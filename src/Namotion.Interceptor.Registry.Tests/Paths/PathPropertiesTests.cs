@@ -136,4 +136,39 @@ public class PathPropertiesTests
         // Assert
         Assert.Equal([(GetProperty(root, nameof(Person.Father)), null), (GetProperty(father, nameof(Person.Children)), (object?)0)], properties);
     }
+
+    [Fact]
+    public void WhenThePathIsWrittenWithAList_ThenTheListHoldsTheChainItIsWrittenThrough()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "Root" };
+        var second = new Person(context) { FirstName = "Second" };
+        root.Children = [new Person(context) { FirstName = "First" }, second];
+        var properties = new List<(RegisteredSubjectProperty Property, object? Index)> { (GetProperty(root, nameof(Person.FirstName)), null) };
+
+        // Act
+        var path = GetProperty(second, nameof(Person.FirstName)).TryGetPath(DefaultPathProvider.Instance, root, null, properties);
+
+        // Assert
+        Assert.Equal("Children[1].FirstName", path);
+        Assert.Equal([(GetProperty(root, nameof(Person.Children)), 1), (GetProperty(second, nameof(Person.FirstName)), (object?)null)], properties);
+    }
+
+    [Fact]
+    public void WhenNoPathIsWrittenWithAList_ThenTheListIsLeftEmpty()
+    {
+        // Arrange
+        var context = CreateContext();
+        var outside = new Person(context) { FirstName = "Outside" };
+        var root = new Person(context) { FirstName = "Root" };
+        var properties = new List<(RegisteredSubjectProperty Property, object? Index)> { (GetProperty(root, nameof(Person.FirstName)), null) };
+
+        // Act
+        var path = GetProperty(outside, nameof(Person.FirstName)).TryGetPath(DefaultPathProvider.Instance, root, null, properties);
+
+        // Assert
+        Assert.Null(path);
+        Assert.Empty(properties);
+    }
 }

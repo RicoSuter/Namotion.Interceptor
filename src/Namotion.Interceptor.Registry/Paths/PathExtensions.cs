@@ -345,6 +345,39 @@ public static class PathExtensions
     /// the separator is written as is and does not resolve back.
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
+        => TryWritePath(property, pathProvider, rootSubject, propertyIndex, properties: null);
+
+    /// <summary>
+    /// Gets the path as <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
+    /// does and fills <paramref name="properties"/> with the chain of properties it is written through, from the
+    /// property owned by <paramref name="rootSubject"/> (or by the absolute top when it is null) down to
+    /// <paramref name="property"/>, each with its collection position or dictionary key. The list is cleared first and
+    /// stays empty when no path is written.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="pathProvider">The path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <param name="propertyIndex">Optional index of the property, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
+    /// <param name="properties">The list to fill, which the caller may reuse.</param>
+    /// <returns>The path, or null as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</returns>
+    public static string? TryGetPath(
+        this RegisteredSubjectProperty property,
+        PathProviderBase pathProvider,
+        IInterceptorSubject? rootSubject,
+        object? propertyIndex,
+        List<(RegisteredSubjectProperty Property, object? Index)> properties)
+    {
+        ArgumentNullException.ThrowIfNull(properties);
+        properties.Clear();
+        return TryWritePath(property, pathProvider, rootSubject, propertyIndex, properties);
+    }
+
+    private static string? TryWritePath(
+        RegisteredSubjectProperty property,
+        PathProviderBase pathProvider,
+        IInterceptorSubject? rootSubject,
+        object? propertyIndex,
+        List<(RegisteredSubjectProperty Property, object? Index)>? properties)
     {
         if (!pathProvider.IsPropertyIncluded(property))
         {
@@ -393,7 +426,17 @@ public static class PathExtensions
                 }
             }
 
-            return builder.Length > 0 ? builder.ToString() : null;
+            if (builder.Length == 0)
+            {
+                return null;
+            }
+
+            if (properties is not null)
+            {
+                CopyRootFirst(in frames, properties);
+            }
+
+            return builder.ToString();
         }
         finally
         {
@@ -434,17 +477,21 @@ public static class PathExtensions
                 return false;
             }
 
-            properties.EnsureCapacity(frames.Count);
-            for (var i = frames.Count - 1; i >= 0; i--)
-            {
-                properties.Add(frames[i]);
-            }
-
+            CopyRootFirst(in frames, properties);
             return true;
         }
         finally
         {
             frames.Return();
+        }
+    }
+
+    private static void CopyRootFirst(in PooledFrames frames, List<(RegisteredSubjectProperty Property, object? Index)> properties)
+    {
+        properties.EnsureCapacity(frames.Count);
+        for (var i = frames.Count - 1; i >= 0; i--)
+        {
+            properties.Add(frames[i]);
         }
     }
 
