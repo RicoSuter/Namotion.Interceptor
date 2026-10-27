@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
@@ -304,7 +306,7 @@ public sealed partial class MarkdownContentParser
             switch (segments[index])
             {
                 case HtmlMarkdownSegment html:
-                    AddHtml(children, existingChildren, index, html.Html);
+                    AddHtml(children, existingChildren, index, html.Html, html.BlockStarts);
                     break;
 
                 case ExpressionMarkdownSegment expression:
@@ -321,7 +323,7 @@ public sealed partial class MarkdownContentParser
                     if (subject is null)
                     {
                         state.AddErrorBox();
-                        AddHtml(children, existingChildren, index, error!.Render());
+                        AddHtml(children, existingChildren, index, error!.Render(), blockStarts: default);
                     }
                     else
                     {
@@ -339,13 +341,15 @@ public sealed partial class MarkdownContentParser
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
         int index,
-        string html)
+        string html,
+        ImmutableArray<int> blockStarts)
     {
-        // The index is part of the key because the same HTML can occur several times.
-        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
+        // The index is part of the key because the same HTML can occur several times. The block starts are part of the
+        // hash so that a change of them replaces the subject.
+        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html, blockStarts.IsDefault ? default : blockStarts.AsSpan())}";
         children[key] = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment
             ? existing
-            : new HtmlSegment(html);
+            : new HtmlSegment(html, blockStarts);
     }
 
     private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(
@@ -547,15 +551,17 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private static string ComputeHash(string content)
+    private static string ComputeHash(string content, ReadOnlySpan<int> blockStarts = default)
     {
-        var byteCount = Encoding.UTF8.GetByteCount(content);
+        var blockStartBytes = MemoryMarshal.AsBytes(blockStarts);
+        var byteCount = Encoding.UTF8.GetByteCount(content) + blockStartBytes.Length;
         var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
         try
         {
             var bytesWritten = Encoding.UTF8.GetBytes(content, buffer);
+            blockStartBytes.CopyTo(buffer.AsSpan(bytesWritten));
             Span<byte> hashBuffer = stackalloc byte[32];
-            SHA256.HashData(buffer.AsSpan(0, bytesWritten), hashBuffer);
+            SHA256.HashData(buffer.AsSpan(0, bytesWritten + blockStartBytes.Length), hashBuffer);
             return Convert.ToHexStringLower(hashBuffer[..8]);
         }
         finally

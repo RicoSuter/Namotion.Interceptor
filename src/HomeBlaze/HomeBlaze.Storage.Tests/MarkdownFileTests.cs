@@ -683,6 +683,71 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenAWidgetBetweenParagraphsFails_ThenItsErrorBoxIsBetweenTwoBlockStarts()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\n:: Demo.Unknown\n::\n\nAfter.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Collection(markdown.Children.Values.OfType<HtmlSegment>(),
+            first => Assert.True(first.EndsWithBlock),
+            error => Assert.Contains("markdown-block-error", error.Html),
+            after => Assert.True(after.StartsWithBlock));
+        var markup = MarkdownMarkup.GetRenderSegments(markdown.Children.Values, timeZone: null).Select(segment => segment.Html).ToArray();
+        Assert.Equal(3, markup.Length);
+        Assert.Contains("markdown-block-error", markup[1]);
+    }
+
+    [Fact]
+    public async Task WhenAPageHasTwoParagraphs_ThenItsHtmlSegmentHasTheStartOfTheSecond()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var child = Assert.Single(markdown.Children);
+        var html = Assert.IsType<HtmlSegment>(child.Value);
+        Assert.Equal(["<p>First.</p>\n", "<p>Second.</p>\n"], html.Blocks.ToArray());
+        Assert.True(html.StartsWithBlock);
+        Assert.True(html.EndsWithBlock);
+        Assert.Matches("^Html_0_[0-9a-f]{16}$", child.Key);
+    }
+
+    [Fact]
+    public async Task WhenOnlyTheBlockStartsOfTheHtmlChange_ThenTheHtmlSegmentIsReplaced()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+        var before = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
+
+        // Act
+        // The same HTML as raw HTML is one block.
+        await WriteFileAsync(storage, "blocks.md", "<p>First.</p>\n<p>Second.</p>");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var after = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
+        var html = Assert.IsType<HtmlSegment>(after.Value);
+        Assert.Equal(((HtmlSegment)before.Value).Html, html.Html);
+        Assert.Single(html.Blocks);
+        Assert.NotEqual(before.Key, after.Key);
+        Assert.NotSame(before.Value, html);
+    }
+
+    [Fact]
     public async Task WhenPageIsReloadedWithUnrelatedChange_ThenEmbeddedSubjectIsKept()
     {
         // Arrange
