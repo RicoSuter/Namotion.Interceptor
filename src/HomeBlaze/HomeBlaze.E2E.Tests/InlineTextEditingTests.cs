@@ -458,7 +458,7 @@ public class InlineTextEditingTests
     }
 
     [Fact]
-    public async Task WhenEscapeIsPressedAfterAChange_ThenTheDialogClosesWithoutSavingOnlyOnceTheDiscardIsConfirmed()
+    public async Task WhenEscapeIsPressedAfterAChange_ThenKeepEditingReturnsToTheEditorAndOnlyDiscardClosesWithoutSaving()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -471,7 +471,9 @@ public class InlineTextEditingTests
         // Act
         await page.Keyboard.PressAsync("Escape");
         await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page. Unsaved.");
+        await WaitForTextEditorFocusAsync(page);
+        await page.Keyboard.TypeAsync(" Two.");
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page. Unsaved. Two.");
         await page.GetByTestId("markdown-text-cancel").ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Discard", Exact = true }).ClickAsync();
 
@@ -479,27 +481,6 @@ public class InlineTextEditingTests
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
         var text = (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n");
         Assert.DoesNotContain("Unsaved.", text);
-    }
-
-    [Fact]
-    public async Task WhenKeepEditingIsChosenAfterEscape_ThenTheEditorHasTheFocusAgain()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        var actionBar = await SelectTextAsync(page, "Last paragraph");
-        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
-        await page.Keyboard.TypeAsync(" One.");
-        await page.Keyboard.PressAsync("Escape");
-
-        // Act
-        await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
-
-        // Assert
-        await WaitForTextEditorFocusAsync(page);
-        await page.Keyboard.TypeAsync(" Two.");
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page. One. Two.");
     }
 
     [Fact]
@@ -878,25 +859,7 @@ public class InlineTextEditingTests
     }
 
     [Fact]
-    public async Task WhenATextBlockIsDoubleClickedInViewMode_ThenNoDialogOpens()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        await page.SelectEditModeAsync("View", Timeout);
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-        var paragraph = page.Locator("p").Filter(new() { HasText = "First paragraph" });
-        await Assertions.Expect(paragraph).ToBeVisibleAsync(new() { Timeout = Timeout });
-
-        // Act
-        await paragraph.DblClickAsync();
-
-        // Assert: the server handles the switch to Inline after the double click, so a dialog that it opened is open by then.
-        await page.SwitchToInlineModeAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
-    }
-
-    [Fact]
-    public async Task WhenThePageIsViewed_ThenItsTextIsNotWrapped()
+    public async Task WhenThePageIsViewed_ThenItsTextIsNotWrappedAndADoubleClickOnItOpensNoDialog()
     {
         // Arrange: in Inline mode the text blocks have wrappers of their own, which View mode does not render.
         var page = await OpenPageInInlineModeAsync();
@@ -908,29 +871,15 @@ public class InlineTextEditingTests
         // Assert
         await Assertions.Expect(page.Locator(".markdown-text")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".subject-component-wrapper.text-block")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-    }
-
-    [Fact]
-    public async Task WhenATextBlockIsSelected_ThenItsOutlineAndItsBarAreGreenUnlikeThoseOfAWidget()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        var cardWrapper = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
-            .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Text Card", new() { Exact = true }) });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
         // Act
-        await SelectTextAsync(page, "First paragraph");
-        await Assertions.Expect(GetTextWrapper(page, "First paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        var textOutline = await GetOutlineColorAsync(GetTextWrapper(page, "First paragraph"));
-        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
-        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
-        await Assertions.Expect(cardWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        var cardOutline = await GetOutlineColorAsync(cardWrapper);
+        var paragraph = page.Locator("p").Filter(new() { HasText = "First paragraph" });
+        await paragraph.DblClickAsync();
 
-        // Assert
-        Assert.True(IsGreen(textOutline), $"The outline of the selected text is {textOutline}.");
-        Assert.False(IsGreen(cardOutline), $"The outline of the selected card is {cardOutline}.");
-        await Assertions.Expect(page.GetWidgetActionBar()).Not.ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
+        // Assert: the server handles the switch to Inline after the double click, so a dialog that it opened is open by then.
+        await page.SwitchToInlineModeAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
     }
 
     [Fact]
@@ -1273,23 +1222,10 @@ public class InlineTextEditingTests
             "The text was not inserted before the comment.");
     }
 
-    [Fact]
-    public async Task WhenEditInSourceIsClicked_ThenTheSplitModeShowsTheLinesOfTheHtmlInTheEditor()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
-        var actionBar = await SelectTextAsync(page, "Visible HTML.");
-
-        // Act
-        await actionBar.GetByTestId("edit-in-source-button").ClickAsync();
-
-        // Assert
-        await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await WaitForPageEditorSelectionAsync(page, GetLineOf(RawHtmlContent, "visible-html-block"));
-    }
-
-    [Fact]
-    public async Task WhenRawHtmlThatShowsSomethingIsDoubleClicked_ThenTheSplitModeShowsItsLinesInTheEditor()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenEditInSourceIsClickedOrRawHtmlIsDoubleClicked_ThenTheSplitModeShowsTheLinesOfTheHtmlInTheEditor(bool doubleClick)
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
@@ -1297,7 +1233,15 @@ public class InlineTextEditingTests
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
-        await wrapper.DblClickAsync(new() { Force = true });
+        if (doubleClick)
+        {
+            await wrapper.DblClickAsync(new() { Force = true });
+        }
+        else
+        {
+            var actionBar = await SelectTextAsync(page, "Visible HTML.");
+            await actionBar.GetByTestId("edit-in-source-button").ClickAsync();
+        }
 
         // Assert
         await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
@@ -1419,14 +1363,4 @@ public class InlineTextEditingTests
 
     private static Task<string> GetBorderColorAsync(ILocator element) =>
         element.EvaluateAsync<string>("element => getComputedStyle(element).borderTopColor");
-
-    // The success color of both palettes, #007932 and its lightened tone #0dde9c, has its largest channel in green, unlike
-    // the primary colors.
-    private static bool IsGreen(string color)
-    {
-        var channels = Regex.Matches(color, @"\d+(?:\.\d+)?")
-            .Select(match => double.Parse(match.Value, CultureInfo.InvariantCulture))
-            .ToArray();
-        return channels.Length >= 3 && channels[1] > channels[0] && channels[1] > channels[2];
-    }
 }

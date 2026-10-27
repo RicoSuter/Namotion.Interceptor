@@ -109,24 +109,6 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenABlockIsMovedDown_ThenItGoesAfterTheNextBlockInTheFile()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        var actionBar = await GetWrapperOf(page, "switch").SelectWidgetAsync();
-
-        // Act
-        await actionBar.GetByTestId("move-down-button").ClickAsync();
-
-        // Assert
-        await _fixture.WaitForDemoPageTextAsync(
-            PageName,
-            text => text.IndexOf("HomeBlaze.Components.ValueList", StringComparison.Ordinal) <
-                    text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal),
-            "The switch was not moved below the value list.");
-    }
-
-    [Fact]
     public async Task WhenAWidgetIsMovedDownTwice_ThenItPassesTwoItemsAndStaysSelected()
     {
         // Arrange
@@ -169,23 +151,6 @@ public class InlineStructureEditingTests
         // Assert
         await _fixture.WaitForDemoPageTextAsync(
             PageName, text => IndexOf(text, "Responsive") < IndexOf(text, "ValueList"), "The list did not pass the Responsive block.");
-    }
-
-    [Fact]
-    public async Task WhenARowIsMovedDown_ThenTheRowsSwapInTheFile()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        var actionBar = await SelectRowAsync(page, "Row A");
-
-        // Act
-        await actionBar.GetByTestId("move-down-button").ClickAsync();
-
-        // Assert
-        await _fixture.WaitForDemoPageTextAsync(
-            PageName,
-            text => text.IndexOf("Label=\"Row B\"", StringComparison.Ordinal) < text.IndexOf("Label=\"Row A\"", StringComparison.Ordinal),
-            "The rows were not swapped.");
     }
 
     [Fact]
@@ -237,51 +202,21 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    [Fact]
-    public async Task WhenAWidgetIsInserted_ThenItIsSelected()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAValueIsAddedToASelectedListOrToTheListOfASelectedRow_ThenItsRowFollowsTheLastRow(bool selectRow)
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
-        var line = GetInsertLineBefore(GetWrapperOf(page, "switch"));
-
-        // Act
-        await OpenWidgetDialogAtAsync(page, line);
-        var dialog = page.GetByTestId("create-subject-dialog");
-        await dialog.GetByTestId("type-search-input").FillAsync("Alert");
-        await dialog.GetByTestId("type-row-alert").ClickAsync();
-        await dialog.GetByTestId("create-name-input").FillAsync("selectedalert");
-        await page.GetByTestId("create-button").ClickAsync();
-
-        // Assert
-        await _fixture.WaitForDemoPageTextAsync(
-            PageName, text => text.Contains("HomeBlaze.Components.Alert#selectedalert"), "The alert was not inserted.");
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected .mud-alert")).ToHaveCountAsync(1, new() { Timeout = Timeout });
-    }
-
-    [Fact]
-    public async Task WhenAValueIsAddedToASelectedList_ThenItsRowFollowsTheLastRow()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        await GetValueListWrapper(page).SelectWidgetAsync();
-
-        // Act
-        await page.GetByTestId("add-value-button").ClickAsync();
-        var dialog = page.GetByTestId("create-subject-dialog");
-        await dialog.GetByLabel("Label", new() { Exact = true }).FillAsync("Row C");
-        await page.GetByTestId("create-button").ClickAsync();
-
-        // Assert
-        await _fixture.WaitForDemoPageTextAsync(
-            PageName, text => text.Contains("Label=\"Row B\"\n:::\n::: Value Label=\"Row C\""), "The value was not added.");
-    }
-
-    [Fact]
-    public async Task WhenARowIsSelected_ThenAValueCanBeAddedToItsList()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-        await SelectRowAsync(page, "Row A");
+        if (selectRow)
+        {
+            await SelectRowAsync(page, "Row A");
+        }
+        else
+        {
+            await GetValueListWrapper(page).SelectWidgetAsync();
+        }
 
         // Act
         await page.GetByTestId("add-value-button").ClickAsync();
@@ -335,7 +270,7 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenTheInlineModeIsLeft_ThenTheStructureActionsAreGone()
+    public async Task WhenTheInlineModeIsLeft_ThenTheStructureActionsAndTheChipsAreGone()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -346,17 +281,7 @@ public class InlineStructureEditingTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("delete-block-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-    }
-
-    [Fact]
-    public async Task WhenThePageIsEditedInline_ThenAValueMapIsAChipWithItsName()
-    {
-        // Arrange & Act
-        var page = await OpenPageInInlineModeAsync();
-
-        // Assert
-        var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
-        await Assertions.Expect(chip).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("invisible-widget-chip")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -436,19 +361,6 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenThePageIsViewed_ThenNoChipIsShown()
-    {
-        // Arrange
-        var page = await OpenPageInInlineModeAsync();
-
-        // Act
-        await page.SelectEditModeAsync("View", Timeout);
-
-        // Assert
-        await Assertions.Expect(page.GetByTestId("invisible-widget-chip")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-    }
-
-    [Fact]
     public async Task WhenTheContentOfAResponsiveBlockIsHidden_ThenAChipShowsItAndSelectingItShowsTheContent()
     {
         // Arrange: the browser of the tests is wider than Xs, so the phone card is hidden.
@@ -480,7 +392,7 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
-    public async Task WhenNothingIsSelected_ThenThePageHasInsertLinesAndOneInsertsAWidgetThere()
+    public async Task WhenNothingIsSelected_ThenThePageHasInsertLinesAndOneInsertsAWidgetThereThatIsSelected()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -505,6 +417,7 @@ public class InlineStructureEditingTests
             text => text.IndexOf("HomeBlaze.Components.Alert#structurealert", StringComparison.Ordinal) is var alert and >= 0 &&
                     alert < text.IndexOf("HomeBlaze.Components.Switch", StringComparison.Ordinal),
             "The alert was not inserted before the switch.");
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected .mud-alert")).ToHaveCountAsync(1, new() { Timeout = Timeout });
     }
 
     [Fact]
