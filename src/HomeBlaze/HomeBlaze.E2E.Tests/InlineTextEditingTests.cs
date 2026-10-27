@@ -1189,6 +1189,27 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenTextInACardIsEmptiedInItsDialog_ThenTheCardIsSelectedAsAfterADelete()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
+        var actionBar = await SelectTextAsync(page, "One line in the card.");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "One line in the card.");
+
+        // Act
+        await SetTextEditorValueAsync(page, string.Empty);
+        await page.GetByTestId("markdown-text-save").ClickAsync();
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            LayoutPageName, text => !text.Contains("One line in the card.", StringComparison.Ordinal), "The text was not removed.");
+        await Assertions.Expect(GetCardWrapper(page, "Layout Card")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToHaveCountAsync(1);
+    }
+
+    [Fact]
     public async Task WhenRawHtmlStandsBetweenParagraphs_ThenTheParagraphsCanBeEdited()
     {
         // Arrange

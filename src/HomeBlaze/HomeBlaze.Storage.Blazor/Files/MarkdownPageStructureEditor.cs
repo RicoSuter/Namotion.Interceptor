@@ -139,10 +139,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override async Task DeleteAsync(IInterceptorSubject subject)
     {
-        // A block inside another one leaves the selection and the focus to the block around it, see WidgetSelection.Remove.
-        // On the page, the block that takes its place takes them, so that the keyboard does not start over at the top.
-        var selectsResult = _selection.Selected is not { SelectableAncestor: not null } selected ||
-                            !ReferenceEquals(selected.Subject, subject);
+        var selectsResult = SelectsResultOfRemoval(subject);
         if (subject is HtmlSegment segment)
         {
             if (_file.GetTextBlockText(segment) is not { } text)
@@ -249,7 +246,10 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                     return null;
                 }
 
-                var result = await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None), reportsInSnackbar: false);
+                var result = await RunAsync(
+                    () => _file.ReplaceTextBlockAsync(segment, text, newText, CancellationToken.None),
+                    reportsInSnackbar: false,
+                    selectsResult: !string.IsNullOrWhiteSpace(newText) || SelectsResultOfRemoval(segment));
 
                 // The dialog keeps what was typed, but a save of it is refused again once the text changed, so the message
                 // says how to get it into the page.
@@ -258,6 +258,12 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                     : TextChangedWhileEditingMessage;
             });
     }
+
+    // Whether the item that takes the place of the removed block of the subject takes the selection and the focus: on the page,
+    // so that the keyboard does not start over at the top. A block inside another one leaves them to the block around it,
+    // see WidgetSelection.Remove.
+    private bool SelectsResultOfRemoval(IInterceptorSubject subject) =>
+        _selection.Selected is not { SelectableAncestor: not null } selected || !ReferenceEquals(selected.Subject, subject);
 
     public override bool CanInsertText(IInterceptorSubject content, IInterceptorSubject? before) =>
         _file.CanInsertTextAt(content, before);
