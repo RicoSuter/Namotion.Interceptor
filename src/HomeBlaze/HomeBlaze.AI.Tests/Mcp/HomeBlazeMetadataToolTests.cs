@@ -496,6 +496,30 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenARoleHidesTheMetadataOfAFolder_ThenSearchMetadataLeavesItOut()
+    {
+        // Arrange
+        WriteFile("Docs/.metadata.json", """{ "tags": ["floor-2"] }""");
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Docs/Pump.metadata.json", """{ "tags": ["floor-2"] }""");
+
+        // The metadata path of the folder resolves to a key of its children once its metadata is hidden.
+        var role = new AuthorizationRole
+        {
+            Name = "NoFolderMetadata",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/Storage/Docs/*"], Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] }]
+        };
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+
+        // Assert
+        Assert.Equal(["Docs/Pump.json|"], GetMatches(result));
+    }
+
+    [Fact]
     public async Task WhenMoreThanAHundredSubjectsMatch_ThenTheFirstHundredAreReturned()
     {
         // Arrange

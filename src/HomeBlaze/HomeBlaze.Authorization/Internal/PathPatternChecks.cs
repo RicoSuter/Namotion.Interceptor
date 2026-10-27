@@ -102,7 +102,8 @@ internal static class PathPatternChecks
 
     // A pattern without a wildcard that resolves to an entry of a dictionary or collection, such as a device in a folder,
     // names a subject that has no member of its own and matches nothing, which the policy cannot tell without the graph.
-    // The graph can change while it is read, as in AuthorizationService.BuildSnapshot; the warning is then left out.
+    // The graph can change while it is read, as in AuthorizationService.BuildSnapshot, and resolving a pattern calls the
+    // getters on its path, which can throw. The warning is advisory, so it is then left out rather than failing the policy.
     public static string? GetWarning(
         AuthorizationRole role,
         IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
@@ -115,7 +116,7 @@ internal static class PathPatternChecks
             AddEntryPatterns(role.Allow, knownSubjects, pathProvider, ref roots, ref entryPatterns);
             AddEntryPatterns(role.Deny, knownSubjects, pathProvider, ref roots, ref entryPatterns);
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
             return null;
         }
@@ -150,9 +151,12 @@ internal static class PathPatternChecks
         }
     }
 
-    /// <summary>Gets the subjects without parents among <paramref name="knownSubjects"/>, which patterns are resolved below.</summary>
+    /// <summary>
+    /// Gets the attached subjects without parents among <paramref name="knownSubjects"/>, which patterns are resolved below.
+    /// </summary>
+    // Parents before IsAttached, see RegisteredSubject.IsAttached.
     public static List<RegisteredSubject> GetRoots(IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects) =>
-        knownSubjects.Values.Where(static subject => subject.Parents.Length == 0).ToList();
+        knownSubjects.Values.Where(static subject => subject.Parents.Length == 0 && subject.IsAttached).ToList();
 
     private static string FormatWarning(string pattern, char separator) =>
         $"Path pattern '{pattern}' names a subject, not a member, and matches nothing; use '{pattern}{separator}**' for the subject and everything below it, or '{pattern}{separator}*' for its members.";

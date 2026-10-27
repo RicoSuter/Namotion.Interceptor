@@ -88,8 +88,7 @@ internal sealed class MarkdownSearchSourceFinder
 
         foreach (var (propertyName, title, text) in notes)
         {
-            if (accessRoot is null ||
-                _configuration.TryGetReadableProperty(accessRoot, HomeBlazeMarkdownSearchToolProvider.GetMetadataPath(path, propertyName)) is not null)
+            if (accessRoot is null || AgentMetadataAccess.IsMetadataReadable(_configuration, accessRoot, subject, path, propertyName))
             {
                 sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
             }
