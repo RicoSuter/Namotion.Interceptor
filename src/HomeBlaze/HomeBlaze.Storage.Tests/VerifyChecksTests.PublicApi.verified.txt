@@ -88,10 +88,27 @@ namespace HomeBlaze.Storage.Files
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddSlotItemAsync(Namotion.Interceptor.IInterceptorSubject owner, string slotName, Namotion.Interceptor.IInterceptorSubject item, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddTextToSlotAsync(Namotion.Interceptor.IInterceptorSubject owner, string? slotName, string text, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> AddWidgetToSlotAsync(Namotion.Interceptor.IInterceptorSubject owner, string? slotName, Namotion.Interceptor.IInterceptorSubject widget, string? name, System.Threading.CancellationToken cancellationToken) { }
+        public bool CanInsertTextAt(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> DeleteBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Pages.MarkdownAddSlot> GetAddSlots(Namotion.Interceptor.IInterceptorSubject owner) { }
+        public HomeBlaze.Storage.Pages.MarkdownBlockActions GetBlockActions(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public string? GetBlockName(Namotion.Interceptor.IInterceptorSubject subject) { }
         public Namotion.Interceptor.IInterceptorSubject? GetBlockSubject(int blockIndex) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Line",
+                "EndLine"})]
+        public System.ValueTuple<int, int>? GetTextBlockLines(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
+        public string? GetTextBlockText(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertTextAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, string text, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, Namotion.Interceptor.IInterceptorSubject widget, string? name, System.Threading.CancellationToken cancellationToken) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        public bool IsContentOfPage(Namotion.Interceptor.IInterceptorSubject content) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> MoveBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -104,6 +121,7 @@ namespace HomeBlaze.Storage.Files
         public System.Threading.Tasks.Task ReplaceContentAsync(string content, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces one exact, unique passage of the markdown source.", Icon="FindReplace", Title="Replace Text")]
         public System.Threading.Tasks.Task ReplaceTextAsync(string oldText, string newText, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> ReplaceTextBlockAsync(HomeBlaze.Storage.Internal.HtmlSegment segment, string expectedText, string newText, System.Threading.CancellationToken cancellationToken) { }
         public string ResolveLink(string link) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
@@ -251,9 +269,13 @@ namespace HomeBlaze.Storage.Internal
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.All)]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.DisplayName("Text")]
     public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public HtmlSegment(string html, System.Collections.Immutable.ImmutableArray<int> blockStarts = default) { }
+        public HtmlSegment(string html, System.Collections.Immutable.ImmutableArray<int> blockStarts = default, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0, string? kind = null) { }
+        public string Html { get; }
+        public string? Kind { get; }
+        public HomeBlaze.Storage.Internal.HtmlSegmentStart Start { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
@@ -261,6 +283,13 @@ namespace HomeBlaze.Storage.Internal
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum HtmlSegmentStart
+    {
+        None = 0,
+        Text = 1,
+        Other = 2,
+        Source = 3,
     }
     public sealed class MarkdownContentParser
     {
@@ -287,12 +316,13 @@ namespace HomeBlaze.Storage.Internal
     }
     public static class MarkdownMarkup
     {
-        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, bool groupsText = false) { }
     }
     public readonly struct MarkdownRenderSegment : System.IEquatable<HomeBlaze.Storage.Internal.MarkdownRenderSegment>
     {
-        public MarkdownRenderSegment(string? Html, Namotion.Interceptor.IInterceptorSubject? Widget) { }
+        public MarkdownRenderSegment(string? Html, Namotion.Interceptor.IInterceptorSubject? Widget, HomeBlaze.Storage.Internal.HtmlSegment? Start = null) { }
         public string? Html { get; init; }
+        public HomeBlaze.Storage.Internal.HtmlSegment? Start { get; init; }
         public Namotion.Interceptor.IInterceptorSubject? Widget { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.All)]
@@ -351,6 +381,20 @@ namespace HomeBlaze.Storage.Pages
         public bool Equals(HomeBlaze.Storage.Pages.HtmlMarkdownSegment? other) { }
         public override int GetHashCode() { }
     }
+    public sealed class MarkdownAddSlot : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownAddSlot>
+    {
+        public MarkdownAddSlot(string? Name, HomeBlaze.Storage.Pages.MarkdownAddSlotKind Kind, System.Type? ItemType) { }
+        public System.Type? ItemType { get; init; }
+        public HomeBlaze.Storage.Pages.MarkdownAddSlotKind Kind { get; init; }
+        public string? Name { get; init; }
+    }
+    public enum MarkdownAddSlotKind
+    {
+        DefaultContent = 0,
+        NamedContent = 1,
+        ContentItem = 2,
+        ConfiguredItem = 3,
+    }
     public sealed class MarkdownBlock
     {
         public MarkdownBlock() { }
@@ -366,6 +410,14 @@ namespace HomeBlaze.Storage.Pages
         public int Index { get; }
         public required HomeBlaze.Storage.Pages.MarkdownBlockKind Kind { get; init; }
         public int Line { get; init; }
+    }
+    public readonly struct MarkdownBlockActions : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockActions>
+    {
+        public MarkdownBlockActions(bool CanDelete, bool CanMoveUp, bool CanMoveDown, int ContainedBlockCount) { }
+        public bool CanDelete { get; init; }
+        public bool CanMoveDown { get; init; }
+        public bool CanMoveUp { get; init; }
+        public int ContainedBlockCount { get; init; }
     }
     public sealed class MarkdownBlockArgument : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownBlockArgument>
     {
@@ -404,7 +456,17 @@ namespace HomeBlaze.Storage.Pages
         public static string CreateBlock(string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = "
 ") { }
         public static string GetLineEnding(string source, int offset = 0) { }
+        public static string InsertBlockText(string source, int line, string blockText, string lineEnding) { }
         public static string WriteConfiguration(string source, HomeBlaze.Storage.Pages.MarkdownBlock block, string configurationJson) { }
+    }
+    public readonly struct MarkdownEditResult : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownEditResult>
+    {
+        public MarkdownEditResult(string? Refusal, Namotion.Interceptor.IInterceptorSubject? Subject = null) { }
+        public bool IsWritten { get; }
+        public string? Refusal { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; init; }
+        public static HomeBlaze.Storage.Pages.MarkdownEditResult Refused(string refusal) { }
+        public static HomeBlaze.Storage.Pages.MarkdownEditResult WrittenFor(Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
     public static class MarkdownErrorBox
     {
