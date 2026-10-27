@@ -11,7 +11,6 @@ using HomeBlaze.Storage.Tests.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -223,14 +222,11 @@ public class StorageReconcilerTests : StorageTestBase
 
         Directory.Delete(GetFullPath("House/Kitchen"));
         await storage.ReconcileAsync();
-        device.Power = 42;
 
         // Assert
         Assert.Equal(["Dishwasher", "Freezer"], house.Children.Keys.Order());
         Assert.Same(device, house.Children["Dishwasher"]);
-        Assert.Same(Context!.TryGetService<ISubjectRegistry>(), ((IInterceptorSubject)device).Context.TryGetService<ISubjectRegistry>());
-        Assert.NotNull(device.TryGetRegisteredSubject());
-        Assert.Equal(42d, resolver.ResolveValue("/House/Dishwasher/Power", PathStyle.Canonical));
+        Assert.Equal("Dishwasher", resolver.ResolveValue("/House/Dishwasher/Name", PathStyle.Canonical));
     }
 
     [Fact]

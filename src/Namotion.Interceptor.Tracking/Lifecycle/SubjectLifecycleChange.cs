@@ -29,6 +29,6 @@ public readonly struct SubjectLifecycleChange
     /// <summary>True when the subject is leaving the graph.</summary>
     public bool IsContextDetach { get; init; }
 
-    /// <summary>The property references that still hold the subject after a property reference was removed.</summary>
-    internal PropertyReferenceSet RemainingReferences { get; init; }
+    /// <summary>The interceptor that dispatches the removal of a property reference.</summary>
+    internal LifecycleInterceptor? Interceptor { get; init; }
 }

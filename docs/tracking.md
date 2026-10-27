@@ -302,7 +302,7 @@ car.Tire = tire; // tire.Context is automatically set to context
 
 This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
 
-A subject that several parents hold inherits the context of the parent that attached it first. When that parent releases it while another parent still holds it, the subject inherits the context of a remaining parent instead, so it keeps the services of the graph after the first parent leaves it. A remaining parent whose context falls back on the subject's own, such as a child of the subject that holds it as well, is not inherited from, because the two contexts would fall back on each other. A subject that only such parents still hold keeps the context of the parent that released it, and loses the services of the graph once that parent leaves it.
+A subject that several parents hold inherits the context of the parent that attached it first. When that parent releases it while another parent still holds it, the subject inherits the context of a remaining parent instead, so it keeps the services of the graph after the first parent leaves it. A remaining parent is skipped when its context falls back on the subject's own, such as a child of the subject that holds it as well, or reaches other lifecycle interceptors, such as a parent constructed with the context of another graph. A subject that only such parents still hold keeps the context of the parent that released it, and loses the services of the graph once that parent leaves it.
 
 ## Subject Lifecycle Tracking
 

@@ -14,8 +14,6 @@ public partial class InjectedDevice : IConfigurable
     [Configuration]
     public partial string Name { get; set; }
 
-    public partial double? Power { get; set; }
-
     public InjectedDevice(IServiceProvider serviceProvider)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);

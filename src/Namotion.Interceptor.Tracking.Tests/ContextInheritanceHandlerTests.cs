@@ -9,6 +9,19 @@ public class ContextInheritanceHandlerTests
 {
     private sealed class DerivedContextInheritanceHandler : ContextInheritanceHandler;
 
+    private sealed class ReleasingHandler(IInterceptorSubject subject, IInterceptorSubject parent, Action release) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsPropertyReferenceRemoved &&
+                ReferenceEquals(change.Subject, subject) &&
+                ReferenceEquals(change.Property?.Subject, parent))
+            {
+                release();
+            }
+        }
+    }
+
     [Fact]
     public void WhenEqualBaseAndDerivedHandlersAddedToHashSet_ThenOnlyOneEntryIsStored()
     {
@@ -156,8 +169,10 @@ public class ContextInheritanceHandlerTests
         Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetServices<ILifecycleInterceptor>());
     }
     
-    [Fact]
-    public void WhenParentThatAttachedSharedChildIsRemoved_ThenChildInheritsContextOfRemainingParent()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenParentThatAttachedSharedChildIsRemoved_ThenChildInheritsContextOfRemainingParent(bool isReleasedBeforeRemoval)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -171,6 +186,11 @@ public class ContextInheritanceHandlerTests
         second.Mother = shared;
 
         // Act
+        if (isReleasedBeforeRemoval)
+        {
+            first.Mother = null;
+        }
+
         root.Mother = null;
 
         // Assert
@@ -181,28 +201,25 @@ public class ContextInheritanceHandlerTests
     }
 
     [Fact]
-    public void WhenParentThatAttachedSharedChildReleasesItAndIsRemovedLater_ThenChildKeepsContextOfRemainingParent()
+    public void WhenHandlerReleasesSharedChildFromAnotherParentWhileItIsReleased_ThenChildInheritsContextOfParentThatStillHoldsIt()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance();
-
+        // Arrange: the handler runs before the inheritance handler and changes which parents hold the child.
         var shared = new Person { FirstName = "Shared" };
         var first = new Person { FirstName = "First", Mother = shared };
-        var second = new Person { FirstName = "Second" };
-        var root = new Person(context) { Mother = first, Father = second };
-        second.Mother = shared;
+        var second = new Person { FirstName = "Second", Mother = shared };
+        var third = new Person { FirstName = "Third", Mother = shared };
+        var handler = new ReleasingHandler(shared, first, () => second.Mother = null);
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<ILifecycleHandler>(handler);
+        context.WithContextInheritance();
+        var root = new Person(context) { Mother = first, Father = second, Children = [third] };
 
         // Act
         first.Mother = null;
-        root.Mother = null;
+        root.Father = null;
 
         // Assert
-        Assert.Empty(first.GetServices<ILifecycleInterceptor>());
         Assert.Equal(context.GetServices<ILifecycleInterceptor>(), shared.GetServices<ILifecycleInterceptor>());
-        Assert.True(context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(shared, () => { }));
-        Assert.Equal(1, ((IInterceptorSubject)shared).GetReferenceCount());
     }
 
     [Fact]
