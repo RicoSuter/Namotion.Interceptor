@@ -60,16 +60,6 @@ This page is changed by the tile widget tests.
 :: HomeBlaze.Components.Switch#restarttile Kind=Tile Path=tilemotor/IsPowered Label="Restart tile" Map=powered On=tilemotor/PowerOn Off=tilemotor/RestartController
 ::
 
-:: HomeBlaze.Samples.SimulatedRollerShutter#tileshutter Name=TileShutter TravelDuration=00:01:00
-::
-
-:: HomeBlaze.Components.GridLayout#shuttergrid Rows=1 Columns=2
-::: Cell Row=0 Column=0
-:::: HomeBlaze.Components.OperationButton#uptile Kind=Tile Path=tileshutter/Open ActivePath=tileshutter/Stop Label="Up" Color=Default
-::: Cell Row=0 Column=1
-:::: HomeBlaze.Components.OperationButton#downtile Kind=Tile Path=tileshutter/Close ActivePath=tileshutter/Stop Label="Down" Color=Default
-::
-
 :: HomeBlaze.Components.OperationButton#nowheretile Kind=Tile Path=tilemotor/DoesNotExistEither
 ::
 

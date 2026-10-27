@@ -549,18 +549,6 @@ public partial class Server
 - The attribute name is `IsEnabled`, without the `HomeBlaze:` prefix of the HomeBlaze metadata: it describes the operation itself, so an external source can provide it and a connector that exports attributes shows it under this name
 - The button renders again by itself when the derived property changes, because its render read it
 
-### Active Operations (IsActive)
-
-`KnownAttributes.IsActive` marks an operation as in effect right now, for example the opening of a cover while it opens. It is declared like `IsEnabled`, and an operation without it is not active:
-
-```csharp
-[Derived]
-[PropertyAttribute("Open", KnownAttributes.IsActive)]
-public bool Open_IsActive => ShutterState == RollerShutterState.Opening;
-```
-
-An [OperationButton](../administration/widgets/operation-button.md#active-operations) takes its `ActiveColor` while its operation is active, and can show and invoke another operation then, such as the stop of the cover.
-
 ## Categories
 
 `[Category("...")]` from `System.ComponentModel` on a `[State]` property or on an `[Operation]` or `[Query]` method puts it under a heading of that name in the property panel, below the members without a category.

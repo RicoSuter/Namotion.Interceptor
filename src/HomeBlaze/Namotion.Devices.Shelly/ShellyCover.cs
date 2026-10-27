@@ -126,14 +126,6 @@ public partial class ShellyCover :
     public bool Stop_IsEnabled => _device.IsConnected &&
         (IsMoving == true || ShutterState is not (RollerShutterState.Open or RollerShutterState.Closed or RollerShutterState.PartiallyOpen));
 
-    [Derived]
-    [PropertyAttribute("Open", KnownAttributes.IsActive)]
-    public bool Open_IsActive => ShutterState == RollerShutterState.Opening;
-
-    [Derived]
-    [PropertyAttribute("Close", KnownAttributes.IsActive)]
-    public bool Close_IsActive => ShutterState == RollerShutterState.Closing;
-
     public ShellyCover(ShellyDevice device, int index)
     {
         _device = device;

@@ -11,13 +11,13 @@ The rules that all widgets of a markdown page share. The [overview](overview.md)
 
 ## Type Names
 
-A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, the sample lock `HomeBlaze.Samples.SimulatedDoorLock`, the sample shutter `HomeBlaze.Samples.SimulatedRollerShutter`, and a device has the namespace of its device library. The name is case-sensitive.
+A block names its type with the full type name: the namespace and the name of the class, for example `HomeBlaze.Components.Card`. The namespace is the name of the library that ships the type. The widgets of this reference are in `HomeBlaze.Components`, except `HomeBlaze.History.Blazor.HistoryChart`, which ships with the history library. The sample motor is `HomeBlaze.Samples.Motor`, the sample lock `HomeBlaze.Samples.SimulatedDoorLock`, and a device has the namespace of its device library. The name is case-sensitive.
 
 A block that fills a slot of a widget is written with the name of the slot instead, for example `Tab` inside a `TabLayout` or `Case` inside a `ValueMap`. Such a slot block is only allowed directly inside its widget, see [Slot Blocks](#slot-blocks).
 
 ## Sample Motors
 
-The samples of these pages need subjects to show. They use two sample motors: the subject files `Pump.json` and `Fan.json` in this folder, of the type `HomeBlaze.Samples.Motor`, with the names "Pump" and "Fan" and the target speeds 1200 and 800 RPM. The documentation is copied into every installation, so the two motors run there as well and the samples show live values. The samples of [DoorLock](door-lock.md) use the sample lock `FrontDoor.json` in this folder, of the type `HomeBlaze.Samples.SimulatedDoorLock`, with the name "Front door". The samples of active operations on [OperationButton](operation-button.md#active-operations) use the sample shutter `Shutter.json`, of the type `HomeBlaze.Samples.SimulatedRollerShutter`, with the name "Shutter".
+The samples of these pages need subjects to show. They use two sample motors: the subject files `Pump.json` and `Fan.json` in this folder, of the type `HomeBlaze.Samples.Motor`, with the names "Pump" and "Fan" and the target speeds 1200 and 800 RPM. The documentation is copied into every installation, so the two motors run there as well and the samples show live values. The samples of [DoorLock](door-lock.md) use the sample lock `FrontDoor.json` in this folder, of the type `HomeBlaze.Samples.SimulatedDoorLock`, with the name "Front door".
 
 A sample refers to a motor relative to its page, for example `../Pump/CurrentSpeed` for the current speed of the pump. A sample that you copy to a page of your own needs the path of one of your subjects in its place.
 

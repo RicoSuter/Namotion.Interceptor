@@ -569,7 +569,6 @@ namespace HomeBlaze.Abstractions
     public static class KnownAttributes
     {
         public const string Configuration = "HomeBlaze:Configuration";
-        public const string IsActive = "IsActive";
         public const string IsEnabled = "IsEnabled";
         public const string Maximum = "Maximum";
         public const string Metadata = "HomeBlaze:Metadata";

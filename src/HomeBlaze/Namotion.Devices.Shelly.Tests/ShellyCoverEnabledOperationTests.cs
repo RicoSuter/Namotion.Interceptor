@@ -71,25 +71,6 @@ public class ShellyCoverEnabledOperationTests
         Assert.True(cover.Stop_IsEnabled);
     }
 
-    [Theory]
-    [InlineData("opening", true, false)]
-    [InlineData("closing", false, true)]
-    [InlineData("stopped", false, false)]
-    public void WhenCoverIsInAState_ThenTheOperationThatMovesItIsActive(
-        string apiState, bool expectedOpen, bool expectedClose)
-    {
-        // Arrange
-        var (_, cover) = CreateConnectedCover();
-
-        // Act
-        cover.ApiState = apiState;
-        cover.CurrentPosition = 50;
-
-        // Assert
-        Assert.Equal(expectedOpen, cover.Open_IsActive);
-        Assert.Equal(expectedClose, cover.Close_IsActive);
-    }
-
     [Fact]
     public void WhenDeviceIsDisconnected_ThenNoOperationIsEnabled()
     {

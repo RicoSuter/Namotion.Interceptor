@@ -15,12 +15,6 @@ public static class KnownAttributes
     public const string IsEnabled = "IsEnabled";
 
     /// <summary>
-    /// Attribute name for whether an operation is in effect right now, for example the opening of a cover while it
-    /// opens. An operation without the attribute is not active.
-    /// </summary>
-    public const string IsActive = "IsActive";
-
-    /// <summary>
     /// Registry attribute name for [State] property metadata.
     /// </summary>
     public const string State = "HomeBlaze:State";

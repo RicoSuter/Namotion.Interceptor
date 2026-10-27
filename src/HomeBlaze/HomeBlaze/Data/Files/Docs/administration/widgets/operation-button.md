@@ -15,8 +15,6 @@ A button that invokes an operation or a query of a subject. Type name: `HomeBlaz
 | `Label` | Text | From the method, see [Labels](basics.md#labels) | The text of the button |
 | `Icon` | Text | The icon of the method, else `PlayArrow` for an operation and `Search` for a query | The [icon](basics.md#icons) at the start of the button |
 | `Color` | Color | `Primary` | The [color](basics.md#colors) of the button |
-| `ActiveColor` | Color | `Warning` | The [color](basics.md#colors) of the button while its operation is active, see [Active Operations](#active-operations) |
-| `ActivePath` | Path (Operation) | None | The [path](basics.md#paths) of the operation that the button shows and invokes in place of its own while its own is active, for example `shutter/Stop` |
 | `Variant` | `Filled`, `Outlined` or `Text` | `Filled` | A filled button, a button with a border, or text alone. A tile takes its fill from `Color` and `Variant`, see [Tiles](#tiles) |
 | `Kind` | `Button` or `Tile` | `Button` | `Button` is a button. `Tile` is a tile that fills its place, see [Tiles](#tiles) |
 | `Subtitle` | Text | None | A second line below the label of a tile |
@@ -97,35 +95,12 @@ Rules of a tile:
 - **Disabled**: A tile is disabled while its operation is not enabled or is running, as the button is, and is then dimmed with its fill kept, its icon and text more than its fill. The two tiles above are enabled in turn, because `PowerOn` is enabled only while the pump is off and `PowerOff` only while it is powered. A device can limit its operations in the same way, so that for example the open and close tiles of a cover are disabled at the end position they move to.
 - **Badge**: A badge shows over the top right corner of a tile only, and a click on it reaches the tile.
 
-## Active Operations
-
-A device can mark an operation as active while it is in effect, for example the opening of a cover while the cover opens. An active button takes `ActiveColor`. With `ActivePath` it also shows the operation of that path in place of its own, its icon and title, and a click invokes that one. So the two tiles below stop the shutter while it moves: a click on the down tile closes it, the tile turns yellow and shows the stop icon while it closes, and a second click stops it.
-
-<!-- sample: live -->
-~~~~markdown
-:: HomeBlaze.Components.GridLayout#shuttergrid Rows=1 Columns=3 CellAspectRatio=1:1
-::: Cell Row=0 Column=0
-:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Shutter/Open ActivePath=../Shutter/Stop Color=Default
-::: Cell Row=0 Column=1
-:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Shutter/Close ActivePath=../Shutter/Stop Color=Default
-::
-~~~~
-
-:: HomeBlaze.Components.GridLayout#shuttergrid Rows=1 Columns=3 CellAspectRatio=1:1
-::: Cell Row=0 Column=0
-:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Shutter/Open ActivePath=../Shutter/Stop Color=Default
-::: Cell Row=0 Column=1
-:::: HomeBlaze.Components.OperationButton Kind=Tile Path=../Shutter/Close ActivePath=../Shutter/Stop Color=Default
-::
-
-The sample shutter `Shutter` next to this page is of the type `HomeBlaze.Samples.SimulatedRollerShutter` and takes 10 seconds from open to closed. Without `ActivePath` an active button keeps its own operation, which a device often disables while it is active, so the button is then dimmed in `ActiveColor`.
-
 ## Behavior and Limits
 
 - **As in the property panel**: The button invokes the method the same way the property panel of a subject does. A method with parameters shows a dialog for them, a method that asks for confirmation shows the confirmation dialog, a result is shown in a dialog, and a failure shows an error dialog, also a request to a device that timed out.
 - **Operations and queries**: Both work. A query shows its result.
 - **Running**: While the method runs, the button is disabled and shows a spinner in place of its icon, so a second click has to wait for the first to end.
-- **Enabled state**: The button is disabled while the method is not enabled, and when the path leads nowhere. While the button shows the operation of `ActivePath`, that operation decides. A path that leads nowhere is also the tooltip of the button.
+- **Enabled state**: The button is disabled while the method is not enabled, and when the path leads nowhere. A path that leads nowhere is also the tooltip of the button.
 - **Leaving the page**: An operation that has started runs to its end when the page is left or reloaded. Its result dialog is not shown then.
 
 ## Related

@@ -22,14 +22,10 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     /// <summary>The variant of a button that sets none.</summary>
     internal const MudBlazor.Variant DefaultVariant = MudBlazor.Variant.Filled;
 
-    /// <summary>The color of an active button that sets none.</summary>
-    internal const MudBlazor.Color DefaultActiveColor = MudBlazor.Color.Warning;
-
     public OperationButton()
     {
         Color = DefaultColor;
         Variant = DefaultVariant;
-        ActiveColor = DefaultActiveColor;
     }
 
     /// <summary>
@@ -57,20 +53,6 @@ public partial class OperationButton : IConfigurable, ITitleProvider
     /// </summary>
     [Configuration]
     public partial MudBlazor.Color Color { get; set; }
-
-    /// <summary>
-    /// The color of the button while its operation is active, see <see cref="HomeBlaze.Abstractions.KnownAttributes.IsActive"/>.
-    /// </summary>
-    [Configuration]
-    public partial MudBlazor.Color ActiveColor { get; set; }
-
-    /// <summary>
-    /// Path of the operation that the button invokes in place of its own while its own is active, for example the stop
-    /// of a cover on the button that opens it. The button then shows that operation.
-    /// </summary>
-    [Configuration]
-    [SubjectPath(Kind = SubjectPathKind.Operation)]
-    public partial string? ActivePath { get; set; }
 
     /// <summary>
     /// Whether the button is filled, outlined or text only.

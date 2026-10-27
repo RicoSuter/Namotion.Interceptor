@@ -10,14 +10,11 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = button.Path;
-    var activePath = button.ActivePath;
     <OperationButtonView Property="@ValueReader.ResolveProperty(PathResolver, button, path)"
-                         ActiveProperty="@(string.IsNullOrEmpty(activePath) ? null : ValueReader.ResolveProperty(PathResolver, button, activePath))"
                          Path="@path"
                          Label="@button.Label"
                          Icon="@button.Icon"
                          Color="@button.Color"
-                         ActiveColor="@button.ActiveColor"
                          Variant="@button.Variant"
                          Kind="@button.Kind"
                          Subtitle="@button.Subtitle"

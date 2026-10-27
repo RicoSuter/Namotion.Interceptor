@@ -35,15 +35,6 @@ public static class RegisteredSubjectMethodExtensions
     }
 
     /// <summary>
-    /// Gets whether the operation that the method property holds is in effect right now: the value of its
-    /// <see cref="KnownAttributes.IsActive"/> attribute, false without one.
-    /// </summary>
-    public static bool IsMethodActive(this RegisteredSubjectProperty methodProperty)
-    {
-        return methodProperty.TryGetAttribute(KnownAttributes.IsActive)?.GetValue() as bool? ?? false;
-    }
-
-    /// <summary>
     /// Gets the operation or query that the property holds, or null when it holds none. The value of a property whose
     /// type cannot hold a <see cref="MethodMetadata"/> is not read.
     /// </summary>
