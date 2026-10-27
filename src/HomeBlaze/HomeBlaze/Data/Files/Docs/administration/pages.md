@@ -129,6 +129,24 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 
 ---
 
+## Diagrams
+
+A fenced code block with the language `mermaid` is shown as a [Mermaid](https://mermaid.js.org) diagram, as on GitHub:
+
+~~~~markdown
+```mermaid
+graph LR
+    Pump --> Tank --> Heater
+```
+~~~~
+
+- **Size**: a diagram is never wider than its place.
+- **Theme**: a diagram takes the dark or light theme that is active when it is shown. After a switch, it changes on the next visit of the page.
+- **Not shown**: a diagram with an error, or one on a browser that cannot load Mermaid, appears as its source in a code block.
+- **No interaction**: `click` lines, links and HTML in labels are ignored, and an `init` directive or frontmatter of a diagram cannot change these settings.
+
+---
+
 ## Navigation Updates
 
 The navigation follows pages that are added, removed or changed while a browser tab is open:
