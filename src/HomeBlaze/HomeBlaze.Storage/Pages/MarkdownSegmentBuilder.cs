@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using Markdig.Extensions.Tables;
 using Markdig.Renderers;
@@ -11,7 +13,22 @@ namespace HomeBlaze.Storage.Pages;
 
 public abstract record MarkdownSegment;
 
-public sealed record HtmlMarkdownSegment(string Html) : MarkdownSegment;
+/// <param name="Html">The HTML of the segment.</param>
+/// <param name="BlockStarts">
+/// The offsets into <paramref name="Html"/>, in ascending order, at which a top-level block of the page starts, so that the
+/// HTML from there on does not depend on the HTML before it. An offset of <c>Html.Length</c> means that a block starts
+/// after the segment, and an offset of 0 that one starts after the expression before it. Default when there is none.
+/// </param>
+public sealed record HtmlMarkdownSegment(string Html, ImmutableArray<int> BlockStarts = default) : MarkdownSegment
+{
+    public ImmutableArray<int> BlockStarts { get; } = BlockStarts.IsDefaultOrEmpty ? default : BlockStarts;
+
+    // By content, because the equality of an immutable array compares the array it wraps.
+    public bool Equals(HtmlMarkdownSegment? other) =>
+        other is not null && Html == other.Html && BlockStarts.AsSpan().SequenceEqual(other.BlockStarts.AsSpan());
+
+    public override int GetHashCode() => HashCode.Combine(Html, BlockStarts.IsDefault ? 0 : BlockStarts.Length);
+}
 
 public sealed record ExpressionMarkdownSegment(string Text) : MarkdownSegment;
 
@@ -38,7 +55,7 @@ public static partial class MarkdownSegmentBuilder
     [GeneratedRegex(@"\{\{\s*([^{}]+?)\s*\}\}")]
     private static partial Regex SourceExpressionRegex();
 
-    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern + @"|<!--BREAK:([0-9a-f]{32})-->")]
     private static partial Regex MarkerRegex();
 
     private static readonly char[] Braces = ['{', '}'];
@@ -174,11 +191,60 @@ public static partial class MarkdownSegmentBuilder
             renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
         }
 
+        WriteBreaksBetweenBlocks(renderer, page.Document, writer, token);
         renderer.Render(page.Document);
         writer.Flush();
 
         return Split(writer.ToString(), page, token, expressions);
     }
+
+    /// <summary>Writes a break marker before each top-level block of the document that may start a markup string of its own.</summary>
+    private static void WriteBreaksBetweenBlocks(HtmlRenderer renderer, MarkdownDocument document, StringWriter writer, string token)
+    {
+        // Blazor parses each markup string on its own, so a tag opened in one block and closed in a later one would be
+        // closed early. No break is written between the first and the last top-level block that contains raw HTML.
+        var firstRawHtml = -1;
+        var lastRawHtml = -1;
+        for (var index = 0; index < document.Count; index++)
+        {
+            if (ContainsRawHtml(document[index]))
+            {
+                firstRawHtml = firstRawHtml < 0 ? index : firstRawHtml;
+                lastRawHtml = index;
+            }
+        }
+
+        var marker = $"<!--BREAK:{token}-->";
+        var blockIndex = 0;
+        renderer.ObjectWriteBefore += (_, markdownObject) =>
+        {
+            if (markdownObject is not Block block || !ReferenceEquals(block.Parent, document))
+            {
+                return;
+            }
+
+            while (blockIndex < document.Count && !ReferenceEquals(document[blockIndex], block))
+            {
+                blockIndex++;
+            }
+
+            // Hooked into the rendering of the whole document, so that each block renders as it does there. The marker
+            // is written past the renderer, which then still knows whether the HTML before it ended a line.
+            var isOutsideRawHtml = lastRawHtml < 0 || blockIndex <= firstRawHtml || blockIndex > lastRawHtml;
+            if (isOutsideRawHtml && writer.GetStringBuilder().Length > 0)
+            {
+                writer.Write(marker);
+            }
+        };
+    }
+
+    private static bool ContainsRawHtml(Block block) => block switch
+    {
+        HtmlBlock => true,
+        LeafBlock leaf => leaf.Inline?.Descendants<HtmlInline>().Any() == true,
+        ContainerBlock container => container.Descendants().Any(descendant => descendant is HtmlBlock or HtmlInline),
+        _ => false
+    };
 
     internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token, IReadOnlyList<string> expressions)
     {
@@ -187,11 +253,17 @@ public static partial class MarkdownSegmentBuilder
         var current = root;
         var lastIndex = 0;
 
+        // A break marker does not end a segment: the HTML around it is one run, and the break is kept as an offset into it.
+        var run = new StringBuilder();
+        var blockStarts = new List<int>();
+        var hasBreak = false;
+
         foreach (Match match in MarkerRegex().Matches(html))
         {
             var isForgedMarker =
                 (match.Groups[2].Success && match.Groups[2].Value != token) ||
-                (match.Groups[4].Success && match.Groups[4].Value != token);
+                (match.Groups[4].Success && match.Groups[4].Value != token) ||
+                (match.Groups[7].Success && match.Groups[7].Value != token);
             if (isForgedMarker)
             {
                 continue;
@@ -207,12 +279,23 @@ public static partial class MarkdownSegmentBuilder
                 continue;
             }
 
-            if (match.Index > lastIndex)
+            AppendToRun(html, lastIndex, match.Index, current, run, blockStarts, ref hasBreak);
+            lastIndex = match.Index + match.Length;
+
+            if (match.Groups[7].Success)
             {
-                current.Add(new HtmlMarkdownSegment(html[lastIndex..match.Index]));
+                hasBreak = true;
+                continue;
             }
 
-            lastIndex = match.Index + match.Length;
+            // Before a widget nothing is kept: a widget ends the markup string anyway.
+            if (hasBreak && expression is not null && run.Length > 0)
+            {
+                blockStarts.Add(run.Length);
+            }
+
+            hasBreak = false;
+            EndRun(current, run, blockStarts);
 
             if (expression is not null)
             {
@@ -231,10 +314,8 @@ public static partial class MarkdownSegmentBuilder
             }
         }
 
-        if (lastIndex < html.Length)
-        {
-            current.Add(new HtmlMarkdownSegment(html[lastIndex..]));
-        }
+        AppendToRun(html, lastIndex, html.Length, current, run, blockStarts, ref hasBreak);
+        EndRun(current, run, blockStarts);
 
         // A closing marker that was not found must not take the content of its block out of the result.
         while (stack.Count > 0)
@@ -245,6 +326,36 @@ public static partial class MarkdownSegmentBuilder
         }
 
         return root;
+    }
+
+    private static void AppendToRun(
+        string html, int start, int end, List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts, ref bool hasBreak)
+    {
+        if (end <= start)
+        {
+            return;
+        }
+
+        // At the start of a run, a block start matters only after an expression, whose text the view joins with the HTML.
+        if (hasBreak && (run.Length > 0 || current is [.., ExpressionMarkdownSegment]))
+        {
+            blockStarts.Add(run.Length);
+        }
+
+        hasBreak = false;
+        run.Append(html, start, end - start);
+    }
+
+    private static void EndRun(List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts)
+    {
+        if (run.Length == 0)
+        {
+            return;
+        }
+
+        current.Add(new HtmlMarkdownSegment(run.ToString(), blockStarts.Count > 0 ? [.. blockStarts] : default));
+        run.Clear();
+        blockStarts.Clear();
     }
 
     // The marker holds an index and not the text, so that no text of an expression, such as "-->", can end the comment.

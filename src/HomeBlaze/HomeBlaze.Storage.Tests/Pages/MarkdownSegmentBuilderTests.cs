@@ -821,6 +821,127 @@ public class MarkdownSegmentBuilderTests
         Assert.Equal(new ExpressionMarkdownSegment("a"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
+    [Fact]
+    public void WhenPageHasTwoParagraphs_ThenTheSecondStartsABlock()
+    {
+        // Act
+        var segments = Build("First.\n\nSecond.");
+
+        // Assert
+        Assert.Equal([new HtmlMarkdownSegment("<p>First.</p>\n<p>Second.</p>\n", [14])], segments);
+    }
+
+    [Fact]
+    public void WhenRawHtmlSpansSeveralBlocks_ThenNoBlockStartsInsideTheSpan()
+    {
+        // Act
+        var segments = Build("Before.\n\n<div class=\"box\">\n\nInside.\n\n</div>\n\nAfter.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.Equal("<p>Before.</p>\n<div class=\"box\">\n<p>Inside.</p>\n</div>\n<p>After.</p>\n", html.Html);
+        Assert.Equal([BlockStart(html.Html, "<div"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public void WhenInlineHtmlIsOpenedAndClosedInDifferentParagraphs_ThenNoBlockStartsBetweenThem()
+    {
+        // Act
+        var segments = Build("One <span class=\"x\">open\n\nTwo close</span>\n\nThree.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.Equal([BlockStart(html.Html, "<p>Three.")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public void WhenRawHtmlIsInsideStyleBlocks_ThenNoBlockStartsBetweenThem()
+    {
+        // Act
+        var segments = Build("Before.\n\n:: {.box}\nOne <span class=\"x\">open\n::\n\nInside.\n\n:: {.box}\nTwo close</span>\n::\n\nAfter.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.Equal([BlockStart(html.Html, "<div class=\"box\">"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public void WhenPageTextContainsABreakMarker_ThenItIsNoBreak()
+    {
+        // Act
+        var segments = Build("One <!--BREAK:00000000000000000000000000000000--> two.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.True(html.BlockStarts.IsDefault);
+        Assert.Contains("<!--BREAK:00000000000000000000000000000000-->", html.Html);
+    }
+
+    [Fact]
+    public void WhenAWidgetBlockFollowsAParagraph_ThenNoBlockStartIsKeptBeforeIt()
+    {
+        // Act
+        var segments = Build("First.\n\n:: Demo.Card\ninside\n::\n\nAfter.");
+
+        // Assert
+        Assert.Collection(segments,
+            segment => Assert.Equal(new HtmlMarkdownSegment("<p>First.</p>\n"), segment),
+            segment => Assert.IsType<BlockMarkdownSegment>(segment),
+            segment => Assert.Equal(new HtmlMarkdownSegment("\n<p>After.</p>\n"), segment));
+    }
+
+    [Fact]
+    public void WhenABlockStartsBeforeOrAfterAnExpression_ThenTheOffsetIsAtTheEndOrTheStartOfTheHtml()
+    {
+        // Arrange
+        var token = new string('a', 32);
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Split(
+            $"<p>First.</p>\n<!--BREAK:{token}--><!--EXPR:{token}:0--><!--BREAK:{token}--><p>After.</p>\n",
+            MarkdownPageParser.Parse("First."),
+            token,
+            ["a/b"]);
+
+        // Assert
+        Assert.Equal(
+            [
+                new HtmlMarkdownSegment("<p>First.</p>\n", [14]),
+                new ExpressionMarkdownSegment("a/b"),
+                new HtmlMarkdownSegment("<p>After.</p>\n", [0])
+            ],
+            segments);
+    }
+
+    [Fact]
+    public void WhenFrontMatterIsTheFirstBlock_ThenNoBlockStartsBeforeTheFirstHtml()
+    {
+        // Act
+        var segments = Build("---\ntitle: Test\n---\n\nFirst.\n\nSecond.");
+
+        // Assert
+        Assert.Equal([new HtmlMarkdownSegment("<p>First.</p>\n<p>Second.</p>\n", [14])], segments);
+    }
+
+    [Fact]
+    public void WhenBlockStartsAreEmpty_ThenTheSegmentEqualsOneWithoutThem()
+    {
+        // Act
+        var segment = new HtmlMarkdownSegment("<p>x</p>", []);
+
+        // Assert
+        Assert.True(segment.BlockStarts.IsDefault);
+        Assert.Equal(new HtmlMarkdownSegment("<p>x</p>"), segment);
+        Assert.NotEqual(new HtmlMarkdownSegment("<p>x</p>", [0]), segment);
+    }
+
+    private static int BlockStart(string html, string text)
+    {
+        var index = html.IndexOf(text, StringComparison.Ordinal);
+        Assert.True(index > 0, $"'{text}' is not in the HTML after its start.");
+        return index;
+    }
+
     // What a browser shows for the HTML: character references are decoded.
     private static string VisibleText(IEnumerable<MarkdownSegment> segments) =>
         WebUtility.HtmlDecode(AllHtml(segments));
