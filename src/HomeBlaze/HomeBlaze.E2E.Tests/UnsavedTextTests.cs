@@ -38,6 +38,9 @@ public class UnsavedTextTests
         // Act
         await link.ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
+
+        // As a user does, the link is clicked again only once the question is gone.
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
         var editorTextAfterKeep = await page.EvaluateAsync<string>("() => monaco.editor.getEditors()[0].getValue()");
         var urlAfterKeep = page.Url;
         await link.ClickAsync();
