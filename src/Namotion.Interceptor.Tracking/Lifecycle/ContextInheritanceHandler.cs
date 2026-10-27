@@ -22,6 +22,37 @@ public class ContextInheritanceHandler : ILifecycleHandler
             {
                 change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
             }
+            else if (change is { IsPropertyReferenceRemoved: true, IsContextDetach: false, Interceptor: { } interceptor } &&
+                     change.Subject.Context is InterceptorSubjectContext context &&
+                     context.HasFallbackContext(change.Property.Value.Subject.Context))
+            {
+                InheritFromRemainingParent(context, change.Property.Value.Subject, interceptor.GetPropertyReferences(change.Subject));
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void InheritFromRemainingParent(InterceptorSubjectContext context, IInterceptorSubject releasingParent, PropertyReferenceSet remainingReferences)
+    {
+        if (remainingReferences.IsEmpty || remainingReferences.ContainsSubject(releasingParent))
+        {
+            return;
+        }
+
+        // Fails for a parent whose context falls back on the subject's own, such as a child of the subject that holds
+        // it as well, or reaches other lifecycle interceptors.
+        var releasingContext = releasingParent.Context;
+        if (context.ReplaceFallbackContext(releasingContext, remainingReferences.First.Subject.Context) || remainingReferences.Additional is null)
+        {
+            return;
+        }
+
+        foreach (var reference in remainingReferences.Additional)
+        {
+            if (context.ReplaceFallbackContext(releasingContext, reference.Subject.Context))
+            {
+                return;
+            }
         }
     }
 
