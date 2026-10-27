@@ -18,6 +18,7 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -507,6 +508,60 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenARoleHidesTheMetadataOfAFolder_ThenItsNotesAreNotSearched()
+    {
+        // Arrange
+        var role = new AuthorizationRole
+        {
+            Name = "NoFolderMetadata",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/Storage/Docs/*"], Tags = [MemberTags.Metadata], Actions = [PermissionAction.Read] }]
+        };
+        var (root, services) = await CreateGraphAsync([("Docs/.metadata.json", """{ "notes": "The folder gasket." }""")]);
+        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+        // Act
+        var result = await CallAsync(tool, new { query = "gasket" });
+
+        // Assert
+        Assert.Empty(result.GetProperty("pages").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task WhenThePathOfASubjectResolvesToAnotherSubjectBecauseARoleHidesAProperty_ThenOnlyTheNotesOfTheOtherSubjectAreSearched()
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync([]);
+        var hidden = new MarkdownSearchSecretDevice();
+        var shown = new MarkdownSearchSecretDevice();
+        var house = new SegmentCollisionFolder
+        {
+            Kitchen = hidden,
+            Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = shown }
+        };
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["House"] = house };
+        AddNotes(hidden, "The hidden gasket.");
+        AddNotes(shown, "The shown gasket.");
+
+        // The written path of the hidden subject, /House/Kitchen, resolves to the shown one once the property is hidden.
+        var role = new AuthorizationRole
+        {
+            Name = "NoKitchenProperty",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Paths = ["/House/Kitchen"], Actions = [PermissionAction.Read] }]
+        };
+        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+        // Act
+        var result = await CallAsync(tool, new { query = "gasket" });
+
+        // Assert
+        var page = GetSinglePage(result);
+        Assert.Equal("/House/Children[Kitchen]", page.GetProperty("path").GetString());
+        Assert.Equal("The shown gasket.", page.GetProperty("matches")[0].GetProperty("snippet").GetString());
+    }
+
+    [Fact]
     public async Task WhenAPageHasNotes_ThenThePageComesBeforeItsNotes()
     {
         // Arrange
@@ -612,6 +667,12 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         return (root, serviceProvider);
     }
 
+    private static void AddNotes(IInterceptorSubject subject, string notes)
+    {
+        var metadata = ImmutableDictionary<string, JsonElement>.Empty.Add("notes", JsonSerializer.SerializeToElement(notes));
+        subject.TryGetRegisteredSubject()!.AddProperty(KnownAttributes.Metadata, metadata.GetType(), _ => metadata, null);
+    }
+
     private static JsonElement GetSinglePage(JsonElement result) =>
         Assert.Single(result.GetProperty("pages").EnumerateArray());
 
@@ -650,4 +711,21 @@ public partial class MarkdownSearchSecretDevice : IConfigurable
     public partial string? Password { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
+/// A folder whose property and dictionary key share the segment Kitchen, so the registry writes the key in its explicit form.
+/// </summary>
+[InterceptorSubject]
+public partial class SegmentCollisionFolder
+{
+    public SegmentCollisionFolder()
+    {
+        Children = new Dictionary<string, IInterceptorSubject>();
+    }
+
+    public partial IInterceptorSubject? Kitchen { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 }

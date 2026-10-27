@@ -137,8 +137,20 @@ internal static class AgentMetadataAccess
         }
 
         return configuration.AccessPolicy is null ||
-            configuration.TryGetReadableProperty(storage, HomeBlazeMarkdownSearchToolProvider.GetMetadataPath(match.Path, match.Property)) is not null;
+            IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
     }
+
+    /// <summary>
+    /// Gets whether the metadata path of <paramref name="path"/> and <paramref name="propertyName"/>, see
+    /// <see cref="HomeBlazeMarkdownSearchToolProvider.GetMetadataPath"/>, resolves from <paramref name="root"/> as
+    /// get_property reads it to a readable member of <paramref name="subject"/> itself. It is not readable when the path
+    /// resolves to a member of another subject or to a dictionary entry, as it can when the policy hides the member.
+    /// </summary>
+    internal static bool IsMetadataReadable(
+        McpServerConfiguration configuration, RegisteredSubject root, RegisteredSubject subject, string path, string? propertyName)
+        => configuration.TryGetReadableProperty(root, HomeBlazeMarkdownSearchToolProvider.GetMetadataPath(path, propertyName)) is
+            { Index: null } resolved &&
+            ReferenceEquals(resolved.Property.Parent.Subject, subject.Subject);
 
     // The subject at the path of the storage when the tools resolve the path to it and show it, else null.
     private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, McpServerConfiguration configuration)
