@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Net;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Markdig.Extensions.Tables;
@@ -61,9 +60,9 @@ public static partial class MarkdownSegmentBuilder
 
     private static readonly char[] Braces = ['{', '}'];
 
-    // A comment, whose content is no tag, or a tag: its name, and a slash that closes it when it ends with one.
-    [GeneratedRegex(@"<!--[\s\S]*?(?:-->|$)|<(/?)([A-Za-z][A-Za-z0-9-]*)(?:[^>""']|""[^""]*""|'[^']*')*?(/?)>")]
-    private static partial Regex HtmlTagRegex();
+    // A comment, whose content opens nothing, or the name of an opening tag. "<!-->" and "<!--->" are complete comments.
+    [GeneratedRegex(@"<!--(?:-?>|[\s\S]*?(?:-->|$))|<([A-Za-z][A-Za-z0-9-]*)")]
+    private static partial Regex OpeningTagRegex();
 
     private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -201,41 +200,31 @@ public static partial class MarkdownSegmentBuilder
             renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
         }
 
-        WriteBreaksBetweenBlocks(renderer, page.Document, writer, token);
+        WriteBreaksBetweenBlocks(renderer, page, writer, token);
         renderer.Render(page.Document);
         writer.Flush();
 
         return Split(writer.ToString(), page, token, expressions);
     }
 
-    /// <summary>Writes a break marker before each top-level block of the document that may start a markup string of its own.</summary>
-    private static void WriteBreaksBetweenBlocks(HtmlRenderer renderer, MarkdownDocument document, StringWriter writer, string token)
+    /// <summary>Writes a break marker before each top-level block of the page that may start a markup string of its own.</summary>
+    private static void WriteBreaksBetweenBlocks(HtmlRenderer renderer, MarkdownPage page, StringWriter writer, string token)
     {
-        // Blazor parses each markup string on its own, so a tag opened in one block and closed in a later one would be
-        // closed early. No break is written between the first and the last top-level block that contains raw HTML.
-        // A tag that is still open after the last of them reaches to the end of the page.
-        var firstRawHtml = -1;
-        var lastRawHtml = -1;
-        Dictionary<string, int>? openTags = null;
+        // Blazor parses each markup string on its own, so an element opened in one block and closed in a later one
+        // would be closed early. Whether and where a browser closes it is not decided here: after the first top-level
+        // block whose raw HTML opens an element, no break is written.
+        var document = page.Document;
+        HashSet<Block>? withoutBreak = null;
         for (var index = 0; index < document.Count; index++)
         {
-            foreach (var rawHtml in GetRawHtml(document[index]))
+            if (withoutBreak is not null)
             {
-                firstRawHtml = firstRawHtml < 0 ? index : firstRawHtml;
-                lastRawHtml = index;
-                CountOpenTags(rawHtml, openTags ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+                withoutBreak.Add(document[index]);
             }
-        }
-
-        if (openTags is not null && openTags.Values.Any(count => count > 0))
-        {
-            lastRawHtml = document.Count - 1;
-        }
-
-        HashSet<Block>? withoutBreak = null;
-        for (var index = firstRawHtml + 1; firstRawHtml >= 0 && index <= lastRawHtml; index++)
-        {
-            (withoutBreak ??= new HashSet<Block>(ReferenceEqualityComparer.Instance)).Add(document[index]);
+            else if (OpensAnElement(page, document[index]))
+            {
+                withoutBreak = new HashSet<Block>(ReferenceEqualityComparer.Instance);
+            }
         }
 
         var marker = $"<!--BREAK:{token}-->";
@@ -253,44 +242,27 @@ public static partial class MarkdownSegmentBuilder
         };
     }
 
-    /// <summary>Gets the raw HTML that a block and the blocks and inlines inside it write, in document order.</summary>
-    private static IEnumerable<string> GetRawHtml(Block block)
+    // The content of a widget block is markup of its own, so only the content of a style block counts for the page.
+    private static bool OpensAnElement(MarkdownPage page, Block block) => block switch
     {
-        IEnumerable<MarkdownObject> descendants = block switch
-        {
-            HtmlBlock => [block],
-            LeafBlock { Inline: { } inline } => inline.Descendants<HtmlInline>(),
-            ContainerBlock container => container.Descendants(),
-            _ => []
-        };
+        HtmlBlock html => OpensAnElement(html.Lines.ToString()),
+        LeafBlock { Inline: { } inline } => inline.Descendants<HtmlInline>().Any(tag => OpensAnElement(tag.Tag)),
+        MarkdownBlockContainer container when page.GetBlock(container).Kind != MarkdownBlockKind.Style => false,
+        ContainerBlock container => container.Any(child => OpensAnElement(page, child)),
+        _ => false
+    };
 
-        foreach (var descendant in descendants)
+    private static bool OpensAnElement(string rawHtml)
+    {
+        foreach (Match match in OpeningTagRegex().Matches(rawHtml))
         {
-            if (descendant is HtmlBlock htmlBlock)
+            if (match.Groups[1].Success && !VoidElements.Contains(match.Groups[1].Value))
             {
-                yield return htmlBlock.Lines.ToString();
-            }
-            else if (descendant is HtmlInline htmlInline)
-            {
-                yield return htmlInline.Tag;
+                return true;
             }
         }
-    }
 
-    private static void CountOpenTags(string rawHtml, Dictionary<string, int> openTags)
-    {
-        foreach (Match match in HtmlTagRegex().Matches(rawHtml))
-        {
-            var name = match.Groups[2];
-            if (!name.Success || match.Groups[3].Length > 0 || VoidElements.Contains(name.Value))
-            {
-                continue;
-            }
-
-            // A closing tag without an opening one before it closes nothing, also not one that is opened later.
-            ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(openTags, name.Value, out _);
-            count = match.Groups[1].Length == 0 ? count + 1 : Math.Max(0, count - 1);
-        }
+        return false;
     }
 
     internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token, IReadOnlyList<string> expressions)

@@ -832,7 +832,7 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
-    public void WhenRawHtmlSpansSeveralBlocks_ThenNoBlockStartsInsideTheSpan()
+    public void WhenRawHtmlOpensAnElement_ThenNoBlockStartsAfterIt()
     {
         // Act
         var segments = Build("Before.\n\n<div class=\"box\">\n\nInside.\n\n</div>\n\nAfter.");
@@ -840,29 +840,46 @@ public class MarkdownSegmentBuilderTests
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
         Assert.Equal("<p>Before.</p>\n<div class=\"box\">\n<p>Inside.</p>\n</div>\n<p>After.</p>\n", html.Html);
-        Assert.Equal([BlockStart(html.Html, "<div"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+        Assert.Equal([BlockStart(html.Html, "<div")], html.BlockStarts.ToArray());
     }
 
     [Fact]
-    public void WhenInlineHtmlIsOpenedAndClosedInDifferentParagraphs_ThenNoBlockStartsBetweenThem()
+    public void WhenInlineHtmlInTheFirstParagraphOpensAnElement_ThenNoBlockStarts()
     {
         // Act
         var segments = Build("One <span class=\"x\">open\n\nTwo close</span>\n\nThree.");
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<p>Three.")], html.BlockStarts.ToArray());
+        Assert.True(html.BlockStarts.IsDefault);
     }
 
     [Fact]
-    public void WhenRawHtmlIsInsideStyleBlocks_ThenNoBlockStartsBetweenThem()
+    public void WhenRawHtmlInsideAStyleBlockOpensAnElement_ThenNoBlockStartsAfterIt()
     {
         // Act
         var segments = Build("Before.\n\n:: {.box}\nOne <span class=\"x\">open\n::\n\nInside.\n\n:: {.box}\nTwo close</span>\n::\n\nAfter.");
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<div class=\"box\">"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+        Assert.Equal([BlockStart(html.Html, "<div class=\"box\">")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public void WhenRawHtmlInsideAWidgetBlockIsNeverClosed_ThenBlocksStillStartAfterTheWidget()
+    {
+        // Act
+        var segments = Build("Before.\n\n:: Demo.Card\n<div class=\"x\">\n::\n\nAfter.\n\nLast.");
+
+        // Assert
+        Assert.Collection(segments,
+            segment => Assert.Equal(new HtmlMarkdownSegment("<p>Before.</p>\n", [15]), segment),
+            segment => Assert.Contains("<div class=\"x\">", AllHtml(Assert.IsType<BlockMarkdownSegment>(segment).Content)),
+            segment =>
+            {
+                var html = Assert.IsType<HtmlMarkdownSegment>(segment);
+                Assert.Equal([0, BlockStart(html.Html, "<p>Last.")], html.BlockStarts.ToArray());
+            });
     }
 
     [Fact]
@@ -889,36 +906,45 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
-    public void WhenATagIsClosedBeforeItIsOpenedAndNeverClosedAfter_ThenNoBlockStartsAfterIt()
+    public void WhenRawHtmlOnlyClosesAnElement_ThenBlocksStillStartAfterIt()
     {
         // Act
         var segments = Build("Before.\n\n</span>\n\nText <span>open\n\nAfter.\n\nLast.");
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "</span>")], html.BlockStarts.ToArray());
+        Assert.Equal([BlockStart(html.Html, "</span>"), BlockStart(html.Html, "<p>Text")], html.BlockStarts.ToArray());
     }
 
-    [Fact]
-    public void WhenRawHtmlHasVoidAndSelfClosingTagsAndComments_ThenItIsClosed()
+    [Theory]
+    [InlineData("An <img src=\"x\"> image.")]
+    [InlineData("A <br> break.")]
+    [InlineData("A <!-- c --> comment.")]
+    [InlineData("An <img src=\"a.png\"> image<br/> and <!-- <div> --> text.")]
+    public void WhenRawHtmlHasOnlyVoidElementsAndComments_ThenBlocksStillStartAfterIt(string paragraph)
     {
         // Act
-        var segments = Build("Before.\n\nAn <img src=\"a.png\"> image<br/> and <!-- <div> --> text.\n\nAfter.");
+        var segments = Build($"Before.\n\n{paragraph}\n\nAfter.");
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<p>An"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+        Assert.Equal([BlockStart(html.Html, "<p>A"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
     }
 
-    [Fact]
-    public void WhenAnHtmlTagIsClosedInALaterHtmlBlock_ThenBlocksStartAfterTheClosingBlock()
+    // The rule does not look for the closing tag, so even a closed element ends the block starts of the page.
+    [Theory]
+    [InlineData("<details><summary>x</summary>y</details>")]
+    [InlineData("<div class=\"spacer\"/>")]
+    [InlineData("Jump <a name=\"top\"/> here.")]
+    [InlineData("<!--> <div>")]
+    public void WhenRawHtmlOpensAnElementInAnyForm_ThenNoBlockStartsAfterIt(string block)
     {
         // Act
-        var segments = Build("<section>\n<div title=\"a>b\">\n\nInside.\n\n</div>\n</section>\n\nAfter.\n\nLast.");
+        var segments = Build($"Before.\n\n{block}\n\nAfter.\n\nLast.");
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<p>After."), BlockStart(html.Html, "<p>Last.")], html.BlockStarts.ToArray());
+        Assert.Equal([15], html.BlockStarts.ToArray());
     }
 
     [Fact]
