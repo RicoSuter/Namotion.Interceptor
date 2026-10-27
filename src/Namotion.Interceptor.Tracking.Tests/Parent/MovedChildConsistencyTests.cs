@@ -39,6 +39,8 @@ public class MovedChildConsistencyTests
         Car[][] steps =
         [
             [cars[0], cars[1], cars[2]],
+            [cars[0], cars[4], cars[2]],
+            [cars[0], cars[4], cars[2], cars[0]],
             [cars[2], cars[0]],
             [cars[2], cars[0], cars[3], cars[1]],
             [cars[3], cars[1], cars[3]],
@@ -116,6 +118,12 @@ public class MovedChildConsistencyTests
             cars[1],
             new Dictionary<int, Car> { [0] = cars[1], [1] = cars[2] },
             new Dictionary<int, Car> { [0] = cars[1], [5] = cars[2] },
+            cars[2],
+            new List<Car> { cars[1], cars[2] },
+            cars.Select(car => car),
+            new[] { cars[2], cars[0], cars[1] }.Select(car => car),
+            new[,] { { cars[0], cars[1], cars[2] } },
+            new[,] { { cars[2], cars[0], cars[1] } },
             null
         ];
 

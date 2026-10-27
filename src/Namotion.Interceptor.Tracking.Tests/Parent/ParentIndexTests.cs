@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -48,7 +49,7 @@ public class ParentIndexTests
     {
         // Arrange
         var car = new Car();
-        var garage = new Garage(CreateContext())
+        var garage = new Garage(CreateContext().WithRegistry())
         {
             Cars = [car],
             CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
@@ -59,6 +60,9 @@ public class ParentIndexTests
 
         // Assert
         Assert.Equal(Parent(garage, nameof(Garage.CarsByName), "Motor"), Assert.Single(car.GetParents()));
+        var registeredParent = Assert.Single(car.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal(nameof(Garage.CarsByName), registeredParent.Property.Name);
+        Assert.Equal("Motor", registeredParent.Index);
     }
 
     [Fact]
