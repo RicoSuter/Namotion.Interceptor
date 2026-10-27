@@ -8,6 +8,8 @@ using MudBlazor.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
+using System.Reactive.Concurrency;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Blazor.Tests;
@@ -404,6 +406,49 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
         // Assert
         Assert.Equal(["Kitchen"], authorization.Roles.Keys);
         Assert.True(authorization.Roles.ContainsKey("KITCHEN"));
+    }
+
+    [Fact]
+    public async Task WhenARenameIsSaved_ThenBothAssignmentsOfTheRolesAreMadeUnderTheEditLock()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.Authorization);
+        await ClickAsync(component, "authorization-role-rename-Kitchen");
+        await TypeNameAsync(component, "Pantry");
+        await ClickAsync(component, "authorization-role-name-confirm");
+        var isLockHeldPerAssignment = new List<bool>();
+        using var subscription = ((IInterceptorSubject)_graph.Authorization).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property.Name == nameof(Authorization.Roles))
+                {
+                    isLockHeldPerAssignment.Add(AuthorizationEditLock.Instance.IsHeldByCurrentThread);
+                }
+            });
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal([true, true], isLockHeldPerAssignment);
+    }
+
+    [Fact]
+    public async Task WhenAnotherAuthorizationDialogSavedWhileThisOneWasOpen_ThenSavingThrowsAndKeepsTheOtherSave()
+    {
+        // Arrange
+        var first = RenderEditor(_graph.Authorization);
+        var second = RenderEditor(_graph.Authorization);
+        await AddRoleAsync(first, "Pantry");
+        await first.InvokeAsync(() => first.Instance.SaveAsync(CancellationToken.None));
+        await AddRoleAsync(second, "Cellar");
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => second.InvokeAsync(() => second.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
+        Assert.Equal(["Kitchen", "Garden", "Pantry"], _graph.Authorization.Roles.Keys);
     }
 
     [Fact]

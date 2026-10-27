@@ -186,33 +186,40 @@
             throw new InvalidOperationException("The roles are invalid and cannot be saved.");
         }
 
-        // Saving the roles as read when the dialog opened would revert a reload of the file since.
-        if (!ReferenceEquals(authorization.Roles, _loadedRoles))
+        Dictionary<string, Role> roles;
+        lock (AuthorizationEditLock.Instance)
         {
-            throw new InvalidOperationException(RoleEditComponent.ConcurrentChangeMessage);
-        }
-
-        // Existing instances under their new keys keep their rules; a new dictionary, as only a replaced one is noticed.
-        var roles = new Dictionary<string, Role>(_entries.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in _entries)
-        {
-            entry.Role ??= new Role();
-            roles.Add(entry.Name, entry.Role);
-        }
-
-        // In one update, so that no policy sees the roles left out in between.
-        using (AuthorizationService.BeginUpdate())
-        {
-            // The registry keeps the key a role was attached under while the role stays in the dictionary, which would
-            // leave a renamed role with its old path and name. Left out once, it is attached again under its new key.
-            if (_entries.Exists(IsRenamed))
+            // Saving the roles as read when the dialog opened would revert a reload of the file or the save of another
+            // Authorization dialog since.
+            if (!ReferenceEquals(authorization.Roles, _loadedRoles))
             {
-                authorization.Roles = _entries
-                    .Where(entry => !IsRenamed(entry))
-                    .ToDictionary(entry => entry.Name, entry => entry.Role!, StringComparer.OrdinalIgnoreCase);
+                throw new InvalidOperationException(RoleEditComponent.ConcurrentChangeMessage);
             }
 
-            authorization.Roles = roles;
+            // Existing instances under their new keys keep their rules; a new dictionary, as only a replaced one is
+            // noticed.
+            roles = new Dictionary<string, Role>(_entries.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in _entries)
+            {
+                entry.Role ??= new Role();
+                roles.Add(entry.Name, entry.Role);
+            }
+
+            // In one update, so that no policy sees the roles left out in between.
+            using (AuthorizationService.BeginUpdate())
+            {
+                // The registry keeps the key a role was attached under while the role stays in the dictionary, which
+                // would leave a renamed role with its old path and name. Left out once, it is attached again under its
+                // new key.
+                if (_entries.Exists(IsRenamed))
+                {
+                    authorization.Roles = _entries
+                        .Where(entry => !IsRenamed(entry))
+                        .ToDictionary(entry => entry.Name, entry => entry.Role!, StringComparer.OrdinalIgnoreCase);
+                }
+
+                authorization.Roles = roles;
+            }
         }
 
         _loadedRoles = roles;

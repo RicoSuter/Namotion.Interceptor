@@ -828,6 +828,32 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenTheRoleIsSaved_ThenItsListsAreAssignedUnderTheEditLock()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        var isLockHeldPerAssignment = new List<bool>();
+        using var subscription = ((IInterceptorSubject)role).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property.Name is nameof(Role.Includes) or nameof(Role.Allow) or nameof(Role.Deny))
+                {
+                    isLockHeldPerAssignment.Add(AuthorizationEditLock.Instance.IsHeldByCurrentThread);
+                }
+            });
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal([true, true, true], isLockHeldPerAssignment);
+    }
+
+    [Fact]
     public async Task WhenTheDialogSavesTwice_ThenTheSecondSaveIsNoConcurrentChange()
     {
         // Arrange
