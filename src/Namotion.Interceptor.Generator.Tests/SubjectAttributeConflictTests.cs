@@ -630,6 +630,50 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenASubjectAddsAThirdProviderToABaseDuplicate_ThenItReportsOnlyTheProviderItAdds()
+    {
+        // Arrange: BaseMotor reports Forward_IsEnabled and Forward_Enabled; Motor only adds Forward_On.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_Enabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor
+                {
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_On { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostics = result.GeneratorDiagnostics.Where(d => d.Id == "NI0066").ToList();
+        Assert.Single(diagnostics, d => d.GetMessage().StartsWith("'BaseMotor' attaches", StringComparison.Ordinal));
+        var motorDiagnostic = Assert.Single(diagnostics, d => d.GetMessage().StartsWith("'Motor' attaches", StringComparison.Ordinal));
+        Assert.Contains("'Forward_On'", motorDiagnostic.GetMessage());
+        Assert.Equal(2, diagnostics.Count);
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange

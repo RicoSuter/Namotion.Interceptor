@@ -25,14 +25,12 @@ internal static class SubjectAttributeConflicts
             return;
         }
 
-        // A duplicate the nearest subject ancestor has with the same providers is reported there, so each duplicate
-        // is reported once, on the nearest subject that has it.
         var ancestorProviders = subjectAncestors is null ? null : BuildProviderMap(subjectAncestors[0], subjectAncestors, 1);
         foreach (var entry in providers)
         {
-            if (entry.Value.Count > 1 && !HasSameProviders(ancestorProviders, entry.Key, entry.Value))
+            if (entry.Value.Count > 1)
             {
-                Report(typeSymbol, entry.Key, entry.Value, location, diagnostics);
+                ReportAddedProviders(typeSymbol, entry.Key, entry.Value, GetProviders(ancestorProviders, entry.Key), location, diagnostics);
             }
         }
     }
@@ -114,43 +112,47 @@ internal static class SubjectAttributeConflicts
         return false;
     }
 
-    // Names are unique within a property set, so equal counts and containment make the sets equal.
-    private static bool HasSameProviders(
-        Dictionary<AttributeTarget, List<string>>? ancestorProviders,
-        AttributeTarget target,
-        List<string> names)
+    private static List<string>? GetProviders(Dictionary<AttributeTarget, List<string>>? providers, AttributeTarget target)
     {
-        if (ancestorProviders is null ||
-            !ancestorProviders.TryGetValue(target, out var ancestorNames) ||
-            ancestorNames.Count != names.Count)
-        {
-            return false;
-        }
-
-        foreach (var name in names)
-        {
-            if (!ancestorNames.Contains(name))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return providers is not null && providers.TryGetValue(target, out var names) ? names : null;
     }
 
-    private static void Report(
+    // A provider the nearest subject ancestor already has is reported there, so only the providers this subject adds
+    // are reported, each against one the ancestor has (or the first one when the ancestor has none).
+    private static void ReportAddedProviders(
         INamedTypeSymbol subject,
         AttributeTarget target,
         List<string> names,
+        List<string>? ancestorNames,
         Location location,
         List<Diagnostic> diagnostics)
     {
-        for (var index = 1; index < names.Count; index++)
+        var anchor = FindAnchor(names, ancestorNames);
+        foreach (var name in names)
         {
-            diagnostics.Add(Diagnostic.Create(
-                Diagnostics.DuplicatePropertyAttributeTarget, location,
-                subject.Name, target.AttributeName, target.PropertyName, names[0], names[index]));
+            if (name != anchor && ancestorNames?.Contains(name) != true)
+            {
+                diagnostics.Add(Diagnostic.Create(
+                    Diagnostics.DuplicatePropertyAttributeTarget, location,
+                    subject.Name, target.AttributeName, target.PropertyName, anchor, name));
+            }
         }
+    }
+
+    private static string FindAnchor(List<string> names, List<string>? ancestorNames)
+    {
+        if (ancestorNames is not null)
+        {
+            foreach (var name in names)
+            {
+                if (ancestorNames.Contains(name))
+                {
+                    return name;
+                }
+            }
+        }
+
+        return names[0];
     }
 
     // An explicit implementation's attributes are not part of the property metadata, and its name is qualified.
