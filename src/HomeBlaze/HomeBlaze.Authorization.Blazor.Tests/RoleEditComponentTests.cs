@@ -546,6 +546,22 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenTheRoleDeniesReadOnAMethodAnIncludedBuiltInRoleAllowsToExecute_ThenTheRoleSaysItCannotBeUsed()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = [BuiltInRoles.OperatorName];
+        role.Deny = [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        Assert.Contains("on 1 method, such as /Devices/Child/Start,", roleHint);
+    }
+
+    [Fact]
     public void WhenAnotherRoleAllowsReadingTheMethods_ThenExecuteWithoutReadIsNoHint()
     {
         // Arrange

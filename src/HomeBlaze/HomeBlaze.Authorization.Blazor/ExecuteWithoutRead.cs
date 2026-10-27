@@ -15,11 +15,16 @@ internal static class ExecuteWithoutRead
     public const string Reason = "A method is listed and run only when it is readable.";
 
     /// <summary>
-    /// Gets whether a role of <paramref name="policy"/>, its own or an included one, has an allow rule with execute,
-    /// without which no method is executable, so that most roles never walk the graph for it.
+    /// Gets whether <paramref name="policy"/> may allow a method to execute but not to read: whether a custom role of it,
+    /// the previewed one or an included one, has an allow rule with execute or a deny rule with read. Only then is the
+    /// graph walked for it.
     /// </summary>
+    // The built-in roles allow read on every method they allow to execute, and where the system rules deny read on a
+    // method, they deny execute as well.
     public static bool MayApply(AuthorizationPolicy policy) =>
-        policy.Roles.Any(role => role.Allow.Any(rule => rule.Actions.Contains(AuthorizationActions.Execute)));
+        policy.Roles.Any(role => !BuiltInRoles.IsBuiltIn(role.Name) &&
+            (role.Allow.Any(rule => rule.Actions.Contains(AuthorizationActions.Execute)) ||
+             role.Deny.Any(rule => rule.Actions.Contains(PermissionAction.Read))));
 
     /// <summary>
     /// Gets the methods among the members of <paramref name="subjects"/> that <paramref name="policy"/> allows to execute
