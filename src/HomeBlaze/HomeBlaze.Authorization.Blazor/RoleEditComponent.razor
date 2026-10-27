@@ -62,6 +62,7 @@
 
     private string? _name;
     private Authorization? _authorization;
+    private LoadedLists _loadedLists;
     private string[] _excluded = [];
     private IReadOnlyList<string> _includes = [];
     private List<RuleEntry> _allow = [];
@@ -118,6 +119,7 @@
         }
 
         (_authorization, _name) = FindParent(role);
+        _loadedLists = new LoadedLists(role);
         _excluded = _name is null ? [] : [_name];
         // Normalized as the selector shows it, so saving without a change writes what was shown. Reading the role
         // names also writes the role's status and agent count.
@@ -148,7 +150,8 @@
         }
 
         // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer part of.
-        if (!ReferenceEquals(FindParent(role).Authorization, _authorization))
+        // Every save assigns new lists, so other lists are the save of another dialog, which this one would revert.
+        if (!ReferenceEquals(FindParent(role).Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
         {
             throw new InvalidOperationException(ConcurrentChangeMessage);
         }
@@ -161,6 +164,8 @@
             role.Allow = [.. _allow.Select(entry => entry.Rule)];
             role.Deny = [.. _deny.Select(entry => entry.Rule)];
         }
+
+        _loadedLists = new LoadedLists(role);
 
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);
@@ -283,6 +288,18 @@
             _wasValid = isValid;
             IsValidChanged?.Invoke(isValid);
         }
+    }
+
+    // The lists of the role as this dialog read them, compared by reference.
+    private readonly record struct LoadedLists(List<string>? Includes, List<PermissionRule>? Allow, List<PermissionRule>? Deny)
+    {
+        public LoadedLists(Role role)
+            : this(role.Includes, role.Allow, role.Deny)
+        {
+        }
+
+        public bool AreHeldBy(Role role) =>
+            ReferenceEquals(role.Includes, Includes) && ReferenceEquals(role.Allow, Allow) && ReferenceEquals(role.Deny, Deny);
     }
 
     // A rule by reference, so that a card keeps its typed text when another card is removed.

@@ -134,7 +134,7 @@ The property panel of a role shows four values:
 
 Role names compare ignoring case. A saved change applies to the next turn of each agent, as a whole: an agent never gets a part of the changes of one save. When a hand-written file holds two roles whose names differ only in case, the `Authorization` dialog shows "Several roles have the same name, ignoring case. Rename or remove one to save." and "Save" stays disabled until one is renamed or removed.
 
-When the file of the `Authorization` subject is reloaded while its dialog or the dialog of one of its roles is open, such as after it was edited by hand, "Save" does not overwrite the reloaded roles. It shows "Error saving configuration: The roles changed while this dialog was open. Close it and open it again."; close the dialog, open it again and repeat the change.
+When the file of the `Authorization` subject is reloaded while its dialog or the dialog of one of its roles is open, such as after it was edited by hand, "Save" does not overwrite the reloaded roles. Neither does "Save" in the dialog of a role when another dialog of the same role, such as one of another user, saved it since this one was opened, so that the earlier save is not reverted. It shows "Error saving configuration: The roles changed while this dialog was open. Close it and open it again."; close the dialog, open it again and repeat the change.
 
 ---
 

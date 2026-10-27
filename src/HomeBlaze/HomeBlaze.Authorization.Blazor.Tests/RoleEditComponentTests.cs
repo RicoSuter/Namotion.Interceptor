@@ -737,6 +737,45 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnotherDialogSavedTheRoleWhileThisOneWasOpen_ThenSavingThrowsAndKeepsTheOtherSave()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var first = RenderEditor(role);
+        var second = RenderEditor(role);
+        await first.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(first, 0, "read", true);
+        await first.InvokeAsync(() => first.Instance.SaveAsync(CancellationToken.None));
+        await second.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(second, 0, "read", true);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => second.InvokeAsync(() => second.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
+        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], role.Deny);
+        Assert.Empty(role.Allow);
+    }
+
+    [Fact]
+    public async Task WhenTheDialogSavesTwice_ThenTheSecondSaveIsNoConcurrentChange()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Act
+        await SetActionAsync(component, 0, "write", true);
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }], role.Allow);
+    }
+
+    [Fact]
     public async Task WhenTheRoleMovesToAnotherAuthorizationWhileTheDialogIsOpen_ThenSavingThrows()
     {
         // Arrange
