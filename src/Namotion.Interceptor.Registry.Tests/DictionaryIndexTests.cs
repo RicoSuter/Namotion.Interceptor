@@ -35,6 +35,83 @@ public class DictionaryIndexTests
     }
 
     [Fact]
+    public void WhenDictionaryEntryIsReKeyedNextToOtherEntries_ThenOnlyItsIndexChanges()
+    {
+        // Arrange
+        var first = new TestItem();
+        var child = new TestItem();
+        var last = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["First"] = first, ["Motor"] = child, ["Last"] = last }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["First"] = first, ["Last"] = last, ["Engine"] = child };
+
+        // Assert
+        var children = GetProperty(container, nameof(TestContainer.Items)).Children;
+        Assert.Equal(3, children.Length);
+        Assert.Equal("First", children.Single(c => c.Subject == first).Index);
+        Assert.Equal("Engine", children.Single(c => c.Subject == child).Index);
+        Assert.Equal("Last", children.Single(c => c.Subject == last).Index);
+
+        Assert.Equal("First", Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal("Engine", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal("Last", Assert.Single(last.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenTwoDictionaryKeysAreSwapped_ThenBothIndicesAreSwapped()
+    {
+        // Arrange
+        var left = new TestItem();
+        var right = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Left"] = left, ["Right"] = right }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Left"] = right, ["Right"] = left };
+
+        // Assert
+        var children = GetProperty(container, nameof(TestContainer.Items)).Children;
+        Assert.Equal(2, children.Length);
+        Assert.Equal("Right", children.Single(c => c.Subject == left).Index);
+        Assert.Equal("Left", children.Single(c => c.Subject == right).Index);
+
+        Assert.Equal("Right", Assert.Single(left.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal("Left", Assert.Single(right.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenReKeyedDictionaryEntryIsRemoved_ThenItsParentAndChildEntriesAreRemoved()
+    {
+        // Arrange: the holder keeps the child registered after it leaves the container's
+        // dictionary, so an entry left behind under the old key stays observable.
+        var child = new TestItem();
+        var holder = new TestItem { Children = new Dictionary<string, TestItem> { ["Shared"] = child } };
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Holder"] = holder, ["Motor"] = child }
+        };
+
+        container.Items = new Dictionary<string, TestItem> { ["Holder"] = holder, ["Engine"] = child };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Holder"] = holder };
+
+        // Assert
+        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
+        Assert.Same(holder, registeredChild.Subject);
+
+        var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal(nameof(TestItem.Children), parent.Property.Name);
+        Assert.Equal("Shared", parent.Index);
+    }
+
+    [Fact]
     public void WhenSubjectSitsUnderTwoDictionaryKeys_ThenItIsRegisteredOnceUnderTheFirstKey()
     {
         // Arrange
@@ -53,6 +130,66 @@ public class DictionaryIndexTests
     }
 
     [Fact]
+    public void WhenRegisteredKeyOfSubjectUnderTwoKeysIsRemoved_ThenIndexIsTheRemainingKey()
+    {
+        // Arrange
+        var child = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Motor"] = child, ["Engine"] = child }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Engine"] = child };
+
+        // Assert
+        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
+        Assert.Equal("Engine", registeredChild.Index);
+        Assert.Equal("Engine", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenSecondKeyIsAddedForSubject_ThenIndexIsTheFirstKeyOfTheNewDictionary()
+    {
+        // Arrange
+        var child = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Engine"] = child }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Motor"] = child, ["Engine"] = child };
+
+        // Assert: the same result as attaching the new dictionary from scratch.
+        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
+        Assert.Equal("Motor", registeredChild.Index);
+        Assert.Equal("Motor", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenSubjectUnderTwoDictionaryKeysIsRemoved_ThenItsParentAndChildEntriesAreRemoved()
+    {
+        // Arrange: the holder keeps the child registered after it leaves the container's dictionary.
+        var child = new TestItem();
+        var holder = new TestItem { Children = new Dictionary<string, TestItem> { ["Shared"] = child } };
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Holder"] = holder, ["Motor"] = child, ["Engine"] = child }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Holder"] = holder };
+
+        // Assert
+        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
+        Assert.Same(holder, registeredChild.Subject);
+
+        var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal(nameof(TestItem.Children), parent.Property.Name);
+    }
+
+    [Fact]
     public void WhenKeyChangesOnlyInCaseUnderCaseInsensitiveComparer_ThenIndexIsTheNewKey()
     {
         // Arrange
@@ -68,6 +205,24 @@ public class DictionaryIndexTests
         // Assert
         Assert.Equal("Motor", Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children).Index);
         Assert.Equal("Motor", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenIntegerKeyedDictionaryEntryIsReKeyed_ThenIndexIsTheNewKey()
+    {
+        // Arrange
+        var child = new TestItem();
+        var container = new TestKeyedContainer(CreateContext())
+        {
+            ByNumber = new Dictionary<int, TestItem> { [1] = child }
+        };
+
+        // Act
+        container.ByNumber = new Dictionary<int, TestItem> { [2] = child };
+
+        // Assert
+        Assert.Equal(2, Assert.Single(GetProperty(container, nameof(TestKeyedContainer.ByNumber)).Children).Index);
+        Assert.Equal(2, Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
     }
 
     [Fact]
@@ -91,6 +246,52 @@ public class DictionaryIndexTests
         Assert.Equal(0, children.Single(c => c.Subject == kept).Index);
         Assert.Equal(2, children.Single(c => c.Subject == child).Index);
         Assert.Equal(2, Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenDictionaryEntryIsAddedOrRemoved_ThenRetainedEntriesKeepTheirKeys()
+    {
+        // Arrange
+        var first = new TestItem();
+        var second = new TestItem();
+        var third = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["First"] = first, ["Second"] = second }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Second"] = second, ["Third"] = third };
+
+        // Assert
+        var children = GetProperty(container, nameof(TestContainer.Items)).Children;
+        Assert.Equal(2, children.Length);
+        Assert.Equal("Second", children.Single(c => c.Subject == second).Index);
+        Assert.Equal("Third", children.Single(c => c.Subject == third).Index);
+        Assert.Equal("Second", Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Null(first.TryGetRegisteredSubject());
+    }
+
+    [Fact]
+    public void WhenReorderedDictionaryRepeatsASubject_ThenItIsListedOnceAtItsFirstKey()
+    {
+        // Arrange
+        var first = new TestItem();
+        var second = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["First"] = first, ["Second"] = second }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Second"] = second, ["First"] = first, ["Alias"] = second };
+
+        // Assert
+        var children = GetProperty(container, nameof(TestContainer.Items)).Children;
+        Assert.Equal(2, children.Length);
+        Assert.Equal("Second", children.Single(c => c.Subject == second).Index);
+        Assert.Equal("First", children.Single(c => c.Subject == first).Index);
+        Assert.Equal("Second", Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
     }
 
     [Fact]
@@ -163,6 +364,67 @@ public class DictionaryIndexTests
     }
 
     [Fact]
+    public void WhenBroadlyDeclaredCollectionIsReordered_ThenIndicesAreTheNewPositions()
+    {
+        // Arrange: the property is declared as object, so only the value says it is a collection.
+        var first = new TestItem();
+        var second = new TestItem();
+        var holder = new BroadlyDeclaredHolder(CreateContext())
+        {
+            Items = new List<TestItem> { first, second }
+        };
+
+        // Act
+        holder.Items = new List<TestItem> { second, first };
+
+        // Assert
+        var children = GetProperty(holder, nameof(BroadlyDeclaredHolder.Items)).Children;
+        Assert.Equal([second, first], children.Select(c => c.Subject));
+        Assert.Equal([0, 1], children.Select(c => c.Index));
+        Assert.Equal(1, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(0, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenBroadlyDeclaredCollectionGivesWayToItsOnlyItem_ThenIndexIsNull()
+    {
+        // Arrange
+        var child = new TestItem();
+        var holder = new BroadlyDeclaredHolder(CreateContext())
+        {
+            Items = new List<TestItem> { child }
+        };
+
+        // Act
+        holder.Items = child;
+
+        // Assert
+        Assert.Null(Assert.Single(GetProperty(holder, nameof(BroadlyDeclaredHolder.Items)).Children).Index);
+        Assert.Null(Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenBroadlyDeclaredDictionaryBecomesACollection_ThenIndicesArePositions()
+    {
+        // Arrange
+        var first = new TestItem();
+        var second = new TestItem();
+        var holder = new BroadlyDeclaredHolder(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["First"] = first, ["Second"] = second }
+        };
+
+        // Act
+        holder.Items = new List<TestItem> { second, first };
+
+        // Assert
+        var children = GetProperty(holder, nameof(BroadlyDeclaredHolder.Items)).Children;
+        Assert.Equal([second, first], children.Select(c => c.Subject));
+        Assert.Equal([0, 1], children.Select(c => c.Index));
+        Assert.Equal(1, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
     public void WhenUntypedCollectionPropertyHoldsAReKeyedDictionary_ThenIndexIsTheNewKey()
     {
         // Arrange: a non-generic ICollection declaration classifies as a collection, the value is keyed.
@@ -199,6 +461,24 @@ public class DictionaryIndexTests
         // Assert
         Assert.Equal(2, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
         Assert.Equal(1, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenEntryOfBroadlyDeclaredDictionaryIsReKeyed_ThenIndexIsTheNewKey()
+    {
+        // Arrange: the property is declared as object, so only the value says it is a dictionary.
+        var child = new TestItem();
+        var holder = new BroadlyDeclaredHolder(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Motor"] = child }
+        };
+
+        // Act
+        holder.Items = new Dictionary<string, TestItem> { ["Engine"] = child };
+
+        // Assert
+        Assert.Equal("Engine", Assert.Single(GetProperty(holder, nameof(BroadlyDeclaredHolder.Items)).Children).Index);
+        Assert.Equal("Engine", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
     }
 
     [Fact]
@@ -305,6 +585,8 @@ public class DictionaryIndexTests
 [InterceptorSubject]
 public partial class BroadlyDeclaredHolder
 {
+    public partial object? Items { get; set; }
+
     public partial ICollection? Untyped { get; set; }
 
     public partial IEnumerable<TestItem>? Sequence { get; set; }

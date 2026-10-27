@@ -139,6 +139,31 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
+    public void WhenDictionaryEntryIsReKeyed_ThenPathsAndResolutionFollowTheNewKey()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestContainer> { ["Motor"] = child }
+        };
+        RootManager.Root = root;
+        var pathBefore = Resolver.GetPath(child, PathStyle.Canonical);
+        var resolvedBefore = Resolver.ResolveSubject("/Children[Motor]", PathStyle.Canonical);
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["Engine"] = child };
+
+        // Assert
+        Assert.Equal("/Children[Motor]", pathBefore);
+        Assert.Same(child, resolvedBefore);
+        Assert.Equal("/Children[Engine]", Resolver.GetPath(child, PathStyle.Canonical));
+        Assert.Null(Resolver.ResolveSubject("/Children[Motor]", PathStyle.Canonical));
+        Assert.Same(child, Resolver.ResolveSubject("/Children[Engine]", PathStyle.Canonical));
+    }
+
+    [Fact]
     public void WhenTwoDictionaryKeysAreSwapped_ThenPathsAndResolutionFollowTheNewKeys()
     {
         // Arrange
@@ -163,6 +188,26 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
         Assert.Equal("/Children[Left]", Resolver.GetPath(right, PathStyle.Canonical));
         Assert.Same(right, Resolver.ResolveSubject("/Children[Left]", PathStyle.Canonical));
         Assert.Same(left, Resolver.ResolveSubject("/Children[Right]", PathStyle.Canonical));
+    }
+
+    [Fact]
+    public void WhenDictionaryIsAssignedAgainWithTheSameEntries_ThenPathsVersionIsUnchanged()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestContainer> { ["Motor"] = child }
+        };
+        RootManager.Root = root;
+        var versionBefore = Resolver.PathsVersion;
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["Motor"] = child };
+
+        // Assert
+        Assert.Equal(versionBefore, Resolver.PathsVersion);
     }
 
     [Fact]
