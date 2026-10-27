@@ -620,7 +620,9 @@
             // Then try absolute/root resolution (e.g., "/Demo/Conveyor/Temperature")
             value ??= PathResolver.ResolveValue(Value, PathStyle.Canonical);
 
-            if (value != null)
+            // A secret property resolves to no value; a value whose text can show a secret, such as a record with a
+            // secret property, is not previewed either.
+            if (value != null && !SecretValueTypes.HoldsSecret(value))
             {
                 _previewValue = value;
                 _isValidPath = true;

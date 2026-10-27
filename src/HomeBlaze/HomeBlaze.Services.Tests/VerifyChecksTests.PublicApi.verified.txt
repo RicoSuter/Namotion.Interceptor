@@ -393,6 +393,10 @@ namespace HomeBlaze.Services.Display
     {
         public static string Format(object? value) { }
     }
+    public static class SecretValueTypes
+    {
+        public static bool HoldsSecret(object value) { }
+    }
     public static class StateUnitExtensions
     {
         public static string FormatDisplayValue(object value, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }

@@ -2,8 +2,10 @@ using Bunit;
 using HomeBlaze.Components.Inputs;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor.Services;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -12,13 +14,14 @@ public sealed class SubjectPathPickerTests : BunitContext, IAsyncLifetime
 {
     private readonly ServiceProvider _serviceProvider = new ServiceCollection().BuildServiceProvider();
     private readonly RootManager _rootManager;
+    private readonly IInterceptorSubjectContext _context;
 
     public SubjectPathPickerTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
 
-        var context = SubjectContextFactory.Create(new ServiceCollection());
+        var context = _context = SubjectContextFactory.Create(new ServiceCollection());
         var typeProvider = new TypeProvider();
         RootManager? rootManager = null;
         var pathResolver = new SubjectPathResolver(() => rootManager?.Root);
@@ -85,6 +88,73 @@ public sealed class SubjectPathPickerTests : BunitContext, IAsyncLifetime
         Assert.Contains("Name", items);
         Assert.DoesNotContain("IsOn", items);
     }
+
+    [Theory]
+    [InlineData("/Password")] // a secret configuration property
+    [InlineData("/Token")] // a secret that is state as well
+    [InlineData("/Credentials")] // a value whose text shows a secret
+    public void WhenAPathNamesASecret_ThenItCanBePickedButItsValueIsNotPreviewed(string path)
+    {
+        // Arrange
+        _rootManager.Root = CreateSecretTarget();
+
+        // Act
+        var component = Render<SubjectPathPicker>(parameters => parameters
+            .Add(picker => picker.Value, path)
+            .Add(picker => picker.CanSelectProperty, _ => true)
+            .Add(picker => picker.ListsPropertiesWithoutState, true));
+
+        // Assert
+        Assert.Contains(path.TrimStart('/'), GetItemNames(component));
+        Assert.DoesNotContain("s3cr3t", component.Markup);
+        Assert.DoesNotContain("Preview:", component.Markup);
+    }
+
+    [Fact]
+    public async Task WhenASecretIsSelectedInTheTree_ThenItsPathIsTakenButItsValueIsNotPreviewed()
+    {
+        // Arrange
+        _rootManager.Root = CreateSecretTarget();
+        string? selectedPath = null;
+        var component = Render<SubjectPathPicker>(parameters => parameters
+            .Add(picker => picker.Value, "/Host")
+            .Add(picker => picker.ValueChanged, path => selectedPath = path)
+            .Add(picker => picker.CanSelectProperty, _ => true)
+            .Add(picker => picker.ListsPropertiesWithoutState, true));
+
+        // Act
+        await component.FindAll(".mud-treeview-item-content").Single(item => item.TextContent.Trim() == "Password").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Equal("/Password", selectedPath);
+        Assert.DoesNotContain("s3cr3t", component.Markup);
+        Assert.DoesNotContain("Preview:", component.Markup);
+    }
+
+    [Fact]
+    public void WhenAPathNamesAValueThatIsNoSecret_ThenItIsPreviewed()
+    {
+        // Arrange
+        _rootManager.Root = CreateSecretTarget();
+
+        // Act
+        var component = Render<SubjectPathPicker>(parameters => parameters
+            .Add(picker => picker.Value, "/Host")
+            .Add(picker => picker.CanSelectProperty, _ => true)
+            .Add(picker => picker.ListsPropertiesWithoutState, true));
+
+        // Assert
+        Assert.Contains("Preview: kitchen.local", component.Find(".mud-typography-caption").TextContent);
+    }
+
+    private SecretTargetSubject CreateSecretTarget() =>
+        new(_context)
+        {
+            Host = "kitchen.local",
+            Password = "s3cr3t",
+            Token = "s3cr3t",
+            Credentials = new SecretCredentials("admin", "s3cr3t")
+        };
 
     // A path below the root expands it, so that its members are listed.
     private IRenderedComponent<SubjectPathPicker> RenderPicker(bool listsPropertiesWithoutState) =>
