@@ -68,7 +68,8 @@ internal static class PathPatternChecks
 
     // A pattern without a wildcard that resolves to an entry of a dictionary or collection, such as a device in a folder,
     // names a subject that has no member of its own and matches nothing, which the policy cannot tell without the graph.
-    // The graph can change while it is read, as in AuthorizationService.BuildSnapshot; the warning is then left out.
+    // The graph can change while it is read, as in AuthorizationService.BuildSnapshot, and resolving a pattern calls the
+    // getters on its path, which can throw. The warning is advisory, so it is then left out rather than failing the policy.
     public static string? GetWarning(
         AuthorizationRole role,
         IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
@@ -81,7 +82,7 @@ internal static class PathPatternChecks
             AddEntryPatterns(role.Allow, knownSubjects, pathProvider, ref roots, ref entryPatterns);
             AddEntryPatterns(role.Deny, knownSubjects, pathProvider, ref roots, ref entryPatterns);
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
             return null;
         }
@@ -117,7 +118,7 @@ internal static class PathPatternChecks
                     continue;
                 }
 
-                roots ??= knownSubjects.Values.Where(static subject => subject.Parents.Length == 0).ToList();
+                roots ??= GetRoots(knownSubjects);
                 if (NamesEntry(pattern, roots, pathProvider))
                 {
                     (entryPatterns ??= []).Add(pattern);
@@ -125,6 +126,10 @@ internal static class PathPatternChecks
             }
         }
     }
+
+    // Parents before IsAttached, see RegisteredSubject.IsAttached.
+    private static List<RegisteredSubject> GetRoots(IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects) =>
+        knownSubjects.Values.Where(static subject => subject.Parents.Length == 0 && subject.IsAttached).ToList();
 
     // A pattern matches the member paths below every root, so it names an entry when it resolves to an entry holding a
     // subject below one root and to a member below none.

@@ -560,6 +560,31 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(role.Status);
     }
 
+    [Fact]
+    public void WhenAGetterOnAPatternsPathThrows_ThenThePolicyCompilesAndTheRoleHasNoWarning()
+    {
+        // Arrange
+        var role = new Role
+        {
+            Allow = [ReadPlain()],
+            Deny = [new PermissionRule { Paths = ["/Kitchen/Broken/Plain"], Actions = [PermissionAction.Read] }]
+        };
+        _root.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Kitchen"] = new ThrowingGetterSubject(),
+            ["Authorization"] = new Authorization { Roles = new Dictionary<string, Role> { ["Custom"] = role } }
+        };
+
+        // Act
+        var result = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Null(role.Status);
+        Assert.Null(role.Warning);
+    }
+
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization
