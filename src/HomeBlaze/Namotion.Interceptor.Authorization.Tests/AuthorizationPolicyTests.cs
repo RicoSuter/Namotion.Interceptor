@@ -257,6 +257,19 @@ public class AuthorizationPolicyTests
     }
 
     [Fact]
+    public void WhenTheTagProviderReturnsADefaultArray_ThenEvaluationThrowsNamingTheProvider()
+    {
+        // Arrange
+        var home = Create();
+        var provider = new DelegateTagProvider(_ => default);
+        var policy = Policies.Compile([Role("Reader", allow: [Rule(Read, tags: ["state"])])], ["Reader"], [], provider);
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        Assert.Contains(typeof(DelegateTagProvider).FullName!, exception.Message);
+    }
+
+    [Fact]
     public void WhenPolicyIsDenyAll_ThenEverythingIsDeniedForAnyAction()
     {
         // Arrange

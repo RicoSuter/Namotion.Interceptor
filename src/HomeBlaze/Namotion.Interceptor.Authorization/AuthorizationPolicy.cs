@@ -1,7 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using Namotion.Interceptor.Authorization.Internal;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -195,17 +194,9 @@ public sealed class AuthorizationPolicy
             return false;
         }
 
-        if (rule.Tags is not null)
+        if (rule.Tags is not null && !HasAllTags(GetTags(ref context), rule.Tags))
         {
-            if (context.Tags.IsDefault)
-            {
-                context.Tags = _tagProvider!.GetTags(context.Member);
-            }
-
-            if (!HasAllTags(context.Tags, rule.Tags))
-            {
-                return false;
-            }
+            return false;
         }
 
         if (rule.Types is not null && !TypeNames.IsAssignableToAny(context.Member.Parent.Subject.GetType(), rule.Types))
@@ -232,6 +223,23 @@ public sealed class AuthorizationPolicy
 
         context.MemberSegment ??= SubjectPaths.GetSegment(_pathProvider!, context.Member);
         return AnyPathMatches(patterns, context.Paths, new PathLink(context.MemberSegment, null, null));
+    }
+
+    private ImmutableArray<string> GetTags(ref MatchContext context)
+    {
+        if (context.Tags.IsDefault)
+        {
+            var tags = _tagProvider!.GetTags(context.Member);
+            if (tags.IsDefault)
+            {
+                throw new InvalidOperationException(
+                    $"{_tagProvider.GetType().FullName}.GetTags returned a default array; return an empty array for a member without tags.");
+            }
+
+            context.Tags = tags;
+        }
+
+        return context.Tags;
     }
 
     /// <summary>The name a member glob matches: the property name, or <c>Property@Attribute</c> for an attribute, nested for an attribute of an attribute.</summary>
@@ -264,14 +272,14 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // Every path of the subject; the root has the single empty path. Incomplete when a path could not be written, more
-    // than MaxPaths exist, the subject has parents but no path was found, or it was detached.
+    // Every path of the subject; a root has the single empty path. Incomplete when a path could not be written, more
+    // than MaxPaths exist, the subject has parents but no path was found, or it has no parents and is not a root.
     private List<PathLink[]> GetPaths(RegisteredSubject subject, out bool isComplete)
     {
         if (subject.Parents.Length == 0)
         {
-            // Detaching removes the parents and unregisters the subject, so its last paths are unknown rather than empty.
-            isComplete = ReferenceEquals(subject.Subject.TryGetRegisteredSubject(), subject);
+            // A detach removes the parents, so a subject that lost them that way has unknown paths rather than none.
+            isComplete = SubjectPaths.IsRoot(subject);
             return isComplete ? RootPaths : NoPaths;
         }
 
@@ -311,14 +319,15 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // True when some chain of readable subject-holding properties leads to a root. Otherwise deniedProperty is the first
-    // unreadable link found, or stays null when every chain returns to a subject already walked.
+    // True when some chain of readable subject-holding properties leads to a root, as SubjectPaths.IsRoot defines it.
+    // Otherwise deniedProperty is the first unreadable link found, or stays null when every chain returns to a subject
+    // already walked or ends at a subject without parents that is not a root.
     private bool IsReachable(RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, ref RegisteredSubjectProperty? deniedProperty)
     {
         var parents = subject.Parents;
         if (parents.Length == 0)
         {
-            return true;
+            return SubjectPaths.IsRoot(subject);
         }
 
         // Already explored from here, or a cycle: no new route to a root through this subject.
