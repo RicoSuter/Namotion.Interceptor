@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Registry.Tests.Paths;
 
 namespace Namotion.Interceptor.Registry.Tests.GraphBehavior;
 
@@ -262,6 +263,86 @@ public class DetachCleanupTests
         Assert.Contains(shared, registry.KnownSubjects.Keys);
         Assert.Single(sharedRegistered.Parents);
         Assert.Equal(nameof(Person.Mother), sharedRegistered.Parents[0].Property.Name);
+    }
+
+    // === Subject constructed with the graph's context ===
+
+    [Fact]
+    public void WhenSubjectConstructedWithContextIsRemovedFromDictionaryAndWritten_ThenItIsNotRegisteredAgain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var container = new TestContainer(context);
+        var kitchen = new TestItem(context);
+        container.Items = new Dictionary<string, TestItem> { ["Kitchen"] = kitchen };
+        container.Items = new Dictionary<string, TestItem>();
+
+        // Sanity: the removal already unregistered it, so the write below is what is under test
+        Assert.Null(registry.TryGetRegisteredSubject(kitchen));
+
+        // Act
+        kitchen.Children = new Dictionary<string, TestItem> { ["Pantry"] = new TestItem() };
+
+        // Assert
+        Assert.Null(registry.TryGetRegisteredSubject(kitchen));
+        Assert.DoesNotContain(kitchen, registry.KnownSubjects.Keys);
+        Assert.Single(registry.KnownSubjects); // only the container
+    }
+
+    [Fact]
+    public void WhenSubjectConstructedWithContextIsRemovedFromCollectionAndWritten_ThenItIsNotRegisteredAgain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var root = new Person(context) { FirstName = "Root" };
+        var child = new Person(context) { FirstName = "Kid" };
+        root.Children = [child];
+        root.Children = [];
+
+        // Sanity: the removal already unregistered it, so the write below is what is under test
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+
+        // Act
+        child.Mother = new Person { FirstName = "Mom" };
+
+        // Assert
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+        Assert.DoesNotContain(child, registry.KnownSubjects.Keys);
+        Assert.Single(registry.KnownSubjects); // only root
+    }
+
+    [Fact]
+    public void WhenBranchWithGrandchildConstructedWithContextIsRemovedAndGrandchildIsWritten_ThenItIsNotRegisteredAgain()
+    {
+        // Arrange: root -> parent -> grandchild, where only root and grandchild are constructed with the context
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var grandchild = new Person(context) { FirstName = "Gran" };
+        var parent = new Person { FirstName = "Par", Mother = grandchild };
+        var root = new Person(context) { FirstName = "Root", Mother = parent };
+        root.Mother = null;
+
+        // Sanity: the removal already unregistered it, so the write below is what is under test
+        Assert.Null(registry.TryGetRegisteredSubject(grandchild));
+
+        // Act
+        grandchild.Mother = new Person { FirstName = "Mom" };
+
+        // Assert
+        Assert.Null(registry.TryGetRegisteredSubject(grandchild));
+        Assert.DoesNotContain(grandchild, registry.KnownSubjects.Keys);
+        Assert.Single(registry.KnownSubjects); // only root
     }
 
     // === Reattach after detach ===
