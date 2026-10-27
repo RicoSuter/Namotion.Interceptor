@@ -81,6 +81,7 @@ namespace Namotion.Interceptor
     }
     public class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
     {
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.IInterceptorSubjectContext> FallbackContexts { get; }
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }

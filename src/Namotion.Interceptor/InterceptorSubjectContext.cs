@@ -141,6 +141,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
+    /// <summary>
+    /// The fallback contexts of this context in the order they were added, as one snapshot that a
+    /// concurrent add or remove does not change.
+    /// </summary>
+    public ImmutableArray<IInterceptorSubjectContext> FallbackContexts =>
+        ImmutableArray<IInterceptorSubjectContext>.CastUp(Volatile.Read(ref _state).FallbackContexts);
+
     /// <summary>Whether <paramref name="context"/> is one of the fallback contexts of this context.</summary>
     public bool HasFallbackContext(IInterceptorSubjectContext context)
     {

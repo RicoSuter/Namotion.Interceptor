@@ -304,6 +304,10 @@ This ensures that all objects in the subject graph share the same context, enabl
 
 A subject that several parents hold inherits the context of the parent that attached it first. When that parent releases it while another parent still holds it, the subject inherits the context of a remaining parent instead, so it keeps the services of the graph after the first parent leaves it. A remaining parent is skipped when its context falls back on the subject's own, such as a child of the subject that holds it as well, or reaches other lifecycle interceptors, such as a parent constructed with the context of another graph. A subject that only such parents still hold keeps the context of the parent that released it, and loses the services of the graph once that parent leaves it.
 
+Pass a context only to the root subject and construct every other subject without one. A subject constructed with a context is a root of that context: the context keeps it reachable, and with lifecycle tracking keeps it attached, until `subject.Context.RemoveFallbackContext(context)` removes it. Dropping the last reference to a root is not enough.
+
+When the last parent reference to a subject is removed, counted over every graph that holds it, inheritance removes the context of the parent that released it and every other fallback context that reaches only the releasing graph's lifecycle interceptor, such as the context the subject was constructed with. A context that also reaches another lifecycle interceptor stays, so a root of one graph that another graph releases stays in its own graph. When the subject is assigned into a graph again, it inherits the context of its new parent.
+
 ## Subject Lifecycle Tracking
 
 Track when subjects enter or leave the object graph, and when property references are added or removed:
