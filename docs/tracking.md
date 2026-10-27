@@ -520,7 +520,7 @@ This is the classic reference counting limitation. **Workarounds:**
 1. Call `DetachSubjectFromContext(subject)` explicitly
 2. Break all cycle references before removing the parent
 
-A reference back to the root closes a cycle through it and makes the root a child:
+A reference back to the root closes a cycle through it and makes the root a child, so the graph then has no root: it stays attached only through that cycle:
 
 ```
 Root → A → Root (back-reference)
