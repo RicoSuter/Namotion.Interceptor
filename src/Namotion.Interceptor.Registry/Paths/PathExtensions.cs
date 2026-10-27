@@ -384,8 +384,8 @@ public static class PathExtensions
             {
                 var (prop, index) = frames[i];
 
-                // [InlinePaths] frames write just the key where the reader resolves it back. Without
-                // includedPropertiesOnly only the leaf is checked for inclusion, so these frames are not either.
+                // [InlinePaths] frames write just the key where the reader resolves it back. Like any frame above the
+                // leaf, they are checked for inclusion only with includedPropertiesOnly.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))

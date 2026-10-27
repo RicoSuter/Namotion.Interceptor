@@ -245,7 +245,7 @@ internal static class McpToolHelper
     }
 
     // The chain is checked in the walk that writes the text, so a subject moved on it while a call runs cannot put the
-    // name of a hidden property into the text. The resolution provider writes the listing provider's segments and
+    // name of a hidden property into the text. The resolution provider writes the path provider's segments and
     // includes exactly what the policy allows to read, the holding property too; the path provider's own inclusion
     // applies to the holding property only, as without a policy.
     private static string? TryGetReadablePath(
