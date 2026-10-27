@@ -1,6 +1,7 @@
 @page "/pages/{*Path}"
 
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.Components.Editors
@@ -21,8 +22,12 @@
 @inject IJSRuntime JsRuntime
 @inject PageEditModeChoice EditModeChoice
 @inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
+
+@* The text of the page editor is lost when the page or the mode changes, so a change asks first. *@
+<NavigationLock OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" ConfirmExternalNavigation="_isPageEditorDirty" />
 
 @if (_subject == null)
 {
@@ -229,6 +234,10 @@ else
     // The subject that "Edit in Source" shows once the edit panel of the Split mode it switched to is ready.
     private IInterceptorSubject? _pendingReveal;
 
+    // The edit component of the page editor whose dirty state the browser asks about before it leaves, and that state.
+    private ISubjectEditComponent? _watchedEditComponent;
+    private bool _isPageEditorDirty;
+
     private bool IsEditing => _editMode != PageEditMode.View;
     private bool ShowEditor => _editMode is PageEditMode.Split or PageEditMode.Source;
 
@@ -376,11 +385,59 @@ else
     private PageEditMode GetStartMode() =>
         EditModeChoice.Mode != PageEditMode.View && CanEdit() ? EditModeChoice.Mode : PageEditMode.View;
 
-    private void ChooseEditMode(PageEditMode mode)
+    private async Task ChooseEditModeAsync(PageEditMode mode)
     {
+        if (mode != _editMode && !await ConfirmDiscardAsync())
+        {
+            return;
+        }
+
         EditModeChoice.Mode = mode;
         SetEditMode(mode);
     }
+
+    private async Task OnBeforeInternalNavigationAsync(LocationChangingContext context)
+    {
+        if (!await ConfirmDiscardAsync())
+        {
+            context.PreventNavigation();
+        }
+    }
+
+    // Whether the unsaved text of the page editor may be thrown away: without a change at once, otherwise once the user says so.
+    private async Task<bool> ConfirmDiscardAsync() =>
+        !(ShowEditor && _editPanel?.EditComponent is ISubjectEditComponent { IsDirty: true }) ||
+        await DialogService.ShowMessageBoxAsync("Discard changes", "Discard your changes?", yesText: "Discard", cancelText: "Keep editing") == true;
+
+    private void WatchEditComponent(ISubjectEditComponent? editComponent)
+    {
+        if (ReferenceEquals(editComponent, _watchedEditComponent))
+        {
+            return;
+        }
+
+        if (_watchedEditComponent is not null)
+        {
+            _watchedEditComponent.IsDirtyChanged -= OnPageEditorDirtyChanged;
+        }
+
+        _watchedEditComponent = editComponent;
+        _isPageEditorDirty = editComponent?.IsDirty ?? false;
+        if (editComponent is not null)
+        {
+            editComponent.IsDirtyChanged += OnPageEditorDirtyChanged;
+        }
+    }
+
+    // Renders only when the state flips, which the editor raises once per flip and not for every typed character.
+    private void OnPageEditorDirtyChanged(bool isDirty) => InvokeAsync(() =>
+    {
+        if (_isPageEditorDirty != isDirty && !_isDisposed)
+        {
+            _isPageEditorDirty = isDirty;
+            StateHasChanged();
+        }
+    });
 
     private void SetEditMode(PageEditMode mode)
     {
@@ -392,6 +449,7 @@ else
         _editMode = mode;
         _pendingReveal = null;
         _widgetSelection.Clear();
+        WatchEditComponent(null);
 
         // Every mode with an editor has an edit panel of its own, which reports its validity once it is ready.
         _isEditPanelValid = false;
@@ -409,6 +467,7 @@ else
     private async Task OnEditPanelIsValidChanged(bool isValid)
     {
         _isEditPanelValid = isValid;
+        WatchEditComponent(_editPanel?.EditComponent as ISubjectEditComponent);
         if (_pendingReveal is { } subject && _editPanel?.EditComponent is ISubjectRevealTarget target)
         {
             _pendingReveal = null;
@@ -490,22 +549,22 @@ else
             <MudDivider />
             <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
                          IconColor="@(_editMode == PageEditMode.View ? Color.Primary : Color.Default)"
-                         OnClick="@(() => ChooseEditMode(PageEditMode.View))">
+                         OnClick="@(() => ChooseEditModeAsync(PageEditMode.View))">
                 View
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.VerticalSplit"
                          IconColor="@(_editMode == PageEditMode.Split ? Color.Primary : Color.Default)"
-                         OnClick="@(() => ChooseEditMode(PageEditMode.Split))">
+                         OnClick="@(() => ChooseEditModeAsync(PageEditMode.Split))">
                 Split
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Code"
                          IconColor="@(_editMode == PageEditMode.Source ? Color.Primary : Color.Default)"
-                         OnClick="@(() => ChooseEditMode(PageEditMode.Source))">
+                         OnClick="@(() => ChooseEditModeAsync(PageEditMode.Source))">
                 Source
             </MudMenuItem>
             <MudMenuItem Icon="@Icons.Material.Filled.Edit"
                          IconColor="@(_editMode == PageEditMode.Inline ? Color.Primary : Color.Default)"
-                         OnClick="@(() => ChooseEditMode(PageEditMode.Inline))">
+                         OnClick="@(() => ChooseEditModeAsync(PageEditMode.Inline))">
                 Inline
             </MudMenuItem>
         </MudMenu>
@@ -514,6 +573,7 @@ else
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
+        WatchEditComponent(null);
 
         if (_hotKeysContext != null)
         {

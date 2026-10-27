@@ -1,3 +1,4 @@
+@using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
 @using MudBlazor
 
@@ -8,7 +9,8 @@
 
 @* The Markdown of a block of text in an editor that fills the dialog. A refusal, such as text that changed meanwhile, shows
    above it and keeps what was typed, and so does a close: Escape and Cancel ask before they discard a change. Create writes
-   a new widget into the text, which the page gets with the save. *@
+   a new widget into the text, which the page gets with the save. So does a navigation, which closes the dialog. *@
+<NavigationLock OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" ConfirmExternalNavigation="_isChanged" />
 <MudDialog Class="markdown-text-dialog" ContentClass="markdown-text-dialog-content" DefaultFocus="DefaultFocus.None">
     <DialogContent>
         @* The dialog reports no Escape to its OnKeyDown, so its module watches the dialog for it, see watchEscape. The editor
@@ -29,6 +31,7 @@
                                       FocusesEnd="true"
                                       MinimumFenceLength="MinimumFenceLength"
                                       ReservedNames="ReservedNames"
+                                      TextChanged="OnTextChanged"
                                       SaveRequested="SaveAsync"/>
             </div>
         </div>
@@ -105,6 +108,9 @@
     private bool _isCanceling;
     private bool _isCreating;
     private bool _isDisposed;
+
+    // Whether the editor has another text than it started with, as its last change told, for the prompt of the browser.
+    private bool _isChanged;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -202,6 +208,38 @@
         }
     }
 
+    // Renders only when the state flips, as the editor raises a change for every typed character.
+    private void OnTextChanged(string text)
+    {
+        var isChanged = !IsUnchanged(text);
+        if (isChanged != _isChanged)
+        {
+            _isChanged = isChanged;
+            StateHasChanged();
+        }
+    }
+
+    // The navigation closes the dialog, unless the user keeps the changed text. Reads the editor, which the last change
+    // reached the server from with a delay.
+    private async Task OnBeforeInternalNavigationAsync(LocationChangingContext context)
+    {
+        if (_isDisposed || _editor is null)
+            return;
+
+        var text = await _editor.GetTextAsync();
+        if (_isDisposed)
+            return;
+
+        if (text is not null && !IsUnchanged(text) &&
+            await DialogService.ShowMessageBoxAsync("Discard changes", "Discard your changes?", yesText: "Discard", cancelText: "Keep editing") != true)
+        {
+            context.PreventNavigation();
+            return;
+        }
+
+        Dialog.Cancel();
+    }
+
     private bool IsUnchanged(string text) =>
         string.Equals(text.Replace("\r\n", "\n"), Text.Replace("\r\n", "\n"), StringComparison.Ordinal);
 
@@ -293,8 +331,12 @@
             { dialog => dialog.ReservedNames, reservedNames },
             { dialog => dialog.Save, save }
         };
-        // Escape is handled by the dialog, which asks before it discards a change, and a click beside the dialog does nothing.
-        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = false, BackdropClick = false };
+        // Escape and a navigation are handled by the dialog, which asks before it discards a change, and a click beside the
+        // dialog does nothing.
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = false, BackdropClick = false, CloseOnNavigation = false
+        };
         var reference = await dialogService.ShowAsync<MarkdownTextDialog>(title, parameters, options);
         await reference.Result;
     }
