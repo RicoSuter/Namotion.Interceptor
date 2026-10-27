@@ -227,7 +227,8 @@ public class RegisteredSubjectProperty
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
     /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
-    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
+    /// static attribute property or a dynamic one, or the attribute's property name is taken by a property that is not
+    /// this attribute. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddAttribute<TProperty>(
         string name,
         Func<IInterceptorSubject, TProperty?>? getValue,
@@ -249,7 +250,8 @@ public class RegisteredSubjectProperty
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
     /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
-    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
+    /// static attribute property or a dynamic one, or the attribute's property name is taken by a property that is not
+    /// this attribute. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddAttribute<TProperty>(
         string name,
         Func<IInterceptorSubject, object?>? getValue,
@@ -269,7 +271,8 @@ public class RegisteredSubjectProperty
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
     /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
-    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
+    /// static attribute property or a dynamic one, or the attribute's property name is taken by a property that is not
+    /// this attribute. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddAttribute(
         string name, Type type, 
         Func<IInterceptorSubject, object?>? getValue, 
@@ -289,7 +292,8 @@ public class RegisteredSubjectProperty
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
     /// <exception cref="InvalidOperationException">The property already has an attribute with this name, whether a
-    /// static attribute property or a dynamic one. Neither the subject nor the registry changes in that case.</exception>
+    /// static attribute property or a dynamic one, or the attribute's property name is taken by a property that is not
+    /// this attribute. Neither the subject nor the registry changes in that case.</exception>
     public RegisteredSubjectProperty AddDerivedAttribute(
         string name, Type type, 
         Func<IInterceptorSubject, object?>? getValue, 
