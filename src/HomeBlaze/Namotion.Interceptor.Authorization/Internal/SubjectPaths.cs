@@ -3,7 +3,6 @@ using System.Diagnostics;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Authorization.Internal;
 
@@ -15,17 +14,6 @@ internal static class SubjectPaths
     private const int ParentLinksPerPath = 64;
     private const int CycleDetectionDepthThreshold = 256;
 
-    // A detach releases the reference before the registry clears the flag, so reading in the same order lets the later
-    // read see the more advanced state.
-
-    /// <summary>
-    /// Whether a subject without parents is a root: no property references it and the registry still holds it. A
-    /// detached subject is not a root, and neither is one whose parent is being detached and whose own detach has not
-    /// started yet, since it is still referenced. Lock-free.
-    /// </summary>
-    public static bool IsRoot(RegisteredSubject subject)
-        => subject.Subject.GetReferenceCount() == 0 && subject.IsRegistered;
-
     /// <summary>
     /// The segment of the property as the registry's path writer spells it: the provider's segment, or the browse name
     /// when the provider gives none. An attribute is spelled the same way, so attribute paths follow the registry's syntax.
@@ -34,8 +22,9 @@ internal static class SubjectPaths
         => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
     /// <summary>
-    /// Gets every path of the subject: one per chain of parents from the subject up to a root (see
-    /// <see cref="IsRoot"/>), in the order the parents are listed. A path is its links from the root's property down to the property holding
+    /// Gets every path of the subject: one per chain of parents from the subject up to a subject without parents, a
+    /// root, in the order the parents are listed. Every subject a chain passes must be attached
+    /// (<see cref="RegisteredSubject.IsAttached"/>). A path is its links from the root's property down to the property holding
     /// the subject, each in every spelling the path reader resolves. When the chain of first parents ends at a subject
     /// without parents and every property on it is included, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
@@ -48,7 +37,7 @@ internal static class SubjectPaths
     /// <returns>
     /// True when every chain was written; false when a chain could not be written (a property on it is excluded, an
     /// [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, or the
-    /// chain ends at a subject without parents that is not a root), more than
+    /// chain passes a subject that is no longer attached), more than
     /// <paramref name="maxPaths"/> chains exist, or the search took more than 64 parent links per allowed path before
     /// every chain was found. A subject without parents has no paths and returns true.
     /// </returns>
@@ -95,17 +84,17 @@ internal static class SubjectPaths
             frames.Add(parent);
             current = parent.Property.Parent;
             parents = current.Parents;
+
+            // Read after the parents: the registry clears it before it removes the last parent.
+            if (!current.IsAttached)
+            {
+                writer.MarkIncomplete();
+                return true;
+            }
+
             if (parents.Length == 0)
             {
-                if (IsRoot(current))
-                {
-                    writer.TryWrite(frames);
-                }
-                else
-                {
-                    writer.MarkIncomplete();
-                }
-
+                writer.TryWrite(frames);
                 return true;
             }
         }
@@ -172,14 +161,16 @@ internal static class SubjectPaths
     {
         var owner = parent.Property.Parent;
         var ownerParents = owner.Parents;
+
+        // Read after the parents: the registry clears it before it removes the last parent.
+        if (!owner.IsAttached)
+        {
+            writer.MarkIncomplete();
+            return true;
+        }
+
         if (ownerParents.Length == 0)
         {
-            if (!IsRoot(owner))
-            {
-                writer.MarkIncomplete();
-                return true;
-            }
-
             frames.Add(parent);
             var proceed = writer.TryWrite(frames);
             frames.RemoveAt(frames.Count - 1);

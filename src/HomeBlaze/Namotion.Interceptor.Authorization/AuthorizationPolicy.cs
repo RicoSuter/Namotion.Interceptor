@@ -273,14 +273,24 @@ public sealed class AuthorizationPolicy
     }
 
     // Every path of the subject; a root has the single empty path. Incomplete when a path could not be written, more
-    // than MaxPaths exist, the subject has parents but no path was found, or it has no parents and is not a root.
+    // than MaxPaths exist, the subject has parents but no path was found, or the subject or one on a path is no longer
+    // attached.
     private List<PathLink[]> GetPaths(RegisteredSubject subject, out bool isComplete)
     {
-        if (subject.Parents.Length == 0)
+        var hasParents = subject.Parents.Length > 0;
+
+        // Read after the parents: the registry clears it before it removes the last parent, so a subject that lost
+        // its parents to a detach has unknown paths rather than the root's.
+        if (!subject.IsAttached)
         {
-            // A detach removes the parents, so a subject that lost them that way has unknown paths rather than none.
-            isComplete = SubjectPaths.IsRoot(subject);
-            return isComplete ? RootPaths : NoPaths;
+            isComplete = false;
+            return NoPaths;
+        }
+
+        if (!hasParents)
+        {
+            isComplete = true;
+            return RootPaths;
         }
 
         var paths = new List<PathLink[]>(1);
@@ -319,15 +329,22 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // True when some chain of readable subject-holding properties leads to a root, as SubjectPaths.IsRoot defines it.
-    // Otherwise deniedProperty is the first unreadable link found, or stays null when every chain returns to a subject
-    // already walked or ends at a subject without parents that is not a root.
+    // True when some chain of readable subject-holding properties of attached subjects leads to a root. Otherwise
+    // deniedProperty is the first unreadable link found, or stays null when every chain returns to a subject already
+    // walked or passes a subject that is no longer attached.
     private bool IsReachable(RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, ref RegisteredSubjectProperty? deniedProperty)
     {
         var parents = subject.Parents;
+
+        // Read after the parents, see GetPaths.
+        if (!subject.IsAttached)
+        {
+            return false;
+        }
+
         if (parents.Length == 0)
         {
-            return SubjectPaths.IsRoot(subject);
+            return true;
         }
 
         // Already explored from here, or a cycle: no new route to a root through this subject.
@@ -336,6 +353,12 @@ public sealed class AuthorizationPolicy
             return false;
         }
 
+        return IsAnyParentReachable(parents, depth, ref visited, ref deniedProperty);
+    }
+
+    private bool IsAnyParentReachable(
+        ImmutableArray<SubjectPropertyParent> parents, int depth, ref HashSet<RegisteredSubject>? visited, ref RegisteredSubjectProperty? deniedProperty)
+    {
         foreach (var parent in parents)
         {
             if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit))
