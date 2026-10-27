@@ -168,7 +168,7 @@ public class MarkdownFileWriteTests : IDisposable
         var segment = markdown.Children.Values.OfType<HtmlSegment>().Single(candidate => candidate.Html.Contains("Second."));
 
         // Act
-        var result = await markdown.MoveTextBlockAsync(segment, -1, CancellationToken.None);
+        var result = await markdown.MoveBlockAsync(segment, -1, CancellationToken.None);
 
         // Assert
         Assert.Equal("# Notes\n\nSecond.\n\nFirst.\n", ReadFile("Notes.md"));

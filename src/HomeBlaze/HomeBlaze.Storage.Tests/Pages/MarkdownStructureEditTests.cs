@@ -365,7 +365,7 @@ public class MarkdownStructureEditTests
         var leafB = page.Children["TestLeaf_1"];
 
         // Act
-        var result = await page.MoveTextBlockAsync(FindText(page, "intro"), 1, CancellationToken.None);
+        var result = await page.MoveBlockAsync(FindText(page, "intro"), 1, CancellationToken.None);
         await page.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
@@ -404,7 +404,7 @@ public class MarkdownStructureEditTests
         await fixture.UpdatePageAsync(page, "Intro.\n\n" + TextPage);
 
         // Act
-        var result = await page.MoveTextBlockAsync(segment, -1, CancellationToken.None);
+        var result = await page.MoveBlockAsync(segment, -1, CancellationToken.None);
 
         // Assert
         Assert.Equal("The text moved or changed. Select it again.", result.Refusal);

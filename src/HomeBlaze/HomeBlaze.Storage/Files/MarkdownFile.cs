@@ -527,20 +527,35 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             cancellationToken);
 
     /// <summary>
-    /// Moves the block of <paramref name="subject"/> one place up (-1) or down (1) among the content around it: before the
-    /// item before it, or after the item after it, where an item is a widget block or a top-level block of text of that
-    /// content, or for a slot block a block of the same slot. Saves the page.
+    /// Moves the block of <paramref name="subject"/>, or the text block that a <see cref="HtmlSegment"/> starts, one place up
+    /// (-1) or down (1) among the content around it: before the item before it, or after the item after it, where an item is
+    /// a widget block or a top-level block of text of that content, or for a slot block a block of the same slot. Saves the
+    /// page.
     /// </summary>
-    /// <remarks>Refused as <see cref="DeleteBlockAsync"/> is.</remarks>
+    /// <remarks>
+    /// Refused as <see cref="DeleteBlockAsync"/> is, and for a text block when the segment starts no text block that can be
+    /// edited any more or there is nothing to move past in the direction.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
-    public Task<MarkdownEditResult> MoveBlockAsync(
-        IInterceptorSubject subject, int direction, CancellationToken cancellationToken) =>
-        EditStructureAsync(
+    public Task<MarkdownEditResult> MoveBlockAsync(IInterceptorSubject subject, int direction, CancellationToken cancellationToken)
+    {
+        if (subject is HtmlSegment segment)
+        {
+            return EditStructureAsync(
+                (snapshot, page) => snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
+                    ? (MarkdownPageOperations.TryMoveText(page, snapshot.BlockSubjects, textBlock, direction, out var refusal), refusal)
+                    : (null, MovedTextRefusal),
+                MovedTextRefusal,
+                cancellationToken);
+        }
+
+        return EditStructureAsync(
             (snapshot, page) => FindOwnBlock(page, snapshot.BlockSubjects, subject) is { } block
                 ? (MarkdownPageOperations.TryMove(page, snapshot.BlockSubjects, block, direction, out var refusal), refusal)
                 : (null, NoBlockRefusal),
             StructureChangedRefusal,
             cancellationToken);
+    }
 
     /// <summary>
     /// Inserts a block for <paramref name="widget"/>, with its configuration and <paramref name="name"/> after <c>#</c>,
@@ -651,26 +666,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 ? (MarkdownPageOperations.TryInsertText(page, snapshot.BlockSubjects, owner, line, text, out refusal), refusal)
                 : (null, refusal),
             GetChangedPageRefusal(before),
-            cancellationToken);
-    }
-
-    /// <summary>
-    /// Moves the text block that <paramref name="segment"/> starts one place up (-1) or down (1) among the content around it,
-    /// as <see cref="MoveBlockAsync"/> moves a block, and saves the page.
-    /// </summary>
-    /// <remarks>
-    /// Refused when the segment starts no text block that can be edited any more or there is nothing to move past in the
-    /// direction, and as <see cref="DeleteBlockAsync"/> is.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
-    public Task<MarkdownEditResult> MoveTextBlockAsync(HtmlSegment segment, int direction, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(segment);
-        return EditStructureAsync(
-            (snapshot, page) => snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
-                ? (MarkdownPageOperations.TryMoveText(page, snapshot.BlockSubjects, textBlock, direction, out var refusal), refusal)
-                : (null, MovedTextRefusal),
-            MovedTextRefusal,
             cancellationToken);
     }
 

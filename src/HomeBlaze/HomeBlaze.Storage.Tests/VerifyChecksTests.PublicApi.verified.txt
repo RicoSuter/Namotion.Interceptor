@@ -109,7 +109,6 @@ namespace HomeBlaze.Storage.Files
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         public bool IsContentOfPage(Namotion.Interceptor.IInterceptorSubject content) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> MoveBlockAsync(Namotion.Interceptor.IInterceptorSubject subject, int direction, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> MoveTextBlockAsync(HomeBlaze.Storage.Internal.HtmlSegment segment, int direction, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }

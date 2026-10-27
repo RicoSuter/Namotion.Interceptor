@@ -165,9 +165,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     }
 
     public override async Task MoveAsync(IInterceptorSubject subject, int direction) =>
-        await RunAsync(() => subject is HtmlSegment segment
-            ? _file.MoveTextBlockAsync(segment, direction, CancellationToken.None)
-            : _file.MoveBlockAsync(subject, direction, CancellationToken.None));
+        await RunAsync(() => _file.MoveBlockAsync(subject, direction, CancellationToken.None));
 
     public override Task InsertWidgetAsync(IInterceptorSubject content, IInterceptorSubject? before) =>
         CreateWidgetAsync((widget, name) => _file.InsertWidgetAsync(content, before, widget, name, CancellationToken.None));
