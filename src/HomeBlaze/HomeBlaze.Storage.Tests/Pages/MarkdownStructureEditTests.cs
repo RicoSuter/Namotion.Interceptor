@@ -1,6 +1,8 @@
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -206,6 +208,25 @@ public class MarkdownStructureEditTests
 
         // Assert
         Assert.Same(leafB, Assert.Single(page.Children.Values.OfType<TestLeaf>()));
+    }
+
+    [Fact]
+    public async Task WhenAKeptUnnamedWidgetGetsAnotherKey_ThenTheOldAndTheNewKeyAreLogged()
+    {
+        // Arrange
+        var log = new RecordingLogger<MarkdownContentParser>();
+        var fixture = await MarkdownPageFixture.CreateAsync(services => services.AddSingleton<ILogger<MarkdownContentParser>>(log));
+        var page = await fixture.AddPageAsync("page.md", UnnamedLeavesPage);
+
+        // Act
+        await page.DeleteBlockAsync(page.Children["TestLeaf_0"], CancellationToken.None);
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var entry = Assert.Single(log.Entries, entry => entry.Level == LogLevel.Information);
+        Assert.Contains("TestLeaf_1", entry.Message);
+        Assert.Contains("TestLeaf_0", entry.Message);
+        Assert.Contains("page.md", entry.Message);
     }
 
     [Fact]

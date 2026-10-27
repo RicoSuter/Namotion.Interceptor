@@ -883,13 +883,15 @@ public class InlineTextEditingTests
         // Arrange
         var page = await OpenPageInInlineModeAsync();
         await page.SelectEditModeAsync("View", Timeout);
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         var paragraph = page.Locator("p").Filter(new() { HasText = "First paragraph" });
         await Assertions.Expect(paragraph).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         await paragraph.DblClickAsync();
 
-        // Assert
+        // Assert: the server handles the switch to Inline after the double click, so a dialog that it opened is open by then.
+        await page.SwitchToInlineModeAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
     }
 
@@ -972,19 +974,30 @@ public class InlineTextEditingTests
     }
 
     [Theory]
-    [InlineData("card")]
-    [InlineData("tab")]
-    [InlineData("flow item")]
-    [InlineData("page")]
-    [InlineData("card footer")]
-    [InlineData("flow item in a grid cell")]
-    [InlineData("tab in a grid cell")]
-    public async Task WhenAContentIsAtTheSelection_ThenItsInsertButtonsCanBeClickedAndCoverNoBlock(string content)
+    [InlineData("card", false)]
+    [InlineData("tab", false)]
+    [InlineData("flow item", false)]
+    [InlineData("page", false)]
+    [InlineData("card footer", false)]
+    [InlineData("flow item in a grid cell", false)]
+    [InlineData("tab in a grid cell", false)]
+    [InlineData("card", true)]
+    [InlineData("tab", true)]
+    [InlineData("flow item", true)]
+    [InlineData("page", true)]
+    [InlineData("card footer", true)]
+    [InlineData("flow item in a grid cell", true)]
+    [InlineData("tab in a grid cell", true)]
+    public async Task WhenAContentIsAtTheSelection_ThenItsInsertButtonsCanBeClickedAndCoverNoBlock(string content, bool isTouch)
     {
-        // Arrange: the page has a paragraph right after its title.
+        // Arrange: the page has a paragraph right after its title. A touch screen gets buttons of the target size of 24
+        // pixels, which show in full also without a hover.
+        var contextOptions = isTouch
+            ? new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 1280, Height = 900 } }
+            : null;
         var page = content == "page"
-            ? await OpenPageInInlineModeAsync()
-            : await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+            ? await OpenPageInInlineModeAsync(PageName, Content, contextOptions)
+            : await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent, contextOptions);
         const string Fragment = ":scope > .subject-component-wrapper > .markdown-fragment";
         var cells = page.Locator(".grid-cell-content");
 
@@ -1031,7 +1044,7 @@ public class InlineTextEditingTests
         // Assert: every button is centered on its line and covers no block, also where a grid cell clips the content.
         var findings = await fragment.EvaluateAsync<string[]>(
             """
-            fragment => {
+            (fragment, isTouch) => {
                 const findings = [];
                 const buttons = [...fragment.querySelectorAll(':scope > [data-testid=block-insert-line] button')];
 
@@ -1046,8 +1059,13 @@ public class InlineTextEditingTests
                     // A point outside the window hits nothing.
                     button.scrollIntoView({ block: 'center' });
                     const box = button.getBoundingClientRect();
-                    if (box.height > 16.5) {
-                        findings.push(`${button.ariaLabel} is ${box.height} pixels high`);
+                    if (isTouch ? box.height < 24 || box.width < 24 : box.height > 16.5) {
+                        findings.push(`${button.ariaLabel} is ${box.width}x${box.height} pixels`);
+                    }
+
+                    const opacity = getComputedStyle(button.closest('.block-insert-line-bar')).opacity;
+                    if (isTouch && opacity !== '1') {
+                        findings.push(`${button.ariaLabel} has an opacity of ${opacity}`);
                     }
 
                     const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
@@ -1074,7 +1092,8 @@ public class InlineTextEditingTests
 
                 return findings;
             }
-            """);
+            """,
+            isTouch);
         Assert.True(findings.Length == 0, string.Join("; ", findings));
     }
 
@@ -1126,6 +1145,47 @@ public class InlineTextEditingTests
             LayoutPageName, text => !text.Contains("Inner Card", StringComparison.Ordinal), "The inner card was not deleted.");
         await Assertions.Expect(page.GetByTestId("card-title").GetByText("Inner Card", new() { Exact = true })).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await Assertions.Expect(layoutCard).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAParagraphOfThePageIsDeletedWithTheKeyboard_ThenTheBlockThatTakesItsPlaceHasTheFocus()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await SelectTextAsync(page, "First paragraph");
+        await page.GetWidgetActionBar().GetByTestId("delete-block-button").FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+        var confirm = page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true });
+        await confirm.FocusAsync();
+
+        // Act
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => !text.Contains("First paragraph", StringComparison.Ordinal), "The paragraph was not deleted.");
+        await Assertions.Expect(GetCardWrapper(page, "Text Card")).ToBeFocusedAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenTextInACardIsDeletedWithTheKeyboard_ThenTheCardHasTheFocus()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        await SelectTextAsync(page, "Card body text");
+        await page.GetWidgetActionBar().GetByTestId("delete-block-button").FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+        var confirm = page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true });
+        await confirm.FocusAsync();
+
+        // Act
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName, text => !text.Contains("Card body text", StringComparison.Ordinal), "The text was not deleted.");
+        await Assertions.Expect(GetCardWrapper(page, "Text Card")).ToBeFocusedAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -1225,10 +1285,10 @@ public class InlineTextEditingTests
 
     private Task<IPage> OpenPageInInlineModeAsync() => OpenPageInInlineModeAsync(PageName, Content);
 
-    private async Task<IPage> OpenPageInInlineModeAsync(string pageName, string content)
+    private async Task<IPage> OpenPageInInlineModeAsync(string pageName, string content, BrowserNewContextOptions? contextOptions = null)
     {
         await _fixture.WriteDemoPageAsync(pageName, content);
-        var page = await _fixture.CreatePageAsync();
+        var page = await _fixture.CreatePageAsync(contextOptions);
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
@@ -1268,6 +1328,10 @@ public class InlineTextEditingTests
             "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
             startLine,
             new() { Timeout = Timeout });
+
+    private static ILocator GetCardWrapper(IPage page, string title) =>
+        page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
+            .Filter(new() { Has = page.GetByTestId("card-title").GetByText(title, new() { Exact = true }) });
 
     private static ILocator GetTextWrapper(IPage page, string text) =>
         page.Locator(".subject-component-wrapper.selectable:has(> .markdown-text)").Filter(new() { HasText = text });

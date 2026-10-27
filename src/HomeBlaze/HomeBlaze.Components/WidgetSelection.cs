@@ -96,13 +96,15 @@ public sealed class WidgetSelection
 
     // The widget around the removed one takes the selection rather than none, so that the content that holds the
     // replacement of the removed widget, such as edited text in a card, stays at the selection and the replacement can take
-    // it. A pending subject stays pending. The removed widget renders no more.
+    // it. It takes the focus as well where the removal left it on the body, such as after a deleted block, from where the
+    // keyboard would start over at the top of the page. A pending subject stays pending. The removed widget renders no more.
     internal void Remove(SubjectComponent component)
     {
         if (ReferenceEquals(Selected, component))
         {
             var ancestor = component.SelectableAncestor;
             Selected = ancestor;
+            _takesFocus |= ancestor is not null;
             ancestor?.OnSelectionChanged();
             Changed?.Invoke();
         }

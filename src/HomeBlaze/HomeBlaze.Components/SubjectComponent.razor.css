@@ -73,7 +73,7 @@
    button of the insert line next to the widget stands, so that it never covers that button, also in a narrow content. */
 .subject-action-bar-anchor {
     position: absolute;
-    top: calc(-1 * var(--mud-appbar-height, 64px) - 1rem);
+    top: calc(-1 * var(--mud-appbar-height, 64px) - var(--block-gap, 1rem));
     right: 0;
     bottom: 0;
     left: 0;
@@ -255,9 +255,10 @@
    does not move when the selection shows or hides the lines, and margins collapse through it as if it were not there: its
    bar is drawn over the gap above the block that follows, with the button in the middle of the line. Only its button
    takes the pointer, and it is never drawn over a block, so that a click anywhere on a block selects it: the page keeps
-   gaps of at least 1rem between the blocks it edits inline and at the edges of their containers, which the button fits
-   into (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). The content of a value list row is the
-   exception: its blocks stand in the row without gaps, and the buttons of its lines can be drawn over its value. */
+   gaps of at least --block-gap between the blocks it edits inline and at the edges of their containers, 1rem or 1.5rem on a
+   touch screen, which the button fits into (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). The
+   content of a value list row is the exception: its blocks stand in the row without gaps, and the buttons of its lines can
+   be drawn over its value. */
 ::deep .block-insert-line {
     position: relative;
     height: 0;
@@ -268,7 +269,7 @@
     position: absolute;
     left: 0;
     right: 0;
-    top: -0.5rem;
+    top: calc(-0.5 * var(--block-gap, 1rem));
     transform: translateY(-50%);
     display: flex;
     align-items: center;
@@ -282,6 +283,13 @@
     opacity: 1;
 }
 
+/* A touch screen has no hover, so the lines show in full. */
+@media (pointer: coarse) {
+    ::deep .block-insert-line-bar {
+        opacity: 1;
+    }
+}
+
 ::deep .block-insert-line-bar::before,
 ::deep .block-insert-line-bar::after {
     content: "";
@@ -290,18 +298,18 @@
     background: rgba(var(--mud-palette-primary-rgb), 0.7);
 }
 
-/* The button is as high as the gap of 1rem between two blocks, which it fits into. */
+/* The button is as high as the gap between two blocks, which it fits into. */
 ::deep .block-insert-line-bar .mud-icon-button {
     box-sizing: border-box;
-    width: 1rem;
-    height: 1rem;
+    width: var(--block-gap, 1rem);
+    height: var(--block-gap, 1rem);
     padding: 0;
     background: var(--mud-palette-surface);
     pointer-events: auto;
 }
 
 ::deep .block-insert-line-bar .mud-icon-button .mud-icon-root {
-    font-size: 0.75rem;
+    font-size: calc(0.75 * var(--block-gap, 1rem));
 }
 
 /* In the preview next to the editor, the widget that a click reveals in the editor. Its content is inert, so it never

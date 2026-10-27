@@ -35,7 +35,10 @@ internal static class MarkdownPageOperations
     private const string TextMoveRefusal = "Moving the text would change other blocks of the page.";
     private const string OpenHtmlRefusal = "The text would leave HTML open over the text after it.";
 
-    /// <summary>Removes the block with everything in it.</summary>
+    /// <summary>
+    /// Removes the block with everything in it. The change names the item of its content that takes its place, or else the
+    /// one before it.
+    /// </summary>
     /// <returns>Null with a refusal when the change would change other blocks of the page.</returns>
     public static MarkdownStructureChange? TryRemove(
         MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, MarkdownBlock block, out string? refusal)
@@ -55,8 +58,67 @@ internal static class MarkdownPageOperations
             return null;
         }
 
+        var (resultBlockIndex, resultTextLine) = FindItemInPlace(after, map, parent, edit.Line);
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true), parent);
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: true),
+            parent,
+            resultBlockIndex,
+            resultTextLine);
+    }
+
+    // The item of the content of `owner`, a block of the page before the removal, that stands at the line of the page after
+    // it where the removed lines began, or else the last one before it: the index of a widget or slot block, or the line of
+    // a text block. Text that shows nothing is no item.
+    private static (int BlockIndex, int TextLine) FindItemInPlace(MarkdownPage after, int[] map, MarkdownBlock? owner, int line)
+    {
+        MarkdownBlock? newOwner = null;
+        if (owner is not null)
+        {
+            if (map[owner.Index] < 0)
+            {
+                return (-1, 0);
+            }
+
+            newOwner = after.AllBlocks[map[owner.Index]];
+        }
+
+        var next = (Line: int.MaxValue, BlockIndex: -1, TextLine: 0);
+        var previous = (Line: 0, BlockIndex: -1, TextLine: 0);
+        foreach (var sibling in newOwner?.Children ?? after.Blocks)
+        {
+            if (sibling.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot)
+            {
+                Consider(sibling.Line, sibling.Index, 0, line, ref next, ref previous);
+            }
+        }
+
+        foreach (var textBlock in MarkdownTextBlocks.Find(after))
+        {
+            if (ReferenceEquals(textBlock.Owner, newOwner) && !textBlock.ShowsNothing)
+            {
+                Consider(textBlock.Line, -1, textBlock.Line, line, ref next, ref previous);
+            }
+        }
+
+        var item = next.Line != int.MaxValue ? next : previous;
+        return (item.BlockIndex, item.TextLine);
+
+        static void Consider(
+            int itemLine, int blockIndex, int textLine, int line,
+            ref (int Line, int BlockIndex, int TextLine) next, ref (int Line, int BlockIndex, int TextLine) previous)
+        {
+            if (itemLine >= line)
+            {
+                if (itemLine < next.Line)
+                {
+                    next = (itemLine, blockIndex, textLine);
+                }
+            }
+            else if (itemLine > previous.Line)
+            {
+                previous = (itemLine, blockIndex, textLine);
+            }
+        }
     }
 
     /// <summary>
@@ -678,7 +740,10 @@ internal static class MarkdownPageOperations
         return AlignText(page, blockSubjects, newSource, edit, textBlock.Owner, blockCount, "Changing the text would change other blocks of the page.", out refusal);
     }
 
-    /// <summary>Removes the lines of the text block so that the text around it stays apart as before.</summary>
+    /// <summary>
+    /// Removes the lines of the text block so that the text around it stays apart as before. The change names the item of its
+    /// content that takes its place, or else the one before it.
+    /// </summary>
     /// <returns>
     /// Null with a refusal when the text block cannot be edited or the change would change other blocks of the page or the
     /// text around it.
@@ -699,8 +764,12 @@ internal static class MarkdownPageOperations
             return null;
         }
 
+        var (resultBlockIndex, resultTextLine) = FindItemInPlace(after, map, textBlock.Owner, edit.Line);
         return new MarkdownStructureChange(
-            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: false), textBlock.Owner);
+            new MarkdownBlockWrite(after, MapSubjects(blockSubjects, map), [], HasInsertedOrRemovedBlocks: false),
+            textBlock.Owner,
+            resultBlockIndex,
+            resultTextLine);
     }
 
     /// <summary>

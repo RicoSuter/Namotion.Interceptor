@@ -509,7 +509,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    /// <summary>Deletes the block of <paramref name="subject"/> with everything in it and saves the page.</summary>
+    /// <summary>
+    /// Deletes the block of <paramref name="subject"/> with everything in it and saves the page. The result names the subject
+    /// of the block or the segment of the text that takes its place in its content, or else of the one before it.
+    /// </summary>
     /// <remarks>
     /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
     /// be larger than <see cref="MaxContentSize"/> bytes.
@@ -592,7 +595,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Replaces the text block that <paramref name="segment"/> starts with <paramref name="newText"/>, or removes it when that
-    /// is empty or white space, and saves the page. Complete widget blocks at the top level of the new text become blocks of
+    /// is empty or white space, and saves the page. A removal names in its result what <see cref="DeleteBlockAsync"/> names.
+    /// Complete widget blocks at the top level of the new text become blocks of
     /// the content, and the page creates their subjects. Such a block with fewer fence characters than
     /// <see cref="GetWidgetFenceLengthInText"/> gets that many, and the blocks inside it as many more.
     /// </summary>

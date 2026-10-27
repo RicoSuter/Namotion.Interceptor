@@ -455,7 +455,35 @@ public sealed partial class MarkdownContentParser
         var (subject, error) = await CreateBlockSubjectAsync(
             type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
 
+        if (state.ReusableSubjects is not null && subject is not null && ReferenceEquals(subject, existing))
+        {
+            LogKeyChange(existingChildren, key, subject, state);
+        }
+
         return (subject is null ? null : key, subject, error);
+    }
+
+    // A subject kept by its block under another key has another path, which a reference to the old one no longer reaches.
+    private void LogKeyChange(
+        IDictionary<string, IInterceptorSubject> existingChildren, string key, IInterceptorSubject subject, ParseState state)
+    {
+        if (_logger is null || (existingChildren.TryGetValue(key, out var atKey) && ReferenceEquals(atKey, subject)))
+        {
+            return;
+        }
+
+        foreach (var (oldKey, candidate) in existingChildren)
+        {
+            if (ReferenceEquals(candidate, subject))
+            {
+                _logger.LogInformation(
+                    "The block {OldKey} of the page {Path} is now {Key}: its path changed with its position.",
+                    oldKey,
+                    state.Page.FullPath,
+                    key);
+                return;
+            }
+        }
     }
 
     /// <summary>Gets the type that a widget block names with its full name, or null when there is none.</summary>

@@ -15,9 +15,22 @@
     scroll-margin-top: calc(var(--mud-appbar-height) + 0.5rem);
 }
 
+/* The gap between the blocks of a page, 1rem, which the rules below call the 1rem. Edited inline on a touch screen it is
+   1.5rem, so that the button of an insert line, as high as the gap, has the target size of 24 pixels (see the insert line
+   in SubjectComponent.razor.css of HomeBlaze.Components). */
+.markdown-content {
+    --block-gap: 1rem;
+}
+
+@media (pointer: coarse) {
+    .markdown-content-inline {
+        --block-gap: 1.5rem;
+    }
+}
+
 /* The blocks of a page are 1rem apart, from each other and from the text around them. */
 .markdown-content > ::deep .subject-component-wrapper {
-    margin: 1rem 0;
+    margin: var(--block-gap) 0;
 }
 
 /* A widget that shows nothing, such as a ValueMap on a viewed page, takes no space (see SubjectComponent.razor.css of
@@ -46,8 +59,8 @@
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > *,
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
-    margin-top: 1rem;
-    margin-bottom: 1rem;
+    margin-top: var(--block-gap);
+    margin-bottom: var(--block-gap);
 }
 
 /* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its 1rem,
@@ -75,11 +88,11 @@
 }
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::before {
-    margin-bottom: -1rem;
+    margin-bottom: calc(-1 * var(--block-gap));
 }
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::after {
-    margin-top: -1rem;
+    margin-top: calc(-1 * var(--block-gap));
 }
 
 /* Edited inline, the content of a container also keeps 1rem inside its edges, so that every item of an edited content is at
@@ -88,7 +101,7 @@
    while no line shows, so that the page does not move when the selection shows or hides the lines. The content of a grid
    cell or a canvas node fills its place and never has lines. */
 .markdown-content-inline ::deep :is(.mud-card-content, .layout-cell, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment {
-    padding-block: 1rem;
+    padding-block: var(--block-gap);
     box-sizing: border-box;
 }
 
@@ -116,7 +129,7 @@
    the page. The box takes the margins of the table, so the spacing rules above apply to it as to any block. */
 .markdown-content ::deep .markdown-table {
     overflow-x: auto;
-    margin: 1rem 0;
+    margin: var(--block-gap) 0;
 }
 
 .markdown-content ::deep .markdown-table > table {

@@ -139,6 +139,10 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
 
     public override async Task DeleteAsync(IInterceptorSubject subject)
     {
+        // A block inside another one leaves the selection and the focus to the block around it, see WidgetSelection.Remove.
+        // On the page, the block that takes its place takes them, so that the keyboard does not start over at the top.
+        var selectsResult = _selection.Selected is not { SelectableAncestor: not null } selected ||
+                            !ReferenceEquals(selected.Subject, subject);
         if (subject is HtmlSegment segment)
         {
             if (_file.GetTextBlockText(segment) is not { } text)
@@ -149,7 +153,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             var isConfirmed = await _dialogService.ShowMessageBoxAsync("Delete text", "Delete this text?", yesText: "Delete", cancelText: "Cancel");
             if (isConfirmed == true)
             {
-                await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, string.Empty, CancellationToken.None));
+                await RunAsync(() => _file.ReplaceTextBlockAsync(segment, text, string.Empty, CancellationToken.None), selectsResult: selectsResult);
             }
 
             return;
@@ -173,7 +177,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
         var confirmed = await _dialogService.ShowMessageBoxAsync("Delete block", message, yesText: "Delete", cancelText: "Cancel");
         if (confirmed == true && IsUnchangedSince(content))
         {
-            await RunAsync(() => _file.DeleteBlockAsync(subject, CancellationToken.None));
+            await RunAsync(() => _file.DeleteBlockAsync(subject, CancellationToken.None), selectsResult: selectsResult);
         }
     }
 
@@ -333,8 +337,10 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
     // A write that the storage cannot make must not end the circuit: a file that another process holds open or that
     // may not be written, a storage that does not answer in time (a TimeoutException) or that is not connected (an
     // InvalidOperationException, the base of the internal refusal of the storage), which is then the refusal of the result.
-    // A caller that shows the refusal itself, such as a dialog, passes false for reportsInSnackbar.
-    private async Task<MarkdownEditResult> RunAsync(Func<Task<MarkdownEditResult>> edit, bool reportsInSnackbar = true)
+    // A caller that shows the refusal itself, such as a dialog, passes false for reportsInSnackbar, and one that leaves the
+    // selection where it is false for selectsResult.
+    private async Task<MarkdownEditResult> RunAsync(
+        Func<Task<MarkdownEditResult>> edit, bool reportsInSnackbar = true, bool selectsResult = true)
     {
         MarkdownEditResult result;
         try
@@ -364,7 +370,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
                 _snackbar.Add($"The page was not changed. {result.Refusal}", Severity.Warning);
             }
         }
-        else if (result.Subject is { } subject)
+        else if (selectsResult && result.Subject is { } subject)
         {
             _selection.SelectSubject(subject, _pageComponent);
         }

@@ -275,6 +275,42 @@ public class MarkdownPageOperationsTests
         Assert.Equal(expected, change!.Write.Page.Source);
     }
 
+    [Theory]
+    [InlineData("intro\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n\noutro\n", 0, 3, 0)]
+    [InlineData("intro\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n\noutro\n", 1, -1, 6)]
+    [InlineData("intro\n\n:: Demo.One\n::\n\noutro\n\n:: Demo.Two\n::\n", 0, -1, 3)]
+    [InlineData("intro\n\n:: Demo.One\n::\n", 0, -1, 1)]
+    public void WhenAWidgetIsRemoved_ThenTheChangeNamesTheItemThatTakesItsPlaceOrElseTheOneBeforeIt(
+        string source, int blockPosition, int expectedBlockLine, int expectedTextLine)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryRemove(page, NoSubjects, page.Blocks[blockPosition], out _);
+
+        // Assert
+        var after = change!.Write.Page;
+        Assert.Equal(expectedBlockLine, change.ResultBlockIndex < 0 ? -1 : after.AllBlocks[change.ResultBlockIndex].Line);
+        Assert.Equal(expectedTextLine, change.ResultTextLine);
+    }
+
+    [Fact]
+    public void WhenTextInACardIsRemoved_ThenTheChangeNamesTheItemOfTheCardThatTakesItsPlace()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("intro\n\n:: Demo.Card\nbody\n\n::: Demo.Inner\n:::\n::\n\noutro\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, 4), out _);
+
+        // Assert
+        var after = change!.Write.Page;
+        Assert.Equal("intro\n\n:: Demo.Card\n\n::: Demo.Inner\n:::\n::\n\noutro\n", after.Source);
+        Assert.Equal("Demo.Inner", after.AllBlocks[change.ResultBlockIndex].Head!.Name);
+        Assert.Equal(0, change.ResultTextLine);
+    }
+
     [Fact]
     public void WhenThePageHasALoneCarriageReturn_ThenRemovingIsRefused()
     {

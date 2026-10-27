@@ -79,6 +79,14 @@
     margin-top: calc(4px + 1rem);
 }
 
+/* The bar renders outside of the page, which on a touch screen has gaps of 1.5rem in edit mode, see --block-gap in
+   MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor. */
+@media (pointer: coarse) {
+    ::deep .subject-action-bar[data-mudpopover-flip^="bottom"] {
+        margin-top: calc(4px + 1.5rem);
+    }
+}
+
 /* The menu button at the end of the app bar lines up with the edge like the drawer toggle at the start. */
 ::deep .app-bar-menu > .mud-menu-icon-button-activator {
     margin-inline-end: -12px;
