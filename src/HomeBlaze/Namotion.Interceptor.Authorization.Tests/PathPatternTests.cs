@@ -143,14 +143,64 @@ public class PathPatternTests
     }
 
     [Theory]
-    [InlineData("Rooms", "must start with '/'")]
-    [InlineData("", "must start with '/'")]
+    [InlineData("Wifi/Ssid", "Wifi/Ssid", true)]
+    [InlineData("Wifi/Ssid", "Wifi/Password", false)]
+    [InlineData("Rooms[Kitchen]/**", "Rooms[Kitchen]/Lights[Ceiling]/IsOn", true)]
+    [InlineData("Rooms[Kitchen]/**", "Rooms[Bedroom]/Lights", false)]
+    [InlineData("*", "Wifi", true)]
+    [InlineData("*", "Wifi/Ssid", false)]
+    [InlineData("**", "Rooms[Kitchen]/Sensor", true)]
+    public void WhenPatternHasNoLeadingSeparator_ThenItMatchesLikeThePatternWithOne(string pattern, string memberPath, bool expected)
+    {
+        // Arrange
+        var provider = SlashPathProvider.Instance;
+        var withoutSeparator = PathPattern.Parse(pattern, provider, "Test");
+        var withSeparator = PathPattern.Parse("/" + pattern, provider, "Test");
+        var (links, member) = ToMemberPath(provider, memberPath);
+
+        // Act
+        var result = withoutSeparator.Matches(links, member);
+
+        // Assert
+        Assert.Equal(expected, result);
+        Assert.Equal(withSeparator.Matches(links, member), result);
+    }
+
+    [Fact]
+    public void WhenPatternIsAPathTheRegistryWrote_ThenItCompilesAndMatchesThatMember()
+    {
+        // Arrange
+        var home = TestGraph.Create();
+        var brightness = TestGraph.Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Models.Light.Brightness));
+        var path = brightness.TryGetPath(DefaultPathProvider.Instance, null)!;
+        var policy = AuthorizationPolicy.Compile(
+            [Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [path])])], ["Reader"], [],
+            Policies.KnownActions, TestTags.Default, DefaultPathProvider.Instance);
+
+        // Act
+        var result = policy.CanRead(brightness);
+
+        // Assert
+        Assert.Equal("Rooms[Kitchen].Lights[Ceiling].Brightness", path);
+        Assert.True(result);
+        Assert.False(policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Models.Light.Brightness))));
+    }
+
+    [Theory]
+    [InlineData("", "is empty")]
     [InlineData("/Rooms[", "malformed")]
     [InlineData("/Rooms[]", "malformed")]
     [InlineData("/ Rooms", "whitespace")]
     [InlineData("/Rooms[ Kitchen]", "whitespace")]
-    [InlineData("/", "matches no member; use '/**' for the subject and everything below it, or '/*' for its members")]
+    [InlineData("/", "matches no member; use '**' for the subject and everything below it, or '*' for its members")]
+    [InlineData("//", "matches no member; use '**'")]
     [InlineData("/Rooms[Kitchen]", "matches no member; use '/Rooms[Kitchen]/**' for the subject and everything below it, or '/Rooms[Kitchen]/*' for its members")]
+    [InlineData("Rooms[Kitchen]", "matches no member; use 'Rooms[Kitchen]/**' for the subject and everything below it, or 'Rooms[Kitchen]/*' for its members")]
+    [InlineData("//Rooms/*", "has an empty segment; '/' may only start a pattern and separate segments")]
+    [InlineData("/Rooms//*", "has an empty segment")]
+    [InlineData("Rooms/", "has an empty segment")]
+    [InlineData("/Rooms[Kitchen]/", "has an empty segment")]
+    [InlineData("/Rooms['a/']//*", "has an empty segment")]
     [InlineData("/Rooms[*]", "matches no member")]
     [InlineData("/**/Lights[C*]", "matches no member")]
     [InlineData("/Rooms/**[A]", "matches no member")]
@@ -162,6 +212,20 @@ public class PathPatternTests
         // Assert
         Assert.Contains("Reader", exception.Message);
         Assert.Contains(expectedMessagePart, exception.Message);
+    }
+
+    [Theory]
+    [InlineData("/Rooms[a/b]/*")]
+    [InlineData("/Rooms['a//b']/*")]
+    [InlineData("/Rooms['it''s/']/*")]
+    [InlineData("Rooms['/']/**")]
+    public void WhenAnIndexContainsTheSeparator_ThenThePatternHasNoEmptySegment(string pattern)
+    {
+        // Act
+        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+
+        // Assert
+        Assert.NotNull(compiled);
     }
 
     private static readonly PathLink Name = new("Name", null, null);

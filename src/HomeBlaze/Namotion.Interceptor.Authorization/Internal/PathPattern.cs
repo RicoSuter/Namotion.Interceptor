@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Authorization.Internal;
@@ -10,6 +11,7 @@ namespace Namotion.Interceptor.Authorization.Internal;
 internal sealed class PathPattern
 {
     private const string AnySegments = "**";
+    private const char Quote = '\'';
 
     private readonly Segment[] _segments;
 
@@ -18,13 +20,12 @@ internal sealed class PathPattern
         _segments = segments;
     }
 
-    /// <exception cref="AuthorizationException">The pattern does not start with the separator, is malformed, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
+    /// <exception cref="AuthorizationException">The pattern is empty, malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
     public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string roleName)
     {
-        var separator = pathProvider.PathSeparator;
-        if (pattern.Length == 0 || pattern[0] != separator)
+        if (pattern.Length == 0)
         {
-            throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' must start with '{separator}'.");
+            throw new AuthorizationException($"A path pattern of role '{roleName}' is empty.");
         }
 
         if (!pathProvider.TryParsePath(pattern, out var parsed, out var error))
@@ -32,6 +33,30 @@ internal sealed class PathPattern
             throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' is malformed: {error}");
         }
 
+        var separator = pathProvider.PathSeparator;
+        if (parsed.Count == 0)
+        {
+            ThrowMatchesNoMember(pattern, prefix: string.Empty, separator, roleName);
+        }
+
+        if (HasEmptySegment(pattern, pathProvider))
+        {
+            throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' has an empty segment; '{separator}' may only start a pattern and separate segments.");
+        }
+
+        var segments = ToSegments(parsed, pattern, roleName);
+
+        // A member path ends in a member, which has no index, so such a pattern would match nothing.
+        if (segments[^1].Index is not null)
+        {
+            ThrowMatchesNoMember(pattern, prefix: pattern + separator, separator, roleName);
+        }
+
+        return new PathPattern(segments);
+    }
+
+    private static Segment[] ToSegments(List<(string segment, string? index)> parsed, string pattern, string roleName)
+    {
         var segments = new Segment[parsed.Count];
         for (var i = 0; i < parsed.Count; i++)
         {
@@ -44,22 +69,68 @@ internal sealed class PathPattern
             segments[i] = new Segment(name, index, IsAnySegments: name == AnySegments && index is null);
         }
 
-        ThrowIfMatchesNoMember(segments, pattern, separator, roleName);
-        return new PathPattern(segments);
+        return segments;
     }
 
-    // A member path ends in a member, which has no index, so such a pattern would match nothing; a deny that silently
-    // matches nothing must not compile.
-    private static void ThrowIfMatchesNoMember(Segment[] segments, string pattern, char separator, string roleName)
+    // A deny that silently matches nothing must not compile.
+    [DoesNotReturn]
+    private static void ThrowMatchesNoMember(string pattern, string prefix, char separator, string roleName)
+        => throw new AuthorizationException(
+            $"Path pattern '{pattern}' of role '{roleName}' matches no member; use '{prefix}**' for the subject and everything below it, or '{prefix}*' for its members.");
+
+    // The registry's parser skips empty segments, so a doubled or trailing separator would otherwise compile as a
+    // pattern other than the one written. Only called for a well-formed pattern, so every index is closed.
+    private static bool HasEmptySegment(string pattern, PathProviderBase pathProvider)
     {
-        if (segments.Length > 0 && segments[^1].Index is null)
+        var separator = pathProvider.PathSeparator;
+        var position = pattern[0] == separator ? 1 : 0;
+        var atSegmentStart = true;
+        while (position < pattern.Length)
         {
-            return;
+            var character = pattern[position];
+            if (character == separator)
+            {
+                if (atSegmentStart)
+                {
+                    return true;
+                }
+
+                atSegmentStart = true;
+                position++;
+            }
+            else
+            {
+                position = character == pathProvider.IndexOpen
+                    ? SkipIndex(pattern, position + 1, pathProvider.IndexClose)
+                    : position + 1;
+                atSegmentStart = false;
+            }
         }
 
-        var prefix = segments.Length == 0 ? string.Empty : pattern;
-        throw new AuthorizationException(
-            $"Path pattern '{pattern}' of role '{roleName}' matches no member; use '{prefix}{separator}**' for the subject and everything below it, or '{prefix}{separator}*' for its members.");
+        return atSegmentStart;
+    }
+
+    // Inside an index the separator is literal: a quoted key runs to the next lone quote, any other to the first close.
+    private static int SkipIndex(string pattern, int keyStart, char indexClose)
+    {
+        if (pattern[keyStart] != Quote)
+        {
+            return pattern.IndexOf(indexClose, keyStart) + 1;
+        }
+
+        var position = keyStart + 1;
+        while (true)
+        {
+            var quote = pattern.IndexOf(Quote, position);
+            if (quote + 1 < pattern.Length && pattern[quote + 1] == Quote)
+            {
+                position = quote + 2;
+            }
+            else
+            {
+                return quote + 2;
+            }
+        }
     }
 
     private static bool HasOuterWhitespace(string text)
