@@ -251,6 +251,7 @@ public class PathPatternTests
     [InlineData("Security.a/b.Name")]
     [InlineData("Security.a\\b.Name")]
     [InlineData(".Security.Roles['/a'].Name")]
+    [InlineData("Areas[/Garage].**")]
     public void WhenASeparatorOfAnotherProviderIsNotTheFirstCharacter_ThenThePatternCompiles(string pattern)
     {
         // Act

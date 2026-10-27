@@ -23,8 +23,9 @@ internal static class SubjectPaths
 
     /// <summary>
     /// Gets every path of the subject: one per chain of parents from the subject up to a subject without parents, a
-    /// root, in the order the parents are listed. Every subject a chain passes must be attached
-    /// (<see cref="RegisteredSubject.IsAttached"/>). A path is its links from the root's property down to the property holding
+    /// root, in the order the parents are listed. Every subject a chain passes above the starting subject must be
+    /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
+    /// it. A path is its links from the root's property down to the property holding
     /// the subject, each in every spelling the path reader resolves. When the chain of first parents ends at a subject
     /// without parents and every property on it is included, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
