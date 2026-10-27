@@ -529,15 +529,68 @@ public class DictionaryIndexTests
         var second = new TestItem();
         var holder = new BroadlyDeclaredHolder(CreateContext())
         {
-            Sequence = new PairEnumeratingDictionary(new Dictionary<int, TestItem> { [1] = first, [2] = second })
+            Sequence = new PairEnumeratingDictionary<int>(new Dictionary<int, TestItem> { [1] = first, [2] = second })
         };
 
         // Act
-        holder.Sequence = new PairEnumeratingDictionary(new Dictionary<int, TestItem> { [2] = first, [1] = second });
+        holder.Sequence = new PairEnumeratingDictionary<int>(new Dictionary<int, TestItem> { [2] = first, [1] = second });
 
         // Assert
         Assert.Equal(2, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
         Assert.Equal(1, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenCollectionPropertyHoldsAStringKeyedDictionaryWithoutDictionaryInterface_ThenIndexIsTheNewKey()
+    {
+        // Arrange: a collection refresh first, so that this thread holds a reusable position map,
+        // which is what used to let a refresh read string keys as positions.
+        var context = CreateContext();
+        var warmFirst = new TestItem();
+        var warmSecond = new TestItem();
+        var warm = new TestKeyedContainer(context) { Items = [warmFirst, warmSecond] };
+        warm.Items = [warmSecond, warmFirst];
+
+        var first = new TestItem();
+        var second = new TestItem();
+        var holder = new BroadlyDeclaredHolder(context)
+        {
+            Sequence = new PairEnumeratingDictionary<string>(new Dictionary<string, TestItem> { ["First"] = first, ["Second"] = second })
+        };
+
+        // Act
+        holder.Sequence = new PairEnumeratingDictionary<string>(new Dictionary<string, TestItem> { ["Second"] = first, ["First"] = second });
+
+        // Assert
+        Assert.Equal("Second", Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal("First", Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenEnumeratingACollectionWritesAnotherCollection_ThenBothKeepTheirOwnPositions()
+    {
+        // Arrange: the outer sequence reorders another property's list while the registry walks
+        // it, which nests one refresh inside the other on the same thread.
+        var context = CreateContext();
+        var innerFirst = new TestItem();
+        var innerSecond = new TestItem();
+        var inner = new TestKeyedContainer(context) { Items = [innerFirst, innerSecond] };
+
+        var first = new TestItem();
+        var second = new TestItem();
+        var outer = new BroadlyDeclaredHolder(context) { Sequence = new List<TestItem> { first, second } };
+
+        // Act: the lifecycle enumerates the new value first, the registry second.
+        outer.Sequence = new WritingSequence(
+            [second, first],
+            enumeration: 2,
+            write: () => inner.Items = [innerSecond, innerFirst]);
+
+        // Assert
+        Assert.Equal(1, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(0, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(1, Assert.Single(innerFirst.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(0, Assert.Single(innerSecond.TryGetRegisteredSubject()!.Parents).Index);
     }
 
     [Fact]
@@ -629,22 +682,45 @@ public class DictionaryIndexTests
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    private sealed class PairEnumeratingDictionary(Dictionary<int, TestItem> items)
-        : IReadOnlyDictionary<int, TestItem>, IEnumerable<TestItem>
+    private sealed class WritingSequence(TestItem[] items, int enumeration, Action write) : IEnumerable<TestItem>
     {
-        public TestItem this[int key] => items[key];
+        private int _enumerations;
 
-        public IEnumerable<int> Keys => items.Keys;
+        public IEnumerator<TestItem> GetEnumerator()
+        {
+            var writes = ++_enumerations == enumeration;
+            foreach (var item in items)
+            {
+                yield return item;
+
+                if (writes)
+                {
+                    writes = false;
+                    write();
+                }
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class PairEnumeratingDictionary<TKey>(Dictionary<TKey, TestItem> items)
+        : IReadOnlyDictionary<TKey, TestItem>, IEnumerable<TestItem>
+        where TKey : notnull
+    {
+        public TestItem this[TKey key] => items[key];
+
+        public IEnumerable<TKey> Keys => items.Keys;
 
         public IEnumerable<TestItem> Values => items.Values;
 
         public int Count => items.Count;
 
-        public bool ContainsKey(int key) => items.ContainsKey(key);
+        public bool ContainsKey(TKey key) => items.ContainsKey(key);
 
-        public bool TryGetValue(int key, [MaybeNullWhen(false)] out TestItem value) => items.TryGetValue(key, out value);
+        public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TestItem value) => items.TryGetValue(key, out value);
 
-        public IEnumerator<KeyValuePair<int, TestItem>> GetEnumerator() => items.GetEnumerator();
+        public IEnumerator<KeyValuePair<TKey, TestItem>> GetEnumerator() => items.GetEnumerator();
 
         IEnumerator<TestItem> IEnumerable<TestItem>.GetEnumerator() => items.Values.GetEnumerator();
 

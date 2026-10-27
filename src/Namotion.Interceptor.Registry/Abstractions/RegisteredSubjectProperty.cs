@@ -402,9 +402,8 @@ public class RegisteredSubjectProperty
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
     internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
     {
-        // Dispatches on the value in the order LifecycleInterceptor.FindSubjectsInProperty
-        // does, whatever the property declares, because that scan decided whether each child
-        // was attached under a key or a position.
+        // Classifies the value the way LifecycleInterceptor.FindSubjectsInProperty does,
+        // because that scan decided whether each child was attached under a key or a position.
         switch (collectionValue)
         {
             case null or IInterceptorSubject or string:
@@ -432,32 +431,46 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            var collectionPositions = BuildCollectionPositions(collectionValue, _children.Count);
-            if (collectionPositions is null)
-                return;
-
-            for (var i = 0; i < _children.Count; i++)
+            // Taken out of its thread-static slot while in use, so that a refresh nested on this
+            // thread, which a sequence that writes a property while it is enumerated can cause,
+            // gets a map of its own.
+            var collectionPositions = _reusableCollectionPositions;
+            _reusableCollectionPositions = null;
+            try
             {
-                var child = _children[i];
-                if (!collectionPositions.TryGetValue(child.Subject, out var newIndex))
-                    continue;
+                collectionPositions = BuildCollectionPositions(collectionValue, collectionPositions, _children.Count);
+                if (collectionPositions is null)
+                    return;
 
-                // Compare unboxed to avoid allocating a boxed int when index hasn't changed
-                if (child.Index is int oldIndex && oldIndex == newIndex)
-                    continue;
+                for (var i = 0; i < _children.Count; i++)
+                {
+                    var child = _children[i];
+                    if (!collectionPositions.TryGetValue(child.Subject, out var newIndex))
+                        continue;
 
-                var boxedNewIndex = (object)newIndex;
-                _children[i] = child with { Index = boxedNewIndex };
+                    // Compare unboxed to avoid allocating a boxed int when index hasn't changed
+                    if (child.Index is int oldIndex && oldIndex == newIndex)
+                        continue;
 
-                registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, boxedNewIndex);
+                    var boxedNewIndex = (object)newIndex;
+                    _children[i] = child with { Index = boxedNewIndex };
+
+                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, boxedNewIndex);
+                }
+
+                // Sort children to match live collection order
+                _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
+                _childrenCache = default;
             }
-
-            // Sort children to match live collection order
-            _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
-            _childrenCache = default;
-
-            // Release references so subjects can be GC'd on idle threads
-            collectionPositions.Clear();
+            finally
+            {
+                if (collectionPositions is not null)
+                {
+                    // Release references so subjects can be GC'd on idle threads
+                    collectionPositions.Clear();
+                    _reusableCollectionPositions = collectionPositions;
+                }
+            }
         }
     }
 
@@ -586,6 +599,8 @@ public class RegisteredSubjectProperty
                 // The map is taken out of its thread-static slot while in use and put back by
                 // the caller, so that a refresh nested on this thread, which a dictionary that
                 // writes a property while it is enumerated can cause, gets a map of its own.
+                // Only the map is isolated: a nested write that detaches the subject owning
+                // this property is not supported.
                 displacedChildren = _reusableDisplacedChildren ?? new Dictionary<IInterceptorSubject, object?>(ReferenceEqualityComparer.Instance);
                 _reusableDisplacedChildren = null;
                 for (var i = position; i < _children.Count; i++)
@@ -628,15 +643,15 @@ public class RegisteredSubjectProperty
     /// listed more than once, which is the one LifecycleInterceptor attaches it with.
     /// Uses IList indexed access when available; falls back to ICollection foreach,
     /// then IEnumerable for read-only types that implement neither.
-    /// Reuses a ThreadStatic dictionary to avoid allocations.
+    /// Fills <paramref name="collectionPositions"/> when given, so a reused map avoids allocations.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value, int capacityHint)
+    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value,
+        Dictionary<IInterceptorSubject, int>? collectionPositions, int capacityHint)
     {
         if (value is null)
-            return null;
+            return collectionPositions;
 
-        var collectionPositions = _reusableCollectionPositions;
         collectionPositions?.Clear();
 
         if (value is IList list)
@@ -645,7 +660,7 @@ public class RegisteredSubjectProperty
             {
                 if (list[index] is IInterceptorSubject subject)
                 {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
+                    collectionPositions ??= new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
                     collectionPositions.TryAdd(subject, index);
                 }
             }
@@ -657,7 +672,7 @@ public class RegisteredSubjectProperty
             {
                 if (item is IInterceptorSubject subject)
                 {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
+                    collectionPositions ??= new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
                     collectionPositions.TryAdd(subject, index);
                 }
                 index++;
@@ -670,7 +685,7 @@ public class RegisteredSubjectProperty
             {
                 if (item is IInterceptorSubject subject)
                 {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
+                    collectionPositions ??= new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
                     collectionPositions.TryAdd(subject, index);
                 }
                 index++;

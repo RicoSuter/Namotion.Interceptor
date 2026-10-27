@@ -167,7 +167,7 @@ No leak.
 
 ## Lock Ordering
 
-Two locks exist in the lifecycle/registry system:
+Two locks serialize the lifecycle and the registry:
 
 1. `_attachedSubjects` in `LifecycleInterceptor`
 2. `_knownSubjects` in `SubjectRegistry`
