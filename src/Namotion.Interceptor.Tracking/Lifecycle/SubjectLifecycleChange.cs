@@ -28,4 +28,5 @@ public readonly struct SubjectLifecycleChange
 
     /// <summary>True when the subject is leaving the graph.</summary>
     public bool IsContextDetach { get; init; }
+
 }

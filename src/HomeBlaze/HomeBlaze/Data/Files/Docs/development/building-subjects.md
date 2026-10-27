@@ -152,7 +152,7 @@ public enum StateUnit
 }
 ```
 
-Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and the MCP tools `invoke_query` and `invoke_operation` pass the fraction unchanged.
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"), and a value of 0 keeps the unit of the property (0 km displays as "0 km"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and the MCP tools `invoke_query` and `invoke_operation` pass the fraction unchanged.
 
 ### Naming Cumulative Properties
 

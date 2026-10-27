@@ -138,8 +138,10 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
-    /// subsequent writes preserve the original old value (last write wins). Returns false when
-    /// disposal wins the race, allowing the caller to continue the normal write chain.
+    /// subsequent writes preserve the original old value (last write wins). When
+    /// <paramref name="restoresLandedValue"/> is true and a change is pending, it is removed instead, the same as
+    /// never writing the property; without a pending change the write is captured as usual. Returns false when disposal wins the race, allowing the caller to continue the normal
+    /// write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
     internal bool TryCaptureChange<TProperty>(
@@ -148,7 +150,8 @@ public sealed class SubjectTransaction : IDisposable
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         TProperty currentValue,
-        TProperty newValue)
+        TProperty newValue,
+        bool restoresLandedValue)
     {
         lock (_pendingChangesLock)
         {
@@ -158,6 +161,11 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             ThrowIfCommittingConcurrently();
+
+            if (restoresLandedValue && _pendingChanges.Remove(property))
+            {
+                return true;
+            }
 
             var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
@@ -170,6 +178,29 @@ public sealed class SubjectTransaction : IDisposable
                 newValue);
             return true;
         }
+    }
+
+    /// <summary>
+    /// Returns true with the pending value when the current flow's transaction is capturing and holds a pending change
+    /// for <paramref name="property"/>.
+    /// </summary>
+    internal static bool TryGetPendingValueInCurrentTransaction<TProperty>(PropertyReference property, out TProperty value)
+    {
+        var transaction = CurrentTransaction.Value;
+        if (transaction is not null && !transaction.IsDisposed && !transaction._isCommitted && !transaction._isCommitting)
+        {
+            lock (transaction._pendingChangesLock)
+            {
+                if (transaction._pendingChanges is not null && transaction._pendingChanges.TryGetValue(property, out var change))
+                {
+                    value = change.GetNewValue<TProperty>();
+                    return true;
+                }
+            }
+        }
+
+        value = default!;
+        return false;
     }
 
     /// <summary>

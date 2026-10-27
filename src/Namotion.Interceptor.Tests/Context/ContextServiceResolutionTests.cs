@@ -82,6 +82,7 @@ public class ContextServiceResolutionTests
         Assert.Same(duplicate1, services[2]);
     }
 
+
     private interface IOrderedTestService { }
 
     private class DuplicateOrderedService : IOrderedTestService { }

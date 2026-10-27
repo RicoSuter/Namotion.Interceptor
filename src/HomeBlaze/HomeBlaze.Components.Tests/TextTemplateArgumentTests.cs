@@ -20,7 +20,7 @@ public class TextTemplateArgumentTests
         Assert.Equal(
             [
                 "Card.Subtitle", "Card.Title", "Control.Label", "Gauge.Label", "Switch.Label", "Switch.Subtitle",
-                "ValueMapCase.Text", "ValueRow.Label", "ValueTile.Label"
+                "ValueMapCase.Text", "ValueRow.Label", "ValueTile.Label", "ValueTile.Subtitle"
             ],
             templates);
     }

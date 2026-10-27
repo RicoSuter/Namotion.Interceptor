@@ -106,6 +106,20 @@ A `Widget` that is not on a page, for example one in a JSON file of its own, res
 
 ---
 
+## Routes
+
+Every subject opens in the browser of the application, and a subject with a page of its own also opens as that page. The address is built from its path:
+
+| Subject | Address | Example |
+|---------|---------|---------|
+| A page, such as a markdown page or an agent | `/pages` and its canonical path | `/pages/Demo/Setup.md`, `/pages/Agents/Claude` |
+| Any subject in the browser | `/browser` and its path with every index as a segment of its own | `/browser/Demo/WaterPump`, `/browser/Items/0/Name` |
+| A property in the browser | the address of its subject and `?property=` with its name | `/browser/Demo/WaterPump?property=CurrentSpeed` |
+
+- **Which subjects have a page**: a markdown page and the types that bring a page of their own, such as an agent. The tools `browse` and `search` give such a subject a `$url` with its address; a subject without one opens only in the browser.
+- **Indices**: in the browser an index is a segment, `Items/0` where the canonical path writes `Items[0]`.
+- **Special characters**: each segment of a browser address is percent-encoded, so a colon is `%3A`, a space `%20`, a `#` `%23` and a `?` `%3F`, as in `/browser/Network/Clients/AA%3ABB%3ACC%3A00%3A11%3A22`. In a link on a page, write a space in a page address as `%20`.
+
 ## Limitations
 
 - **Parent navigation with multiple parents**: If a subject has multiple parents (rare), `../` returns null (ambiguous path).

@@ -161,6 +161,8 @@ public class LifecycleInterceptorTests
         return Verify(handler.GetEvents());
     }
 
+
+
     [Fact]
     public Task WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
     {

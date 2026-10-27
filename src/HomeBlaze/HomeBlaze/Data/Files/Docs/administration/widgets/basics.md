@@ -81,7 +81,7 @@ A widget with a `Label` argument shows the label that is set. Without it, a widg
 
 ## Text with Values
 
-The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](control.md), a [Switch](switch.md) and a row of a [ValueList](value-list.md), the `Subtitle` of a `Switch`, and the `Title` and the `Subtitle` of a [Card](card.md) can show values with expressions between double braces, as the text of a page does:
+The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](control.md), a [Switch](switch.md) and a row of a [ValueList](value-list.md), the `Subtitle` of a `Switch` and a `ValueTile`, and the `Title` and the `Subtitle` of a [Card](card.md) can show values with expressions between double braces, as the text of a page does:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -96,7 +96,7 @@ The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](co
 - **Other paths** resolve from the widget, and so from the page that holds it, as in the text of the page, see [Expression Paths](../pages.md#expression-paths).
 - **Pipes**: `display`, `raw` and `map:name`, see [Pipes](../pages.md#pipes). A map name resolves like the `Map` of the widget, and `{{ subject | map:name }}` applies the map to `subject`, such as a wallbox that the `Path` leads to, so that the label shows the text of its case.
 - **Live**: The text updates when a value that it shows changes.
-- **Empty**: A text that is empty, also one whose expressions give no text because a value is missing, is shown as one that is not set: an empty label shows the label of the property, an empty title or subtitle of a card shows none, and an empty subtitle of a switch tile with a map shows the text of the value.
+- **Empty**: A text that is empty, also one whose expressions give no text because a value is missing, is shown as one that is not set: an empty label shows the label of the property, an empty title or subtitle of a card shows none, and an empty subtitle of a switch tile with a map shows the text of the value. Only a subtitle written as `Subtitle=""` hides the line of a switch tile, and only a label written as `Label=""` hides the label of a switch tile, see [Switch](switch.md#tiles).
 - **Errors**: A mistake shows in place of the widget with the name of the argument in front, such as `Label: expected ')' at position 5`, see [Page Errors](../page-errors.md#value-widget-errors).
 - **Written as is elsewhere**: The source of the page, the page editor, the property panel, the tree of subjects and AI agents see the text as written, with its braces.
 - **Other arguments**: Paths, map names, colors, icons and numbers are taken as written. A color or an icon that depends on a value comes from a [ValueMap](value-map.md).
@@ -143,7 +143,7 @@ Write a CSS color in double quotes, like `Color="#ffffff80"` or `Color="Surface 
 
 ## Icons
 
-The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an operation button and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error.
+The `Icon` of a card, a tab, a panel, a row, a tile, an indicator, an alert, an operation button and a case of a map is the name of a MudBlazor Material icon in its filled form, for example `Settings`, `Bolt`, `WaterDrop`, `AcUnit` or `Link`. The name is case-sensitive. An unknown name shows a default icon and no error. The names are listed at [mudblazor.com/features/icons](https://mudblazor.com/features/icons): pick the filled variant and write its name without the `Icons.Material.Filled.` in front, so `Icons.Material.Filled.DirectionsCar` is `Icon=DirectionsCar`.
 
 ## Control Writes
 
@@ -171,6 +171,10 @@ Only containers create space: the page, a card, a tab, an expansion panel and th
 - **Fluid and fixed widgets**: A card, a tile, a list, a table and a chart are as wide as their place. A tile of a [Switch](switch.md#tiles), an [OperationButton](operation-button.md#tiles) or a [ValueTile](value-tile.md#tiles), like a card, fills a grid cell, a canvas node or a flow row when it is their only content, and is 96 pixels high alone. In a grid cell or a canvas node the icon and the text of a tile grow with the place, from their usual size in a place of about 150 pixels to twice that size, so that a large cell is filled, and a [Gauge](gauge.md) in the same kind of place shows its value and its label in the same sizes as the value and the label of a tile. A tile in a grid cell or a canvas node that is lower than its icon and its text, about 115 pixels for two lines and 91 for one, such as a square cell on a phone, leaves out the icon so that the text stays whole; a tile with a badge needs the extra room for the badge and hides the icon below about 140 pixels instead. A badge icon, such as the lock of a [DoorLock](door-lock.md) tile, is half as large as the icon of its tile and grows with it, while a badge widget, such as an [Indicator](indicator.md), keeps its size. A tile that shows only an icon keeps it. A card that is the only content of a `FlowLayout` cell is as high as the highest cell of its row, so the cards of a row end on one line, and its footer stays at the bottom. A widget of a fixed size, such as a [Gauge](gauge.md) or a button, stands at the start of its place, and a gauge that is the only content of a grid cell or a canvas node stands in its middle; [Gauge Rows](gauge.md#gauge-rows) shows how to choose the column width for it.
 - **Card footers**: The blocks of a footer, such as two buttons, stand in a row with 8 pixels between them and wrap when the card is too narrow.
 - **Controls**: A control is aligned by its visible edges: the track of a [Switch](switch.md), the box of a [Select](select.md) and the label of a [Slider](slider.md) start at the edge where text starts. Inside a widget, its own parts keep their room, such as the 16 pixels between the rows of a value list or the small margin around a chip; the first and the last row of a value list add nothing at its edges.
+
+## Tile Borders
+
+A tile of a [ValueTile](value-tile.md#tiles), a [Switch](switch.md#tiles), an [OperationButton](operation-button.md#tiles) and a [DoorLock](door-lock.md) has no border, since a grid cell and a canvas node draw no frame around their content. `Outlined=true` gives it the thin border of an outlined [Card](card.md), in the color of the lines of the theme, on the surface and on a filled tile alike, so that tiles can stand next to cards with the same edge. The `Variant=Outlined` of an `OperationButton` is something else: it draws the edge in the color of the button.
 
 ---
 

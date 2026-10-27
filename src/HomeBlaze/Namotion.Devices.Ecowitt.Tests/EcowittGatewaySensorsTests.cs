@@ -1,9 +1,12 @@
+using System.Reactive.Concurrency;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Ecowitt.Models;
+using Namotion.Devices.Ecowitt.Sensors;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Xunit;
 
 namespace Namotion.Devices.Ecowitt.Tests;
@@ -435,6 +438,49 @@ public class EcowittGatewaySensorsTests
         // Assert
         Assert.Equal(clock.Now, gateway.Sensors[OnlineWh68].LastSeen);
         Assert.Null(gateway.Sensors[OfflineWs90].LastSeen);
+    }
+
+    [Fact]
+    public void WhenSensorIsOnlineOrOffline_ThenIconColorIsSuccessOrError()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+
+        // Act
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+
+        // Assert
+        Assert.Equal("Success", gateway.Sensors[OnlineWh68].IconColor);
+        Assert.Equal("Error", gateway.Sensors[OfflineWs90].IconColor);
+    }
+
+    [Fact]
+    public void WhenSensorGoesOfflineAndBackOnline_ThenIconColorChangesArePublished()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+        var sensor = gateway.Sensors[OnlineWh68];
+        var offlinePage1 = EcowittSamples.SensorsInfoPage1Json.Replace(
+            "\"id\":\"51B\",\"batt\":\"5\",\"rssi\":\"-75\",\"signal\":\"4\"",
+            "\"id\":\"51B\",\"batt\":\"9\",\"rssi\":\"--\",\"signal\":\"--\"");
+        var changes = new List<string?>();
+        using var subscription = ((IInterceptorSubject)gateway).GetContext()
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (ReferenceEquals(change.Property.Subject, sensor) && change.Property.Name == nameof(EcowittSensor.IconColor))
+                {
+                    changes.Add(change.GetNewValue<string?>());
+                }
+            });
+
+        // Act
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo(offlinePage1));
+        gateway.Update(EcowittSamples.ParseLiveData(), EcowittSamples.ParseSensorsInfo());
+
+        // Assert
+        Assert.Equal(["Error", "Success"], changes);
     }
 
     private static EcowittGateway CreateGateway(TimeProvider? clock = null)

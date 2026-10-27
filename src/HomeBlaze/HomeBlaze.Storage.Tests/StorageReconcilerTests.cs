@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text;
 using FluentStorage.Blobs;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -196,6 +198,35 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.Same(machines, parent.Property.Subject);
         Assert.Equal(nameof(VirtualFolder.Children), parent.Property.Name);
         Assert.Equal("Motor", parent.Index);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenDeviceMovesToParentFolderAndItsOldFolderIsDeleted_ThenItIsStillReachableThroughTheGraph(bool isOnePass)
+    {
+        // Arrange: the device has no constructor that takes the context, so it has its services from its folder only.
+        WriteFile("House/Kitchen/Dishwasher.json", InjectedDevice.Serialize("Dishwasher"));
+        WriteFile("House/Freezer.json", InjectedDevice.Serialize("Freezer"));
+        var storage = await ConnectAsync();
+        var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
+        var device = Assert.IsType<InjectedDevice>(((VirtualFolder)house.Children["Kitchen"]).Children["Dishwasher"]);
+        var resolver = new SubjectPathResolver(() => storage);
+
+        // Act
+        File.Move(GetFullPath("House/Kitchen/Dishwasher.json"), GetFullPath("House/Dishwasher.json"));
+        if (!isOnePass)
+        {
+            await storage.ReconcileAsync();
+        }
+
+        Directory.Delete(GetFullPath("House/Kitchen"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Dishwasher", "Freezer"], house.Children.Keys.Order());
+        Assert.Same(device, house.Children["Dishwasher"]);
+        Assert.Equal("Dishwasher", resolver.ResolveValue("/House/Dishwasher/Name", PathStyle.Canonical));
     }
 
     [Fact]

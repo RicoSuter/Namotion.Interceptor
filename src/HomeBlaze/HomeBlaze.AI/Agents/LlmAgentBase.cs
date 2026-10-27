@@ -168,6 +168,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     public string? IconName => "SmartToy";
 
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => null
+    };
+
     /// <summary>
     /// The backend tools this agent type can run, which are enabled by adding their names to <see cref="AllowedTools"/>.
     /// </summary>

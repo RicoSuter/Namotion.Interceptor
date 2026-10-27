@@ -84,6 +84,25 @@ public class HomeBlazeMcpSubjectEnricherTests
     }
 
     [Fact]
+    public void WhenTheSubjectHasAPage_ThenItsAddressIsEnriched()
+    {
+        // Arrange
+        var context = CreateContext();
+        var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
+        var other = new TestThing(context) { Name = "Other", Temperature = 20m };
+        var enricher = new HomeBlazeMcpSubjectEnricher([], isReadOnly: false,
+            subject => ReferenceEquals(subject, thing) ? "/pages/House/Thing.md" : null);
+
+        // Act
+        var withPage = enricher.GetSubjectEnrichments(thing.TryGetRegisteredSubject()!);
+        var withoutPage = enricher.GetSubjectEnrichments(other.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.Equal("/pages/House/Thing.md", withPage["$url"]);
+        Assert.False(withoutPage.ContainsKey("$url"));
+    }
+
+    [Fact]
     public void WhenSubjectImplementsKnownInterface_ThenInterfacesAreEnriched()
     {
         // Arrange

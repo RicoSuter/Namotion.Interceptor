@@ -318,6 +318,46 @@ public class LlmAgentBaseTests
         Assert.Equal(["browse", "update_memory"], test.Agent.Requests[0].Tools.Tools.Select(tool => tool.Name));
     }
 
+    [Theory]
+    [InlineData(ServiceStatus.Stopped, null)]
+    [InlineData(ServiceStatus.Starting, null)]
+    [InlineData(ServiceStatus.Running, "Success")]
+    [InlineData(ServiceStatus.Stopping, null)]
+    [InlineData(ServiceStatus.Unavailable, null)]
+    [InlineData(ServiceStatus.Error, "Error")]
+    public void WhenTheStatusChanges_ThenTheIconColorFollowsIt(ServiceStatus status, string? expectedIconColor)
+    {
+        // Arrange
+        var agent = new FakeAgent(AgentTestContext.CreateServices(new AgentTestRoot()));
+
+        // Act
+        agent.Status = status;
+
+        // Assert
+        Assert.Equal(expectedIconColor, agent.IconColor);
+    }
+
+    [Fact]
+    public async Task WhenARunningAgentFails_ThenTheErrorIconColorIsPublished()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        var iconColors = new ConcurrentQueue<string?>();
+        using var subscription = ((IInterceptorSubject)test.Agent).GetContext().GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => ReferenceEquals(change.Property.Subject, test.Agent) &&
+                             change.Property.Name == nameof(LlmAgentBase.IconColor))
+            .Subscribe(change => iconColors.Enqueue(change.GetNewValue<string?>()));
+        var runningIconColor = test.Agent.IconColor;
+        test.Agent.PollInterval = TimeSpan.FromDays(400);
+
+        // Act
+        await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Success", runningIconColor);
+        Assert.Equal(["Error"], iconColors);
+    }
+
     [Fact]
     public async Task WhenTheIntervalIsReconfiguredBeyondTheMaximum_ThenTheAgentReportsAConfigurationErrorInsteadOfThrowing()
     {

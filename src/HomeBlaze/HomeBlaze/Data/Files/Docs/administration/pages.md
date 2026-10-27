@@ -103,6 +103,13 @@ Check the [installation guide](../administration/installation.md) for examples.
 
 A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
 
+### Link Targets
+
+- **Links on a page open in the same tab**: a relative link to a page, an address of the application such as `/browser/Demo`, and a web address alike. So does the `Href` of a [Card](widgets/card.md).
+- **A new tab**: write the link as an HTML element with a target, `<a href="https://example.com" target="_blank" rel="noopener">Example</a>`. The page keeps the attribute as written.
+- **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
+- **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
+
 ---
 
 ## Pictures
@@ -119,6 +126,24 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 - **Height**: at most four fifths of the height of the browser window.
 - **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height.
 - **Not available**: a picture that cannot be loaded is replaced by a placeholder with its text. The address of the picture is the tooltip of the placeholder.
+
+---
+
+## Diagrams
+
+A fenced code block with the language `mermaid` is shown as a [Mermaid](https://mermaid.js.org) diagram, as on GitHub:
+
+~~~~markdown
+```mermaid
+graph LR
+    Pump --> Tank --> Heater
+```
+~~~~
+
+- **Size**: a diagram is never wider than its place.
+- **Theme**: a diagram takes the dark or light theme that is active when it is shown. After a switch, it changes on the next visit of the page.
+- **Not shown**: a diagram with an error, or one on a browser that cannot load Mermaid, appears as its source in a code block.
+- **No interaction**: `click` lines, links and HTML in labels are ignored, and an `init` directive or frontmatter of a diagram cannot change these settings.
 
 ---
 

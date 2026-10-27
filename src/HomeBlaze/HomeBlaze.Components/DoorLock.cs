@@ -39,10 +39,16 @@ public partial class DoorLock : IConfigurable, ITitleProvider
     public partial string? Map { get; set; }
 
     /// <summary>
-    /// The second line of the tile. Defaults to the text of the matched case of the map, otherwise to the state of the lock.
+    /// The second line of the tile. Defaults to the text of the matched case of the map, otherwise to the state of the lock. An empty subtitle hides the line.
     /// </summary>
     [Configuration]
     public partial string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
 
     public string? Title => null;
 

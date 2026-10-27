@@ -748,6 +748,8 @@ public class MarkdownFileWriteTests : IDisposable
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.SubjectTable Source=motor\n::: Column Property=CurrentSpeed Label=Speed\n:::\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart Range=6h\n::: Series Path=motor/CurrentSpeed Label=Speed\n:::\n::")]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.History.Blazor.HistoryChart\n::: Series Path=motor/CurrentSpeed Color=\"#E4572E\"\n:::\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ValueMap#online\n::: Case Value=True Text=online\n:::\n::\n\n:: HomeBlaze.Components.ValueTile Path=motor/IsPowered Map=online\n::")]
+    [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.ValueTile Path=motor/IsPowered Map=online\n::\n\n:: HomeBlaze.Components.ValueMap#online\n::: Case Value=True Text=online\n:::\n::")]
     public async Task WhenAnAgentMayEditPageLayoutAndChangesLayoutBlocks_ThenThePageIsWritten(string oldText, string newText)
     {
         // Arrange

@@ -179,7 +179,8 @@ public static class StateUnitExtensions
 
     /// <summary>
     /// Gets the unit of its family that <see cref="FormatWithUnit"/> shows a value of <paramref name="magnitude"/> in: the
-    /// largest unit in which the value is at least 1, such as kWh for 1500 Wh. Returns false for a unit of no family.
+    /// largest unit in which the value is at least 1, such as kWh for 1500 Wh. A value of 0 stays in <paramref name="unit"/>,
+    /// as it is 0 in every unit and the one the property declares is the one a reader expects. Returns false for a unit of no family.
     /// </summary>
     /// <param name="unit">The unit of the value.</param>
     /// <param name="magnitude">The value in <paramref name="unit"/>; its sign is ignored.</param>
@@ -196,6 +197,13 @@ public static class StateUnitExtensions
 
         var family = UnitFamilies[lookup.FamilyIndex];
         var inputFactor = family[lookup.UnitIndex].Factor;
+
+        if (magnitude == 0m)
+        {
+            suffix = family[lookup.UnitIndex].Suffix;
+            factor = 1m;
+            return true;
+        }
 
         // Saturated rather than overflowing, which only picks the largest unit.
         var absolute = Math.Abs(magnitude);

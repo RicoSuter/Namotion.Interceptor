@@ -24,7 +24,7 @@ public partial class Switch : IConfigurable, ITitleProvider
     public partial string? Path { get; set; }
 
     /// <summary>
-    /// The label next to the switch. Defaults to the title the property declares, then to its name. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
+    /// The label next to the switch. Defaults to the title the property declares, then to its name. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>. An empty label hides the label of a tile, which then shows its icon alone.
     /// </summary>
     [Configuration]
     [TextTemplate]
@@ -59,11 +59,17 @@ public partial class Switch : IConfigurable, ITitleProvider
     public partial string? Map { get; set; }
 
     /// <summary>
-    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
+    /// A second, smaller line below the label of a tile. Without it, a tile with a map shows the text of the value. An empty subtitle hides the line. It can show values with expressions between double braces, such as <c>{{ subject/Name }}</c>.
     /// </summary>
     [Configuration]
     [TextTemplate]
     public partial string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Whether a tile has a thin border like an outlined card, whatever its fill.
+    /// </summary>
+    [Configuration]
+    public partial bool Outlined { get; set; }
 
     /// <summary>
     /// Name of the icon of a tile, for example "Lightbulb". The icon of a matched case of the map replaces it.

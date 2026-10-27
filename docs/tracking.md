@@ -673,6 +673,8 @@ Dictionary key/value entries retain their keys even when the dictionary also imp
 
 > **Internal design:** For the exact read points and why the discard is cleaned up rather than reported, see [Structural Getters](design/tracking-lifecycle.md#structural-getters).
 
+A reference back to a root from its own subtree, such as `Root → A → Root`, does not consume the root's anchor: only an edge from an independently anchored parent does. The root therefore stays a root, and removing the back-reference, or removing `A`, leaves it attached.
+
 ## Parent-Child Relationship Tracking
 
 Parent relationships come from the lifecycle itself, so any context with `WithLifecycle()` (included in `WithFullPropertyTracking()` and `WithRegistry()`) answers them:

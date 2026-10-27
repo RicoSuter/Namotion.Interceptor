@@ -40,7 +40,7 @@
                 @* The view shows the legend of the lines below them and each band series in the header of its band. Until
                    the data arrives it reserves the room of the lines and bands the query will return, also while prerendering. *@
                 var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
-                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
+                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" MinHeight="chart.MinHeight" ShowAxes="!chart.Compact"
                                   LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
                                   SeriesClicked="@(linesTarget >= 0 ? _seriesClicked : default)"

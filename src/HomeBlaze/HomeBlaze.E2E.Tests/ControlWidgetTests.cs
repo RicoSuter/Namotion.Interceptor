@@ -215,6 +215,33 @@ public class ControlWidgetTests
     }
 
     [Fact]
+    public async Task WhenASwitchHasOnlyOff_ThenItTurnsOffAndCannotTurnOnAgain()
+    {
+        try
+        {
+            // Arrange
+            ResetMotor();
+            var page = await OpenPageAsync();
+            var offSwitch = GetSwitch(page, "Power off only");
+            await Assertions.Expect(offSwitch).ToBeCheckedAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(offSwitch).ToBeEnabledAsync(new() { Timeout = Timeout });
+
+            // Act
+            await offSwitch.ClickAsync();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => !GetMotor().IsPowered, WaitTimeout, message: "PowerOff was not invoked");
+            await Assertions.Expect(offSwitch).Not.ToBeCheckedAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(offSwitch).ToBeDisabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        }
+        finally
+        {
+            ResetMotor();
+        }
+    }
+
+    [Fact]
     public async Task WhenConfirmationOfTheOperationOfASwitchIsCanceled_ThenTheSwitchKeepsItsState()
     {
         try
