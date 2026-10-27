@@ -12,7 +12,7 @@ Security in HomeBlaze covers graph-level authorization (who can read and write w
 
 ## Graph Authorization [In Progress]
 
-Authorization is role-based, with roles as data. The generic engine is the library `Namotion.Interceptor.Authorization`, see its [README](../../../../../../Namotion.Interceptor.Authorization/README.md) and [design](../../../../../../../../docs/design/authorization.md): rules select members of the graph by path, type, member name and tag, roles hold allow and deny rules and include other roles, and `AuthorizationPolicy.Compile` turns the roles of one principal into an immutable policy. `HomeBlaze.Authorization` supplies what the library leaves to the application: the roles, the tags, the actions and the system rules.
+Authorization is role-based, with roles as data. The generic engine is the library `Namotion.Interceptor.Authorization`, see its [documentation](../../../../../../../../docs/authorization.md) and [design](../../../../../../../../docs/design/authorization.md): rules select members of the graph by path, type, member name and tag, roles hold allow and deny rules and include other roles, and `AuthorizationPolicy.Compile` turns the roles of one principal into an immutable policy. `HomeBlaze.Authorization` supplies what the library leaves to the application: the roles, the tags, the actions and the system rules.
 
 | Part | Implementation |
 |------|----------------|
