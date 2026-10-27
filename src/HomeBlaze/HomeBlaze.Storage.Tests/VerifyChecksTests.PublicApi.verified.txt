@@ -254,10 +254,6 @@ namespace HomeBlaze.Storage.Internal
     public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public HtmlSegment(string html, System.Collections.Immutable.ImmutableArray<int> blockStarts = default) { }
-        public System.Collections.Immutable.ImmutableArray<string> Blocks { get; }
-        public bool EndsWithBlock { get; }
-        public string Html { get; }
-        public bool StartsWithBlock { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }

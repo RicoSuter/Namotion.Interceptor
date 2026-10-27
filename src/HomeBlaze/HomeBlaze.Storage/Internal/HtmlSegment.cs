@@ -14,19 +14,19 @@ namespace HomeBlaze.Storage.Internal;
 public partial class HtmlSegment
 {
     /// <summary>Gets the HTML of the segment, joined from <see cref="Blocks"/>.</summary>
-    public string Html => Blocks.Length == 1 ? Blocks[0] : string.Concat((IEnumerable<string>)Blocks);
+    internal string Html => Blocks.Length == 1 ? Blocks[0] : string.Concat((IEnumerable<string>)Blocks);
 
     /// <summary>
     /// Gets the HTML cut at its block starts (see <see cref="HtmlMarkdownSegment.BlockStarts"/>), without empty parts.
     /// The HTML between two block starts is a complete block. Without block starts, it is the HTML as one part.
     /// </summary>
-    public ImmutableArray<string> Blocks { get; }
+    internal ImmutableArray<string> Blocks { get; }
 
     /// <summary>Gets whether a block starts with the first part of <see cref="Blocks"/>.</summary>
-    public bool StartsWithBlock { get; }
+    internal bool StartsWithBlock { get; }
 
     /// <summary>Gets whether a block starts after the last part of <see cref="Blocks"/>.</summary>
-    public bool EndsWithBlock { get; }
+    internal bool EndsWithBlock { get; }
 
     public HtmlSegment(string html, ImmutableArray<int> blockStarts = default)
     {
