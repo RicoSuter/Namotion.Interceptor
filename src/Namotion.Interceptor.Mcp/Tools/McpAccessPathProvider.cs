@@ -67,6 +67,15 @@ internal sealed class McpAccessPathProvider : PathProviderBase
             return property;
         }
 
+        // A later member with the same segment answers as if the hidden one did not exist.
+        foreach (var member in subject.Properties)
+        {
+            if (member != property && _inner.TryGetPropertySegment(member) == segment && IsReadable(_policy, member))
+            {
+                return member;
+            }
+        }
+
         // As for a name that does not exist, the segment is a key of the [InlinePaths] dictionary, so a client cannot
         // tell the hidden property from a missing one and the registry writes the key without the explicit form.
         var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
