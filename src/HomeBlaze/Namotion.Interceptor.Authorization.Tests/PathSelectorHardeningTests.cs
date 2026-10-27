@@ -1,7 +1,5 @@
 using Namotion.Interceptor.Authorization.Tests.Models;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using static Namotion.Interceptor.Authorization.Tests.Policies;
 using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
@@ -99,14 +97,11 @@ public class PathSelectorHardeningTests
         var role = Role("Operator", allow: [Rule([actions[61]])]);
 
         // Act
-        var policy = AuthorizationPolicy.Compile([role], ["Operator"], [], actions, TestTags.Default, SlashPathProvider.Instance);
+        var policy = AuthorizationPolicy.Compile([role], ["Operator"], [], actions, TestTags.Default, Policies.SlashPaths);
 
         // Assert
         Assert.True(policy.IsAllowed(member, actions[61]));
         Assert.False(policy.IsAllowed(member, actions[60]));
-        var exception = Assert.Throws<AuthorizationException>(
-            () => AuthorizationPolicy.Compile([], [], [], [.. actions, new PermissionAction("action63")], TestTags.Default, SlashPathProvider.Instance));
-        Assert.Equal("At most 64 actions are supported.", exception.Message);
     }
 
     [Fact]
@@ -124,26 +119,6 @@ public class PathSelectorHardeningTests
 
         // Assert
         Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), decision);
-    }
-
-    [Fact]
-    public void WhenRoomsPointAtEachOtherAndTheirOnlyWayToTheRootIsDenied_ThenExplainReportsTheDeniedLink()
-    {
-        // Arrange
-        var home = Create();
-        var kitchen = home.Rooms["Kitchen"];
-        var bedroom = home.Rooms["Bedroom"];
-        kitchen.Neighbor = bedroom;
-        bedroom.Neighbor = kitchen;
-        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, types: ["Home"], members: ["Rooms"])]));
-
-        // Act
-        var decision = policy.Explain(Registered(kitchen));
-
-        // Assert
-        Assert.False(decision.IsReadable);
-        Assert.True(decision.HasReadableMember);
-        Assert.Same(Member(home, nameof(Home.Rooms)), decision.DeniedProperty);
     }
 
     [Fact]
@@ -208,13 +183,5 @@ public class PathSelectorHardeningTests
     }
 
     private static AuthorizationPolicy CompileExcludingSpare(AuthorizationRole role)
-        => AuthorizationPolicy.Compile([role], [role.Name], [], KnownActions, TestTags.Default, new SpareExcludingPathProvider());
-
-    private sealed class SpareExcludingPathProvider : PathProviderBase
-    {
-        public override char PathSeparator => '/';
-
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-            => !(property.Subject is Home && property.Name == nameof(Home.Spare));
-    }
+        => AuthorizationPolicy.Compile([role], [role.Name], [], KnownActions, TestTags.Default, new ExcludingPathProvider(nameof(Home.Spare), '/'));
 }

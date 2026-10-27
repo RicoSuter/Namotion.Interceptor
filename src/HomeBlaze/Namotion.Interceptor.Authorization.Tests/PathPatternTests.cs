@@ -59,7 +59,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstMemberPath_ThenResultIsAsExpected(string pattern, string memberPath, bool expected)
     {
         // Arrange
-        var provider = SlashPathProvider.Instance;
+        var provider = Policies.SlashPaths;
         var compiled = PathPattern.Parse(pattern, provider, "Test");
         var (links, member) = ToMemberPath(provider, memberPath);
 
@@ -83,7 +83,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyWithBothSpellings_ThenEitherSpellingMatches(string pattern, bool expected)
     {
         // Arrange
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         PathLink[] links = [new("Security", null, null), new("Roles", "FullReader", "FullReader")];
 
         // Act
@@ -100,7 +100,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyShadowedByAProperty_ThenOnlyTheExplicitSpellingMatches(string pattern, bool expected)
     {
         // Arrange
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         PathLink[] links = [new("Security", null, null), new("Roles", "Wifi", null)];
 
         // Act
@@ -117,7 +117,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyWhoseExplicitFormIsShadowed_ThenOnlyTheBareSpellingMatches(string pattern, bool expected)
     {
         // Arrange
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         PathLink[] links = [new("Security", null, null), new(null, "FullReader", "FullReader")];
 
         // Act
@@ -132,7 +132,7 @@ public class PathPatternTests
     {
         // Arrange
         var pattern = "/" + string.Join("/", Enumerable.Repeat("**/A", 30)) + "/Missing";
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         var links = Enumerable.Range(0, 60).Select(_ => new PathLink("A", null, null)).ToArray();
 
         // Act
@@ -153,7 +153,7 @@ public class PathPatternTests
     public void WhenPatternHasNoLeadingSeparator_ThenItMatchesLikeThePatternWithOne(string pattern, string memberPath, bool expected)
     {
         // Arrange
-        var provider = SlashPathProvider.Instance;
+        var provider = Policies.SlashPaths;
         var withoutSeparator = PathPattern.Parse(pattern, provider, "Test");
         var withSeparator = PathPattern.Parse("/" + pattern, provider, "Test");
         var (links, member) = ToMemberPath(provider, memberPath);
@@ -207,7 +207,7 @@ public class PathPatternTests
     public void WhenPatternIsInvalid_ThenParseThrowsNamingTheRole(string pattern, string expectedMessagePart)
     {
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, SlashPathProvider.Instance, "Reader"));
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, Policies.SlashPaths, "Reader"));
 
         // Assert
         Assert.Contains("Reader", exception.Message);
@@ -222,7 +222,7 @@ public class PathPatternTests
     public void WhenAnIndexContainsTheSeparator_ThenThePatternHasNoEmptySegment(string pattern)
     {
         // Act
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
 
         // Assert
         Assert.NotNull(compiled);

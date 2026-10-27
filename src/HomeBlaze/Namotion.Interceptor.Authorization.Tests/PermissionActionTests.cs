@@ -95,7 +95,7 @@ public class PermissionActionTests
         Assert.Throws<ArgumentException>(() => policy.IsAllowed(member, default));
         Assert.False(AuthorizationPolicy.DenyAll.IsAllowed(member, default));
         var exception = Assert.Throws<AuthorizationException>(
-            () => AuthorizationPolicy.Compile([], [], [], [default], TestTags.Default, SlashPathProvider.Instance));
+            () => AuthorizationPolicy.Compile([], [], [], [default], TestTags.Default, Policies.SlashPaths));
         Assert.Equal("A known action has no name.", exception.Message);
     }
 }
