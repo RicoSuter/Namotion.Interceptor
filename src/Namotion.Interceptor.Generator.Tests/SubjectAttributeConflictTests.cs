@@ -759,6 +759,86 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenAnOverrideDiffersOnlyByANestedDynamic_ThenNI0066SeesTheInheritedAttribute()
+    {
+        // Arrange: List<dynamic> and List<object> are one type at runtime, so the override inherits the attribute.
+        const string source = """
+            using System.Collections.Generic;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public class PlainMotorBase
+                {
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    public virtual List<object> Value { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : PlainMotorBase
+                {
+                    public partial bool Forward { get; set; }
+
+                    public override List<dynamic> Value { get => base.Value; set => base.Value = value; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenAnOverrideDiffersOnlyByTupleElementNames_ThenNI0066SeesTheInheritedAttribute()
+    {
+        // Arrange: tuple element names do not exist at runtime, so the override inherits the attribute.
+        const string source = """
+            using System.Collections.Generic;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public class PlainMotorBase
+                {
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    public virtual (int A, int B) Value { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : PlainMotorBase
+                {
+                    public partial bool Forward { get; set; }
+
+                    public override (int, int) Value { get => base.Value; set => base.Value = value; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange

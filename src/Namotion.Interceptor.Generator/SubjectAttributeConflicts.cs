@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 using AttributeTarget = (string PropertyName, string AttributeName);
 
@@ -15,17 +16,18 @@ internal static class SubjectAttributeConflicts
     /// </remarks>
     public static void ReportDuplicatePropertyAttributeTargets(
         INamedTypeSymbol typeSymbol,
+        Compilation compilation,
         Location location,
         List<Diagnostic> diagnostics)
     {
         var subjectAncestors = SubjectAncestry.GetSubjectAncestors(typeSymbol);
-        var providers = BuildProviderMap(typeSymbol, subjectAncestors, 0);
+        var providers = BuildProviderMap(typeSymbol, subjectAncestors, 0, compilation);
         if (providers is null || !HasDuplicate(providers))
         {
             return;
         }
 
-        var ancestorProviders = subjectAncestors is null ? null : BuildProviderMap(subjectAncestors[0], subjectAncestors, 1);
+        var ancestorProviders = subjectAncestors is null ? null : BuildProviderMap(subjectAncestors[0], subjectAncestors, 1, compilation);
         foreach (var entry in providers)
         {
             if (entry.Value.Count > 1)
@@ -44,7 +46,8 @@ internal static class SubjectAttributeConflicts
     private static Dictionary<AttributeTarget, List<string>>? BuildProviderMap(
         INamedTypeSymbol subject,
         List<INamedTypeSymbol>? subjectAncestors,
-        int firstAncestorIndex)
+        int firstAncestorIndex,
+        Compilation compilation)
     {
         var ancestorCount = subjectAncestors?.Count ?? 0;
 
@@ -52,10 +55,10 @@ internal static class SubjectAttributeConflicts
         var seenNames = firstAncestorIndex < ancestorCount ? new HashSet<string>() : null;
         Dictionary<AttributeTarget, List<string>>? providers = null;
 
-        AddProviders(subject, seenNames, ref providers);
+        AddProviders(subject, seenNames, ref providers, compilation);
         for (var index = firstAncestorIndex; index < ancestorCount; index++)
         {
-            AddProviders(subjectAncestors![index], seenNames, ref providers);
+            AddProviders(subjectAncestors![index], seenNames, ref providers, compilation);
         }
 
         return providers;
@@ -64,7 +67,8 @@ internal static class SubjectAttributeConflicts
     private static void AddProviders(
         INamedTypeSymbol type,
         HashSet<string>? seenNames,
-        ref Dictionary<AttributeTarget, List<string>>? providers)
+        ref Dictionary<AttributeTarget, List<string>>? providers,
+        Compilation compilation)
     {
         foreach (var member in type.GetMembers())
         {
@@ -79,7 +83,7 @@ internal static class SubjectAttributeConflicts
                 continue;
             }
 
-            if (TryGetRuntimePropertyAttributeTarget(property, out var target))
+            if (TryGetRuntimePropertyAttributeTarget(property, compilation, out var target))
             {
                 AddProvider(ref providers, target, property.Name);
             }
@@ -141,7 +145,7 @@ internal static class SubjectAttributeConflicts
     }
 
     // A provider the nearest subject ancestor already has is reported there, so only the providers this subject adds
-    // are reported, each against one the ancestor has (or the first one when the ancestor has none).
+    // are reported, each against one the ancestor has (or the first one when the ancestor has none of them).
     private static void ReportAddedProviders(
         INamedTypeSymbol subject,
         AttributeTarget target,
@@ -185,9 +189,10 @@ internal static class SubjectAttributeConflicts
 
     // The nearest declaration wins, matching AllowMultiple = false. Roslyn reports only the attributes declared on a
     // property itself, so the walk adds what the runtime inherits.
-    private static bool TryGetRuntimePropertyAttributeTarget(IPropertySymbol property, out AttributeTarget target)
+    private static bool TryGetRuntimePropertyAttributeTarget(
+        IPropertySymbol property, Compilation compilation, out AttributeTarget target)
     {
-        for (var current = property; current is not null; current = GetParentDeclaration(current))
+        for (var current = property; current is not null; current = GetParentDeclaration(current, compilation))
         {
             if (TryGetDeclaredPropertyAttributeTarget(current, out target))
             {
@@ -202,21 +207,19 @@ internal static class SubjectAttributeConflicts
     // The runtime finds the parent through the declaration the getter overrides, or the setter when no getter is
     // declared, so an override of one accessor can skip a class that overrides only the other. It then looks the
     // parent up by property type, so a covariant-return override inherits nothing.
-    private static IPropertySymbol? GetParentDeclaration(IPropertySymbol property)
+    private static IPropertySymbol? GetParentDeclaration(IPropertySymbol property, Compilation compilation)
     {
         var parent = (property.GetMethod ?? property.SetMethod)?.OverriddenMethod?.AssociatedSymbol as IPropertySymbol;
-        return parent is not null && HaveSameRuntimeType(parent.Type, property.Type) ? parent : null;
+        return parent is not null && HaveSameRuntimeType(parent.Type, property.Type, compilation) ? parent : null;
     }
 
-    // dynamic is System.Object at runtime, so an override typed dynamic still finds an object-typed parent.
-    private static bool HaveSameRuntimeType(ITypeSymbol left, ITypeSymbol right)
+    // An identity conversion is exactly "the same type at runtime": it ignores dynamic versus object, tuple element
+    // names and nullable annotations at any depth, as the runtime's lookup by property type does.
+    private static bool HaveSameRuntimeType(ITypeSymbol left, ITypeSymbol right, Compilation compilation)
     {
-        return SymbolEqualityComparer.Default.Equals(left, right) || (IsObjectAtRuntime(left) && IsObjectAtRuntime(right));
-    }
-
-    private static bool IsObjectAtRuntime(ITypeSymbol type)
-    {
-        return type.TypeKind == TypeKind.Dynamic || type.SpecialType == SpecialType.System_Object;
+        return compilation is CSharpCompilation csharpCompilation
+            ? csharpCompilation.ClassifyConversion(left, right).IsIdentity
+            : SymbolEqualityComparer.Default.Equals(left, right);
     }
 
     private static bool TryGetDeclaredPropertyAttributeTarget(

@@ -69,7 +69,7 @@ internal static class SubjectMetadataExtractor
         SubjectPropertyConflicts.ReportPropertiesShadowingABaseImplementation(
             typeSymbol, classProperties, displacedNames, location, diagnostics);
 
-        SubjectAttributeConflicts.ReportDuplicatePropertyAttributeTargets(typeSymbol, location, diagnostics);
+        SubjectAttributeConflicts.ReportDuplicatePropertyAttributeTargets(typeSymbol, semanticModel.Compilation, location, diagnostics);
 
         var interfaceProperties = InterfacePropertyMetadataExtractor.ExtractInterfaceDefaultProperties(
             typeSymbol, classProperties, semanticModel.Compilation, location, diagnostics);
