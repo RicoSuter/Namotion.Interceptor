@@ -839,6 +839,61 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenABaseSubjectFromAnotherAssemblyHasAPropertyNamedProperties_ThenNI0066StillSeesIt()
+    {
+        // Arrange: from metadata, MiddleMotor also exposes its generated IInterceptorSubject.Properties
+        // implementation, which is not part of the property set and must not hide BaseMotor.Properties.
+        const string librarySource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial string Name { get; set; }
+
+                    [PropertyAttribute(nameof(Name), "Unit")]
+                    public partial string Properties { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class MiddleMotor : BaseMotor
+                {
+                    public partial int Speed { get; set; }
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Motor : Library.MiddleMotor
+                {
+                    [PropertyAttribute(nameof(Name), "Unit")]
+                    public partial string Name_Unit { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReference(librarySource, mainSource, runGeneratorOverLibrary: true);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Contains("'Properties'", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange

@@ -104,11 +104,20 @@ internal static class SubjectAttributeConflicts
         {
             if (member is IPropertySymbol property &&
                 !SymbolExtensions.IsNeverASubjectProperty(property) &&
-                property.ExplicitInterfaceImplementations.Length > 0)
+                property.ExplicitInterfaceImplementations.Length > 0 &&
+                !IsGeneratedSubjectMember(property.ExplicitInterfaceImplementations[0]))
             {
                 seenNames.Add(property.ExplicitInterfaceImplementations[0].Name);
             }
         }
+    }
+
+    // The generator implements IInterceptorSubject's properties explicitly on every subject; they are visible on a
+    // subject read from metadata but are never part of the property set.
+    private static bool IsGeneratedSubjectMember(IPropertySymbol implementedProperty)
+    {
+        return implementedProperty.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
+            KnownTypes.IInterceptorSubject;
     }
 
     private static void AddProvider(
