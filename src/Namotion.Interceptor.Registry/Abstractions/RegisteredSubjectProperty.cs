@@ -415,7 +415,8 @@ public class RegisteredSubjectProperty
             SortByPosition();
             _childrenCache = default;
 
-            // Release references so subjects can be GC'd on idle threads
+            // Release references so subjects can be GC'd on idle threads. Nothing above runs user code or
+            // throws; a throw would leave entries of this property in the thread-static map for the next one.
             positions?.Clear();
         }
     }
@@ -434,8 +435,8 @@ public class RegisteredSubjectProperty
     }
 
     // Children of a collection are kept in position order, which an append leaves as it is. A
-    // dictionary has no order of its own to follow, so its children stay in the order they were
-    // attached, whatever the type of their keys.
+    // property declared as a dictionary has no order of its own to follow, so its children stay in
+    // the order they were attached, whatever the type of their keys.
     private int GetInsertPosition(object? index)
     {
         var position = _children.Count;

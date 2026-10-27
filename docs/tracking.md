@@ -432,7 +432,7 @@ These rules hold for every index the library keeps, in the registry (`Children`,
 - An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation.
 - Keys are compared with `Equals`. A key whose `Equals` throws makes the write throw after the value is stored, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
 - The same requirements apply as to `ILifecycleHandler` (below), and the span is only valid during the call.
-- On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with its last position or key, and after an in-place mutation that index is not the stored one.
+- On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with one of its positions or keys, and after an in-place mutation with one the value had then, neither of which needs to be the stored one.
 
 ### Thread Safety
 
