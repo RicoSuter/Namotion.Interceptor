@@ -236,4 +236,43 @@ public class HiddenSubjectAccessTests
         Assert.Equal(2, items.GetProperty("count").GetInt32());
         Assert.Equal(nameof(TestDevice), items.GetProperty("itemType").GetString());
     }
+
+    [Fact]
+    public async Task WhenASubjectIsMovedBehindAHiddenPropertyAfterItsCheck_ThenItsPathDoesNotNameTheHiddenProperty()
+    {
+        // Arrange
+        // The root holds A through A, and A holds S. Once the policy is asked about S, its check walks the chain
+        // through the root's A; on that first chain property the policy moves A behind the hidden Secret.
+        var context = CreateContext();
+        var root = new TestNode(context) { Name = "Root" };
+        var a = new TestNode(context) { Name = "A" };
+        var s = new TestNode(context) { Name = "S" };
+        root.A = a;
+        a.Child = s;
+
+        var isSubjectChecked = false;
+        var isMoved = false;
+        var policy = new TestAccessPolicy((member, action) =>
+        {
+            if (member.Parent.Subject == s)
+            {
+                isSubjectChecked = true;
+            }
+            else if (isSubjectChecked && !isMoved && member.Parent.Subject == root && member.Name == nameof(TestNode.A))
+            {
+                isMoved = true;
+                root.Secret = a;
+                root.A = null;
+            }
+
+            return action != McpAccessActions.Read || member.Name != nameof(TestNode.Secret);
+        });
+
+        // Act
+        var result = await McpToolCaller.CallAsync(root, CreateConfiguration(policy), "browse", new { format = "json", depth = 2 });
+
+        // Assert
+        Assert.True(isMoved);
+        Assert.DoesNotContain(nameof(TestNode.Secret), result.GetRawText());
+    }
 }

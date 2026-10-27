@@ -919,6 +919,95 @@ public class PathExtensionsTests
             Assert.Same(person.Father, result!.Value.Property.Subject);
         }
     }
+
+    // --- Writing only through included properties ---
+
+    [Fact]
+    public void WhenAPropertyOnTheChainIsExcluded_ThenTheIncludedOnlyPathIsNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person(context) { FirstName = "Father" };
+        var mother = new Person(context) { FirstName = "Mother" };
+        root.Father = father;
+        father.Mother = mother;
+        var property = mother.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null);
+        var includedOnlyPath = property.TryGetPath(pathProvider, root, null, includedPropertiesOnly: true);
+        var allIncludedPath = property.TryGetPath(DefaultPathProvider.Instance, root, null, includedPropertiesOnly: true);
+
+        // Assert
+        Assert.Equal("Father.Mother.FirstName", path);
+        Assert.Null(includedOnlyPath);
+        Assert.Equal("Father.Mother.FirstName", allIncludedPath);
+    }
+
+    [Fact]
+    public void WhenTheInlinePathsDictionaryOnTheChainIsExcluded_ThenTheIncludedOnlyPathIsNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        var child = new TestInlineContainer(context) { Name = "Child" };
+        root.Children = new Dictionary<string, TestInlineContainer> { ["a"] = child };
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestInlineContainer.Name))!;
+        var pathProvider = new ExcludingPathProvider(nameof(TestInlineContainer.Children));
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null);
+        var includedOnlyPath = property.TryGetPath(pathProvider, root, null, includedPropertiesOnly: true);
+
+        // Assert
+        Assert.Equal("a.Name", path);
+        Assert.Null(includedOnlyPath);
+    }
+
+    [Fact]
+    public void WhenASubjectOnTheChainMovesWhileItIsChecked_ThenTheIncludedOnlyPathIsTheCheckedOne()
+    {
+        // Arrange
+        // On its first check of father.Father the provider moves the father behind the excluded Mother, so a second
+        // walk would write the path through Mother.
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person(context) { FirstName = "Father" };
+        var grand = new Person(context) { FirstName = "Grand" };
+        root.Father = father;
+        father.Father = grand;
+        var property = grand.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var pathProvider = new MovingPathProvider(father.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Father))!, () =>
+        {
+            root.Mother = father;
+            root.Father = null;
+        });
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null, includedPropertiesOnly: true);
+
+        // Assert
+        Assert.True(pathProvider.IsMoved);
+        Assert.Equal("Father.Father.FirstName", path);
+    }
+
+    private sealed class MovingPathProvider(RegisteredSubjectProperty trigger, Action move) : PathProviderBase
+    {
+        public bool IsMoved { get; private set; }
+
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            if (!IsMoved && property == trigger)
+            {
+                IsMoved = true;
+                move();
+            }
+
+            return property.Name != nameof(Person.Mother);
+        }
+    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]

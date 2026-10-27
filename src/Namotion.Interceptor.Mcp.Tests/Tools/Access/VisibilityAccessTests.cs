@@ -80,4 +80,33 @@ public class VisibilityAccessTests
         Assert.Same(first, second);
         Assert.True(first.IsShown(room.Device.TryGetRegisteredSubject()!));
     }
+
+    [Fact]
+    public void WhenAskedForAnotherInnerProvider_ThenTheVisibilityWrapsThatProvider()
+    {
+        // Arrange
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen" };
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            AccessPolicy = new TestAccessPolicy((_, _) => true)
+        };
+        var visibility = McpVisibility.For(configuration, room);
+
+        // Act
+        var first = visibility.GetListingPathProvider(DefaultPathProvider.Instance);
+        var again = visibility.GetListingPathProvider(DefaultPathProvider.Instance);
+        var other = visibility.GetListingPathProvider(new SlashPathProvider());
+
+        // Assert
+        Assert.Same(first, again);
+        Assert.Equal('.', first.PathSeparator);
+        Assert.Equal('/', other.PathSeparator);
+    }
+
+    private sealed class SlashPathProvider : PathProviderBase
+    {
+        public override char PathSeparator => '/';
+    }
 }
