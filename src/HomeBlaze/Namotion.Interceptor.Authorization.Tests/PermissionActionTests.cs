@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Namotion.Interceptor.Authorization.Tests.Models;
+using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
 namespace Namotion.Interceptor.Authorization.Tests;
 
@@ -67,5 +69,33 @@ public class PermissionActionTests
     {
         // Act & Assert
         Assert.Equal("read", PermissionAction.Read.ToString());
+    }
+
+    [Fact]
+    public void WhenActionIsDefault_ThenNameIsEmptyAndSerializationThrows()
+    {
+        // Arrange
+        var action = default(PermissionAction);
+
+        // Act & Assert
+        Assert.Equal(string.Empty, action.Name);
+        Assert.Equal(string.Empty, action.ToString());
+        Assert.Equal(action.GetHashCode(), default(PermissionAction).GetHashCode());
+        Assert.Throws<JsonException>(() => JsonSerializer.Serialize(action));
+    }
+
+    [Fact]
+    public void WhenActionIsDefault_ThenNoPolicyKnowsIt()
+    {
+        // Arrange
+        var member = Member(Create().Wifi!, nameof(Wifi.Ssid));
+        var policy = Policies.Compile(Policies.Role("Reader"));
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() => policy.IsAllowed(member, default));
+        Assert.False(AuthorizationPolicy.DenyAll.IsAllowed(member, default));
+        var exception = Assert.Throws<AuthorizationException>(
+            () => AuthorizationPolicy.Compile([], [], [], [default], TestTags.Default, Policies.SlashPaths));
+        Assert.Equal("A known action has no name.", exception.Message);
     }
 }

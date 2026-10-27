@@ -180,6 +180,12 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
                 if (registeredSubject is not null)
                 {
+                    if (change.IsContextDetach)
+                    {
+                        // Before the parents change, see RegisteredSubject.IsAttached.
+                        registeredSubject.MarkDetached();
+                    }
+
                     if (change is { IsPropertyReferenceRemoved: true, Property: not null })
                     {
                         var property = _knownSubjects
@@ -256,6 +262,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
         var registeredSubject = new RegisteredSubject(subject);
+        registeredSubject.MarkAttached();
         _knownSubjects[subject] = registeredSubject;
         Volatile.Write(ref _knownSubjectsSnapshot, null);
         return registeredSubject;

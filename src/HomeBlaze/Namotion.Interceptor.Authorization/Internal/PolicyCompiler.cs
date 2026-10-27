@@ -9,6 +9,10 @@ internal static class PolicyCompiler
 {
     public const int MaxActions = 64;
 
+    public const ulong ReadBit = 1UL;
+
+    public const ulong WriteBit = 1UL << 1;
+
     public sealed record Result(
         ImmutableArray<AuthorizationRole> Roles,
         CompiledRule[] Allow,
@@ -22,14 +26,6 @@ internal static class PolicyCompiler
         IReadOnlyCollection<PermissionAction> knownActions,
         PathProviderBase pathProvider)
     {
-        foreach (var role in roles)
-        {
-            if (role is not null && string.Equals(role.Name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new AuthorizationException($"Role name '{AuthorizationPolicy.SystemRoleName}' is reserved.");
-            }
-        }
-
         var closure = RoleClosure.Resolve(roles, roleNames);
         var actionBits = BuildActionBits(knownActions);
 
@@ -51,8 +47,8 @@ internal static class PolicyCompiler
     {
         var bits = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
         {
-            [PermissionAction.Read.Name] = 1UL,
-            [PermissionAction.Write.Name] = 1UL << 1
+            [PermissionAction.Read.Name] = ReadBit,
+            [PermissionAction.Write.Name] = WriteBit
         };
 
         var next = 2;

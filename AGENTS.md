@@ -35,7 +35,7 @@ Risky connector work also needs the [Connector Tester](docs/connector-tester.md)
 ### Performance Testing
 - `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LaunchCount 3` - Compare against a base branch (`-Filter` takes several patterns)
 - `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LocalOnly` - Absolute numbers for the current tree
-- `pwsh scripts/benchmark.ps1 -Project src/HomeBlaze/HomeBlaze.Benchmark/HomeBlaze.Benchmark.csproj -Filter "*AuthorizationBenchmark*" -LocalOnly` - Benchmarks of libraries incubating under `src/HomeBlaze/`, which move to `src/Namotion.Interceptor.Benchmark` with their library
+- `pwsh scripts/benchmark.ps1 -Project <benchmark project .csproj> -Filter "*Benchmark*" -LocalOnly` - Benchmarks of another benchmark project, see [Benchmarking](docs/benchmarking.md)
 
 Always read [Benchmarking](docs/benchmarking.md) before running or interpreting a benchmark.
 

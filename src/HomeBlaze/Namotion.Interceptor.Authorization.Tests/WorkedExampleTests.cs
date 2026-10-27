@@ -10,7 +10,7 @@ public class WorkedExampleTests
 {
     private static readonly IMemberTagProvider Tags = new DelegateTagProvider(GetTags);
 
-    private static string[] GetTags(RegisteredSubjectProperty member)
+    private static ImmutableArray<string> GetTags(RegisteredSubjectProperty member)
     {
         if (member.IsAttribute)
         {

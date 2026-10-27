@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -13,7 +15,7 @@ namespace HomeBlaze.Authorization;
 /// operations and whether they require confirmation, properties holding subjects, attributes and metadata.
 /// </summary>
 /// <remarks>
-/// Thread-safe; returns a shared array per combination of tags, which callers must not change. The tags of a member are
+/// Thread-safe; returns a shared array per combination of tags. The tags of a member are
 /// cached until an attribute is added to it. Only a property of type <see cref="MethodMetadata"/> is read.
 /// </remarks>
 public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
@@ -54,7 +56,7 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
     private static readonly ConditionalWeakTable<RegisteredSubjectProperty, CachedTags> TagsByMember = new();
 
     /// <inheritdoc />
-    public IReadOnlyCollection<string> GetTags(RegisteredSubjectProperty member)
+    public ImmutableArray<string> GetTags(RegisteredSubjectProperty member)
     {
         var attributeCount = member.Attributes.Length;
         if (TagsByMember.TryGetValue(member, out var cached) && cached.AttributeCount == attributeCount)
@@ -63,7 +65,7 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         }
 
         var index = (int)GetMarkers(member);
-        var tags = Volatile.Read(ref TagsByMarkers[index]) ?? CreateTags(index);
+        var tags = ImmutableCollectionsMarshal.AsImmutableArray(Volatile.Read(ref TagsByMarkers[index]) ?? CreateTags(index));
         TagsByMember.AddOrUpdate(member, new CachedTags(tags, attributeCount));
         return tags;
     }
@@ -137,5 +139,5 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         return Interlocked.CompareExchange(ref TagsByMarkers[index], created, null) ?? created;
     }
 
-    private sealed record CachedTags(string[] Tags, int AttributeCount);
+    private sealed record CachedTags(ImmutableArray<string> Tags, int AttributeCount);
 }

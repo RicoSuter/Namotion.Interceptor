@@ -21,7 +21,7 @@ public sealed class PermissionActionJsonConverter : JsonConverter<PermissionActi
 
     public override void Write(Utf8JsonWriter writer, PermissionAction value, JsonSerializerOptions options)
     {
-        if (value.Name is null)
+        if (value.Name.Length == 0)
         {
             throw new JsonException("An action has no name.");
         }

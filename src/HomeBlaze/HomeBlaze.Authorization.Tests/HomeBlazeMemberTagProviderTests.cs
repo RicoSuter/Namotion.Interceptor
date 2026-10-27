@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor.Registry;
@@ -143,7 +144,7 @@ public class HomeBlazeMemberTagProviderTests
     }
 
     [Fact]
-    public void WhenAPropertyHasNoMarker_ThenItHasNoTagsAndNotNull()
+    public void WhenAPropertyHasNoMarker_ThenItHasNoTagsAndTheArrayIsNotDefault()
     {
         // Arrange
         var member = GetMember(nameof(TagTestSubject.Plain));
@@ -152,7 +153,7 @@ public class HomeBlazeMemberTagProviderTests
         var tags = _provider.GetTags(member);
 
         // Assert
-        Assert.NotNull(tags);
+        Assert.False(tags.IsDefault);
         Assert.Empty(tags);
     }
 
@@ -168,8 +169,7 @@ public class HomeBlazeMemberTagProviderTests
         var secondTags = _provider.GetTags(second);
 
         // Assert
-        Assert.IsType<string[]>(firstTags);
-        Assert.Same(firstTags, secondTags);
+        Assert.Same(ImmutableCollectionsMarshal.AsArray(firstTags), ImmutableCollectionsMarshal.AsArray(secondTags));
     }
 
     [Fact]
@@ -227,7 +227,7 @@ public class HomeBlazeMemberTagProviderTests
         var second = _provider.GetTags(member);
 
         // Assert
-        Assert.Same(first, second);
+        Assert.Same(ImmutableCollectionsMarshal.AsArray(first), ImmutableCollectionsMarshal.AsArray(second));
     }
 
     private static RegisteredSubjectProperty GetMember(string name) =>

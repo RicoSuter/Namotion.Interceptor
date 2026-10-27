@@ -21,6 +21,9 @@ internal sealed class AuthorizationSnapshot
     private readonly string? _customRolesError;
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
 
+    // The error of each role with a path pattern that does not start with the separator, null when there is none.
+    private readonly Dictionary<string, string>? _leadingSeparatorErrors;
+
     private AuthorizationSnapshot(
         long version,
         PathProviderBase pathProvider,
@@ -33,6 +36,7 @@ internal sealed class AuthorizationSnapshot
         _roles = roles;
         _unavailableRoles = unavailableRoles;
         _customRolesError = customRolesError;
+        _leadingSeparatorErrors = PathPatternChecks.GetLeadingSeparatorErrors(roles, pathProvider.PathSeparator);
         RoleNames = ImmutableArray.CreateRange(roles, static role => role.Name);
     }
 
@@ -177,6 +181,12 @@ internal sealed class AuthorizationSnapshot
         {
             var policy = AuthorizationPolicy.Compile(
                 _roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
+            if (_leadingSeparatorErrors is not null &&
+                PathPatternChecks.FindLeadingSeparatorError(roleNames, _roles, _leadingSeparatorErrors) is { } patternError)
+            {
+                return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
+            }
+
             return new AuthorizationResult(policy, null);
         }
         catch (AuthorizationException exception)
@@ -197,93 +207,10 @@ internal sealed class AuthorizationSnapshot
             var (name, role) = customRoles[i];
             var error = GetPolicy([name]).Error;
             var warning = error is null
-                ? GetWarning(_roles[BuiltInRoles.All.Length + i], knownSubjects, _pathProvider, ref roots)
+                ? PathPatternChecks.GetWarning(_roles[BuiltInRoles.All.Length + i], knownSubjects, _pathProvider, ref roots)
                 : null;
             roleStatuses.Add((role, name, error, warning));
         }
-    }
-
-    // A pattern without a wildcard that resolves to an entry of a dictionary or collection, such as a device in a folder,
-    // names a subject that has no member of its own and matches nothing, which the policy cannot tell without the graph.
-    // The graph can change while it is read, as in AuthorizationService.BuildSnapshot; the warning is then left out.
-    private static string? GetWarning(
-        AuthorizationRole role,
-        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
-        PathProviderBase pathProvider,
-        ref List<RegisteredSubject>? roots)
-    {
-        List<string>? entryPatterns = null;
-        try
-        {
-            AddEntryPatterns(role.Allow, knownSubjects, pathProvider, ref roots, ref entryPatterns);
-            AddEntryPatterns(role.Deny, knownSubjects, pathProvider, ref roots, ref entryPatterns);
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-
-        if (entryPatterns is null)
-        {
-            return null;
-        }
-
-        var separator = pathProvider.PathSeparator;
-        return string.Join(' ', entryPatterns.Select(pattern =>
-            $"Path pattern '{pattern}' names a subject, not a member, and matches nothing; use '{pattern}{separator}**' for the subject and everything below it, or '{pattern}{separator}*' for its members."));
-    }
-
-    private static void AddEntryPatterns(
-        ImmutableArray<PermissionRule> rules,
-        IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects,
-        PathProviderBase pathProvider,
-        ref List<RegisteredSubject>? roots,
-        ref List<string>? entryPatterns)
-    {
-        foreach (var rule in rules)
-        {
-            if (rule.Paths.IsDefault)
-            {
-                continue;
-            }
-
-            foreach (var pattern in rule.Paths)
-            {
-                if (pattern.Contains('*') || entryPatterns?.Contains(pattern) == true)
-                {
-                    continue;
-                }
-
-                roots ??= knownSubjects.Values.Where(static subject => subject.Parents.Length == 0).ToList();
-                if (NamesEntry(pattern, roots, pathProvider))
-                {
-                    (entryPatterns ??= []).Add(pattern);
-                }
-            }
-        }
-    }
-
-    // A pattern matches the member paths below every root, so it names an entry when it resolves to an entry holding a
-    // subject below one root and to a member below none.
-    private static bool NamesEntry(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
-    {
-        var namesEntry = false;
-        foreach (var root in roots)
-        {
-            if (pathProvider.TryGetPropertyFromPath(root, pattern) is not { } resolved)
-            {
-                continue;
-            }
-
-            if (resolved.Index is null)
-            {
-                return false;
-            }
-
-            namesEntry |= pathProvider.TryGetSubjectFromPath(root, pattern) is not null;
-        }
-
-        return namesEntry;
     }
 
     private static List<KeyValuePair<string, Role>> GetRoles(Authorization authorization)

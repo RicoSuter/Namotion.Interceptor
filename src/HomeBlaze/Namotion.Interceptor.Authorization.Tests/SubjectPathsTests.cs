@@ -1,6 +1,5 @@
 using Namotion.Interceptor.Authorization.Internal;
 using Namotion.Interceptor.Authorization.Tests.Models;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
@@ -377,7 +376,7 @@ public class SubjectPathsTests
         home.Areas = new Dictionary<string, Room> { ["Kitchen"] = new Room { Neighbor = bedroom } };
 
         // Act & Assert
-        AssertLinksMatchRegistry(home, lamp, SlashPathProvider.Instance,
+        AssertLinksMatchRegistry(home, lamp, Policies.SlashPaths,
             [[new PathLink("Areas", "Kitchen", "Kitchen"), new PathLink("Neighbor", null, null), new PathLink("Lights", "Lamp", null)]]);
     }
 
@@ -391,7 +390,7 @@ public class SubjectPathsTests
         sensor.Temperature_Probe = probe;
 
         // Act & Assert
-        AssertLinksMatchRegistry(home, probe, SlashPathProvider.Instance,
+        AssertLinksMatchRegistry(home, probe, Policies.SlashPaths,
             [[new PathLink("Rooms", "Kitchen", null), new PathLink("Sensor", null, null), new PathLink("Probe", null, null)]]);
     }
 
@@ -463,9 +462,4 @@ public class SubjectPathsTests
         => index.Length == 0 || index[0] == '\'' || index.Contains(pathProvider.IndexClose)
             ? $"'{index.Replace("'", "''")}'"
             : index;
-
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
-    {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
-    }
 }
