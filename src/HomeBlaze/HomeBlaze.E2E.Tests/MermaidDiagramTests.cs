@@ -46,6 +46,7 @@ public class MermaidDiagramTests
         await Assertions.Expect(diagram).ToHaveAttributeAsync("data-mermaid-state", "done", new() { Timeout = Timeout });
         await Assertions.Expect(diagram.Locator("svg")).ToBeVisibleAsync();
         await Assertions.Expect(diagram).ToContainTextAsync("Tank");
+        Assert.Equal("function", await page.EvaluateAsync<string>("() => typeof window.define"));
     }
 
     [Fact]

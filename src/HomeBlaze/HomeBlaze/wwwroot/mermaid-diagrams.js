@@ -23,24 +23,31 @@
     let renderCount = 0;
 
     // The Monaco loader defines a global AMD define, which makes the bundle register itself as a module instead of
-    // setting window.mermaid, so the define is hidden while the script runs.
-    const loadMermaid = () => mermaidLoad ??= new Promise((resolve, reject) => {
+    // setting window.mermaid. The code runs as an inline script, which executes synchronously, so define is only hidden
+    // while it runs and not while Monaco may load a module of its own.
+    const loadMermaid = () => mermaidLoad ??= (async () => {
+        const response = await fetch('lib/mermaid/mermaid.min.js');
+        if (!response.ok) {
+            throw new Error(`Mermaid could not be loaded: ${response.status}`);
+        }
+
+        const code = await response.text();
         const amdDefine = window.define;
         window.define = undefined;
-        const restore = () => window.define = amdDefine;
+        try {
+            const script = document.createElement('script');
+            script.textContent = code;
+            document.head.appendChild(script);
+        } finally {
+            window.define = amdDefine;
+        }
 
-        const script = document.createElement('script');
-        script.src = 'lib/mermaid/mermaid.min.js';
-        script.onload = () => {
-            restore();
-            resolve(window.mermaid);
-        };
-        script.onerror = error => {
-            restore();
-            reject(error);
-        };
-        document.head.appendChild(script);
-    });
+        if (!window.mermaid) {
+            throw new Error('Mermaid did not load.');
+        }
+
+        return window.mermaid;
+    })();
 
     // Strict still draws a click statement with a URL as a link, so the links are removed and their content stays.
     const withoutLinks = svg => {
