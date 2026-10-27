@@ -55,20 +55,20 @@ internal static class McpToolHelper
         return false;
     }
 
+    /// <summary>
+    /// Builds the node of a subject whose path, from <see cref="TryGetSubjectPath"/>, is <paramref name="path"/>.
+    /// </summary>
     internal static SubjectNode BuildSubjectNodeDto(
         RegisteredSubject subject,
+        string? path,
         PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
         McpServerConfiguration configuration,
-        McpVisibility visibility,
         bool includeProperties,
         bool includeAttributes,
         bool includeMethods,
         bool includeInterfaces,
         IReadOnlySet<string>? propertyNames = null)
     {
-        var path = visibility.TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
-
         // Collect enrichments and extract known fields
         var enrichments = new Dictionary<string, object?>();
         foreach (var enricher in configuration.SubjectEnrichers)
@@ -215,6 +215,44 @@ internal static class McpToolHelper
 
         return property.IsAttribute ? null : property;
     }
+
+    /// <summary>
+    /// The path the tools write for the subject from <paramref name="rootSubject"/>, after the configuration's
+    /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty, otherwise null
+    /// when the registry writes no path. With an <see cref="McpServerConfiguration.AccessPolicy"/> also null when a
+    /// property the path is written through is not readable.
+    /// </summary>
+    internal static string? TryGetSubjectPath(
+        RegisteredSubject subject, McpServerConfiguration configuration, IInterceptorSubject rootSubject)
+    {
+        var pathPrefix = configuration.PathPrefix;
+        if (subject.Subject == rootSubject)
+        {
+            return pathPrefix.Length > 0 ? pathPrefix : null;
+        }
+
+        var parents = subject.Parents;
+        if (parents.Length == 0)
+        {
+            return null;
+        }
+
+        var parent = parents[0];
+        var path = configuration.AccessPolicy is null
+            ? parent.Property.TryGetPath(configuration.ToolPathProvider, rootSubject, parent.Index)
+            : TryGetReadablePath(parent.Property, parent.Index, configuration, rootSubject);
+        return path is not null ? $"{pathPrefix}{path}" : null;
+    }
+
+    // The chain is checked in the walk that writes the text, so a subject moved on it while a call runs cannot put the
+    // name of a hidden property into the text. The resolution provider writes the listing provider's segments and
+    // includes exactly what the policy allows to read; the listing provider's own inclusion applies to the holding
+    // property only, as without a policy.
+    private static string? TryGetReadablePath(
+        RegisteredSubjectProperty property, object? index, McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
+        configuration.ToolPathProvider.IsPropertyIncluded(property)
+            ? property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, index, includedPropertiesOnly: true)
+            : null;
 
     private static ScalarProperty BuildScalarPropertyDto(
         RegisteredSubjectProperty property,

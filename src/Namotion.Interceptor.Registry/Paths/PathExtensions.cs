@@ -345,39 +345,23 @@ public static class PathExtensions
     /// the separator is written as is and does not resolve back.
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
-        => TryWritePath(property, pathProvider, rootSubject, propertyIndex, properties: null);
+        => property.TryGetPath(pathProvider, rootSubject, propertyIndex, includedPropertiesOnly: false);
 
     /// <summary>
-    /// Gets the path as <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
-    /// does and fills <paramref name="properties"/> with the chain of properties it is written through, from the
-    /// property owned by <paramref name="rootSubject"/> (or by the absolute top when it is null) down to
-    /// <paramref name="property"/>, each with its collection position or dictionary key. The list is cleared first and
-    /// stays empty when no path is written.
+    /// Gets the complete path of the given property, optionally only through properties the provider includes.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="pathProvider">The path provider.</param>
     /// <param name="rootSubject">The root subject or null.</param>
-    /// <param name="propertyIndex">Optional index of the property, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
-    /// <param name="properties">The list to fill, which the caller may reuse.</param>
-    /// <returns>The path, or null as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</returns>
+    /// <param name="propertyIndex">The index of the property, or null, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
+    /// <param name="includedPropertiesOnly">Whether every property on the chain the path is written through, also an [InlinePaths] dictionary written as a bare key, must pass <see cref="PathProviderBase.IsPropertyIncluded"/>, checked in the same walk that writes the text.</param>
+    /// <returns>The path, or null as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>, and with <paramref name="includedPropertiesOnly"/> also when a property on the chain is excluded.</returns>
     public static string? TryGetPath(
         this RegisteredSubjectProperty property,
         PathProviderBase pathProvider,
         IInterceptorSubject? rootSubject,
         object? propertyIndex,
-        List<(RegisteredSubjectProperty Property, object? Index)> properties)
-    {
-        ArgumentNullException.ThrowIfNull(properties);
-        properties.Clear();
-        return TryWritePath(property, pathProvider, rootSubject, propertyIndex, properties);
-    }
-
-    private static string? TryWritePath(
-        RegisteredSubjectProperty property,
-        PathProviderBase pathProvider,
-        IInterceptorSubject? rootSubject,
-        object? propertyIndex,
-        List<(RegisteredSubjectProperty Property, object? Index)>? properties)
+        bool includedPropertiesOnly)
     {
         if (!pathProvider.IsPropertyIncluded(property))
         {
@@ -389,7 +373,8 @@ public static class PathExtensions
         var frames = PooledFrames.Rent();
         try
         {
-            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames))
+            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames) ||
+                (includedPropertiesOnly && !AreChainPropertiesIncluded(pathProvider, in frames)))
             {
                 return null;
             }
@@ -399,8 +384,8 @@ public static class PathExtensions
             {
                 var (prop, index) = frames[i];
 
-                // [InlinePaths] frames emit just the key where the reader resolves it back; no IsPropertyIncluded
-                // check, since providers already include them and these frames are only traversed for navigation.
+                // [InlinePaths] frames emit just the key where the reader resolves it back; only includedPropertiesOnly
+                // checks them, since providers already include them and these frames are only traversed for navigation.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))
@@ -426,17 +411,7 @@ public static class PathExtensions
                 }
             }
 
-            if (builder.Length == 0)
-            {
-                return null;
-            }
-
-            if (properties is not null)
-            {
-                CopyRootFirst(in frames, properties);
-            }
-
-            return builder.ToString();
+            return builder.Length > 0 ? builder.ToString() : null;
         }
         finally
         {
@@ -477,7 +452,12 @@ public static class PathExtensions
                 return false;
             }
 
-            CopyRootFirst(in frames, properties);
+            properties.EnsureCapacity(frames.Count);
+            for (var i = frames.Count - 1; i >= 0; i--)
+            {
+                properties.Add(frames[i]);
+            }
+
             return true;
         }
         finally
@@ -486,13 +466,18 @@ public static class PathExtensions
         }
     }
 
-    private static void CopyRootFirst(in PooledFrames frames, List<(RegisteredSubjectProperty Property, object? Index)> properties)
+    // Frame 0 is the property itself, checked before the walk.
+    private static bool AreChainPropertiesIncluded(PathProviderBase pathProvider, in PooledFrames frames)
     {
-        properties.EnsureCapacity(frames.Count);
-        for (var i = frames.Count - 1; i >= 0; i--)
+        for (var i = 1; i < frames.Count; i++)
         {
-            properties.Add(frames[i]);
+            if (!pathProvider.IsPropertyIncluded(frames[i].Property))
+            {
+                return false;
+            }
         }
+
+        return true;
     }
 
     private static bool TryAppendInlineKey(

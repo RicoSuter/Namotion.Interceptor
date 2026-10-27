@@ -919,6 +919,52 @@ public class PathExtensionsTests
             Assert.Same(person.Father, result!.Value.Property.Subject);
         }
     }
+
+    // --- Writing only through included properties ---
+
+    [Fact]
+    public void WhenAPropertyOnTheChainIsExcluded_ThenTheIncludedOnlyPathIsNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person(context) { FirstName = "Father" };
+        var mother = new Person(context) { FirstName = "Mother" };
+        root.Father = father;
+        father.Mother = mother;
+        var property = mother.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null);
+        var includedOnlyPath = property.TryGetPath(pathProvider, root, null, includedPropertiesOnly: true);
+        var allIncludedPath = property.TryGetPath(DefaultPathProvider.Instance, root, null, includedPropertiesOnly: true);
+
+        // Assert
+        Assert.Equal("Father.Mother.FirstName", path);
+        Assert.Null(includedOnlyPath);
+        Assert.Equal("Father.Mother.FirstName", allIncludedPath);
+    }
+
+    [Fact]
+    public void WhenTheInlinePathsDictionaryOnTheChainIsExcluded_ThenTheIncludedOnlyPathIsNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        var child = new TestInlineContainer(context) { Name = "Child" };
+        root.Children = new Dictionary<string, TestInlineContainer> { ["a"] = child };
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestInlineContainer.Name))!;
+        var pathProvider = new ExcludingPathProvider(nameof(TestInlineContainer.Children));
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null);
+        var includedOnlyPath = property.TryGetPath(pathProvider, root, null, includedPropertiesOnly: true);
+
+        // Assert
+        Assert.Equal("a.Name", path);
+        Assert.Null(includedOnlyPath);
+    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]
