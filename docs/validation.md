@@ -147,7 +147,7 @@ Inside a [transaction](tracking-transactions.md), writes are buffered until comm
 
 | Mode | When a value is written |
 |------|-------------------------|
-| `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `ValidationException` at the setter, so write order matters there. |
+| `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `ValidationException` at the setter, so write order matters there. This includes a write back to the landed value: if the landed value is invalid against the transaction's other values, undoing a change throws and the change stays pending. |
 | `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. |
 
 ```csharp
