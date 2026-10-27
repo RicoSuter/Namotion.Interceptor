@@ -315,6 +315,52 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenAPlainBaseAttributeReachesASubjectThroughASubjectOverride_ThenNI0066IsReportedOnTheBaseSubjectOnly()
+    {
+        // Arrange: BaseMotor overrides the plain declaration and adds the duplicate, so BaseMotor owns it and
+        // Motor, which only overrides the same property again, adds nothing.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public class PlainMotorBase
+                {
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    public virtual bool Forward_IsEnabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class BaseMotor : PlainMotorBase
+                {
+                    public partial bool Forward { get; set; }
+
+                    public override partial bool Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_Enabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor
+                {
+                    public override partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'BaseMotor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange
