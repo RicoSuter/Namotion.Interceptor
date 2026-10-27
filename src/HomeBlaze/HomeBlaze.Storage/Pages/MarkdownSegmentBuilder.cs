@@ -60,8 +60,9 @@ public static partial class MarkdownSegmentBuilder
 
     private static readonly char[] Braces = ['{', '}'];
 
-    // A comment, whose content opens nothing, or the name of an opening tag. "<!-->" and "<!--->" are complete comments.
-    [GeneratedRegex(@"<!--(?:-?>|[\s\S]*?(?:-->|$))|<([A-Za-z][A-Za-z0-9-]*)")]
+    // A comment, whose content opens nothing, or the name of an opening tag, each with whether it is never ended.
+    // "<!-->" and "<!--->" are complete comments.
+    [GeneratedRegex(@"<!--(?:-?>|[\s\S]*?(?:-->|(?<unended>$)))|<(?<name>[A-Za-z][A-Za-z0-9-]*)(?<unended>(?>[^>]*)$)?")]
     private static partial Regex OpeningTagRegex();
 
     private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
@@ -210,35 +211,26 @@ public static partial class MarkdownSegmentBuilder
     /// <summary>Writes a break marker before each top-level block of the page that may start a markup string of its own.</summary>
     private static void WriteBreaksBetweenBlocks(HtmlRenderer renderer, MarkdownPage page, StringWriter writer, string token)
     {
-        // Blazor parses each markup string on its own, so an element opened in one block and closed in a later one
-        // would be closed early. Whether and where a browser closes it is not decided here: after the first top-level
-        // block whose raw HTML opens an element, no break is written.
+        // Blazor parses each markup string on its own, in a fresh context. So raw HTML stays with the block before it,
+        // and after a block whose raw HTML opens an element, which would be closed early, the rest stays joined.
         var document = page.Document;
-        HashSet<Block>? withoutBreak = null;
-        for (var index = 0; index < document.Count; index++)
-        {
-            if (withoutBreak is not null)
-            {
-                withoutBreak.Add(document[index]);
-            }
-            else if (OpensAnElement(page, document[index]))
-            {
-                withoutBreak = new HashSet<Block>(ReferenceEqualityComparer.Instance);
-            }
-        }
-
         var marker = $"<!--BREAK:{token}-->";
+        var isJoined = false;
         renderer.ObjectWriteBefore += (_, markdownObject) =>
         {
+            if (markdownObject is not Block block || !ReferenceEquals(block.Parent, document))
+            {
+                return;
+            }
+
             // Hooked into the rendering of the whole document, so that each block renders as it does there. The marker
             // is written past the renderer, which then still knows whether the HTML before it ended a line.
-            if (markdownObject is Block block &&
-                ReferenceEquals(block.Parent, document) &&
-                withoutBreak?.Contains(block) != true &&
-                writer.GetStringBuilder().Length > 0)
+            if (!isJoined && block is not HtmlBlock && writer.GetStringBuilder().Length > 0)
             {
                 writer.Write(marker);
             }
+
+            isJoined = isJoined || OpensAnElement(page, block);
         };
     }
 
@@ -256,7 +248,8 @@ public static partial class MarkdownSegmentBuilder
     {
         foreach (Match match in OpeningTagRegex().Matches(rawHtml))
         {
-            if (match.Groups[1].Success && !VoidElements.Contains(match.Groups[1].Value))
+            var name = match.Groups["name"];
+            if (match.Groups["unended"].Success || (name.Success && !VoidElements.Contains(name.Value)))
             {
                 return true;
             }
