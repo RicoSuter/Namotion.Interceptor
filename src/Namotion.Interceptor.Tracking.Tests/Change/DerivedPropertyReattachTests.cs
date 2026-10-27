@@ -267,6 +267,59 @@ public class DerivedPropertyReattachTests
     }
 
     [Fact]
+    public async Task WhenDependentRegistersAgainWhileItsSourceIsDetaching_ThenBothDirectionsAgree()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var holder = new UntrackedReferenceHolder(context);
+        var leaf = new UntrackedReferenceLeaf(context);
+        holder.First = leaf;
+        holder.Watched = leaf;
+        holder.Trigger = 1;
+
+        var valueProperty = new PropertyReference(leaf, nameof(UntrackedReferenceLeaf.Value));
+        var observedProperty = new PropertyReference(holder, nameof(UntrackedReferenceHolder.Observed));
+        var observedData = observedProperty.TryGetDerivedPropertyData()!;
+
+        // Act: the detach of the leaf waits to remove Value from Observed's dependencies, while Observed
+        // drops Value and then reads it again, registering on Value's fresh data.
+        Thread? detachThread = null;
+        Task detach;
+        Monitor.Enter(observedData);
+        var contentionBefore = Monitor.LockContentionCount;
+        try
+        {
+            detach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                detachThread = Thread.CurrentThread;
+                holder.First = null;
+            });
+
+            Assert.True(SpinWait.SpinUntil(
+                () => detachThread is not null &&
+                      (detachThread.ThreadState & ThreadState.WaitSleepJoin) != 0 &&
+                      Monitor.LockContentionCount > contentionBefore,
+                TimeSpan.FromSeconds(10)));
+
+            holder.Trigger = 0;
+            holder.Trigger = 1;
+        }
+        finally
+        {
+            Monitor.Exit(observedData);
+        }
+
+        await detach.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        Assert.Contains(valueProperty, observedProperty.GetRequiredProperties().ToArray());
+        Assert.Contains(observedProperty, valueProperty.GetUsedByProperties().Items.ToArray());
+    }
+
+    [Fact]
     public void WhenSubjectIsDetached_ThenItsTrackingDataIsRemoved()
     {
         // Arrange

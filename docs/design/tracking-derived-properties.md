@@ -379,7 +379,8 @@ DetachProperty(property)
   // release lock before Case 2 processing to avoid nesting with lock(derivedData)
   for each derived in usedBySnapshot:
     lock(derivedData)
-      derivedData.RemoveRequiredProperty(property)
+      if derived is not in the used-by properties of property's current data:
+        derivedData.RemoveRequiredProperty(property)
 ```
 
 The single lock ensures `IsAttached`, dependency cleanup (Case 1), and used-by snapshot (Case 2) are atomic: no window exists where a concurrent thread could see `IsAttached=false` but `UsedByProperties` still populated.
@@ -615,6 +616,7 @@ This is solved by locking `X.DerivedPropertyData` in both places:
 Since both operations lock the same object (`X.DerivedPropertyData`), they are fully serialized:
 - **DetachProperty wins lock**: sets `IsAttached = false`, takes snapshot (D not present), clears `UsedByProperties` and removes the data. `UpdateDependencies` then acquires the lock, sees the data is no longer current, and registers D on X's current data instead, which is fresh data or the data of X attached again. If the data was kept because X is recalculating, `UpdateDependencies` adds D to it; nothing snapshots it again until X's next detach, which cleans D up.
 - **UpdateDependencies wins lock**: sees the data not removed, adds D to `UsedByProperties`. `DetachProperty` then acquires the lock, takes snapshot (D is present), cleans up D's `RequiredProperties`.
+- **D registers again between the snapshot and the Case 2 cleanup**: a getter that drops X and then reads it again registers D on X's current data after the snapshot. The Case 2 cleanup, under `lock(derivedData)`, then keeps X in D's `RequiredProperties`, because X's current data lists D. The check is exact, since D only registers or unregisters under the same lock.
 
 No window exists where a used-by property is added to removed data. An `UpdateDependencies` that reaches a source after its data was removed registers on fresh data instead; if the source stays detached, this is the stale link described under "Untracked source properties" below.
 

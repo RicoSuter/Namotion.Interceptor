@@ -138,9 +138,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             lock (derivedData)
             {
-                derivedData.RemoveRequiredProperty(property);
+                // A dependent that registered on this property's current data after the snapshot keeps it.
+                if (!IsUsedByCurrentData(property, derivedProperty))
+                {
+                    derivedData.RemoveRequiredProperty(property);
+                }
             }
         }
+    }
+
+    private static bool IsUsedByCurrentData(in PropertyReference property, in PropertyReference derivedProperty)
+    {
+        var currentData = property.TryGetDerivedPropertyData();
+        return currentData is not null && currentData.GetUsedByProperties().Contains(derivedProperty);
     }
 
     /// <inheritdoc />

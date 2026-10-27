@@ -62,7 +62,8 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
-    /// Set by AttachProperty when data kept during an in-flight recalculation is re-attached.
+    /// Set by AttachProperty on every attach of a derived property. Unused for source properties,
+    /// whose data a detach always removes.
     /// Defaults to true because properties are assumed to be attached until explicitly detached.
     /// </summary>
     internal bool IsAttached = true;
