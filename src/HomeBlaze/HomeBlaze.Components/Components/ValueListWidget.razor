@@ -43,20 +43,8 @@
         }
     }
 </MudList>
-@if (ContainsSelection && StructureEditor is { } editor && Subject is ValueList list && PageAddTarget.Find(editor.GetAddTargets(list), "Value") is { } target)
-{
-    @* Shown while the list or one of its rows is selected, and it takes the pointer in both cases. *@
-    <MudButton Size="Size.Small"
-               StartIcon="@Icons.Material.Filled.Add"
-               Class="edit-mode-interactive"
-               OnClick="@(() => editor.AddListItemAsync(list, target))"
-               data-testid="add-value-button">Add value</MudButton>
-}
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
-
-    [CascadingParameter]
-    public PageStructureEditor? StructureEditor { get; set; }
 }

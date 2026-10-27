@@ -1547,8 +1547,6 @@ namespace HomeBlaze.Components.Components
     public class ValueListWidget : HomeBlaze.Components.SelectionContainingWidgetBase, HomeBlaze.Components.Abstractions.ISubjectComponent
     {
         public ValueListWidget() { }
-        [Microsoft.AspNetCore.Components.CascadingParameter]
-        public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }

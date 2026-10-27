@@ -203,24 +203,15 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenAValueIsAddedToASelectedListOrToTheListOfASelectedRow_ThenItsRowFollowsTheLastRow(bool selectRow)
+    [Fact]
+    public async Task WhenAValueIsAddedToASelectedList_ThenItsRowFollowsTheLastRow()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
-        if (selectRow)
-        {
-            await SelectRowAsync(page, "Row A");
-        }
-        else
-        {
-            await GetValueListWrapper(page).SelectWidgetAsync();
-        }
+        var actionBar = await GetValueListWrapper(page).SelectWidgetAsync();
 
         // Act
-        await page.GetByTestId("add-value-button").ClickAsync();
+        await actionBar.GetByTestId("add-button").ClickAsync();
         var dialog = page.GetByTestId("create-subject-dialog");
         await dialog.GetByLabel("Label", new() { Exact = true }).FillAsync("Row C");
         await page.GetByTestId("create-button").ClickAsync();
@@ -291,12 +282,12 @@ public class InlineStructureEditingTests
         // Arrange
         var page = await OpenPageInInlineModeAsync();
         var chip = page.GetByTestId("invisible-widget-chip").Filter(new() { HasText = "structuremap" });
-        await chip.SelectWidgetAsync();
+        var actionBar = await chip.SelectWidgetAsync();
         var cases = page.GetByTestId("value-map-cases");
         await Assertions.Expect(cases.GetByTestId("value-map-case")).ToHaveCountAsync(1, new() { Timeout = Timeout });
 
         // Act
-        await cases.GetByTestId("add-case-button").ClickAsync();
+        await actionBar.GetByTestId("add-button").ClickAsync();
         var dialog = page.GetByTestId("create-subject-dialog");
         await dialog.GetByLabel("Value", new() { Exact = true }).FillAsync("Running");
 
@@ -439,11 +430,11 @@ public class InlineStructureEditingTests
         var rowLines = page.Locator(".markdown-fragment [data-testid='block-insert-line']");
 
         // Act
-        await GetValueListWrapper(page).SelectWidgetAsync();
+        var actionBar = await GetValueListWrapper(page).SelectWidgetAsync();
 
         // Assert: the rows become selectable with the selection of the list, and the content of a row belongs to its row.
         await Assertions.Expect(row).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await page.OpenDialogAfterSelectionAsync(page.GetByTestId("add-value-button"));
+        await page.OpenDialogAfterSelectionAsync(actionBar.GetByTestId("add-button"));
         await Assertions.Expect(rowLines).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await page.GetByRole(AriaRole.Dialog).GetByTestId("cancel-button").ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
