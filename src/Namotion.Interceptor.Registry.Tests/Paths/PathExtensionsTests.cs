@@ -965,6 +965,49 @@ public class PathExtensionsTests
         Assert.Equal("a.Name", path);
         Assert.Null(includedOnlyPath);
     }
+
+    [Fact]
+    public void WhenASubjectOnTheChainMovesWhileItIsChecked_ThenTheIncludedOnlyPathIsTheCheckedOne()
+    {
+        // Arrange
+        // On its first check of father.Father the provider moves the father behind the excluded Mother, so a second
+        // walk would write the path through Mother.
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person(context) { FirstName = "Father" };
+        var grand = new Person(context) { FirstName = "Grand" };
+        root.Father = father;
+        father.Father = grand;
+        var property = grand.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var pathProvider = new MovingPathProvider(father.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Father))!, () =>
+        {
+            root.Mother = father;
+            root.Father = null;
+        });
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null, includedPropertiesOnly: true);
+
+        // Assert
+        Assert.True(pathProvider.IsMoved);
+        Assert.Equal("Father.Father.FirstName", path);
+    }
+
+    private sealed class MovingPathProvider(RegisteredSubjectProperty trigger, Action move) : PathProviderBase
+    {
+        public bool IsMoved { get; private set; }
+
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            if (!IsMoved && property == trigger)
+            {
+                IsMoved = true;
+                move();
+            }
+
+            return property.Name != nameof(Person.Mother);
+        }
+    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]
