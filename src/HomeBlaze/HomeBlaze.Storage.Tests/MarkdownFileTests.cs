@@ -695,13 +695,12 @@ public class MarkdownFileTests
 
         // Assert
         Assert.Collection(markdown.Children.Values.OfType<HtmlSegment>(),
-            first => Assert.Equal([first.Html.Length], first.BlockStarts.ToArray()),
-            error =>
-            {
-                Assert.Contains("markdown-block-error", error.Html);
-                Assert.True(error.BlockStarts.IsDefault);
-            },
-            after => Assert.Equal([0], after.BlockStarts.ToArray()));
+            first => Assert.True(first.EndsWithBlock),
+            error => Assert.Contains("markdown-block-error", error.Html),
+            after => Assert.True(after.StartsWithBlock));
+        var markup = MarkdownMarkup.GetRenderSegments(markdown.Children.Values, timeZone: null).Select(segment => segment.Html).ToArray();
+        Assert.Equal(3, markup.Length);
+        Assert.Contains("markdown-block-error", markup[1]);
     }
 
     [Fact]
@@ -716,9 +715,12 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
-        var html = Assert.Single(markdown.Children.Values.OfType<HtmlSegment>());
-        Assert.Equal("<p>First.</p>\n<p>Second.</p>\n", html.Html);
-        Assert.Equal([14], html.BlockStarts.ToArray());
+        var child = Assert.Single(markdown.Children);
+        var html = Assert.IsType<HtmlSegment>(child.Value);
+        Assert.Equal(["<p>First.</p>\n", "<p>Second.</p>\n"], html.Blocks.ToArray());
+        Assert.True(html.StartsWithBlock);
+        Assert.True(html.EndsWithBlock);
+        Assert.Matches("^Html_0_[0-9a-f]{16}$", child.Key);
     }
 
     [Fact]
@@ -732,7 +734,7 @@ public class MarkdownFileTests
         var before = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
 
         // Act
-        // The same HTML as raw HTML is one block, so it has no block start.
+        // The same HTML as raw HTML is one block.
         await WriteFileAsync(storage, "blocks.md", "<p>First.</p>\n<p>Second.</p>");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
@@ -740,7 +742,7 @@ public class MarkdownFileTests
         var after = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
         var html = Assert.IsType<HtmlSegment>(after.Value);
         Assert.Equal(((HtmlSegment)before.Value).Html, html.Html);
-        Assert.True(html.BlockStarts.IsDefault);
+        Assert.Single(html.Blocks);
         Assert.NotEqual(before.Key, after.Key);
         Assert.NotSame(before.Value, html);
     }

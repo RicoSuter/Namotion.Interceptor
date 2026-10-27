@@ -42,7 +42,7 @@ public class MarkdownSegmentBuilderTests
             """);
 
         // Assert
-        Assert.Equal(new HtmlMarkdownSegment("<p>Value "), segments[0]);
+        Assert.Equal(new HtmlMarkdownSegment("<p>Value ", [0]), segments[0]);
         Assert.Equal(new ExpressionMarkdownSegment("a/b"), segments[1]);
         Assert.DoesNotContain("title", AllHtml(segments));
     }
@@ -643,7 +643,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Equal(2, segments.Count);
-        Assert.Equal(new HtmlMarkdownSegment("<p>Before</p>"), segments[0]);
+        Assert.Equal(new HtmlMarkdownSegment("<p>Before</p>", [0, 13]), segments[0]);
         var block = Assert.IsType<BlockMarkdownSegment>(segments[1]);
         Assert.Same(page.AllBlocks[0], block.Block);
         Assert.Equal(new HtmlMarkdownSegment("<p>Inside</p>"), Assert.Single(block.Content));
@@ -828,7 +828,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("First.\n\nSecond.");
 
         // Assert
-        Assert.Equal([new HtmlMarkdownSegment("<p>First.</p>\n<p>Second.</p>\n", [14])], segments);
+        Assert.Equal([new HtmlMarkdownSegment("<p>First.</p>\n<p>Second.</p>\n", [0, 14, 29])], segments);
     }
 
     [Fact]
@@ -840,7 +840,7 @@ public class MarkdownSegmentBuilderTests
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
         Assert.Equal("<p>Before.</p>\n<div class=\"box\">\n<p>Inside.</p>\n</div>\n<p>After.</p>\n", html.Html);
-        Assert.True(html.BlockStarts.IsDefault);
+        Assert.Equal(BlockStartsOfPage(html.Html), html.BlockStarts.ToArray());
     }
 
     [Fact]
@@ -851,7 +851,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.True(html.BlockStarts.IsDefault);
+        Assert.Equal(BlockStartsOfPage(html.Html), html.BlockStarts.ToArray());
     }
 
     [Fact]
@@ -862,7 +862,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<div class=\"box\">")], html.BlockStarts.ToArray());
+        Assert.Equal(BlockStartsOfPage(html.Html, "<div class=\"box\">"), html.BlockStarts.ToArray());
     }
 
     [Fact]
@@ -873,12 +873,12 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Collection(segments,
-            segment => Assert.Equal(new HtmlMarkdownSegment("<p>Before.</p>\n", [15]), segment),
+            segment => Assert.Equal(new HtmlMarkdownSegment("<p>Before.</p>\n", [0, 15]), segment),
             segment => Assert.Contains("<div class=\"x\">", AllHtml(Assert.IsType<BlockMarkdownSegment>(segment).Content)),
             segment =>
             {
                 var html = Assert.IsType<HtmlMarkdownSegment>(segment);
-                Assert.Equal([0, BlockStart(html.Html, "<p>Last.")], html.BlockStarts.ToArray());
+                Assert.Equal(BlockStartsOfPage(html.Html, "<p>Last."), html.BlockStarts.ToArray());
             });
     }
 
@@ -890,7 +890,10 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = segments.OfType<HtmlMarkdownSegment>().ToArray();
-        Assert.All(html, segment => Assert.True(segment.BlockStarts.IsDefault));
+        Assert.Equal(3, html.Length);
+        Assert.Equal([0], html[0].BlockStarts.ToArray());
+        Assert.True(html[1].BlockStarts.IsDefault);
+        Assert.Equal([html[2].Html.Length], html[2].BlockStarts.ToArray());
         Assert.Equal(["a/B", "c/D"], segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text));
     }
 
@@ -901,7 +904,10 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("Some <b>bold\n\nNext {{ a/B }}\n\nLast.");
 
         // Assert
-        Assert.All(segments.OfType<HtmlMarkdownSegment>(), segment => Assert.True(segment.BlockStarts.IsDefault));
+        var html = segments.OfType<HtmlMarkdownSegment>().ToArray();
+        Assert.Equal(2, html.Length);
+        Assert.Equal([0], html[0].BlockStarts.ToArray());
+        Assert.Equal([html[1].Html.Length], html[1].BlockStarts.ToArray());
     }
 
     [Fact]
@@ -912,7 +918,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<p>Text")], html.BlockStarts.ToArray());
+        Assert.Equal(BlockStartsOfPage(html.Html, "<p>Text"), html.BlockStarts.ToArray());
     }
 
     [Theory]
@@ -926,7 +932,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+        Assert.Equal(BlockStartsOfPage(html.Html, "<p>After."), html.BlockStarts.ToArray());
     }
 
     [Theory]
@@ -941,7 +947,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<p>A"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+        Assert.Equal(BlockStartsOfPage(html.Html, "<p>A", "<p>After."), html.BlockStarts.ToArray());
     }
 
     // The rule does not look for the closing tag, so even a closed element ends the block starts of the page.
@@ -958,7 +964,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.True(html.BlockStarts.IsDefault);
+        Assert.Equal(BlockStartsOfPage(html.Html), html.BlockStarts.ToArray());
     }
 
     [Fact]
@@ -969,7 +975,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([15], html.BlockStarts.ToArray());
+        Assert.Equal(BlockStartsOfPage(html.Html, "<p>Jump"), html.BlockStarts.ToArray());
     }
 
     [Fact]
@@ -980,7 +986,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.Equal([BlockStart(html.Html, "<div class=\"box\">")], html.BlockStarts.ToArray());
+        Assert.Equal(BlockStartsOfPage(html.Html, "<div class=\"box\">"), html.BlockStarts.ToArray());
     }
 
     [Fact]
@@ -991,7 +997,7 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
-        Assert.True(html.BlockStarts.IsDefault);
+        Assert.Equal(BlockStartsOfPage(html.Html), html.BlockStarts.ToArray());
         Assert.Contains("<!--BREAK:00000000000000000000000000000000-->", html.Html);
     }
 
@@ -1003,9 +1009,26 @@ public class MarkdownSegmentBuilderTests
 
         // Assert
         Assert.Collection(segments,
-            segment => Assert.Equal(new HtmlMarkdownSegment("<p>First.</p>\n", [14]), segment),
+            segment => Assert.Equal(new HtmlMarkdownSegment("<p>First.</p>\n", [0, 14]), segment),
             segment => Assert.IsType<BlockMarkdownSegment>(segment),
-            segment => Assert.Equal(new HtmlMarkdownSegment("\n<p>After.</p>\n", [0]), segment));
+            segment => Assert.Equal(new HtmlMarkdownSegment("\n<p>After.</p>\n", [0, 15]), segment));
+    }
+
+    [Fact]
+    public void WhenAWidgetIsAfterRawHtmlThatOpensAnElement_ThenBlocksStillStartAtTheWidget()
+    {
+        // Act
+        var segments = Build("<div>\n\n:: Demo.Card\n::\n\nAfter.\n\nLast.");
+
+        // Assert
+        Assert.Collection(segments,
+            segment => Assert.Equal(new HtmlMarkdownSegment("<div>\n", [0, 6]), segment),
+            segment => Assert.IsType<BlockMarkdownSegment>(segment),
+            segment =>
+            {
+                var html = Assert.IsType<HtmlMarkdownSegment>(segment);
+                Assert.Equal([0, html.Html.Length], html.BlockStarts.ToArray());
+            });
     }
 
     [Fact]
@@ -1024,21 +1047,21 @@ public class MarkdownSegmentBuilderTests
         // Assert
         Assert.Equal(
             [
-                new HtmlMarkdownSegment("<p>First.</p>\n", [14]),
+                new HtmlMarkdownSegment("<p>First.</p>\n", [0, 14]),
                 new ExpressionMarkdownSegment("a/b"),
-                new HtmlMarkdownSegment("<p>After.</p>\n", [0])
+                new HtmlMarkdownSegment("<p>After.</p>\n", [0, 14])
             ],
             segments);
     }
 
     [Fact]
-    public void WhenFrontMatterIsTheFirstBlock_ThenNoBlockStartsBeforeTheFirstHtml()
+    public void WhenFrontMatterIsTheFirstBlock_ThenTheFirstHtmlStartsTheFirstBlock()
     {
         // Act
         var segments = Build("---\ntitle: Test\n---\n\nFirst.\n\nSecond.");
 
         // Assert
-        Assert.Equal([new HtmlMarkdownSegment("<p>First.</p>\n<p>Second.</p>\n", [14])], segments);
+        Assert.Equal([new HtmlMarkdownSegment("<p>First.</p>\n<p>Second.</p>\n", [0, 14, 29])], segments);
     }
 
     [Fact]
@@ -1052,6 +1075,10 @@ public class MarkdownSegmentBuilderTests
         Assert.Equal(new HtmlMarkdownSegment("<p>x</p>"), segment);
         Assert.NotEqual(new HtmlMarkdownSegment("<p>x</p>", [0]), segment);
     }
+
+    // A page of one segment: a block starts at its start, before each of the texts and at its end.
+    private static int[] BlockStartsOfPage(string html, params string[] texts) =>
+        [0, .. texts.Select(text => BlockStart(html, text)), html.Length];
 
     private static int BlockStart(string html, string text)
     {

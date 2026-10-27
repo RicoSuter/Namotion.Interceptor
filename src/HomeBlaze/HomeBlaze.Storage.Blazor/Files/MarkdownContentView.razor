@@ -1,5 +1,3 @@
-@using System.Text
-@using System.Web
 @using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Components.Abstractions.TimeZones
@@ -27,75 +25,8 @@
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? Children { get; set; }
 
-    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
-
     // Runs on every render and keeps nothing: the values of expressions are read here so that the render
     // records them, and a reload replaces the dictionary and its subjects.
-    private List<RenderSegment> GetRenderSegments()
-    {
-        var result = new List<RenderSegment>();
-        if (Children is null)
-            return result;
-
-        StringBuilder? builder = null;
-
-        foreach (var child in Children.Values)
-        {
-            if (child is HtmlSegment html)
-            {
-                builder ??= new StringBuilder();
-                var starts = html.BlockStarts;
-                if (starts.IsDefault)
-                {
-                    builder.Append(html.Html);
-                }
-                else
-                {
-                    // Each top-level block is a markup string of its own, so a value change replaces only the
-                    // block that shows it. The pieces at both ends can join an expression and go through the builder.
-                    builder.Append(html.Html, 0, starts[0]);
-                    Flush(builder, result);
-                    for (var index = 0; index < starts.Length - 1; index++)
-                    {
-                        result.Add(new RenderSegment(html.GetCompleteBlock(index), null));
-                    }
-
-                    builder.Append(html.Html, starts[^1], html.Html.Length - starts[^1]);
-                }
-            }
-            else if (child is RenderExpression expression)
-            {
-                builder ??= new StringBuilder();
-                if (expression.Error is not null)
-                {
-                    builder.Append("<span class=\"mud-error-text\" data-testid=\"expression-error\">");
-                    builder.Append(HttpUtility.HtmlEncode(expression.Error));
-                    builder.Append("</span>");
-                }
-                else
-                {
-                    builder.Append(HttpUtility.HtmlEncode(expression.GetText(TimeZone)));
-                }
-            }
-            else
-            {
-                // HTML and expressions are joined into one markup string so that an
-                // expression can sit inside an HTML attribute.
-                Flush(builder, result);
-                result.Add(new RenderSegment(null, child));
-            }
-        }
-
-        Flush(builder, result);
-        return result;
-    }
-
-    private static void Flush(StringBuilder? builder, List<RenderSegment> result)
-    {
-        if (builder is { Length: > 0 })
-        {
-            result.Add(new RenderSegment(builder.ToString(), null));
-            builder.Clear();
-        }
-    }
+    private List<MarkdownRenderSegment> GetRenderSegments() =>
+        Children is null ? [] : MarkdownMarkup.GetRenderSegments(Children.Values, TimeZone);
 }

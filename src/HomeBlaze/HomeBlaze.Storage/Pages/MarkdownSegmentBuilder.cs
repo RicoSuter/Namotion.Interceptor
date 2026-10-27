@@ -16,12 +16,22 @@ public abstract record MarkdownSegment;
 /// <param name="Html">The HTML of the segment.</param>
 /// <param name="BlockStarts">
 /// The offsets into <paramref name="Html"/>, in ascending order, at which a top-level block of the page starts, so that the
-/// HTML from there on does not depend on the HTML before it. An offset of <c>Html.Length</c> means that a block starts
-/// after the segment, and an offset of 0 that one starts after the expression or widget before it. Default when there is none.
+/// HTML from there on does not depend on the HTML before it. An offset of 0 means that a block starts with the segment, not
+/// joined to an expression before it, and an offset of <c>Html.Length</c> that one starts after the segment, so the
+/// HTML between two offsets is a complete block. Default when there is none; an empty array is stored as default.
 /// </param>
 public sealed record HtmlMarkdownSegment(string Html, ImmutableArray<int> BlockStarts = default) : MarkdownSegment
 {
-    public ImmutableArray<int> BlockStarts { get; } = BlockStarts.IsDefaultOrEmpty ? default : BlockStarts;
+    private readonly ImmutableArray<int> _blockStarts = Normalize(BlockStarts);
+
+    public ImmutableArray<int> BlockStarts
+    {
+        get => _blockStarts;
+        init => _blockStarts = Normalize(value);
+    }
+
+    private static ImmutableArray<int> Normalize(ImmutableArray<int> blockStarts) =>
+        blockStarts.IsDefaultOrEmpty ? default : blockStarts;
 
     // By content, because the equality of an immutable array compares the array it wraps.
     public bool Equals(HtmlMarkdownSegment? other) =>
@@ -291,7 +301,7 @@ public static partial class MarkdownSegmentBuilder
                 continue;
             }
 
-            AppendToRun(html, lastIndex, match.Index, current, run, blockStarts, ref hasBreak);
+            AppendToRun(html, lastIndex, match.Index, root, current, run, blockStarts, ref hasBreak);
             lastIndex = match.Index + match.Length;
 
             if (match.Groups[7].Success)
@@ -300,7 +310,9 @@ public static partial class MarkdownSegmentBuilder
                 continue;
             }
 
-            if (hasBreak && run.Length > 0)
+            // A widget on the page ends the markup string in any case.
+            var opensWidget = expression is null && match.Groups[1].Length == 0;
+            if ((hasBreak || (opensWidget && ReferenceEquals(current, root))) && run.Length > 0)
             {
                 blockStarts.Add(run.Length);
             }
@@ -325,7 +337,12 @@ public static partial class MarkdownSegmentBuilder
             }
         }
 
-        AppendToRun(html, lastIndex, html.Length, current, run, blockStarts, ref hasBreak);
+        AppendToRun(html, lastIndex, html.Length, root, current, run, blockStarts, ref hasBreak);
+        if (ReferenceEquals(current, root) && run.Length > 0)
+        {
+            blockStarts.Add(run.Length);
+        }
+
         EndRun(current, run, blockStarts);
 
         // A closing marker that was not found must not take the content of its block out of the result.
@@ -340,15 +357,23 @@ public static partial class MarkdownSegmentBuilder
     }
 
     private static void AppendToRun(
-        string html, int start, int end, List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts, ref bool hasBreak)
+        string html,
+        int start,
+        int end,
+        List<MarkdownSegment> root,
+        List<MarkdownSegment> current,
+        StringBuilder run,
+        List<int> blockStarts,
+        ref bool hasBreak)
     {
         if (end <= start)
         {
             return;
         }
 
-        // At the start of a run, a block start matters only after an expression or a widget, not at the start of the page.
-        if (hasBreak && (run.Length > 0 || current.Count > 0))
+        // The start of the page and the end of a widget on it start a block in any case.
+        var isAfterWidgetOrStartOfPage = run.Length == 0 && ReferenceEquals(current, root) && current is [] or [.., BlockMarkdownSegment];
+        if ((hasBreak && (run.Length > 0 || current.Count > 0)) || isAfterWidgetOrStartOfPage)
         {
             blockStarts.Add(run.Length);
         }

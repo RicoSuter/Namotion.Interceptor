@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Internal;
@@ -12,30 +13,46 @@ namespace HomeBlaze.Storage.Internal;
 [ExcludeFrom(ExclusionTarget.All)]
 public partial class HtmlSegment
 {
-    public string Html { get; }
+    /// <summary>Gets the HTML of the segment, joined from <see cref="Blocks"/>.</summary>
+    public string Html => Blocks.Length == 1 ? Blocks[0] : string.Concat((IEnumerable<string>)Blocks);
 
     /// <summary>
-    /// Gets the offsets into <see cref="Html"/>, in ascending order, at which a top-level block of the page starts, so that
-    /// the view can render the HTML from there on as markup of its own. Default when there is none.
+    /// Gets the HTML cut at its block starts (see <see cref="HtmlMarkdownSegment.BlockStarts"/>), without empty parts.
+    /// The HTML between two block starts is a complete block. Without block starts, it is the HTML as one part.
     /// </summary>
-    public ImmutableArray<int> BlockStarts { get; }
+    public ImmutableArray<string> Blocks { get; }
+
+    /// <summary>Gets whether a block starts with the first part of <see cref="Blocks"/>.</summary>
+    public bool StartsWithBlock { get; }
+
+    /// <summary>Gets whether a block starts after the last part of <see cref="Blocks"/>.</summary>
+    public bool EndsWithBlock { get; }
 
     public HtmlSegment(string html, ImmutableArray<int> blockStarts = default)
     {
-        Html = html;
-        BlockStarts = blockStarts.IsDefaultOrEmpty ? default : blockStarts;
-    }
+        if (blockStarts.IsDefaultOrEmpty)
+        {
+            Blocks = [html];
+            return;
+        }
 
-    private string?[]? _completeBlocks;
+        StartsWithBlock = blockStarts[0] == 0;
+        EndsWithBlock = blockStarts[^1] == html.Length;
 
-    /// <summary>
-    /// Gets the HTML from the block start at <paramref name="index"/> up to the next block start, which is a complete
-    /// block, as the same string on every call.
-    /// </summary>
-    public string GetCompleteBlock(int index)
-    {
-        // A race only creates a string twice.
-        var blocks = _completeBlocks ??= new string?[BlockStarts.Length - 1];
-        return blocks[index] ??= Html[BlockStarts[index]..BlockStarts[index + 1]];
+        var blocks = ImmutableArray.CreateBuilder<string>(blockStarts.Length + 1);
+        var start = 0;
+        for (var index = 0; index <= blockStarts.Length; index++)
+        {
+            var end = index < blockStarts.Length ? blockStarts[index] : html.Length;
+            if (end > start)
+            {
+                // A part that is the whole HTML is the same string, not a copy.
+                blocks.Add(html[start..end]);
+            }
+
+            start = end;
+        }
+
+        Blocks = blocks.ToImmutable();
     }
 }

@@ -5,17 +5,46 @@ namespace HomeBlaze.Storage.Tests;
 public class HtmlSegmentTests
 {
     [Fact]
-    public void WhenABlockBetweenTwoBlockStartsIsTakenTwice_ThenItIsTheSameString()
+    public void WhenTheHtmlHasNoBlockStarts_ThenItIsOneBlockOfTheSameString()
     {
         // Arrange
-        var segment = new HtmlSegment("<p>A</p>\n<p>B</p>\n<p>C</p>\n", [9, 18]);
+        var html = "<p>A</p>\n";
 
         // Act
-        var first = segment.GetCompleteBlock(0);
-        var second = segment.GetCompleteBlock(0);
+        var segment = new HtmlSegment(html);
 
         // Assert
-        Assert.Equal("<p>B</p>\n", first);
-        Assert.Same(first, second);
+        Assert.Same(html, Assert.Single(segment.Blocks));
+        Assert.Same(html, segment.Html);
+        Assert.False(segment.StartsWithBlock);
+        Assert.False(segment.EndsWithBlock);
+    }
+
+    [Fact]
+    public void WhenBlocksStartAtTheStartAndTheEnd_ThenTheBlockIsTheSameStringAndNoEmptyBlockIsKept()
+    {
+        // Arrange
+        var html = "<p>A</p>\n";
+
+        // Act
+        var segment = new HtmlSegment(html, [0, html.Length]);
+
+        // Assert
+        Assert.Same(html, Assert.Single(segment.Blocks));
+        Assert.True(segment.StartsWithBlock);
+        Assert.True(segment.EndsWithBlock);
+    }
+
+    [Fact]
+    public void WhenABlockStartsInside_ThenTheHtmlIsCutThere()
+    {
+        // Act
+        var segment = new HtmlSegment("<p>A</p>\n<p>B</p>\n", [9]);
+
+        // Assert
+        Assert.Equal(["<p>A</p>\n", "<p>B</p>\n"], segment.Blocks.ToArray());
+        Assert.Equal("<p>A</p>\n<p>B</p>\n", segment.Html);
+        Assert.False(segment.StartsWithBlock);
+        Assert.False(segment.EndsWithBlock);
     }
 }
