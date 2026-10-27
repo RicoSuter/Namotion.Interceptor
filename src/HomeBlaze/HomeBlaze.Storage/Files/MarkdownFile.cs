@@ -1048,8 +1048,25 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(changedPageRefusal);
             }
 
-            // The operations change only text, so a refusal leaves the graph as the snapshot has it.
-            var (change, refusal) = operation(snapshot, page);
+            // The operations change only text, so a refusal leaves the graph as the snapshot has it. Markdig throws an
+            // ArgumentException for Markdown nested beyond its depth limit, while it parses the new text in the operation
+            // or while it renders it, and a page that cannot be shown would fail the read inside the write and every read
+            // after it.
+            MarkdownStructureChange? change;
+            string? refusal;
+            try
+            {
+                (change, refusal) = operation(snapshot, page);
+                if (change is not null)
+                {
+                    MarkdownWriteRules.EnsureRenders(change.Write.Page);
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                (change, refusal) = (null, exception.Message);
+            }
+
             if (change is null)
             {
                 _parser.LogRefusedWrite(FullPath, refusal!);
@@ -1060,17 +1077,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             {
                 _parser.LogRefusedWrite(FullPath, sizeRefusal);
                 return MarkdownEditResult.Refused(sizeRefusal);
-            }
-
-            // A page that cannot be shown would fail the read inside the write and every read after it.
-            try
-            {
-                MarkdownWriteRules.EnsureRenders(change.Write.Page);
-            }
-            catch (ArgumentException exception)
-            {
-                _parser.LogRefusedWrite(FullPath, exception.Message);
-                return MarkdownEditResult.Refused(exception.Message);
             }
 
             var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, changedPageRefusal);

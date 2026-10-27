@@ -511,15 +511,18 @@ public class MarkdownStructureEditTests
         Assert.Equal(0, page.GetWidgetFenceLengthInContent(new MarkdownFragment()));
     }
 
-    [Fact]
-    public async Task WhenTheNewTextIsNestedBeyondTheDepthLimit_ThenItIsRefusedAndThePageStaysEditable()
+    // Markdig finds links nested too deep while it renders, and quotes nested too deep while it parses.
+    [Theory]
+    [InlineData("[", 4096)]
+    [InlineData("> ", 200)]
+    public async Task WhenTheNewTextIsNestedBeyondTheDepthLimit_ThenItIsRefusedAndThePageStaysEditable(string nesting, int depth)
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var content = $"Old text.\n\n:: {PanelType}#panel Title=P\n::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var panel = page.Children["panel"];
-        var nested = new string('[', 4096);
+        var nested = string.Concat(Enumerable.Repeat(nesting, depth)) + "text";
 
         // Act
         var replaced = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", nested, CancellationToken.None);
