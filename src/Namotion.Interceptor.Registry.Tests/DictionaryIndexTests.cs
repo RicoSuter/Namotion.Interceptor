@@ -305,7 +305,6 @@ public class DictionaryIndexTests
 [InterceptorSubject]
 public partial class BroadlyDeclaredHolder
 {
-
     public partial ICollection? Untyped { get; set; }
 
     public partial IEnumerable<TestItem>? Sequence { get; set; }
