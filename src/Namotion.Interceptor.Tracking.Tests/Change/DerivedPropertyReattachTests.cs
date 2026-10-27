@@ -228,7 +228,7 @@ public class DerivedPropertyReattachTests
         var fullNameData = fullNameProperty.TryGetDerivedPropertyData()!;
 
         // Act: an attach outside the graph lock, as for a property added at runtime, fetches the data
-        // and waits for its lock while the property is detached and a dependent's registration recreates it.
+        // and waits for its lock while the property is detached and recreated, as a dependent's registration would.
         Thread? attachThread = null;
         Task attach;
         Monitor.Enter(fullNameData);

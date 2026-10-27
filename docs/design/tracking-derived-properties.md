@@ -616,7 +616,7 @@ This is solved by locking `X.DerivedPropertyData` in both places:
 Since both operations lock the same object (`X.DerivedPropertyData`), they are fully serialized:
 - **DetachProperty wins lock**: sets `IsAttached = false`, takes snapshot (D not present), clears `UsedByProperties` and removes the data. `UpdateDependencies` then acquires the lock, sees the data is no longer current, and registers D on X's current data instead, which is fresh data or the data of X attached again. If the data was kept because X is recalculating, `UpdateDependencies` adds D to it; nothing snapshots it again until X's next detach, which cleans D up.
 - **UpdateDependencies wins lock**: sees the data not removed, adds D to `UsedByProperties`. `DetachProperty` then acquires the lock, takes snapshot (D is present), cleans up D's `RequiredProperties`.
-- **D registers again between the snapshot and the Case 2 cleanup**: a getter that drops X and then reads it again registers D on X's current data after the snapshot. The Case 2 cleanup, under `lock(derivedData)`, then keeps X in D's `RequiredProperties`, because X's current data lists D. The check is exact, since D only registers or unregisters under the same lock.
+- **D registers again between the snapshot and the Case 2 cleanup**: a getter that drops X and then reads it again registers D on X's current data after the snapshot. The Case 2 cleanup, under `lock(derivedData)`, then keeps X in D's `RequiredProperties`, because X's current data lists D. The check is exact: D registers and unregisters only under that lock, and any other change to X's used-by properties is a detach of X, whose own Case 2 handles D again.
 
 No window exists where a used-by property is added to removed data. An `UpdateDependencies` that reaches a source after its data was removed registers on fresh data instead; if the source stays detached, this is the stale link described under "Untracked source properties" below.
 
@@ -634,7 +634,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.RecalculationNeeded` | `lock(data)` | `RecalculateDerivedProperty` (Phase 1 bail, Phase 3, outer loop check, finally re-trigger check), `AttachProperty`, `DetachProperty`, `EvaluateAndStabilize` (bail check) |
 | `data.IsAttached` | `lock(data)` | `DetachAndSnapshotUsedBy`, `RecalculateDerivedProperty` (Phase 1, Phase 3), `AttachProperty`, `EvaluateAndStabilize` (bail check) |
 | Removal from the subject's data | `lock(data)` | `DetachProperty` (removes), `AttachProperty` and `UpdateDependencies` (used-by loop) check identity with the current data and retry on it |
-| `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `UpdateDependencies`, `DetachAndSnapshotUsedBy` |
+| `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `UpdateDependencies`, `DetachAndSnapshotUsedBy`, `DetachProperty` Case 2 (lock-free read) |
 | `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachAndSnapshotUsedBy` (nulls under lock), `AddUsedByProperty` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `UpdateDependencies` (via parameter) |
 | `data.RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (read) | `RecalculateDerivedProperty` (increment under lock, read outside lock for stale notification check) |
