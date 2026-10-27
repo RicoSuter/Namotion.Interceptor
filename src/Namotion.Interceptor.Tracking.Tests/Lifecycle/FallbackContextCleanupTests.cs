@@ -1,12 +1,12 @@
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 public class FallbackContextCleanupTests
 {
-    private sealed class RootMarker;
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -25,26 +25,6 @@ public class FallbackContextCleanupTests
         // Assert
         Assert.False(child.IsAlive);
         GC.KeepAlive(root);
-    }
-
-    [Fact]
-    public void WhenSubjectConstructedWithContextLeavesOtherParent_ThenItNoLongerResolvesThroughContext()
-    {
-        // Arrange
-        var context = CreateContext(fullTracking: false);
-        context.AddService(new RootMarker());
-        var root = new Person(context);
-        var parent = new Person();
-        root.Children = [parent];
-
-        var child = new Person(context);
-        parent.Children = [child];
-
-        // Act
-        parent.Children = [];
-
-        // Assert
-        Assert.Empty(((IInterceptorSubject)child).Context.GetServices<RootMarker>());
     }
 
     [Theory]
@@ -85,33 +65,10 @@ public class FallbackContextCleanupTests
     }
 
     [Fact]
-    public void WhenSubjectLeavesOneOfTwoParents_ThenItKeepsResolvingThroughContext()
+    public void WhenSubjectConstructedWithContextLeavesOtherParentAndReentersGraph_ThenItResolvesThroughNewParent()
     {
         // Arrange
         var context = CreateContext(fullTracking: false);
-        context.AddService(new RootMarker());
-        var root = new Person(context);
-        var firstParent = new Person();
-        var secondParent = new Person();
-        root.Children = [firstParent, secondParent];
-
-        var child = new Person();
-        firstParent.Children = [child];
-        secondParent.Children = [child];
-
-        // Act
-        firstParent.Children = [];
-
-        // Assert
-        Assert.Single(((IInterceptorSubject)child).Context.GetServices<RootMarker>());
-    }
-
-    [Fact]
-    public void WhenDetachedSubjectReentersGraph_ThenItResolvesThroughNewParent()
-    {
-        // Arrange
-        var context = CreateContext(fullTracking: false);
-        context.AddService(new RootMarker());
         var root = new Person(context);
         var firstParent = new Person();
         var secondParent = new Person();
@@ -121,11 +78,14 @@ public class FallbackContextCleanupTests
         firstParent.Children = [child];
         firstParent.Children = [];
 
+        // Sanity: leaving the graph removed the context the child was constructed with
+        Assert.Empty(child.GetServices<ILifecycleInterceptor>());
+
         // Act
         secondParent.Children = [child];
 
         // Assert
-        Assert.Single(((IInterceptorSubject)child).Context.GetServices<RootMarker>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child.GetServices<ILifecycleInterceptor>());
         Assert.True(((IInterceptorSubject)child).Context.RemoveFallbackContext(((IInterceptorSubject)secondParent).Context));
     }
 

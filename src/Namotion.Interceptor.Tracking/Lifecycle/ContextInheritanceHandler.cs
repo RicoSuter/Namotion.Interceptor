@@ -40,11 +40,6 @@ public class ContextInheritanceHandler : ILifecycleHandler
         }
     }
 
-    /// <summary>
-    /// Removes the fallback contexts that tie a subject to the graph of <paramref name="interceptor"/>, which has just
-    /// detached it: the context of the releasing parent, and any other one that reaches this interceptor alone, such as
-    /// the context the subject was constructed with or one inherited from an earlier parent.
-    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void RemoveFallbackContextsOfGraph(InterceptorSubjectContext context, IInterceptorSubjectContext releasingContext, LifecycleInterceptor interceptor)
     {
@@ -52,17 +47,12 @@ public class ContextInheritanceHandler : ILifecycleHandler
         {
             // A context that also reaches another interceptor belongs to another graph as well: removing it would
             // detach the subject there, taking that interceptor's lock while this one's is held.
-            if (ReferenceEquals(fallbackContext, releasingContext) || ReachesOnly(fallbackContext, interceptor))
+            if (ReferenceEquals(fallbackContext, releasingContext) ||
+                fallbackContext.GetServices<ILifecycleInterceptor>() is [var only] && ReferenceEquals(only, interceptor))
             {
                 context.RemoveFallbackContext(fallbackContext);
             }
         }
-    }
-
-    private static bool ReachesOnly(IInterceptorSubjectContext context, LifecycleInterceptor interceptor)
-    {
-        var interceptors = context.GetServices<ILifecycleInterceptor>();
-        return interceptors.Length == 1 && ReferenceEquals(interceptors[0], interceptor);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

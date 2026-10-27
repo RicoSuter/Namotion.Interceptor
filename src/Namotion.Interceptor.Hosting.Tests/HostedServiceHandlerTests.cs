@@ -195,23 +195,17 @@ public class HostedServiceHandlerTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "Disposed");
             Assert.Empty(child.GetAttachedHostedServices());
-        }, withContextInheritance: true);
+        });
     }
 
-    private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action, bool withContextInheritance = false)
+    private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle();
-
-        if (withContextInheritance)
-        {
-            context.WithContextInheritance();
-        }
-
-        context.WithHostedServices(builder.Services);
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
 
         var host = builder.Build();
         await host.StartAsync();

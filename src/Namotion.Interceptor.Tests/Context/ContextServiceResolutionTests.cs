@@ -90,36 +90,24 @@ public class ContextServiceResolutionTests
     }
 
     [Fact]
-    public void WhenFallbackContextsAreAdded_ThenTheyAreListedInOrder()
+    public void WhenFallbackContextIsRemoved_ThenTheOthersAreListedInOrderAndEarlierSnapshotIsUnchanged()
     {
         // Arrange
         var first = InterceptorSubjectContext.Create();
         var second = InterceptorSubjectContext.Create();
+        var third = InterceptorSubjectContext.Create();
         var context = InterceptorSubjectContext.Create();
-
-        // Act
         context.AddFallbackContext(first);
         context.AddFallbackContext(second);
-
-        // Assert
-        Assert.Equal(new IInterceptorSubjectContext[] { first, second }, context.FallbackContexts);
-    }
-
-    [Fact]
-    public void WhenFallbackContextIsRemoved_ThenEarlierSnapshotIsUnchanged()
-    {
-        // Arrange
-        var fallback = InterceptorSubjectContext.Create();
-        var context = InterceptorSubjectContext.Create();
-        context.AddFallbackContext(fallback);
+        context.AddFallbackContext(third);
         var snapshot = context.FallbackContexts;
 
         // Act
-        context.RemoveFallbackContext(fallback);
+        context.RemoveFallbackContext(second);
 
         // Assert
-        Assert.Empty(context.FallbackContexts);
-        Assert.Equal(new IInterceptorSubjectContext[] { fallback }, snapshot);
+        Assert.Equal(new IInterceptorSubjectContext[] { first, third }, context.FallbackContexts);
+        Assert.Equal(new IInterceptorSubjectContext[] { first, second, third }, snapshot);
     }
 
     private interface IOrderedTestService { }
