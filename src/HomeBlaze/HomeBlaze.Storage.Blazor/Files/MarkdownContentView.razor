@@ -44,20 +44,24 @@
             if (child is HtmlSegment html)
             {
                 builder ??= new StringBuilder();
-                var start = 0;
-                if (!html.BlockStarts.IsDefault)
+                var starts = html.BlockStarts;
+                if (starts.IsDefault)
+                {
+                    builder.Append(html.Html);
+                }
+                else
                 {
                     // Each top-level block is a markup string of its own, so a value change replaces only the
-                    // block that shows it. The page puts no block start inside a raw HTML span.
-                    foreach (var blockStart in html.BlockStarts)
+                    // block that shows it. The pieces at both ends can join an expression and go through the builder.
+                    builder.Append(html.Html, 0, starts[0]);
+                    Flush(builder, result);
+                    for (var index = 0; index < starts.Length - 1; index++)
                     {
-                        builder.Append(html.Html, start, blockStart - start);
-                        Flush(builder, result);
-                        start = blockStart;
+                        result.Add(new RenderSegment(html.GetCompleteBlock(index), null));
                     }
-                }
 
-                builder.Append(html.Html, start, html.Html.Length - start);
+                    builder.Append(html.Html, starts[^1], html.Html.Length - starts[^1]);
+                }
             }
             else if (child is RenderExpression expression)
             {

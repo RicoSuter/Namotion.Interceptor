@@ -25,4 +25,17 @@ public partial class HtmlSegment
         Html = html;
         BlockStarts = blockStarts.IsDefaultOrEmpty ? default : blockStarts;
     }
+
+    private string?[]? _completeBlocks;
+
+    /// <summary>
+    /// Gets the HTML from the block start at <paramref name="index"/> up to the next block start, which is a complete
+    /// block, as the same string on every call.
+    /// </summary>
+    public string GetCompleteBlock(int index)
+    {
+        // A race only creates a string twice.
+        var blocks = _completeBlocks ??= new string?[BlockStarts.Length - 1];
+        return blocks[index] ??= Html[BlockStarts[index]..BlockStarts[index + 1]];
+    }
 }
