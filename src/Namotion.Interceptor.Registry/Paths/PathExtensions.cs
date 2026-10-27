@@ -402,12 +402,16 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Fills <paramref name="properties"/> with the properties along the path that
-    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> writes for
+    /// Fills <paramref name="properties"/> with the chain of properties that
+    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> walks for
     /// <paramref name="property"/>, from the property owned by <paramref name="rootSubject"/> (or by the absolute top
-    /// when it is null) down to <paramref name="property"/>, each with the collection position or dictionary key it is
-    /// written with. The list is cleared first.
+    /// when it is null) down to <paramref name="property"/>, each with its collection position or dictionary key. The
+    /// list is cleared first.
     /// </summary>
+    /// <remarks>
+    /// No path provider is involved, so the chain is also returned where <c>TryGetPath</c> writes no path: when its
+    /// provider excludes <paramref name="property"/>, or an [InlinePaths] key on the chain cannot be written.
+    /// </remarks>
     /// <param name="property">The property.</param>
     /// <param name="rootSubject">The root subject or null.</param>
     /// <param name="propertyIndex">Optional index of the last property, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
