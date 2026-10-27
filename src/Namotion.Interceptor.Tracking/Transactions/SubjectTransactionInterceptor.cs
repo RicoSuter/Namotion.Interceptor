@@ -172,8 +172,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     // Only with the equality check: without it every write is captured, as outside a transaction every write lands.
     private static bool IsWriteBackWithEqualityCheck<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        return !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty &&
-            EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue);
+        // The value comparison first: most captured writes differ, so the service lookup runs only for write backs.
+        return EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) &&
+            !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty;
     }
 
     /// <summary>
