@@ -1,7 +1,9 @@
+using HomeBlaze.Abstractions.Devices.Covers;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Samples;
 using HomeBlaze.Storage.Files;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -24,6 +26,9 @@ public class TileWidgetTests
 
     private Motor GetMotor() =>
         (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["tilemotor"];
+
+    private SimulatedRollerShutter GetShutter() =>
+        (SimulatedRollerShutter)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["tileshutter"];
 
     private async Task<IPage> OpenPageAsync(int? width = null, int height = 900, string? initScript = null)
     {
@@ -342,6 +347,32 @@ public class TileWidgetTests
 
         GetMotor().IsPowered = false;
         await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenOperationOfATileIsActive_ThenTheTileHasTheActiveColorAndAClickRunsTheActiveOperation()
+    {
+        // Arrange: the shutter stands open and takes a minute to close.
+        var shutter = GetShutter();
+        await shutter.StopAsync(CancellationToken.None);
+        shutter.Position = 0m;
+        shutter.ShutterState = RollerShutterState.Open;
+        var page = await OpenPageAsync();
+        var tile = page.GetByRole(AriaRole.Button, new() { Name = "Down", Exact = true });
+        var surface = await page.ResolveColorAsync("var(--mud-palette-surface)");
+        var warning = await page.ResolveColorAsync("var(--mud-palette-warning)");
+        await Assertions.Expect(GetTileRoot(tile)).ToHaveCSSAsync("background-color", surface, new() { Timeout = Timeout });
+
+        // Act: the first click closes the shutter, the second, while it closes, runs the stop in place of the close.
+        await tile.ClickAsync();
+        await Assertions.Expect(GetTileRoot(tile)).ToHaveCSSAsync("background-color", warning, new() { Timeout = Timeout });
+        await Assertions.Expect(tile).ToBeEnabledAsync(new() { Timeout = Timeout });
+        await tile.ClickAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => shutter.IsMoving == false, TimeSpan.FromMilliseconds(Timeout), message: "Stop was not invoked");
+        Assert.NotEqual(RollerShutterState.Closed, shutter.ShutterState);
+        await Assertions.Expect(GetTileRoot(tile)).ToHaveCSSAsync("background-color", surface, new() { Timeout = Timeout });
     }
 
     [Theory]

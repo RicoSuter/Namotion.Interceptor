@@ -127,6 +127,37 @@ public class RegisteredSubjectMethodExtensionsTests
     }
 
     [Fact]
+    public void WhenMethodHasAnIsActiveAttribute_ThenItsValueSaysWhetherTheMethodIsActive()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var start = subject.TryGetRegisteredSubject()!.TryGetProperty("Start")!;
+
+        // Act
+        var isActiveWhileStopped = start.IsMethodActive();
+        subject.IsRunning = true;
+        var isActiveWhileRunning = start.IsMethodActive();
+
+        // Assert
+        Assert.False(isActiveWhileStopped);
+        Assert.True(isActiveWhileRunning);
+    }
+
+    [Fact]
+    public void WhenMethodHasNoIsActiveAttribute_ThenItIsNotActive()
+    {
+        // Arrange
+        var subject = new EnabledMethodTestSubject(CreateContext());
+        var reset = subject.TryGetRegisteredSubject()!.TryGetProperty("Reset")!;
+
+        // Act
+        var isActive = reset.IsMethodActive();
+
+        // Assert
+        Assert.False(isActive);
+    }
+
+    [Fact]
     public void WhenAPropertyHoldsAMethod_ThenTryGetMethodMetadataReturnsIt()
     {
         // Arrange
@@ -249,6 +280,10 @@ public partial class EnabledMethodTestSubject
     [Derived]
     [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
     public bool Start_IsEnabled => !IsRunning;
+
+    [Derived]
+    [PropertyAttribute("Start", KnownAttributes.IsActive)]
+    public bool Start_IsActive => IsRunning;
 
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
     public partial string? Stop_IsEnabled { get; set; }
