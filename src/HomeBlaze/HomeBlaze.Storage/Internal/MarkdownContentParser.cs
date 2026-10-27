@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
@@ -304,7 +305,7 @@ public sealed partial class MarkdownContentParser
             switch (segments[index])
             {
                 case HtmlMarkdownSegment html:
-                    AddHtml(children, existingChildren, index, html.Html);
+                    AddHtml(children, existingChildren, index, html.Html, html.BlockStarts);
                     break;
 
                 case ExpressionMarkdownSegment expression:
@@ -321,7 +322,7 @@ public sealed partial class MarkdownContentParser
                     if (subject is null)
                     {
                         state.AddErrorBox();
-                        AddHtml(children, existingChildren, index, error!.Render());
+                        AddHtml(children, existingChildren, index, error!.Render(), blockStarts: default);
                     }
                     else
                     {
@@ -339,13 +340,17 @@ public sealed partial class MarkdownContentParser
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
         int index,
-        string html)
+        string html,
+        ImmutableArray<int> blockStarts)
     {
-        // The index is part of the key because the same HTML can occur several times.
-        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
+        // The index is part of the key because the same HTML can occur several times. The block starts are part of it so
+        // that a change of them replaces the subject.
+        var key = blockStarts.IsDefaultOrEmpty
+            ? $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}"
+            : $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}_b{string.Join('.', blockStarts)}";
         children[key] = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment
             ? existing
-            : new HtmlSegment(html);
+            : new HtmlSegment(html, blockStarts);
     }
 
     private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(

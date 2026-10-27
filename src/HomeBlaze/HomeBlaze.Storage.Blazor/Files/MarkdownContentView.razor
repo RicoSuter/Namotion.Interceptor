@@ -44,7 +44,20 @@
             if (child is HtmlSegment html)
             {
                 builder ??= new StringBuilder();
-                builder.Append(html.Html);
+                var start = 0;
+                if (!html.BlockStarts.IsDefault)
+                {
+                    // Each top-level block is a markup string of its own, so a value change replaces only the
+                    // block that shows it. The page puts no block start inside a raw HTML span.
+                    foreach (var blockStart in html.BlockStarts)
+                    {
+                        builder.Append(html.Html, start, blockStart - start);
+                        Flush(builder, result);
+                        start = blockStart;
+                    }
+                }
+
+                builder.Append(html.Html, start, html.Html.Length - start);
             }
             else if (child is RenderExpression expression)
             {
@@ -64,21 +77,21 @@
             {
                 // HTML and expressions are joined into one markup string so that an
                 // expression can sit inside an HTML attribute.
-                if (builder is { Length: > 0 })
-                {
-                    result.Add(new RenderSegment(builder.ToString(), null));
-                    builder.Clear();
-                }
-
+                Flush(builder, result);
                 result.Add(new RenderSegment(null, child));
             }
         }
 
+        Flush(builder, result);
+        return result;
+    }
+
+    private static void Flush(StringBuilder? builder, List<RenderSegment> result)
+    {
         if (builder is { Length: > 0 })
         {
             result.Add(new RenderSegment(builder.ToString(), null));
+            builder.Clear();
         }
-
-        return result;
     }
 }

@@ -683,6 +683,47 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenAPageHasTwoParagraphs_ThenItsHtmlSegmentHasTheStartOfTheSecond()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var html = Assert.Single(markdown.Children.Values.OfType<HtmlSegment>());
+        Assert.Equal("<p>First.</p>\n<p>Second.</p>\n", html.Html);
+        Assert.Equal([14], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenOnlyTheBlockStartsOfTheHtmlChange_ThenTheHtmlSegmentIsReplaced()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+        var before = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
+
+        // Act
+        // The same HTML as raw HTML is one block, so it has no block start.
+        await WriteFileAsync(storage, "blocks.md", "<p>First.</p>\n<p>Second.</p>");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var after = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
+        var html = Assert.IsType<HtmlSegment>(after.Value);
+        Assert.Equal(((HtmlSegment)before.Value).Html, html.Html);
+        Assert.True(html.BlockStarts.IsDefault);
+        Assert.NotEqual(before.Key, after.Key);
+        Assert.NotSame(before.Value, html);
+    }
+
+    [Fact]
     public async Task WhenPageIsReloadedWithUnrelatedChange_ThenEmbeddedSubjectIsKept()
     {
         // Arrange

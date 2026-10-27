@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
@@ -13,8 +14,15 @@ public partial class HtmlSegment
 {
     public string Html { get; }
 
-    public HtmlSegment(string html)
+    /// <summary>
+    /// Gets the offsets into <see cref="Html"/>, in ascending order, at which a top-level block of the page starts, so that
+    /// the view can render the HTML from there on as markup of its own. Default when there is none.
+    /// </summary>
+    public ImmutableArray<int> BlockStarts { get; }
+
+    public HtmlSegment(string html, ImmutableArray<int> blockStarts = default)
     {
         Html = html;
+        BlockStarts = blockStarts.IsDefaultOrEmpty ? default : blockStarts;
     }
 }
