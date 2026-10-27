@@ -41,8 +41,10 @@ public class RegisteredSubject
     /// registration of the subject until the registry removes the subject's last parent or unregisters it, both of
     /// which happen only when the subject detaches. A subject without parents that is attached is therefore a root.
     /// A subject attached again is registered as a new instance, so an instance never becomes attached again, and an
-    /// instance created outside the registry is never attached. Lock-free; the registry clears it before it removes
-    /// the last parent, so a reader that sees the parents empty after a removal also sees it false.
+    /// instance created outside the registry is never attached. Lock-free. A reader that combines it with
+    /// <see cref="Parents"/> must read <see cref="Parents"/> first and this property second: the registry clears it
+    /// before it removes the last parent, so a reader that sees the parents empty after a removal then sees it false,
+    /// while the opposite order can see it true and then the parents empty.
     /// </summary>
     public bool IsAttached => Volatile.Read(ref _isAttached);
 
