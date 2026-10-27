@@ -140,6 +140,45 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheEditedRoleHasAPathPatternWithoutALeadingSeparator_ThenThePreviewReturnsTheError()
+    {
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Allow = [ReadHome()] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("Path pattern 'Home/**' of role 'Custom' must start with '/'.", result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleIncludesASavedRoleWithAPathPatternWithoutALeadingSeparator_ThenThePreviewReturnsItsError()
+    {
+        // Arrange
+        AddAuthorization(("Bad", new Role { Allow = [ReadHome()] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Includes = ["Bad"], Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("Path pattern 'Home/**' of role 'Bad' must start with '/'.", result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleFixesTheSavedRoleWithAPathPatternWithoutALeadingSeparator_ThenThePreviewHasNoError()
+    {
+        // Arrange
+        AddAuthorization(("Bad", new Role { Allow = [ReadHome()] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "bad", Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
     public void WhenAPreviewIsCompiled_ThenThePoliciesAndStatusesOfTheSavedRolesDoNotChange()
     {
         // Arrange
@@ -259,6 +298,19 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     }
 
     [Fact]
+    public void WhenAGetterOnThePathOfAPatternThrows_ThenItHasNoWarning()
+    {
+        // Arrange
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new ThrowingGetterSubject() };
+
+        // Act
+        var warning = _service.GetPathPatternWarning("/Kitchen/Broken/Plain");
+
+        // Assert
+        Assert.Null(warning);
+    }
+
+    [Fact]
     public void WhenTheSameRoleIsPreviewedAgain_ThenItGetsTheSameResultWithoutCompilingAgain()
     {
         // Arrange
@@ -320,6 +372,9 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     }
 
     private RegisteredSubjectProperty Member(string name) => _subject.TryGetProperty(name)!;
+
+    private static PermissionRule ReadHome() =>
+        new() { Paths = ["Home/**"], Actions = [PermissionAction.Read] };
 
     private static PermissionRule ReadPlain() =>
         new() { Members = [nameof(TagTestSubject.Plain)], Actions = [PermissionAction.Read] };

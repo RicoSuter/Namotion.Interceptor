@@ -141,11 +141,12 @@ internal static class PathPatternChecks
             return null;
         }
 
+        // Left out when resolving fails, as for a role.
         try
         {
             return NamesEntry(pattern, roots, pathProvider) ? FormatWarning(pattern, pathProvider.PathSeparator) : null;
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
             return null;
         }
