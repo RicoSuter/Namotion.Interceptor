@@ -16,6 +16,12 @@ internal sealed class RecordingHandler : ITransactionHandler
     public Action<SubjectTransaction, SubjectPropertyChange[]>? OnCommittingAction { get; set; }
 
     /// <summary>
+    /// Gets or sets whether <see cref="OnCommitting"/> throws an <see cref="InvalidOperationException"/> with the
+    /// message "rejected" after it runs <see cref="OnCommittingAction"/>.
+    /// </summary>
+    public bool RejectCommit { get; set; }
+
+    /// <summary>
     /// Rejects the second <see cref="OnCommitting"/> call, the pre-apply check when a writer is registered, with a
     /// <see cref="SubjectTransactionException"/> that reports the change of <paramref name="propertyName"/> and an
     /// <see cref="InvalidOperationException"/> with <paramref name="message"/>.
@@ -62,5 +68,9 @@ internal sealed class RecordingHandler : ITransactionHandler
     {
         CommittingCalls++;
         OnCommittingAction?.Invoke(transaction, changes.ToArray());
+        if (RejectCommit)
+        {
+            throw new InvalidOperationException("rejected");
+        }
     }
 }

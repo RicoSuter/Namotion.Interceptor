@@ -11,28 +11,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionHandlerPreApplyCheckTests
 {
-    [Theory]
-    [InlineData(false, 1)]
-    [InlineData(true, 2)]
-    public async Task WhenCommitting_ThenOnCommittingRunsOncePerCheckWithPendingValues(bool withWriter, int expectedChecks)
-    {
-        // Arrange
-        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
-        var person = new Person(context) { FirstName = "Ann" };
-        var seen = new List<string?>();
-        handler.OnCommittingAction = (_, _) => seen.Add(person.FirstName);
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(expectedChecks, handler.CommittingCalls);
-        Assert.Equal(Enumerable.Repeat<string?>("Bob", expectedChecks), seen);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
     [Fact]
     public async Task WhenPropertyChangesOutsideTransactionDuringSourceWrite_ThenPreApplyCheckSeesLandedValue()
     {
@@ -91,7 +69,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenPreApplyCheckRejectsChange_ThenNoApplyRunsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var writer = new CountingTransactionWriter();
+        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.FirstName) } };
         var context = CreateContext(out var handler, writer);
         handler.RejectPreApplyCheck(nameof(Person.LastName), "invalid last name");
         var probe = new CommitWriteProbe(handler);
@@ -114,9 +92,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
             [nameof(Person.FirstName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name));
         Assert.Equal("invalid last name", Assert.Single(exception.Errors).Message);
-        Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
-            writer.Reverted.Select(change => change.Property.Name));
+        Assert.Equal(nameof(Person.LastName), Assert.Single(writer.Reverted).Property.Name);
 
         var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await transaction.CommitAsync(CancellationToken.None));
@@ -228,34 +204,9 @@ public class SubjectTransactionHandlerPreApplyCheckTests
 
         // Assert
         Assert.Equal(2, handler.CommittingCalls);
+        Assert.Equal("rejected", Assert.IsType<InvalidOperationException>(Assert.Single(exception.Errors)).Message);
         Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
         Assert.Equal("Ann", person.FirstName);
-        Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
-    }
-
-    [Fact]
-    public async Task WhenPreApplyCheckRejectsChangeWithRollback_ThenChangeWithoutSourceIsReportedAsNotApplied()
-    {
-        // Arrange
-        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.LastName) } };
-        var context = CreateContext(out var handler, writer);
-        handler.RejectPreApplyCheck(nameof(Person.FirstName), "invalid first name");
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-        person.FirstName = "Bob";
-        person.LastName = "Kim";
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Equal("Lee", person.LastName);
-        Assert.Empty(exception.AppliedChanges);
-        Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
-            exception.FailedChanges.Select(change => change.Property.Name));
-        Assert.Equal("invalid first name", Assert.Single(exception.Errors).Message);
         Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
     }
 

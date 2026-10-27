@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using Xunit;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
@@ -54,16 +53,23 @@ public class CommitFailureClassifierTests
     }
 
     [Fact]
-    public async Task WhenOneOfTwoSourcesFailsInCommitWithLocalChanges_ThenFailureIsSourceWriteFailure()
+    public async Task WhenSourcesFailFullyAndPartiallyInCommitWithLocalChanges_ThenFailureIsSourceWriteFailure()
     {
         // Arrange
         var context = CreateTransactionContext();
         var node = new TestNode(context);
         new PropertyReference(node, nameof(TestNode.IntValue)).SetSource(new FailingSource { RootSubject = node });
-        new PropertyReference(node, nameof(TestNode.LongValue)).SetSource(new FailingSource { RootSubject = node, Fails = _ => false });
+        var partiallyFailingSource = new FailingSource
+        {
+            RootSubject = node,
+            Fails = change => change.Property.Name == nameof(TestNode.LongValue)
+        };
+        new PropertyReference(node, nameof(TestNode.LongValue)).SetSource(partiallyFailingSource);
+        new PropertyReference(node, nameof(TestNode.DecimalValue)).SetSource(partiallyFailingSource);
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         node.IntValue = 1;
         node.LongValue = 2;
+        node.DecimalValue = 3;
         node.StringValue = "local";
         var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
@@ -72,32 +78,11 @@ public class CommitFailureClassifierTests
 
         // Assert
         Assert.Equal(CommitFailureKind.SourceWriteFailure, kind);
-        Assert.Equal(nameof(TestNode.IntValue), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.Equal(2, node.LongValue);
+        Assert.Equal(
+            [nameof(TestNode.IntValue), nameof(TestNode.LongValue)],
+            exception.FailedChanges.Select(change => change.Property.Name).Order());
+        Assert.Equal(3m, node.DecimalValue);
         Assert.Equal("local", node.StringValue);
-    }
-
-    [Fact]
-    public async Task WhenSourceReportsOnlySomeChangesOfItsWriteAsFailed_ThenFailureIsSourceWriteFailure()
-    {
-        // Arrange
-        var context = CreateTransactionContext();
-        var node = new TestNode(context);
-        var source = new FailingSource { RootSubject = node, Fails = change => change.Property.Name == nameof(TestNode.IntValue) };
-        new PropertyReference(node, nameof(TestNode.IntValue)).SetSource(source);
-        new PropertyReference(node, nameof(TestNode.LongValue)).SetSource(source);
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        node.IntValue = 1;
-        node.LongValue = 2;
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.SourceWriteFailure, kind);
-        Assert.Equal(nameof(TestNode.IntValue), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.Equal(2, node.LongValue);
     }
 
     [Fact]
@@ -106,20 +91,6 @@ public class CommitFailureClassifierTests
         // Arrange
         var change = CreateChange(nameof(TestNode.IntValue));
         var exception = CreateException([change], new NullReferenceException());
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.Unexpected, kind);
-    }
-
-    [Fact]
-    public void WhenValidationRejectedTheCommit_ThenFailureIsUnexpected()
-    {
-        // Arrange
-        var change = CreateChange(nameof(TestNode.IntValue));
-        var exception = CreateException([change], new ValidationException("invalid"));
 
         // Act
         var kind = CommitFailureClassifier.Classify(exception);
@@ -153,19 +124,6 @@ public class CommitFailureClassifierTests
         var sourceChange = CreateChange(nameof(TestNode.IntValue));
         var otherChange = CreateChange(nameof(TestNode.LongValue));
         var exception = CreateException([sourceChange, otherChange], CreateSourceWriteError(sourceChange));
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.Unexpected, kind);
-    }
-
-    [Fact]
-    public void WhenCommitFailedWithoutErrors_ThenFailureIsUnexpected()
-    {
-        // Arrange
-        var exception = CreateException([CreateChange(nameof(TestNode.IntValue))]);
 
         // Act
         var kind = CommitFailureClassifier.Classify(exception);

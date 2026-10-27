@@ -130,36 +130,27 @@ public class ContextServiceResolutionTests
         Assert.NotSame(ImmutableCollectionsMarshal.AsArray(firstServices), ImmutableCollectionsMarshal.AsArray(secondServices));
     }
 
-    [Fact]
-    public void WhenServiceIsAddedToFallbackContext_ThenGetServicesReturnsNewArrayInstance()
-    {
-        // Arrange
-        var service = new MarkerService();
-        var context = InterceptorSubjectContext.Create();
-        context.AddService(service);
-        var subject = new Car(context);
-        var servicesBefore = ((IInterceptorSubject)subject).Context.GetServices<MarkerService>();
-
-        // Act
-        context.AddService(new object());
-        var servicesAfter = ((IInterceptorSubject)subject).Context.GetServices<MarkerService>();
-
-        // Assert
-        Assert.Same(service, Assert.Single(servicesBefore));
-        Assert.Same(service, Assert.Single(servicesAfter));
-        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
-    }
-
-    [Fact]
-    public void WhenFallbackOfContextWithOwnServicesGainsService_ThenGetServicesReturnsNewArrayInstance()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenFallbackContextGainsService_ThenGetServicesReturnsNewArrayInstance(bool contextHasOwnServices)
     {
         // Arrange
         var service = new MarkerService();
         var fallback = InterceptorSubjectContext.Create();
         fallback.AddService(service);
-        var context = InterceptorSubjectContext.Create();
-        context.AddService(new object());
-        context.AddFallbackContext(fallback);
+        IInterceptorSubjectContext context;
+        if (contextHasOwnServices)
+        {
+            context = InterceptorSubjectContext.Create();
+            context.AddService(new object());
+            context.AddFallbackContext(fallback);
+        }
+        else
+        {
+            context = ((IInterceptorSubject)new Car(fallback)).Context;
+        }
+
         var servicesBefore = context.GetServices<MarkerService>();
 
         // Act

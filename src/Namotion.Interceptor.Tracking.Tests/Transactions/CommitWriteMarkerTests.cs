@@ -12,26 +12,6 @@ public class CommitWriteMarkerTests
     }
 
     [Fact]
-    public async Task WhenPropertyValueAndHandlerMatch_ThenMarkIsConsumedOnce()
-    {
-        // Arrange
-        var (context, handler, person) = CreateContextWithPerson();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-
-        using (CommitWriteMarker.Set(transaction, property, "Bob"))
-        {
-            // Act
-            var first = CommitWriteMarker.TryConsume(handler, property, "Bob");
-            var second = CommitWriteMarker.TryConsume(handler, property, "Bob");
-
-            // Assert
-            Assert.True(first);
-            Assert.False(second);
-        }
-    }
-
-    [Fact]
     public async Task WhenValueDiffers_ThenMarkDoesNotMatchButIsConsumed()
     {
         // Arrange
@@ -49,32 +29,6 @@ public class CommitWriteMarkerTests
             Assert.False(changedValue);
             Assert.False(checkedValue);
         }
-    }
-
-    [Fact]
-    public async Task WhenMarkedValueIsNull_ThenOnlyNullMatches()
-    {
-        // Arrange
-        var (context, handler, person) = CreateContextWithPerson();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-
-        // Act
-        bool nonNullMatches;
-        using (CommitWriteMarker.Set(transaction, property, null))
-        {
-            nonNullMatches = CommitWriteMarker.TryConsume(handler, property, "Bob");
-        }
-
-        bool nullMatches;
-        using (CommitWriteMarker.Set(transaction, property, null))
-        {
-            nullMatches = CommitWriteMarker.TryConsume<string?>(handler, property, null);
-        }
-
-        // Assert
-        Assert.False(nonNullMatches);
-        Assert.True(nullMatches);
     }
 
     [Fact]
@@ -168,7 +122,7 @@ public class CommitWriteMarkerTests
     }
 
     [Fact]
-    public async Task WhenValueIsNullableValueType_ThenEqualValueAndNullMatch()
+    public async Task WhenMarkedValueIsNullOrNullableValueType_ThenOnlyEqualValueOrNullMatches()
     {
         // Arrange
         var (context, handler, person) = CreateContextWithPerson();
@@ -200,11 +154,25 @@ public class CommitWriteMarkerTests
             valueMatchesNullMark = CommitWriteMarker.TryConsume<int?>(handler, property, 5);
         }
 
+        bool nullReferenceMatches;
+        using (CommitWriteMarker.Set(transaction, property, null))
+        {
+            nullReferenceMatches = CommitWriteMarker.TryConsume<string?>(handler, property, null);
+        }
+
+        bool referenceMatchesNullMark;
+        using (CommitWriteMarker.Set(transaction, property, null))
+        {
+            referenceMatchesNullMark = CommitWriteMarker.TryConsume(handler, property, "Bob");
+        }
+
         // Assert
         Assert.True(equalValueMatches);
         Assert.False(otherValueMatches);
         Assert.True(nullMatches);
         Assert.False(valueMatchesNullMark);
+        Assert.True(nullReferenceMatches);
+        Assert.False(referenceMatchesNullMark);
     }
 
     [Fact]

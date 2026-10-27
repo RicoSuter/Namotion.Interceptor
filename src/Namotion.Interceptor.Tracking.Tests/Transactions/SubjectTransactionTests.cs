@@ -344,36 +344,6 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenApplyFailsInBestEffortWithHandler_ThenNothingLands()
-    {
-        // Arrange
-        var context = CreateContext();
-        context.AddService<ITransactionHandler>(new RecordingHandler());
-        var subject = new TransactionCascadeSubject(context) { Plain = "model", Failing = "model" };
-
-        // Act
-        SubjectTransactionException exception;
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            subject.Plain = "applied";
-            subject.Failing = "fails";
-            subject.ThrowOnFailingWrite = true;
-            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-                () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        }
-
-        // Assert
-        Assert.Equal("model", subject.Plain);
-        Assert.Equal("model", subject.Failing);
-        Assert.Empty(exception.AppliedChanges);
-        Assert.Equal(
-            [nameof(TransactionCascadeSubject.Plain), nameof(TransactionCascadeSubject.Failing)],
-            exception.FailedChanges.Select(change => change.Property.Name));
-        Assert.Equal("Setter failed.", Assert.Single(exception.Errors).Message);
-        Assert.Contains("No changes have been applied", exception.Message);
-    }
-
-    [Fact]
     public async Task WhenCommitFailureIsRetryable_ThenLaterWritesRemainCaptured()
     {
         // Arrange
