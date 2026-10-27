@@ -495,6 +495,141 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenASetOnlyOverrideSkipsAGetOnlySubjectOverrideIntoADuplicate_ThenNI0066IsReportedOnTheSubject()
+    {
+        // Arrange: at runtime Motor's Split inherits IsEnabled through its setter from BaseMotor, so it collides with
+        // Forward_IsEnabled, while MiddleMotor's Split carries Other and MiddleMotor has no duplicate.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public virtual partial bool Split { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class MiddleMotor : BaseMotor
+                {
+                    [PropertyAttribute(nameof(Forward), "Other")]
+                    public override partial bool Split { get; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : MiddleMotor
+                {
+                    public override partial bool Split { set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenASetOnlyOverrideRestatesAMiddleSubjectsDuplicate_ThenNI0066IsReportedOnTheMiddleSubjectOnly()
+    {
+        // Arrange: Motor's Split restates IsEnabled, so Motor has the same two providers as MiddleMotor.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "Other")]
+                    public virtual partial bool Split { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class MiddleMotor : BaseMotor
+                {
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public override partial bool Split { get; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : MiddleMotor
+                {
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public override partial bool Split { set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'MiddleMotor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenACovariantOverrideDoesNotInheritTheBaseAttribute_ThenNI0066IsNotReported()
+    {
+        // Arrange: the runtime looks up the parent property by type, so a covariant-return override inherits nothing.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public virtual object Value => "o";
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor
+                {
+                    public override string Value => "s";
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0066");
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange

@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 
 using AttributeTarget = (string PropertyName, string AttributeName);
-using AttributeProvider = (string ProviderName, bool IsOwn);
 
 namespace Namotion.Interceptor.Generator;
 
@@ -20,31 +19,52 @@ internal static class SubjectAttributeConflicts
         List<Diagnostic> diagnostics)
     {
         var subjectAncestors = SubjectAncestry.GetSubjectAncestors(typeSymbol);
-
-        // Names are tracked only across a chain: within one class the compiler already keeps them unique.
-        var seenNames = subjectAncestors is null ? null : new HashSet<string>();
-        Dictionary<AttributeTarget, AttributeProvider>? providers = null;
-
-        CollectAndReport(typeSymbol, typeSymbol, true, seenNames, ref providers, location, diagnostics);
-        if (subjectAncestors is null)
+        var providers = BuildProviderMap(typeSymbol, subjectAncestors, 0);
+        if (providers is null || !HasDuplicate(providers))
         {
             return;
         }
 
-        foreach (var ancestor in subjectAncestors)
+        // A duplicate the nearest subject ancestor has with the same providers is reported there, so each duplicate
+        // is reported once, on the nearest subject that has it.
+        var ancestorProviders = subjectAncestors is null ? null : BuildProviderMap(subjectAncestors[0], subjectAncestors, 1);
+        foreach (var entry in providers)
         {
-            CollectAndReport(typeSymbol, ancestor, false, seenNames, ref providers, location, diagnostics);
+            if (entry.Value.Count > 1 && !HasSameProviders(ancestorProviders, entry.Key, entry.Value))
+            {
+                Report(typeSymbol, entry.Key, entry.Value, location, diagnostics);
+            }
         }
     }
 
-    private static void CollectAndReport(
+    /// <summary>
+    /// Groups the names of the subject's property set by the attribute target each carries at runtime, or returns
+    /// null when none carries one. The ancestors from <paramref name="firstAncestorIndex"/> on are the subject's own.
+    /// </summary>
+    private static Dictionary<AttributeTarget, List<string>>? BuildProviderMap(
         INamedTypeSymbol subject,
+        List<INamedTypeSymbol>? subjectAncestors,
+        int firstAncestorIndex)
+    {
+        var ancestorCount = subjectAncestors?.Count ?? 0;
+
+        // Names are tracked only across a chain: within one class the compiler already keeps them unique.
+        var seenNames = firstAncestorIndex < ancestorCount ? new HashSet<string>() : null;
+        Dictionary<AttributeTarget, List<string>>? providers = null;
+
+        AddProviders(subject, seenNames, ref providers);
+        for (var index = firstAncestorIndex; index < ancestorCount; index++)
+        {
+            AddProviders(subjectAncestors![index], seenNames, ref providers);
+        }
+
+        return providers;
+    }
+
+    private static void AddProviders(
         INamedTypeSymbol type,
-        bool isOwn,
         HashSet<string>? seenNames,
-        ref Dictionary<AttributeTarget, AttributeProvider>? providers,
-        Location location,
-        List<Diagnostic> diagnostics)
+        ref Dictionary<AttributeTarget, List<string>>? providers)
     {
         foreach (var member in type.GetMembers())
         {
@@ -59,44 +79,78 @@ internal static class SubjectAttributeConflicts
                 continue;
             }
 
-            if (!TryGetPropertyAttributeTarget(property, isOwn, out var target, out var isOwnTarget))
+            if (TryGetRuntimePropertyAttributeTarget(property, out var target))
             {
-                continue;
-            }
-
-            if (TryAddProvider(ref providers, target, property.Name, isOwnTarget, out var provider))
-            {
-                continue;
-            }
-
-            // A duplicate that lives entirely in a base subject is reported there, not on every derived subject.
-            if (isOwnTarget || provider.IsOwn)
-            {
-                diagnostics.Add(Diagnostic.Create(
-                    Diagnostics.DuplicatePropertyAttributeTarget, location,
-                    subject.Name, target.AttributeName, target.PropertyName, provider.ProviderName, property.Name));
+                AddProvider(ref providers, target, property.Name);
             }
         }
     }
 
-    /// <summary>
-    /// Records the property as the provider of the target, or returns false with the provider recorded before it.
-    /// </summary>
-    private static bool TryAddProvider(
-        ref Dictionary<AttributeTarget, AttributeProvider>? providers,
+    private static void AddProvider(
+        ref Dictionary<AttributeTarget, List<string>>? providers,
         AttributeTarget target,
-        string propertyName,
-        bool isOwn,
-        out AttributeProvider existingProvider)
+        string propertyName)
     {
-        providers ??= new Dictionary<AttributeTarget, AttributeProvider>();
-        if (providers.TryGetValue(target, out existingProvider))
+        providers ??= new Dictionary<AttributeTarget, List<string>>();
+        if (!providers.TryGetValue(target, out var names))
+        {
+            names = new List<string>(1);
+            providers[target] = names;
+        }
+
+        names.Add(propertyName);
+    }
+
+    private static bool HasDuplicate(Dictionary<AttributeTarget, List<string>> providers)
+    {
+        foreach (var names in providers.Values)
+        {
+            if (names.Count > 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Names are unique within a property set, so equal counts and containment make the sets equal.
+    private static bool HasSameProviders(
+        Dictionary<AttributeTarget, List<string>>? ancestorProviders,
+        AttributeTarget target,
+        List<string> names)
+    {
+        if (ancestorProviders is null ||
+            !ancestorProviders.TryGetValue(target, out var ancestorNames) ||
+            ancestorNames.Count != names.Count)
         {
             return false;
         }
 
-        providers[target] = (propertyName, isOwn);
+        foreach (var name in names)
+        {
+            if (!ancestorNames.Contains(name))
+            {
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    private static void Report(
+        INamedTypeSymbol subject,
+        AttributeTarget target,
+        List<string> names,
+        Location location,
+        List<Diagnostic> diagnostics)
+    {
+        for (var index = 1; index < names.Count; index++)
+        {
+            diagnostics.Add(Diagnostic.Create(
+                Diagnostics.DuplicatePropertyAttributeTarget, location,
+                subject.Name, target.AttributeName, target.PropertyName, names[0], names[index]));
+        }
     }
 
     // An explicit implementation's attributes are not part of the property metadata, and its name is qualified.
@@ -105,42 +159,11 @@ internal static class SubjectAttributeConflicts
         return !SymbolExtensions.IsNeverASubjectProperty(property) && property.ExplicitInterfaceImplementations.Length == 0;
     }
 
-    // The target counts as the subject's own unless the nearest subject ancestor on the override path already sees
-    // the same target for this property: that ancestor then reports the duplicate itself.
-    private static bool TryGetPropertyAttributeTarget(
-        IPropertySymbol property,
-        bool isOwn,
-        out AttributeTarget target,
-        out bool isOwnTarget)
-    {
-        if (!TryGetInheritedPropertyAttributeTarget(property, out target))
-        {
-            isOwnTarget = false;
-            return false;
-        }
-
-        isOwnTarget = isOwn && !IsSeenBySubjectAncestor(property, target);
-        return true;
-    }
-
-    private static bool IsSeenBySubjectAncestor(IPropertySymbol property, AttributeTarget target)
-    {
-        for (var current = GetOverriddenDeclaration(property); current is not null; current = GetOverriddenDeclaration(current))
-        {
-            if (SubjectAncestry.HasInterceptorSubjectAttribute(current.ContainingType))
-            {
-                return TryGetInheritedPropertyAttributeTarget(current, out var ancestorTarget) && ancestorTarget.Equals(target);
-            }
-        }
-
-        return false;
-    }
-
     // The nearest declaration wins, matching AllowMultiple = false. Roslyn reports only the attributes declared on a
     // property itself, so the walk adds what the runtime inherits.
-    private static bool TryGetInheritedPropertyAttributeTarget(IPropertySymbol property, out AttributeTarget target)
+    private static bool TryGetRuntimePropertyAttributeTarget(IPropertySymbol property, out AttributeTarget target)
     {
-        for (var current = property; current is not null; current = GetOverriddenDeclaration(current))
+        for (var current = property; current is not null; current = GetParentDeclaration(current))
         {
             if (TryGetDeclaredPropertyAttributeTarget(current, out target))
             {
@@ -152,11 +175,13 @@ internal static class SubjectAttributeConflicts
         return false;
     }
 
-    // The runtime inherits a property's attributes through the declaration its getter overrides, or its setter when
-    // it declares no getter, so an override of one accessor can skip a class that overrides only the other.
-    private static IPropertySymbol? GetOverriddenDeclaration(IPropertySymbol property)
+    // The runtime finds the parent through the declaration the getter overrides, or the setter when no getter is
+    // declared, so an override of one accessor can skip a class that overrides only the other. It then looks the
+    // parent up by property type, so a covariant-return override inherits nothing.
+    private static IPropertySymbol? GetParentDeclaration(IPropertySymbol property)
     {
-        return (property.GetMethod ?? property.SetMethod)?.OverriddenMethod?.AssociatedSymbol as IPropertySymbol;
+        var parent = (property.GetMethod ?? property.SetMethod)?.OverriddenMethod?.AssociatedSymbol as IPropertySymbol;
+        return parent is not null && SymbolEqualityComparer.Default.Equals(parent.Type, property.Type) ? parent : null;
     }
 
     private static bool TryGetDeclaredPropertyAttributeTarget(
