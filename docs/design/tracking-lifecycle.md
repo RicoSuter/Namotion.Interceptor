@@ -167,12 +167,14 @@ No leak.
 
 ## Lock Ordering
 
-Two locks exist in the lifecycle/registry system:
+Two locks serialize the lifecycle and the registry:
 
 1. `_attachedSubjects` in `LifecycleInterceptor`
 2. `_knownSubjects` in `SubjectRegistry`
 
 Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`. No deadlock is possible.
+
+Below those two sit the registry's per-object locks: `_children` on each `RegisteredSubjectProperty` and `_lock` on each `RegisteredSubject`. `HandleLifecycleChange` takes them inside `_knownSubjects`. The index refresh that follows a collection or dictionary write keeping at least one subject (`RefreshCollectionIndices`) takes them the other way round, `_children` first and `_knownSubjects` inside it. Both paths run only under `_attachedSubjects`, which serializes them, so the inversion cannot deadlock. That argument assumes one `LifecycleInterceptor` per registry. Readers take each of these locks on its own and never nest them.
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
 
