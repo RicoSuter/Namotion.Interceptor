@@ -212,7 +212,7 @@ internal static class McpToolHelper
             return null;
         }
 
-        return property.IsAttribute || !visibility.IsShown(property.Parent) ? null : property;
+        return property.IsAttribute ? null : property;
     }
 
     internal static string? TryGetSubjectPath(
@@ -247,14 +247,7 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                if (!configuration.IsAllowed(attribute, McpAccessActions.Read))
-                {
-                    continue;
-                }
-
-                // A read-only attribute without a value says nothing about its property; a writable one can be set.
-                var value = attribute.GetValue();
-                if (value is not null || attribute.HasSetter)
+                if (TryGetListedAttributeValue(attribute, configuration, out var value))
                 {
                     attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
                 }
@@ -271,6 +264,24 @@ internal static class McpToolHelper
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
             IsWritable: IsWritable(property, configuration),
             Attributes: attributes);
+    }
+
+    /// <summary>
+    /// Whether the tools list the attribute of a listed property, and its value when they do: the policy allows to read
+    /// it, and it has a value or a setter.
+    /// </summary>
+    internal static bool TryGetListedAttributeValue(
+        RegisteredSubjectProperty attribute, McpServerConfiguration configuration, out object? value)
+    {
+        if (!configuration.IsAllowed(attribute, McpAccessActions.Read))
+        {
+            value = null;
+            return false;
+        }
+
+        // A read-only attribute without a value says nothing about its property; a writable one can be set.
+        value = attribute.GetValue();
+        return value is not null || attribute.HasSetter;
     }
 
     /// <summary>
