@@ -312,4 +312,22 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
             }
         }
     }
+
+    [Fact]
+    public void WhenEqualSubjectsSitAtTwoPositions_ThenEachGetsItsOwnPath()
+    {
+        // Arrange
+        var first = new TestEqualItem();
+        var second = new TestEqualItem();
+        var root = new TestEqualItemList(Context) { Items = [first, second] };
+        RootManager.Root = root;
+
+        // Act
+        var firstPath = Resolver.GetPath(first, PathStyle.Canonical);
+        var secondPath = Resolver.GetPath(second, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal("/Items[0]", firstPath);
+        Assert.Equal("/Items[1]", secondPath);
+    }
 }

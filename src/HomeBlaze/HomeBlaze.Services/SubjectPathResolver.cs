@@ -25,7 +25,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     private readonly Func<IInterceptorSubject?> _getRoot;
 
     // Subject → canonical paths cache (with leading /), see InvalidatePaths for the version
-    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new();
+    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
     // (path, style) → Subject resolve cache (absolute paths only), see InvalidatePaths for the version
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject)> _resolveCache = new();
@@ -370,7 +370,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             return Array.Empty<string>();
 
         var paths = new List<string>();
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
 
         foreach (var parent in parents)
         {
