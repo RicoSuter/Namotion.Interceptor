@@ -162,29 +162,6 @@ public class RegisteredSubject
         }
     }
 
-    internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
-    {
-        lock (_lock)
-        {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is not null && _firstParent.Equals(entry))
-            {
-                PromoteFirstParentFromAdditional();
-                return;
-            }
-
-            if (_additionalParents is not null)
-            {
-                var indexInList = _additionalParents.IndexOf(entry);
-                if (indexInList >= 0)
-                {
-                    _additionalParents.RemoveAt(indexInList);
-                    InvalidateParentsSnapshot();
-                }
-            }
-        }
-    }
-
     internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
     {
         lock (_lock)
@@ -216,12 +193,13 @@ public class RegisteredSubject
         }
     }
 
-    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
+    // Matched by property alone: a subject has one parent entry per property, and comparing
+    // the old index would run a key's Equals override under _lock.
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? newIndex)
     {
         lock (_lock)
         {
-            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
+            if (_firstParent.Property == property)
             {
                 _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
                 InvalidateParentsSnapshot();
@@ -230,11 +208,14 @@ public class RegisteredSubject
 
             if (_additionalParents is not null)
             {
-                var indexInList = _additionalParents.IndexOf(oldEntry);
-                if (indexInList >= 0)
+                for (var i = 0; i < _additionalParents.Count; i++)
                 {
-                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                    InvalidateParentsSnapshot();
+                    if (_additionalParents[i].Property == property)
+                    {
+                        _additionalParents[i] = new SubjectPropertyParent { Property = property, Index = newIndex };
+                        InvalidateParentsSnapshot();
+                        return;
+                    }
                 }
             }
         }

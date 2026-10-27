@@ -194,4 +194,54 @@ public class DagTests
         childrenEntry = sharedRegistered.Parents.Single(p => p.Property.Name == nameof(Person.Children));
         Assert.Equal(0, (int)childrenEntry.Index!);
     }
+
+    [Fact]
+    public void WhenSubjectListedTwiceInCollectionIsRemoved_ThenItsParentEntryIsRemoved()
+    {
+        // Arrange: Father keeps the shared child registered after it leaves the collection,
+        // so a parent entry left behind for Children stays observable.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var shared = new Person { FirstName = "Shared" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Father = shared,
+            Children = [shared, shared]
+        };
+
+        // Act
+        root.Children = [];
+
+        // Assert
+        var parent = Assert.Single(shared.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal(nameof(Person.Father), parent.Property.Name);
+        Assert.Empty(root.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Children))!.Children);
+    }
+
+    [Fact]
+    public void WhenSubjectListedTwiceInCollectionIsKept_ThenItsIndexIsItsFirstPosition()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var other = new Person { FirstName = "Other" };
+        var shared = new Person { FirstName = "Shared" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Children = [other, shared]
+        };
+
+        // Act
+        root.Children = [shared, shared, other];
+
+        // Assert: the same result as attaching the new collection from scratch.
+        Assert.Equal(0, Assert.Single(shared.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(2, Assert.Single(other.TryGetRegisteredSubject()!.Parents).Index);
+    }
 }
