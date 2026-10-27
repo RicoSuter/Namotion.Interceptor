@@ -126,6 +126,42 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(good.Status);
     }
 
+    [Theory]
+    [InlineData("Home/**")]
+    [InlineData("Home")]
+    public void WhenAPatternDoesNotStartWithTheSeparator_ThenTheRoleIsDeniedAndItsStatusSaysItMustStartWithIt(string pattern)
+    {
+        // Arrange
+        var role = new Role { Deny = [new PermissionRule { Paths = ["/Home/**", pattern], Actions = [PermissionAction.Read] }] };
+        AddAuthorization(("Custom", role));
+
+        // Act
+        var result = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        var expected = $"Path pattern '{pattern}' of role 'Custom' must start with '/'.";
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal(expected, result.Error);
+        Assert.Equal(expected, role.Status);
+    }
+
+    [Fact]
+    public void WhenAnIncludedRoleHasAPatternWithoutTheSeparator_ThenPrincipalsOfTheIncludingRoleAreDenied()
+    {
+        // Arrange
+        var included = new Role { Allow = [new PermissionRule { Paths = ["Home/**"], Actions = [PermissionAction.Read] }] };
+        var including = new Role { Includes = ["Included"], Allow = [ReadPlain()] };
+        AddAuthorization(("Included", included), ("Including", including));
+
+        // Act
+        var result = _service.GetPolicy(["Including"]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("Path pattern 'Home/**' of role 'Included' must start with '/'.", result.Error);
+        Assert.Equal(result.Error, including.Status);
+    }
+
     [Fact]
     public void WhenACustomRoleHasABuiltInName_ThenItIsNotUsedAndItsStatusSaysTheNameIsReserved()
     {
