@@ -40,7 +40,7 @@ else if (_usesTextArea.Value)
 }
 else
 {
-    <StandaloneCodeEditor @ref="_editor"
+    <DisposeAwareCodeEditor @ref="_editor"
                           Id="@_editorId"
                           CssClass="@CssClass"
                           ConstructionOptions="GetEditorOptions"
@@ -80,7 +80,7 @@ else
     private static int _editorCount;
 
     private string _editorId = string.Empty;
-    private StandaloneCodeEditor? _editor;
+    private DisposeAwareCodeEditor? _editor;
     private IJSObjectReference? _editorHandle;
     private DotNetObjectReference<MarkdownSourceEditor>? _reference;
     private ElementReference _textArea;
