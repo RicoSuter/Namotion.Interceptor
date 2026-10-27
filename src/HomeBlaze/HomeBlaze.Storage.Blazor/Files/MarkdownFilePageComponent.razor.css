@@ -189,7 +189,7 @@
 /* A block of text that is edited inline stands in a wrapper (see MarkdownTextWidget). On the page the wrapper takes the 1rem
    of a block, and a larger margin of its text, such as the one above a title, collapses with it. In a container the
    wrapper takes the margins of a block from the rules above and the text takes none. The preview next to the editor
-   spaces its text as a viewed page does, see the end of this file. */
+   spaces its text as a viewed page does, see the rules of the preview near the top of this file. */
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:not(.revealable) > .markdown-text > * {
     margin-top: 0;
     margin-bottom: 0;

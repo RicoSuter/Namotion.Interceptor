@@ -25,7 +25,8 @@
     display: none;
 }
 
-.subject-component-wrapper.selectable > ::deep * {
+.subject-component-wrapper.selectable > ::deep *,
+.subject-component-wrapper.text-block > ::deep * {
     pointer-events: none;
 }
 
@@ -38,13 +39,10 @@
 
 /* A block of text that is not selectable yet, such as text in a card that is not selected, takes the pointer, so that a
    double click opens its dialog (see SubjectComponent.razor). A click goes on to the widget around it, and its content
-   stays without the pointer, as the content of a selectable widget does, so that a link in it does not navigate. */
+   stays without the pointer, as the content of a selectable widget does (see above), so that a link in it does not
+   navigate. The rule must stay after the one for that content, whose specificity it shares. */
 .subject-component-wrapper.text-block {
     pointer-events: auto;
-}
-
-.subject-component-wrapper.text-block > ::deep * {
-    pointer-events: none;
 }
 
 @media (hover: hover) {
@@ -221,11 +219,13 @@
     margin-bottom: 3px;
 }
 
-::deep .value-list > .value-list-item:first-child > .mud-list-item-text {
+::deep .value-list > .value-list-item:first-child > .mud-list-item-text,
+::deep .value-list > .subject-component-wrapper:first-child > .value-list-item > .mud-list-item-text {
     margin-top: 0;
 }
 
-::deep .value-list > .value-list-item:last-child > .mud-list-item-text {
+::deep .value-list > .value-list-item:last-child > .mud-list-item-text,
+::deep .value-list > .subject-component-wrapper:last-child > .value-list-item > .mud-list-item-text {
     margin-bottom: 0;
 }
 
@@ -233,16 +233,8 @@
     padding-top: 0;
 }
 
-::deep .value-list > .subject-component-wrapper:first-child > .value-list-item > .mud-list-item-text {
-    margin-top: 0;
-}
-
 ::deep .value-list > .subject-component-wrapper:last-child > .value-list-item {
     padding-bottom: 0;
-}
-
-::deep .value-list > .subject-component-wrapper:last-child > .value-list-item > .mud-list-item-text {
-    margin-bottom: 0;
 }
 
 /* A ValueMap edited inline is only its chip (see WidgetChip), and its wrapper is as wide as the chip, so that its outline,
