@@ -228,6 +228,38 @@ public class PathPatternTests
         Assert.NotNull(compiled);
     }
 
+    [Theory]
+    [InlineData("/Rooms.*", "starts with '/', which is not the path provider's separator '.'; write the pattern with '.' or without a leading separator")]
+    [InlineData("\\Rooms.*", "starts with '\\', which is not the path provider's separator '.'")]
+    [InlineData("/", "starts with '/'")]
+    public void WhenPatternStartsWithAnotherProvidersSeparator_ThenParseThrowsNamingTheSeparator(string pattern, string expectedMessagePart)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, DefaultPathProvider.Instance, "Reader"));
+        Assert.Contains(expectedMessagePart, exception.Message);
+    }
+
+    [Fact]
+    public void WhenSlashPatternStartsWithABackslash_ThenParseThrows()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse("\\Rooms/*", Policies.SlashPaths, "Reader"));
+        Assert.Contains("separator '/'", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("Security.a/b.Name")]
+    [InlineData("Security.a\\b.Name")]
+    [InlineData(".Security.Roles['/a'].Name")]
+    public void WhenASeparatorOfAnotherProviderIsNotTheFirstCharacter_ThenThePatternCompiles(string pattern)
+    {
+        // Act
+        var compiled = PathPattern.Parse(pattern, DefaultPathProvider.Instance, "Test");
+
+        // Assert
+        Assert.NotNull(compiled);
+    }
+
     private static readonly PathLink Name = new("Name", null, null);
 
     // The last segment of the member path is the member, the segments before it the path of its subject.
