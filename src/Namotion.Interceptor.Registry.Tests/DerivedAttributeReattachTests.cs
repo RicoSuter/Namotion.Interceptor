@@ -30,7 +30,6 @@ public class DerivedAttributeReattachTests
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithLifecycle()
             .WithRegistry();
 
         context

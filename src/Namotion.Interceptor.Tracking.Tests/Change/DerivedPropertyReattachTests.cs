@@ -122,6 +122,7 @@ public class DerivedPropertyReattachTests
         Thread? writerThread = null;
         Task writer;
         Monitor.Enter(valueData);
+        var contentionBefore = Monitor.LockContentionCount;
         try
         {
             writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
@@ -131,7 +132,9 @@ public class DerivedPropertyReattachTests
             });
 
             Assert.True(SpinWait.SpinUntil(
-                () => writerThread is not null && (writerThread.ThreadState & ThreadState.WaitSleepJoin) != 0,
+                () => writerThread is not null &&
+                      (writerThread.ThreadState & ThreadState.WaitSleepJoin) != 0 &&
+                      Monitor.LockContentionCount > contentionBefore,
                 TimeSpan.FromSeconds(10)));
 
             holder.First = null;
@@ -152,6 +155,115 @@ public class DerivedPropertyReattachTests
         // Assert
         Assert.Contains(valueProperty, observedProperty.GetRequiredProperties().ToArray());
         Assert.Contains(changes, change => change.Property == observedProperty && change.GetNewValue<int>() == 5);
+    }
+
+    [Fact]
+    public async Task WhenDerivedPropertyIsReattachedBeforeADerivedSourceThatIsRecalculating_ThenItStillFollowsIt()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        // The second write of X is the publish of Nickname's own recalculation.
+        var blocker = new ValueBlockingWriteInterceptor(nameof(DerivedSetterPerson.Nickname), "X", occurrence: 2);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        context.WithService(() => blocker);
+
+        var person = new DerivedSetterPerson(context) { Nickname = "A" };
+        var nicknameProperty = new PropertyReference(person, nameof(DerivedSetterPerson.Nickname));
+        var prefixedProperty = new PropertyReference(person, nameof(DerivedSetterPerson.NicknameWithPrefix));
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                lock (changes)
+                {
+                    changes.Add(change);
+                }
+            });
+
+        // Act: the subject is attached again, reader first, while Nickname's recalculation is in flight.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { person.Nickname = "X"; });
+        Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(10)));
+
+        person.DetachSubjectProperty(prefixedProperty);
+        person.DetachSubjectProperty(nicknameProperty);
+        person.AttachSubjectProperty(prefixedProperty);
+        person.AttachSubjectProperty(nicknameProperty);
+
+        blocker.Proceed.Set();
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+
+        lock (changes)
+        {
+            changes.Clear();
+        }
+
+        person.Nickname = "Y";
+
+        // Assert
+        Assert.Contains(nicknameProperty, prefixedProperty.GetRequiredProperties().ToArray());
+        lock (changes)
+        {
+            Assert.Contains(changes, change =>
+                change.Property == prefixedProperty &&
+                change.GetNewValue<string?>() == "Mr. Y");
+        }
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsDetachedWhileAnAttachWaitsForItsData_ThenTheAttachUsesTheCurrentData()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context) { FirstName = "John", LastName = "Doe" };
+        var fullNameProperty = new PropertyReference(person, nameof(Person.FullName));
+        var fullNameData = fullNameProperty.TryGetDerivedPropertyData()!;
+
+        // Act: an attach outside the graph lock, as for a property added at runtime, fetches the data
+        // and waits for its lock while the property is detached.
+        Thread? attachThread = null;
+        Task attach;
+        Monitor.Enter(fullNameData);
+        var contentionBefore = Monitor.LockContentionCount;
+        try
+        {
+            attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                attachThread = Thread.CurrentThread;
+                person.AttachSubjectProperty(fullNameProperty);
+            });
+
+            Assert.True(SpinWait.SpinUntil(
+                () => attachThread is not null &&
+                      (attachThread.ThreadState & ThreadState.WaitSleepJoin) != 0 &&
+                      Monitor.LockContentionCount > contentionBefore,
+                TimeSpan.FromSeconds(10)));
+
+            person.DetachSubjectProperty(fullNameProperty);
+        }
+        finally
+        {
+            Monitor.Exit(fullNameData);
+        }
+
+        await attach.WaitAsync(TimeSpan.FromSeconds(10));
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+        person.FirstName = "Jane";
+
+        // Assert
+        Assert.NotNull(fullNameProperty.TryGetDerivedPropertyData());
+        Assert.Contains(changes, change =>
+            change.Property == fullNameProperty &&
+            change.GetNewValue<string?>() == "Jane Doe");
     }
 
     [Fact]

@@ -4,11 +4,11 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-// Parks the first write of one value to one property before PropertyChangeInterceptor publishes it.
+// Parks one write of one value to one property, the first by default, before PropertyChangeInterceptor publishes it.
 [RunsBefore(typeof(PropertyChangeInterceptor))]
-internal sealed class ValueBlockingWriteInterceptor(string propertyName, object blockedValue) : IWriteInterceptor
+internal sealed class ValueBlockingWriteInterceptor(string propertyName, object blockedValue, int occurrence = 1) : IWriteInterceptor
 {
-    private int _hasBlocked;
+    private int _count;
 
     public ManualResetEventSlim Entered { get; } = new(false);
 
@@ -18,7 +18,7 @@ internal sealed class ValueBlockingWriteInterceptor(string propertyName, object 
     {
         if (context.Property.Name == propertyName &&
             Equals(context.NewValue, blockedValue) &&
-            Interlocked.Exchange(ref _hasBlocked, 1) == 0)
+            Interlocked.Increment(ref _count) == occurrence)
         {
             Entered.Set();
             if (!Proceed.Wait(TimeSpan.FromSeconds(10)))

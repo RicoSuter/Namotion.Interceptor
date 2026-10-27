@@ -51,18 +51,30 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var metadata = change.Property.Metadata;
 
-        // Derived: create data if needed. Source: only get existing (created by Store when first depended on).
-        var data = metadata.IsDerived
-            ? change.Property.GetDerivedPropertyData()
-            : change.Property.TryGetDerivedPropertyData();
-
-        if (data is null)
+        // A detach may remove the fetched data before it is locked: attach the current data instead.
+        while (true)
         {
-            return;
-        }
+            // Derived: create data if needed. Source: only get existing (created by Store when first depended on).
+            var data = metadata.IsDerived
+                ? change.Property.GetDerivedPropertyData()
+                : change.Property.TryGetDerivedPropertyData();
 
+            if (data is null || TryAttach(data, change.Property, metadata.IsDerived))
+            {
+                return;
+            }
+        }
+    }
+
+    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property, bool isDerived)
+    {
         lock (data)
         {
+            if (data.IsRemoved)
+            {
+                return false;
+            }
+
             // Signal any in-progress recalculation to re-evaluate after we change state.
             if (data.IsRecalculating)
             {
@@ -70,19 +82,21 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             data.IsAttached = true;
-            if (metadata.IsDerived)
+            if (isDerived)
             {
                 Volatile.Write(ref data.IsDerived, true);
                 try
                 {
-                    data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                    data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
+                    property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 }
                 catch (Exception)
                 {
                     // Getter threw. The value will be computed on the next dependency write.
                 }
             }
+
+            return true;
         }
     }
 
@@ -101,25 +115,22 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Single lock: set IsAttached=false, clean dependencies (Case 1), snapshot used-by properties (Case 2).
         // Lock serializes with UpdateDependencies' used-by Add on the same depData.
         PropertyReference[] usedBySnapshot;
-        bool isRecalculating;
         lock (data)
         {
-            // Signal any in-progress recalculation to re-evaluate after we change state.
-            isRecalculating = data.IsRecalculating;
-            if (isRecalculating)
+            usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
+            if (data.IsRecalculating)
             {
+                // Kept, so that its IsRecalculating serializes the in-flight recalculation with the ones after
+                // a re-attach. Signal it to re-evaluate after we change state.
                 data.RecalculationNeeded = true;
             }
-
-            usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
-        }
-
-        // Removed so that a dependent attached before this property on re-attach registers on fresh
-        // data instead of skipping it as detached. Kept while a recalculation is in flight: its
-        // IsRecalculating serializes that recalculation with the ones after a re-attach.
-        if (!isRecalculating)
-        {
-            property.RemoveDerivedPropertyData(data);
+            else
+            {
+                // Removed under the lock, so that a registration or attach that fetched this instance sees
+                // IsRemoved and uses the current data instead.
+                data.IsRemoved = true;
+                property.RemoveDerivedPropertyData(data);
+            }
         }
 
         // Case 2: Remove this property from each dependent's RequiredProperties (outside lock).
