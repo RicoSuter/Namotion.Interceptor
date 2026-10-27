@@ -26,6 +26,8 @@ public class RegisteredSubject
     // in the getter so readers see fully built contents.
     private SubjectPropertyParent[]? _parentsSnapshot;
 
+    private bool _isRegistered;
+
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
@@ -33,6 +35,15 @@ public class RegisteredSubject
     /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
     /// </summary>
     public int ReferenceCount => Subject.GetReferenceCount();
+
+    /// <summary>
+    /// Gets whether the registry holds this instance for <see cref="Subject"/>: true from the registry's registration of
+    /// the subject until it unregisters the subject on detach, false for an instance created outside the registry.
+    /// A subject attached again is registered as a new instance, so an instance never becomes registered again.
+    /// Lock-free. The registry clears it before it removes the subject's parents, so a reader that sees the parents of
+    /// a detach removed also sees it false.
+    /// </summary>
+    public bool IsRegistered => Volatile.Read(ref _isRegistered);
 
     /// <summary>
     /// Gets the properties which reference this subject.
@@ -143,6 +154,8 @@ public class RegisteredSubject
                 p => new RegisteredSubjectProperty(
                     this, p.Key, p.Value.Type, p.Value.Attributes));
     }
+
+    internal void SetRegistered(bool isRegistered) => Volatile.Write(ref _isRegistered, isRegistered);
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
