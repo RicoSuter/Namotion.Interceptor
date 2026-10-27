@@ -6,8 +6,9 @@ namespace HomeBlaze.Authorization.Blazor;
 /// between. Taken before <see cref="AuthorizationService.BeginUpdate"/>, and never held across an await.
 /// </summary>
 /// <remarks>
-/// A reload of the file replaces the roles from the storage and does not take the lock, so a reload landing between
-/// the check and the assignment of a save can still be overwritten by that save.
+/// A reload of the file replaces the roles from the storage and does not take the lock. A reload landing between the
+/// check and the assignment of a save can still be overwritten by a save of the Authorization dialog, and makes a save
+/// of a role dialog land in a role the reload removed.
 /// </remarks>
 internal static class AuthorizationEditLock
 {
