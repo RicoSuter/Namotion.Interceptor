@@ -26,7 +26,7 @@ public class RegisteredSubject
     // in the getter so readers see fully built contents.
     private SubjectPropertyParent[]? _parentsSnapshot;
 
-    private bool _isRegistered;
+    private bool _isAttached;
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
@@ -37,13 +37,14 @@ public class RegisteredSubject
     public int ReferenceCount => Subject.GetReferenceCount();
 
     /// <summary>
-    /// Gets whether the registry holds this instance for <see cref="Subject"/>: true from the registry's registration of
-    /// the subject until it unregisters the subject on detach, false for an instance created outside the registry.
-    /// A subject attached again is registered as a new instance, so an instance never becomes registered again.
-    /// Lock-free. The registry clears it before it removes the subject's parents, so a reader that sees the parents of
-    /// a detach removed also sees it false.
+    /// Gets whether the subject is in the registry's graph through this instance: true from the registry's
+    /// registration of the subject until the registry removes the subject's last parent or unregisters it, both of
+    /// which happen only when the subject detaches. A subject without parents that is attached is therefore a root.
+    /// A subject attached again is registered as a new instance, so an instance never becomes attached again, and an
+    /// instance created outside the registry is never attached. Lock-free; the registry clears it before it removes
+    /// the last parent, so a reader that sees the parents empty after a removal also sees it false.
     /// </summary>
-    public bool IsRegistered => Volatile.Read(ref _isRegistered);
+    public bool IsAttached => Volatile.Read(ref _isAttached);
 
     /// <summary>
     /// Gets the properties which reference this subject.
@@ -155,7 +156,9 @@ public class RegisteredSubject
                     this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
-    internal void SetRegistered(bool isRegistered) => Volatile.Write(ref _isRegistered, isRegistered);
+    internal void MarkAttached() => Volatile.Write(ref _isAttached, true);
+
+    internal void MarkDetached() => Volatile.Write(ref _isAttached, false);
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
@@ -182,6 +185,12 @@ public class RegisteredSubject
             var entry = new SubjectPropertyParent { Property = parent, Index = index };
             if (_firstParent.Property is not null && _firstParent.Equals(entry))
             {
+                if (_additionalParents is null || _additionalParents.Count == 0)
+                {
+                    // Before the parents change, see IsAttached.
+                    MarkDetached();
+                }
+
                 PromoteFirstParentFromAdditional();
                 return;
             }
@@ -202,6 +211,12 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
+            if (HasOnlyParent(parent))
+            {
+                // Before the parents change, see IsAttached.
+                MarkDetached();
+            }
+
             var changed = false;
 
             if (_additionalParents is not null && _additionalParents.Count > 0)
@@ -251,6 +266,28 @@ public class RegisteredSubject
                 }
             }
         }
+    }
+
+    // Whether every parent is held by the property and there is at least one. Caller must hold _lock.
+    private bool HasOnlyParent(RegisteredSubjectProperty parent)
+    {
+        if (_firstParent.Property != parent)
+        {
+            return false;
+        }
+
+        if (_additionalParents is not null)
+        {
+            foreach (var additionalParent in _additionalParents)
+            {
+                if (additionalParent.Property != parent)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     // Promotes the head (not the tail) of the overflow list so the surviving parents

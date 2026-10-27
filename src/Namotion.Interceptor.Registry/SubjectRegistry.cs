@@ -182,9 +182,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 {
                     if (change.IsContextDetach)
                     {
-                        // Cleared before the parents change, so lock-free readers never see a detached subject's
-                        // parents gone while it still reads as registered.
-                        registeredSubject.SetRegistered(false);
+                        // Before the parents change, see RegisteredSubject.IsAttached.
+                        registeredSubject.MarkDetached();
                     }
 
                     if (change is { IsPropertyReferenceRemoved: true, Property: not null })
@@ -263,7 +262,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
         var registeredSubject = new RegisteredSubject(subject);
-        registeredSubject.SetRegistered(true);
+        registeredSubject.MarkAttached();
         _knownSubjects[subject] = registeredSubject;
         Volatile.Write(ref _knownSubjectsSnapshot, null);
         return registeredSubject;
