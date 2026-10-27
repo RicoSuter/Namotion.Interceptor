@@ -259,13 +259,6 @@ else
         if (_editor is null)
             return;
 
-        if (SaveRequested.HasDelegate)
-        {
-            // The keys work before the editor takes the focus, so that a key typed right away is not lost. CtrlCmd is
-            // Command on a Mac and Control elsewhere.
-            await _editor.AddCommand((int)KeyMod.CtrlCmd | (int)KeyCode.KeyS, arguments => _ = RequestSaveAsync());
-        }
-
         if (await GetModuleAsync() is { } module)
         {
             await OwnEditorAsync(module);
@@ -317,20 +310,33 @@ else
         _reference = reference;
     }
 
-    /// <summary>Called by the module for Ctrl+S, or Cmd+S on a Mac, in the text area.</summary>
+    /// <summary>Called by the module for Ctrl+S, or Cmd+S on a Mac, in the editor or the text area.</summary>
     [JSInvokable]
-    public Task RequestSaveFromTextAreaAsync() => RequestSaveAsync();
+    public Task RequestSaveFromKeysAsync() => RequestSaveAsync();
 
-    // A dispose while the editor is taken would miss the handle, so the editor is disposed here then.
+    // A dispose while the editor is taken would miss the handle and the reference, so both are let go here then.
     private async Task OwnEditorAsync(IJSObjectReference module)
     {
-        var editorHandle = await module.InvokeAsync<IJSObjectReference>("own", _editorId);
+        var reference = SaveRequested.HasDelegate ? DotNetObjectReference.Create(this) : null;
+        IJSObjectReference editorHandle;
+        try
+        {
+            editorHandle = await module.InvokeAsync<IJSObjectReference>("own", _editorId, reference);
+        }
+        catch
+        {
+            reference?.Dispose();
+            throw;
+        }
+
         if (_isDisposed)
         {
+            reference?.Dispose();
             await DisposeEditorAsync(editorHandle);
             return;
         }
 
+        _reference = reference;
         _editorHandle = editorHandle;
     }
 

@@ -530,6 +530,39 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenATextDialogWasClosed_ThenItsEditorIsGoneAndControlSInTheSourceEditorSavesThePage()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        var editorCount = await page.EvaluateAsync<int>("() => window.monaco?.editor.getEditors().length ?? 0");
+        // The last paragraph, whose bar does not cover the menu of the modes.
+        var actionBar = await SelectTextAsync(page, "Last paragraph");
+        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
+        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
+        await WaitForTextEditorFocusAsync(page);
+        await page.Keyboard.PressAsync("Escape");
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await page.WaitForFunctionAsync(
+            "count => (window.monaco?.editor.getEditors().length ?? 0) === count", editorCount, new() { Timeout = Timeout });
+        await page.SelectEditModeAsync("Source");
+        var editorContent = page.Locator(".monaco-editor .view-lines");
+        await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await editorContent.ClickAsync();
+        await page.Keyboard.PressAsync("ControlOrMeta+End");
+        await page.Keyboard.TypeAsync("Saved by the shortcut.");
+        await Assertions.Expect(editorContent).ToContainTextAsync("Saved by the shortcut.", new() { Timeout = Timeout });
+
+        // Act
+        await page.Keyboard.PressAsync("ControlOrMeta+s");
+
+        // Assert
+        await _fixture.WaitForDemoPageTextAsync(
+            PageName,
+            text => text.Contains("Last paragraph on the page.\nSaved by the shortcut."),
+            "The shortcut did not save the page.");
+    }
+
+    [Fact]
     public async Task WhenEscapeIsPressedWithoutAChange_ThenTheDialogClosesAtOnce()
     {
         // Arrange

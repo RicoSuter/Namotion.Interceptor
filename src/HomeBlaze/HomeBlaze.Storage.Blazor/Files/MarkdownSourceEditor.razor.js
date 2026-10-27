@@ -25,14 +25,29 @@ export function isCoarsePointer() {
  * Takes the editor that has the id now, so that it can be disposed later even when another editor has the id by then.
  * BlazorMonaco keeps an editor and its model until another editor with the same id is created.
  * @param {string} editorId The id of the editor of BlazorMonaco.
+ * @param {object | null} saver The reference to the .NET object of the editor, whose RequestSaveFromKeysAsync is called for
+ * Ctrl+S, or Cmd+S on a Mac, in this editor, or null when it does not save.
  * @returns {{ dispose: () => void }} Disposes the editor together with its model and forgets it.
  */
-export function own(editorId) {
+export function own(editorId, saver) {
     const editor = window.blazorMonaco.editor.getEditor(editorId, true);
 
     // BlazorMonaco disposes the editor itself when a new editor takes its id first.
     let isDisposed = false;
     editor?.onDidDispose(() => isDisposed = true);
+
+    // A listener of this editor, which goes with it. A command of Monaco would apply to every editor of the page and outlive
+    // this one, taking the keys from the editor of the page after the dialog closed.
+    if (editor && saver) {
+        editor.onKeyDown(event => {
+            if (isSaveKey(event.browserEvent)) {
+                event.preventDefault();
+                event.stopPropagation();
+                saver.invokeMethodAsync('RequestSaveFromKeysAsync').catch(() => { });
+            }
+        });
+    }
+
     return {
         dispose: () => {
             if (!editor || isDisposed) {
@@ -64,7 +79,7 @@ export function disposeEditor(editorId) {
 
 /**
  * Starts to remember whether the text area of an editor had the focus, before which it has no cursor of the user, and
- * calls RequestSaveFromTextAreaAsync of the editor for Ctrl+S, or Cmd+S on a Mac.
+ * calls RequestSaveFromKeysAsync of the editor for Ctrl+S, or Cmd+S on a Mac.
  * @param {HTMLTextAreaElement} element The text area.
  * @param {object | null} editor The reference to the .NET object of the editor, or null when it does not save.
  */
@@ -76,12 +91,16 @@ export function watchTextArea(element, editor) {
     element.addEventListener('focus', () => focusedTextAreas.add(element), { once: true });
     if (editor) {
         element.addEventListener('keydown', event => {
-            if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+            if (isSaveKey(event)) {
                 event.preventDefault();
-                editor.invokeMethodAsync('RequestSaveFromTextAreaAsync').catch(() => { });
+                editor.invokeMethodAsync('RequestSaveFromKeysAsync').catch(() => { });
             }
         });
     }
+}
+
+function isSaveKey(event) {
+    return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's';
 }
 
 /**
