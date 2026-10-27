@@ -8,13 +8,22 @@ namespace Namotion.Interceptor.Benchmark;
 
 #pragma warning disable CS8618
 
+public enum StructuralWriteHandler
+{
+    /// <summary>The registry, which keeps the index of each child and of each parent entry.</summary>
+    Registry,
+
+    /// <summary>Parent tracking without a registry, so that it is as large a share of a write as it can get.</summary>
+    ParentTracking
+}
+
 /// <summary>
-/// Structural writes that keep subjects in the property, which is what replacing a collection or
-/// dictionary with an edited copy does to every entry the edit did not touch. Each write alternates
-/// between two prepared values, so a measured operation is one reconciliation.
+/// Structural writes that keep or move subjects in the property, measured with each handler that
+/// keeps the index of a child. Each write alternates between two prepared values, so a measured
+/// operation is one reconciliation.
 /// </summary>
 [MemoryDiagnoser]
-public class RegistryStructuralWriteBenchmark
+public class StructuralWriteBenchmark
 {
     private const int EntryCount = 100;
 
@@ -23,42 +32,45 @@ public class RegistryStructuralWriteBenchmark
 
     private Car[] _items;
     private Car[] _itemsCopy;
+    private Car[] _itemsRotated;
+    private Car[] _otherItems;
 
     private Dictionary<string, Car> _entries;
     private Dictionary<string, Car> _entriesCopy;
     private Dictionary<string, Car> _entriesWithOneAdded;
     private Dictionary<string, Car> _entriesWithOneReKeyed;
-    private Dictionary<string, Car> _entriesReversed;
-    private Dictionary<string, Car> _otherEntries;
 
     private Dictionary<int, Car> _numberedEntries;
     private Dictionary<int, Car> _numberedEntriesCopy;
 
     private bool _toggle;
 
+    [Params(StructuralWriteHandler.Registry, StructuralWriteHandler.ParentTracking)]
+    public StructuralWriteHandler Handler;
+
     [GlobalSetup]
     public void Setup()
     {
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
+            .WithFullPropertyTracking();
+
+        context = Handler == StructuralWriteHandler.Registry
+            ? context.WithRegistry()
+            : context.WithParents();
 
         _items = Enumerable.Range(0, EntryCount).Select(_ => new Car()).ToArray();
         _itemsCopy = [.. _items];
+        _itemsRotated = [.. _items.Skip(1), _items[0]];
+        _otherItems = Enumerable.Range(0, EntryCount).Select(_ => new Car()).ToArray();
 
         _entries = Enumerable.Range(0, EntryCount).ToDictionary(index => $"Car{index}", _ => new Car());
         _entriesCopy = new Dictionary<string, Car>(_entries);
-
         _entriesWithOneAdded = new Dictionary<string, Car>(_entries) { ["Added"] = new Car() };
 
         _entriesWithOneReKeyed = new Dictionary<string, Car>(_entries);
         _entriesWithOneReKeyed.Remove($"Car{EntryCount / 2}", out var reKeyed);
         _entriesWithOneReKeyed["Renamed"] = reKeyed!;
-
-        _entriesReversed = new Dictionary<string, Car>(_entries.Reverse());
-
-        _otherEntries = Enumerable.Range(0, EntryCount).ToDictionary(index => $"Car{index}", _ => new Car());
 
         _numberedEntries = Enumerable.Range(0, EntryCount).ToDictionary(index => index, _ => new Car());
         _numberedEntriesCopy = new Dictionary<int, Car>(_numberedEntries);
@@ -78,6 +90,26 @@ public class RegistryStructuralWriteBenchmark
     }
 
     /// <summary>
+    /// Every item stays and moves to another position.
+    /// </summary>
+    [Benchmark]
+    public void MoveCollectionItems()
+    {
+        _toggle = !_toggle;
+        _car.PreviousCars = _toggle ? _itemsRotated : _items;
+    }
+
+    /// <summary>
+    /// No item stays, so every subject is detached or attached.
+    /// </summary>
+    [Benchmark]
+    public void ReplaceCollectionItems()
+    {
+        _toggle = !_toggle;
+        _car.PreviousCars = _toggle ? _otherItems : _items;
+    }
+
+    /// <summary>
     /// Every entry stays under its key.
     /// </summary>
     [Benchmark]
@@ -88,11 +120,10 @@ public class RegistryStructuralWriteBenchmark
     }
 
     /// <summary>
-    /// Every entry stays under its key, and the keys are value types, which the non-generic
-    /// dictionary interfaces box.
+    /// Every entry stays under its key, which is a value type and has to be boxed to be read.
     /// </summary>
     [Benchmark]
-    public void ReplaceIntKeyedDictionaryKeepingEntries()
+    public void ReplaceNumberedDictionaryKeepingEntries()
     {
         _toggle = !_toggle;
         _garage.ById = _toggle ? _numberedEntriesCopy : _numberedEntries;
@@ -116,25 +147,5 @@ public class RegistryStructuralWriteBenchmark
     {
         _toggle = !_toggle;
         _garage.ByName = _toggle ? _entriesWithOneReKeyed : _entries;
-    }
-
-    /// <summary>
-    /// Every entry stays under its key and the enumeration order turns around.
-    /// </summary>
-    [Benchmark]
-    public void ReverseDictionaryEntries()
-    {
-        _toggle = !_toggle;
-        _garage.ByName = _toggle ? _entriesReversed : _entries;
-    }
-
-    /// <summary>
-    /// No entry stays, so every subject is detached or attached.
-    /// </summary>
-    [Benchmark]
-    public void ReplaceDictionaryEntries()
-    {
-        _toggle = !_toggle;
-        _garage.ByName = _toggle ? _otherEntries : _entries;
     }
 }
