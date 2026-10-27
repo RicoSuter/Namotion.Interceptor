@@ -172,6 +172,24 @@ public class AgentMarkdownRendererTests
         Assert.DoesNotContain("class=", html);
     }
 
+    [Theory]
+    [InlineData("flowchart TD\n  A@{ img: \"http://evil.test/x.png\" }")]
+    [InlineData("stateDiagram-v2\n  classDef bad mask-image:url(//evil.test/x)\n  class S bad")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:URL(//evil.test/x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:image-set(\"//evil.test/x\" 1x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:\\75 rl(//evil.test/x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:#117;rl(//evil.test/x)")]
+    [InlineData("flowchart TD\n  A --> B\n  click A href \"https://evil.test\"")]
+    public void WhenMermaidFenceCouldLoadAnAddress_ThenItIsRenderedAsCode(string source)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("```mermaid\n" + source + "\n```");
+
+        // Assert
+        Assert.Contains("<pre><code>", html);
+        Assert.DoesNotContain("class=", html);
+    }
+
     [Fact]
     public void WhenMermaidFenceContainsHtml_ThenItIsEncoded()
     {
