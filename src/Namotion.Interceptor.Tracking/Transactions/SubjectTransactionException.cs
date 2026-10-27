@@ -23,8 +23,7 @@ public class SubjectTransactionException : Exception
     }
 
     /// <summary>
-    /// Initializes a new instance with an explicit inner exception, for subclasses that supply their own inner
-    /// exception.
+    /// Initializes a new instance with an explicit inner exception, for subclasses.
     /// </summary>
     /// <param name="message">The exception message.</param>
     /// <param name="appliedChanges">The changes that were applied.</param>

@@ -14,7 +14,7 @@ internal static class SubjectPropertyChangeOperations
     /// only on the no-exclude full-success path, where the caller already holds the input span and does not
     /// need the applied set; with exclusions, or on any failure, Successful is populated. When
     /// <paramref name="markingTransaction"/> is set, each applied write carries the commit write mark of that
-    /// transaction, and the applies stop at the first failed one, whose transaction then reverts the set.
+    /// transaction, and applying stops at the first failure, after which that transaction reverts the set.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)

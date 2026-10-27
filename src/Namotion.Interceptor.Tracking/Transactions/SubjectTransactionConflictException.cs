@@ -24,7 +24,9 @@ public sealed class SubjectTransactionConflictException : SubjectTransactionExce
     }
 
     /// <summary>
-    /// Gets the properties that were modified by another source during the transaction.
+    /// Gets the properties that were modified by another source during the transaction. In
+    /// <see cref="TransactionValidationMode.Deferred"/> mode, these can include properties the transaction wrote with
+    /// their unchanged value, which <see cref="SubjectTransaction.GetPendingChanges"/> does not list.
     /// </summary>
     public IReadOnlyList<PropertyReference> ConflictingProperties { get; }
 }

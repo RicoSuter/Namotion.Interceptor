@@ -88,8 +88,8 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     public override int GetHashCode() => GetType().GetHashCode();
 
     /// <summary>
-    /// Validates the new value of <paramref name="change"/> with the property type as the type argument for common value
-    /// types, so the value is not boxed, and as <c>object</c> otherwise.
+    /// Validates the new value of <paramref name="change"/> with the property type as the type argument for common
+    /// value types, so the value is not boxed, and as <c>object</c> otherwise.
     /// </summary>
     private static List<ValidationResult>? ValidateNewValue(ImmutableArray<IPropertyValidator> validators, in SubjectPropertyChange change)
     {

@@ -17,8 +17,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);
 
     /// <summary>
-    /// Acquires the transaction lock for this context. Used by optimistic transactions to hold the lock for the duration
-    /// of a commit.
+    /// Acquires the transaction lock for this context. Used by optimistic transactions to hold the lock for the
+    /// duration of a commit.
     /// </summary>
     /// <returns>An object whose first disposal releases the lock.</returns>
     internal async ValueTask<IDisposable> AcquireTransactionLockAsync(CancellationToken cancellationToken)
@@ -170,16 +170,15 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     }
 
     /// <summary>
-    /// Records a write of the landed value that the equality check drops as unchanged, when the current flow's
-    /// transaction captures in <see cref="TransactionValidationMode.Deferred"/> mode, so the commit check validates the
-    /// value (see <see cref="SubjectTransaction.TryRecordValidateOnly{TProperty}"/>). The write is still dropped
-    /// otherwise, including for a derived property and for a subject whose context does not route through the
-    /// transaction's interceptor.
+    /// Records a write of the landed value, which the equality check drops as unchanged, for the commit check when the
+    /// current flow's transaction captures and <see cref="SubjectTransaction.RecordsValidateOnlyEntries"/> (see
+    /// <see cref="SubjectTransaction.TryRecordValidateOnly{TProperty}"/>). Otherwise, and for a derived property or a
+    /// subject whose context does not route through the transaction's interceptor, the write stays dropped.
     /// </summary>
     internal static void RecordUnchangedWrite<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
         var transaction = SubjectTransaction.Current;
-        if (transaction is not { ValidationMode: TransactionValidationMode.Deferred, IsDisposed: false, IsCommitted: false } ||
+        if (transaction is not { RecordsValidateOnlyEntries: true, IsDisposed: false, IsCommitted: false } ||
             transaction.IsCommitting)
         {
             return;
@@ -197,7 +196,13 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        transaction.IncludeHandlersOf(subjectContext, subjectInterceptors);
+        // A commit that starts meanwhile drops the write instead of failing it. An entry recorded without the handlers
+        // of its context, after a skipped inclusion and a failed commit, would escape their check, so drop it here.
+        if (!transaction.IncludeHandlersOf(subjectContext, subjectInterceptors, skipWhileCommitting: true))
+        {
+            return;
+        }
+
         InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
         transaction.TryRecordValidateOnly(
             context.Property,
@@ -237,8 +242,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     }
 
     /// <summary>
-    /// Throws when <paramref name="subjectContext"/> does not resolve the interceptor of <paramref name="transaction"/>,
-    /// and otherwise returns the transaction interceptors it resolves.
+    /// Throws when <paramref name="subjectContext"/> does not resolve the interceptor of
+    /// <paramref name="transaction"/>, and otherwise returns the transaction interceptors it resolves.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ImmutableArray<SubjectTransactionInterceptor> ValidateTransactionContext(

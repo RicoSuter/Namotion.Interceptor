@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
 /// The transaction handlers that take part in a transaction: those of the transaction's context, resolved when it
-/// begins, followed by those added from the contexts of written subjects. Handlers match by equality.
+/// begins (after any wait for the exclusive lock), followed by those added from the contexts of written subjects.
+/// Handlers match by equality.
 /// </summary>
 // A mutable struct embedded in the transaction to save an allocation per transaction. It must only be used through
 // the transaction's field: a copy, or a readonly field, would publish inclusions to the copy.
@@ -19,15 +20,13 @@ internal struct TransactionHandlerSet
 
     // Caches only (a stale read just takes the slow path): the transaction interceptors of the last subject context
     // included, and the last handler array included. Written after _handlers with release semantics, so a reader that
-    // skips on a hit also sees the included handlers.
-    //
-    // The interceptor array identifies the subject context's handlers, see IInterceptorSubjectContext.GetServices. It
-    // is never empty: it holds the transaction's interceptor.
+    // skips on a hit also sees the included handlers. The interceptor array identifies the subject context's handlers
+    // (see IInterceptorSubjectContext.GetServices) and is never empty: it holds the transaction's interceptor.
     private SubjectTransactionInterceptor[]? _lastIncludedInterceptors;
     private ITransactionHandler[] _lastIncludedHandlers;
 
     /// <summary>
-    /// Initializes the set with <paramref name="transactionContextHandlers"/>, the handlers of the transaction's context.
+    /// Initializes the set with <paramref name="transactionContextHandlers"/>, the transaction's context handlers.
     /// </summary>
     internal TransactionHandlerSet(ImmutableArray<ITransactionHandler> transactionContextHandlers)
     {
@@ -42,6 +41,8 @@ internal struct TransactionHandlerSet
 
     /// <summary>
     /// Adds the handlers of <paramref name="subjectContext"/> that are not registered on the transaction's context.
+    /// Returns false when handlers had to be added but were not, because the transaction no longer captures or, with
+    /// <paramref name="skipWhileCommitting"/>, a commit is in progress.
     /// </summary>
     /// <param name="subjectContext">The context of the written subject.</param>
     /// <param name="subjectInterceptors">
@@ -49,28 +50,31 @@ internal struct TransactionHandlerSet
     /// <see cref="IInterceptorSubjectContext.GetServices{TInterface}"/>, including the transaction's interceptor.
     /// </param>
     /// <param name="transaction">The transaction the set belongs to.</param>
+    /// <param name="skipWhileCommitting">
+    /// True to add nothing instead of throwing while a commit is in progress, for a write that is dropped then.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown by <see cref="SubjectTransaction.CanCaptureUnderLock"/> while a commit is in progress and
-    /// <paramref name="subjectContext"/> adds handlers.
+    /// <paramref name="subjectContext"/> adds handlers, unless <paramref name="skipWhileCommitting"/> is true.
     /// </exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void Include(
+    internal bool Include(
         IInterceptorSubjectContext subjectContext,
         ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors,
-        SubjectTransaction transaction)
+        SubjectTransaction transaction,
+        bool skipWhileCommitting = false)
     {
         var interceptors = ImmutableCollectionsMarshal.AsArray(subjectInterceptors)!;
-        if (!ReferenceEquals(interceptors, Volatile.Read(ref _lastIncludedInterceptors)))
-        {
-            IncludeUncached(subjectContext, interceptors, transaction);
-        }
+        return ReferenceEquals(interceptors, Volatile.Read(ref _lastIncludedInterceptors)) ||
+            IncludeUncached(subjectContext, interceptors, transaction, skipWhileCommitting);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void IncludeUncached(
+    private bool IncludeUncached(
         IInterceptorSubjectContext subjectContext,
         SubjectTransactionInterceptor[] subjectInterceptors,
-        SubjectTransaction transaction)
+        SubjectTransaction transaction,
+        bool skipWhileCommitting)
     {
         var transactionContext = transaction.Context;
         if (!ReferenceEquals(subjectContext, transactionContext))
@@ -78,9 +82,9 @@ internal struct TransactionHandlerSet
             var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
             if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
             {
-                if (!TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction))
+                if (!TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction, skipWhileCommitting))
                 {
-                    return;
+                    return false;
                 }
 
                 Volatile.Write(ref _lastIncludedHandlers, subjectHandlers);
@@ -88,17 +92,20 @@ internal struct TransactionHandlerSet
         }
 
         Volatile.Write(ref _lastIncludedInterceptors, subjectInterceptors);
+        return true;
     }
 
     /// <summary>
     /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the set nor
     /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
-    /// began stays out. Returns false when there are additions and the transaction no longer captures.
+    /// began stays out. Returns false when there are additions and the transaction no longer captures, or a commit is
+    /// in progress and <paramref name="skipWhileCommitting"/> is true.
     /// </summary>
     private bool TryInclude(
         ReadOnlySpan<ITransactionHandler> subjectHandlers,
         ReadOnlySpan<ITransactionHandler> transactionContextHandlers,
-        SubjectTransaction transaction)
+        SubjectTransaction transaction,
+        bool skipWhileCommitting)
     {
         while (true)
         {
@@ -114,7 +121,7 @@ internal struct TransactionHandlerSet
 
             lock (transaction.PendingChangesLock)
             {
-                if (!transaction.CanCaptureUnderLock())
+                if ((skipWhileCommitting && transaction.IsCommitting) || !transaction.CanCaptureUnderLock())
                 {
                     return false;
                 }

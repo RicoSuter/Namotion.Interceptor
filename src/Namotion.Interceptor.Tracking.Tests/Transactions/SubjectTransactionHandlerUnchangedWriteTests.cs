@@ -6,8 +6,8 @@ using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestCon
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 /// <summary>
-/// Covers writes of an unchanged value, which the equality check drops: in Deferred mode the commit check still
-/// receives them, as entries the commit neither writes, applies nor publishes.
+/// Covers writes of an unchanged value, which the equality check drops: in Deferred mode with FailOnConflict the
+/// commit check still receives them, as entries the commit neither writes, applies nor publishes.
 /// </summary>
 public class SubjectTransactionHandlerUnchangedWriteTests
 {
@@ -129,6 +129,79 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         Assert.NotNull(changesSeen);
         Assert.Equal([second, first], changesSeen.Select(change => (object)change.Property.Subject));
         Assert.Equal(["Bob", "Ann"], changesSeen.Select(change => change.GetNewValue<string>()));
+    }
+
+    [Fact]
+    public async Task WhenWrittenBackPropertyChangesBeforeCommit_ThenCommitConflictsUntilTheNewValueIsWritten()
+    {
+        // Arrange
+        var context = CreateContext(out _);
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict,
+            validationMode: TransactionValidationMode.Deferred);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Carl");
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        person.FirstName = "Carl";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.ConflictingProperties).Name);
+        Assert.Equal("Carl", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenDeferredWithoutHandlersAndUnchangedValueChangesBeforeCommit_ThenCommitSucceeds()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict,
+            validationMode: TransactionValidationMode.Deferred);
+        person.FirstName = "Ann";
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Carl");
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Carl", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenDeferredWithIgnore_ThenUnchangedAndWrittenBackValuesAreNotRecorded()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.Ignore,
+            validationMode: TransactionValidationMode.Deferred);
+        person.FirstName = "Ann";
+        person.LastName = "Kim";
+        person.LastName = "Lee";
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Carl");
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Kim", "Lee"], handler.Captured.Select(capture => capture.Value));
+        Assert.Equal(0, handler.CommittingCalls);
+        Assert.Equal("Carl", person.FirstName);
+        Assert.Equal("Lee", person.LastName);
     }
 
     [Fact]

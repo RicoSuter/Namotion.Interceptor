@@ -15,10 +15,10 @@ public interface IPropertyValidator
     /// <param name="context">The validation context carrying the property, value, and attempted origin.</param>
     /// <returns>The validation results, empty if valid.</returns>
     /// <remarks>
-    /// <typeparamref name="TProperty"/> is unspecified: it can be the property type or <c>object</c>, for example in the
-    /// transaction handler checks (the commit check and the pre-apply check) and for writes through
-    /// <c>SetPropertyValueWithInterception</c>, which include derived property recalculations. Do not depend on it:
-    /// test the value (<c>context.Value is int speed</c>) instead of <c>typeof(TProperty)</c>.
+    /// <typeparamref name="TProperty"/> is unspecified: it can be the property type or <c>object</c>, for example in
+    /// the transaction commit checks and for writes through <c>SetPropertyValueWithInterception</c>, which include
+    /// derived property recalculations. Test the value (<c>context.Value is int speed</c>), not
+    /// <c>typeof(TProperty)</c>.
     /// </remarks>
     IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context);
 }

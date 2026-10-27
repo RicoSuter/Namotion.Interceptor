@@ -563,6 +563,29 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenDeferredWithIgnoreAndLandedValueOfUnchangedWriteChanges_ThenCommitCheckReadsTheLandedValue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context) { MotorSpeed = 50 };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.Ignore,
+            validationMode: TransactionValidationMode.Deferred);
+        motor.MaxAllowedSpeed = 100;
+        motor.MotorSpeed = 90;
+        await RunWithoutAsyncLocalFlowAsync(() => motor.MaxAllowedSpeed = 60);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(nameof(Motor.MotorSpeed), Assert.Single(exception.FailedChanges).Property.Name);
+    }
+
+    [Fact]
     public async Task WhenDeferredUnchangedValueIsRejectedAndWrittenAgain_ThenNewValueIsCommitted()
     {
         // Arrange

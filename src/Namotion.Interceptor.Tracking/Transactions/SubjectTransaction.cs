@@ -47,9 +47,12 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Deferred mode only: writes of the landed value of a property without a pending change, which the commit check
-    // validates and conflict detection checks, but the commit neither writes, applies nor publishes. Disjoint from the
-    // _pendingChanges keys. Allocated on the first such write; accessed only under _pendingChangesLock.
+    // Deferred mode with FailOnConflict only (see RecordsValidateOnlyEntries): validate-only entries, writes of the
+    // landed value of a property without a pending change.
+    // The commit check validates them and conflict detection checks them, so the check never validates a value that
+    // moved meanwhile, but the commit neither writes, applies nor publishes them, and GetPendingChanges does not list
+    // them. A later write of another value replaces the entry with a pending change, so the keys stay disjoint from
+    // _pendingChanges. Allocated on the first such write; accessed only under _pendingChangesLock.
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _validateOnlyChanges;
 
     private volatile bool _isCommitting;
@@ -84,13 +87,12 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
     /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
-    /// it. Reference-type values match by identity, value-type values by equality. A call by one of the transaction's
-    /// handlers consumes the mark, so it returns true at most once per applied value.
+    /// it. Reference-type values match by identity, value-type values by equality.
     /// </summary>
     /// <remarks>
-    /// Only one handler can consume a mark. When another handler that also intercepts writes checks the same write
-    /// afterwards, this returns false for it, so it must check the write again. It also returns false for every apply
-    /// after the transaction was disposed during the commit.
+    /// The first call by one of the transaction's handlers consumes the mark, so another handler that checks the same
+    /// write afterwards gets false and must check it again. Returns false for every apply after the transaction was
+    /// disposed during the commit.
     /// </remarks>
     /// <typeparam name="TProperty">The type of the written value.</typeparam>
     /// <param name="handler">The handler asking whether it already checked the write.</param>
@@ -144,8 +146,7 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
-    /// Gets the transaction handlers resolved from the context when the transaction began (after any wait for the
-    /// exclusive lock), followed by those added from the contexts of subjects when they are written.
+    /// Gets the transaction handlers, see <see cref="TransactionHandlerSet"/>.
     /// </summary>
     internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlerSet.Handlers);
 
@@ -157,23 +158,35 @@ public sealed class SubjectTransaction : IDisposable
     // Applies carry the commit write mark only when handlers checked the final set.
     private SubjectTransaction? MarkingTransaction => _handlerSet.Handlers.Length == 0 ? null : this;
 
+    /// <summary>
+    /// Gets whether writes of an unchanged value are recorded as validate-only entries. Conflict detection is what
+    /// keeps an entry sound, since the check reads its value from write time, so with
+    /// <see cref="TransactionConflictBehavior.Ignore"/> such writes stay dropped.
+    /// </summary>
+    internal bool RecordsValidateOnlyEntries =>
+        ValidationMode == TransactionValidationMode.Deferred && ConflictBehavior == TransactionConflictBehavior.FailOnConflict;
+
+    // Without handlers nothing validates the entries, so the commit leaves them out, conflict detection included.
+    private int CheckedValidateOnlyCount => _handlerSet.Handlers.Length == 0 ? 0 : _validateOnlyChanges?.Count ?? 0;
+
     // Handlers checked the changes as a set, so once one fails to apply the rest no longer land as checked.
     private bool RollsBackOnApplyFailure => _failureHandling == TransactionFailureHandling.Rollback || MarkingTransaction is not null;
 
     /// <summary>
-    /// Adds the transaction handlers of <paramref name="subjectContext"/> that are not registered on the transaction's
-    /// context, when a subject of it is written and the transaction is about to capture the write.
+    /// Adds the handlers of <paramref name="subjectContext"/> before the transaction captures a write to one of its
+    /// subjects, see <see cref="TransactionHandlerSet.Include"/>, which also states when this returns false.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Thrown while a commit is in progress and <paramref name="subjectContext"/> adds handlers, like the capture
-    /// would (see <see cref="TransactionHandlerSet.Include"/>).
+    /// Thrown, like the capture, while a commit is in progress and <paramref name="subjectContext"/> adds handlers,
+    /// unless <paramref name="skipWhileCommitting"/> is true.
     /// </exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void IncludeHandlersOf(
+    internal bool IncludeHandlersOf(
         IInterceptorSubjectContext subjectContext,
-        ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors)
+        ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors,
+        bool skipWhileCommitting = false)
     {
-        _handlerSet.Include(subjectContext, subjectInterceptors, this);
+        return _handlerSet.Include(subjectContext, subjectInterceptors, this, skipWhileCommitting);
     }
 
     /// <summary>
@@ -245,7 +258,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Reads a pending value for the handlers during the commit check or the pre-apply check, and in the commit check
     /// also a validate-only value. Returns false when the property is not part of the transaction or its source write
-    /// failed.
+    /// failed (the check's excluded properties).
     /// </summary>
     internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
     {
@@ -266,8 +279,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns the pending change of <paramref name="property"/>, or in the commit check its validate-only entry. Must be
-    /// called under <see cref="_pendingChangesLock"/>.
+    /// Returns the pending change of <paramref name="property"/>, or in the commit check its validate-only entry. Must
+    /// be called under <see cref="_pendingChangesLock"/>.
     /// </summary>
     private bool TryGetCheckedChange(PropertyReference property, out SubjectPropertyChange change)
     {
@@ -281,23 +294,14 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Atomically captures a property change into the pending dictionary.
-    /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
-    /// subsequent writes preserve the original old value (last write wins). Returns false when
-    /// disposal wins the race, allowing the caller to continue the normal write chain.
+    /// Atomically captures a property change into the pending dictionary. The first write preserves
+    /// <paramref name="currentValue"/>, the landed model value, as old value for conflict detection; subsequent writes
+    /// preserve the original old value (last write wins). <paramref name="restoresLandedValue"/> is true when the write
+    /// restores the landed value and the subject's context has the equality check: a pending change is then removed,
+    /// the same as never writing the property (without one the write is captured as usual), and replaced by a
+    /// validate-only entry for the landed value when <see cref="RecordsValidateOnlyEntries"/>.
+    /// Returns false when disposal wins the race, allowing the caller to continue the normal write chain.
     /// </summary>
-    /// <param name="property">The property being written.</param>
-    /// <param name="origin">The resolved origin of the change.</param>
-    /// <param name="changedTimestamp">The timestamp to publish for this change.</param>
-    /// <param name="receivedTimestamp">The timestamp the change was received, if any.</param>
-    /// <param name="currentValue">The landed model value seen by the write interceptor chain.</param>
-    /// <param name="newValue">The value being written.</param>
-    /// <param name="restoresLandedValue">
-    /// True when the write restores the landed value and the subject's context has the equality check; a pending
-    /// change is then removed, the same as never writing the property, and without one the write is captured as usual.
-    /// In <see cref="TransactionValidationMode.Deferred"/> mode, the removed change is replaced by a validate-only
-    /// entry for the landed value (see <see cref="TryRecordValidateOnly{TProperty}"/>).
-    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown if a concurrent commit is in progress (TOCTOU race).
     /// </exception>
@@ -320,7 +324,7 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             if (restoresLandedValue && pendingChanges.Remove(property))
             {
-                if (ValidationMode == TransactionValidationMode.Deferred)
+                if (RecordsValidateOnlyEntries)
                 {
                     (_validateOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
                         property, origin, changedTimestamp, receivedTimestamp, newValue, newValue);
@@ -344,13 +348,11 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Records a write of the landed value of <paramref name="property"/>, which the equality check drops, so the commit
-    /// check validates it: a validate-only entry whose old and new value are <paramref name="value"/>. Conflict
-    /// detection checks it like a pending change, so the check never validates a value that moved meanwhile, but the
-    /// commit neither writes, applies nor publishes it, and <see cref="GetPendingChanges"/> does not list it. A later
-    /// write of another value replaces it with a pending change. Does nothing when the property has a pending change,
-    /// which the commit check already validates, and returns false, dropping the write as unchanged, when the
-    /// transaction no longer captures or a commit has started.
+    /// Records a write of the landed value of <paramref name="property"/>, which the equality check drops, as a
+    /// validate-only entry (see <see cref="_validateOnlyChanges"/>) whose old and new value are
+    /// <paramref name="value"/>. Does nothing when the property has a pending change, which the commit check already
+    /// validates, and returns false, dropping the write as unchanged, when the transaction no longer captures or a
+    /// commit has started.
     /// </summary>
     internal bool TryRecordValidateOnly<TProperty>(
         PropertyReference property,
@@ -582,16 +584,12 @@ public sealed class SubjectTransaction : IDisposable
     /// compared with the current values, which catches changes from other transactions and external sources since
     /// the transaction started.
     /// </description></item>
+    /// <item><description>Source writes, when an <see cref="ITransactionWriter"/> is registered.</description></item>
     /// <item><description>
-    /// Source writes, when an <see cref="ITransactionWriter"/> is registered.
+    /// Pre-apply check, when an <see cref="ITransactionWriter"/> is registered: the handlers check again the changes
+    /// that will be applied.
     /// </description></item>
-    /// <item><description>
-    /// Pre-apply check, when an <see cref="ITransactionWriter"/> is registered: the handlers check the changes that
-    /// will be applied again.
-    /// </description></item>
-    /// <item><description>
-    /// Apply: the changes are applied to the local model in insertion order.
-    /// </description></item>
+    /// <item><description>Apply: the changes are applied to the local model in insertion order.</description></item>
     /// </list>
     /// For Optimistic locking, the lock is acquired at the start of commit and released after completion.
     /// </remarks>
@@ -618,7 +616,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
-            if ((_pendingChanges?.Count ?? 0) == 0 && (_validateOnlyChanges?.Count ?? 0) == 0)
+            if ((_pendingChanges?.Count ?? 0) == 0 && CheckedValidateOnlyCount == 0)
             {
                 _isCommitted = true;
                 return default;
@@ -744,7 +742,7 @@ public sealed class SubjectTransaction : IDisposable
 
             if (changes.IsEmpty)
             {
-                // Only validate-only entries, which the check and conflict detection accepted: nothing to write or apply.
+                // Only validate-only entries, accepted by the check and conflict detection: nothing to write or apply.
                 FinishCommit();
                 return;
             }
@@ -851,8 +849,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // Apply the whole snapshot except the source-write failures in a single pass. Without any, this is the entire
-        // snapshot, and ApplyLocalChanges returns an empty Successful set.
+        // Without source-write failures ApplyLocalChanges returns an empty Successful set on success.
         var exclude = failedSource.Count == 0 ? null : failedSource;
         IReadOnlyList<SubjectPropertyChange> applied;
         IReadOnlyList<SubjectPropertyChange> applyFailed;
@@ -885,10 +882,10 @@ public sealed class SubjectTransaction : IDisposable
                     localRevertFailed: revertFailed.Count > 0);
             }
 
-            // BestEffort without handlers: keep source == model for failed-apply properties by reverting only the source
-            // writes whose property failed to apply. A failed revert is one of those writes (a throwing writer fails
-            // all of them, and a reporting writer may only report requested ones, see
-            // ITransactionWriter.RevertSourceWritesAsync), so applyFailed already reports it.
+            // BestEffort without handlers: keep source == model for failed-apply properties by reverting only their
+            // source writes. A failed revert is one of those writes (a throwing writer fails all of them, and a
+            // reporting writer may only report requested ones, see ITransactionWriter.RevertSourceWritesAsync), so
+            // applyFailed already reports it.
             var toRevert = SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateBestEffortFailureException(
@@ -901,9 +898,10 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns the changes a pre-apply rejection or a failed apply reports after handlers checked them: every
-    /// change, source-write failures first, then the changes whose local revert failed, then those whose source
-    /// revert failed, so a stuck property appears a second time.
+    /// Returns the changes a pre-apply rejection or a failed apply reports after handlers checked them. Handlers
+    /// checked the set as a whole, so once one change fails none commits: every change is reported, source-write
+    /// failures first, then the changes whose local revert failed, then those whose source revert failed, so a stuck
+    /// property appears a second time.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetCheckedSetFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -911,8 +909,6 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> revertFailed,
         IReadOnlyList<SubjectPropertyChange> sourceRevertFailed)
     {
-        // Handlers checked the whole set together, so once one change fails none of them commits: report
-        // every change, source-write failures first.
         return SubjectPropertyChangeOperations.Concat(
             failedSource,
             SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []),
@@ -1127,8 +1123,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Snapshots the pending changes, followed by the validate-only entries. <c>Changes</c> holds the pending changes the
-    /// commit writes and applies, <c>CheckedChanges</c> those plus the validate-only entries for the commit check and
+    /// Snapshots the pending changes, followed by the validate-only entries. <c>Changes</c> holds the pending changes
+    /// the commit writes and applies, <c>CheckedChanges</c> also the validate-only entries, for the commit check and
     /// conflict detection.
     /// </summary>
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, Memory<SubjectPropertyChange> CheckedChanges) SnapshotChanges()
@@ -1137,7 +1133,8 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Rent before changing state so an allocation failure leaves the transaction reusable.
             var changeCount = _pendingChanges?.Count ?? 0;
-            var checkedCount = changeCount + (_validateOnlyChanges?.Count ?? 0);
+            var validateOnlyCount = CheckedValidateOnlyCount;
+            var checkedCount = changeCount + validateOnlyCount;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(checkedCount);
 
             // Set while holding the lock so no write can be captured, and no handler included, between the snapshot
@@ -1145,9 +1142,9 @@ public sealed class SubjectTransaction : IDisposable
             _isCommitting = true;
 
             CopyPendingChanges(rentedArray, excluded: null);
-            if (_validateOnlyChanges is not null)
+            if (validateOnlyCount > 0)
             {
-                _validateOnlyChanges.Values.CopyTo(rentedArray, changeCount);
+                _validateOnlyChanges!.Values.CopyTo(rentedArray, changeCount);
             }
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount), rentedArray.AsMemory(0, checkedCount));
@@ -1177,8 +1174,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Calls the handlers on this thread with reads returning the pending values, except those of
-    /// <paramref name="excludedProperties"/>, and in the commit check also the validate-only values, and writes throwing.
+    /// Calls the handlers on this thread with reads returning the checked values (see
+    /// <see cref="TryGetCheckedValue{TProperty}"/>) and writes throwing.
     /// </summary>
     private void RunHandlerCheck(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -1193,9 +1190,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Calls the handlers again right before the local apply with the changes that will be applied, with reads
-    /// returning the transaction's values for them. Returns null when they accept the set, or otherwise the errors of
-    /// a thrown <see cref="SubjectTransactionException"/> that has any, or the thrown exception itself.
+    /// Calls the handlers again right before the local apply with the changes that will be applied. Returns null when
+    /// they accept the set, or otherwise the errors of a thrown <see cref="SubjectTransactionException"/> that has
+    /// any, or the thrown exception itself.
     /// </summary>
     private IReadOnlyList<Exception>? RunPreApplyCheck(IReadOnlyList<SubjectPropertyChange> failedSource)
     {
@@ -1236,9 +1233,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Copies the pending changes whose property is not in
-    /// <paramref name="failedProperties"/> into a rented array, in insertion order. The caller returns the array to
-    /// <see cref="ArrayPool{T}.Shared"/>.
+    /// Copies the pending changes whose property is not in <paramref name="failedProperties"/> into a rented array, in
+    /// insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
     /// </summary>
     private (SubjectPropertyChange[] RentedArray, int Count) RentLandingPendingChanges(
         HashSet<PropertyReference>? failedProperties)
@@ -1276,8 +1272,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Authorizes synchronous commit-owned work of the transaction on this thread: a handler check when
-    /// <c>isHandlerCheck</c> is true, whose reads skip the pending values of <c>checkExcludedProperties</c> and, in the
-    /// commit check (<c>isCommitCheck</c>), also return the validate-only values, and model access otherwise. The
+    /// <c>isHandlerCheck</c> is true (see <see cref="TryGetCheckedValue{TProperty}"/>), and model access otherwise. The
     /// previous identity is restored on disposal, so a scope of another transaction can nest. Callers must dispose the
     /// scope before awaiting external code.
     /// </summary>
