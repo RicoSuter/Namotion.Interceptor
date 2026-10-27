@@ -32,37 +32,32 @@ public class ContextInheritanceHandler : ILifecycleHandler
                     change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
                 }
             }
-            else if (change is { IsPropertyReferenceRemoved: true, IsContextDetach: false })
+            else if (change is { IsPropertyReferenceRemoved: true, IsContextDetach: false, Interceptor: { } interceptor } &&
+                     change.Subject.Context is InterceptorSubjectContext context &&
+                     context.HasFallbackContext(change.Property.Value.Subject.Context))
             {
-                InheritFromRemainingParent(change.Subject, change.Property.Value.Subject, change.RemainingReferences);
+                InheritFromRemainingParent(context, change.Property.Value.Subject, interceptor.GetPropertyReferences(change.Subject));
             }
         }
     }
 
-    /// <summary>
-    /// Makes a subject that a parent released, while other parents still hold it, inherit the context of one of them
-    /// in place of the releasing parent's context, so that it keeps the services of the graph after that parent leaves.
-    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void InheritFromRemainingParent(IInterceptorSubject subject, IInterceptorSubject releasingParent, PropertyReferenceSet remainingReferences)
+    private static void InheritFromRemainingParent(InterceptorSubjectContext context, IInterceptorSubject releasingParent, PropertyReferenceSet remainingReferences)
     {
-        if (remainingReferences.IsEmpty ||
-            subject.Context is not InterceptorSubjectContext context ||
-            remainingReferences.ContainsSubject(releasingParent))
+        if (remainingReferences.IsEmpty || remainingReferences.ContainsSubject(releasingParent))
         {
             return;
         }
 
-        // Fails without a change when the subject did not inherit the releasing context, and for a parent whose
-        // context falls back on the subject's own, such as a child of the subject that holds it as well.
+        // Fails for a parent whose context falls back on the subject's own, such as a child of the subject that holds
+        // it as well, or reaches other lifecycle interceptors.
         var releasingContext = releasingParent.Context;
-        var additionalReferences = remainingReferences.Additional;
-        if (context.ReplaceFallbackContext(releasingContext, remainingReferences.First.Subject.Context) || additionalReferences is null)
+        if (context.ReplaceFallbackContext(releasingContext, remainingReferences.First.Subject.Context) || remainingReferences.Additional is null)
         {
             return;
         }
 
-        foreach (var reference in additionalReferences)
+        foreach (var reference in remainingReferences.Additional)
         {
             if (context.ReplaceFallbackContext(releasingContext, reference.Subject.Context))
             {

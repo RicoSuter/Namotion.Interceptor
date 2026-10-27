@@ -133,12 +133,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // permanently stale. An extra entry costs a spurious invalidation and lets the
             // invalidation walk arrive out of chain order, which is why no walk may trust what a
             // context further down recorded (see ResolveDelegationChain).
-            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
-            lock (usedByContexts)
-            {
-                usedByContexts.Add(this);
-            }
-
+            RegisterAsUserOf(contextImpl);
             PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
         }
 
@@ -146,7 +141,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
-    protected bool HasFallbackContext(IInterceptorSubjectContext context)
+    /// <summary>Whether <paramref name="context"/> is one of the fallback contexts of this context.</summary>
+    public bool HasFallbackContext(IInterceptorSubjectContext context)
     {
         return context is InterceptorSubjectContext contextImpl &&
                Volatile.Read(ref _state).FallbackContexts.Contains(contextImpl);
@@ -170,14 +166,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
             // stays a superset of the true using set for the whole transition (see
             // AddFallbackContext).
-            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
-            if (usedByContexts is not null)
-            {
-                lock (usedByContexts)
-                {
-                    usedByContexts.Remove(this);
-                }
-            }
+            UnregisterAsUserOf(contextImpl);
         }
 
         InvalidateUsingContexts();
@@ -185,14 +174,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Replaces a fallback context by another one in a single step, so that a query always sees one of them. Lifecycle
-    /// interceptors are not notified, so both contexts must reach the same ones.
+    /// Replaces a fallback context by another one in a single publish, without notifying lifecycle interceptors or
+    /// handlers. When <paramref name="newContext"/> is a fallback context already, only <paramref name="oldContext"/> is
+    /// removed.
     /// </summary>
     /// <param name="oldContext">The fallback context to replace.</param>
     /// <param name="newContext">The context that takes its place.</param>
     /// <returns>
     /// True if replaced, false if <paramref name="oldContext"/> is not a fallback context, <paramref name="newContext"/>
-    /// is one already or falls back on this context, or the two reach different lifecycle interceptors.
+    /// falls back on this context, or the two reach different lifecycle interceptors.
     /// </returns>
     public bool ReplaceFallbackContext(IInterceptorSubjectContext oldContext, IInterceptorSubjectContext newContext)
     {
@@ -204,31 +194,19 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             var state = Volatile.Read(ref _state);
             var index = state.FallbackContexts.IndexOf(oldContextImpl);
             if (index < 0 ||
-                state.FallbackContexts.Contains(newContextImpl) ||
-                newContextImpl.FallsBackOn(this) ||
-                !HaveSameItems(oldContext.GetServices<ILifecycleInterceptor>(), newContext.GetServices<ILifecycleInterceptor>()))
+                !HaveSameItems(oldContext.GetServices<ILifecycleInterceptor>(), newContext.GetServices<ILifecycleInterceptor>()) ||
+                newContextImpl.FallsBackOn(this))
             {
                 return false;
             }
 
-            // R4: register into the new fallback before publishing and unregister from the old one after (see
-            // AddFallbackContext and RemoveFallbackContext).
-            var newUsedByContexts = newContextImpl.GetOrCreateUsedByContexts();
-            lock (newUsedByContexts)
-            {
-                newUsedByContexts.Add(this);
-            }
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.SetItem(index, newContextImpl)));
-
-            var oldUsedByContexts = Volatile.Read(ref oldContextImpl._usedByContexts);
-            if (oldUsedByContexts is not null)
-            {
-                lock (oldUsedByContexts)
-                {
-                    oldUsedByContexts.Remove(this);
-                }
-            }
+            // R4, as in AddFallbackContext and RemoveFallbackContext.
+            RegisterAsUserOf(newContextImpl);
+            var fallbackContexts = state.FallbackContexts.Contains(newContextImpl)
+                ? state.FallbackContexts.RemoveAt(index)
+                : state.FallbackContexts.SetItem(index, newContextImpl);
+            PublishState(new ContextState(state.Services, fallbackContexts));
+            UnregisterAsUserOf(oldContextImpl);
         }
 
         InvalidateUsingContexts();
@@ -254,6 +232,27 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
 
         return removed;
+    }
+
+    private void RegisterAsUserOf(InterceptorSubjectContext fallbackContext)
+    {
+        var usedByContexts = fallbackContext.GetOrCreateUsedByContexts();
+        lock (usedByContexts)
+        {
+            usedByContexts.Add(this);
+        }
+    }
+
+    private void UnregisterAsUserOf(InterceptorSubjectContext fallbackContext)
+    {
+        var usedByContexts = Volatile.Read(ref fallbackContext._usedByContexts);
+        if (usedByContexts is not null)
+        {
+            lock (usedByContexts)
+            {
+                usedByContexts.Remove(this);
+            }
+        }
     }
 
     private bool FallsBackOn(InterceptorSubjectContext context)

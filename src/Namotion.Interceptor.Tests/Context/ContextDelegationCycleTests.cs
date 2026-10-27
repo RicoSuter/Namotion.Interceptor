@@ -170,7 +170,26 @@ public class ContextDelegationCycleTests
         // Assert
         Assert.True(isReplaced);
         Assert.Same(service, Assert.Single(context.GetServices<MarkerService>()));
-        Assert.False(context.RemoveFallbackContext(oldContext));
+        Assert.False(context.HasFallbackContext(oldContext));
+    }
+
+    [Fact]
+    public void WhenFallbackContextIsReplacedByAnotherFallbackContext_ThenOnlyTheOtherOneIsLeft()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var oldContext = InterceptorSubjectContext.Create();
+        var newContext = InterceptorSubjectContext.Create();
+        context.AddFallbackContext(oldContext);
+        context.AddFallbackContext(newContext);
+
+        // Act
+        var isReplaced = context.ReplaceFallbackContext(oldContext, newContext);
+
+        // Assert
+        Assert.True(isReplaced);
+        Assert.False(context.HasFallbackContext(oldContext));
+        Assert.True(context.HasFallbackContext(newContext));
     }
 
     [Fact]
