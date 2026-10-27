@@ -56,7 +56,7 @@ var child = garage.TryGetRegisteredProperty(g => g.Cars)!.Children[0]; // Subjec
 ```
 
 - Both entries follow the assigned value, and paths written afterwards use the new index. The rules, including a subject held more than once and a value mutated in place, are in [Child Index Changes](tracking.md#child-index-changes).
-- `Children` of a collection is in position order. A property declared as a dictionary has no order of its own to follow, so its children stay in the order they were attached.
+- `Children` of a collection is in position order. A property declared as a dictionary has no order of its own to follow, so its children stay in the order they were attached, also when its value enumerates as positions. A property declared more broadly, such as `object`, that holds a dictionary with `int` keys has its children ordered by key.
 
 ## Enumerate property attributes
 

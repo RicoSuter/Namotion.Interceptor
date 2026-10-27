@@ -379,6 +379,32 @@ public class SubjectRegistryTests
     }
 
     [Fact]
+    public void WhenItemsAreInsertedAheadOfKeptItems_ThenChildrenStayInPositionOrder()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var first = new Person { FirstName = "A" };
+        var second = new Person { FirstName = "B" };
+        var person = new Person(context)
+        {
+            Children = [first, second]
+        };
+
+        // Act
+        var front = new Person { FirstName = "C" };
+        var middle = new Person { FirstName = "D" };
+        person.Children = [front, first, middle, second];
+
+        // Assert
+        var children = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Children))!.Children;
+        Assert.Equal([front, first, middle, second], children.Select(c => c.Subject));
+        Assert.Equal([0, 1, 2, 3], children.Select(c => c.Index));
+    }
+
+    [Fact]
     public void WhenInsertingInMiddleOfCollection_ThenIndicesAreCorrect()
     {
         // Arrange

@@ -25,8 +25,8 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         // Remove parent on reference removed
         if (change.IsPropertyReferenceRemoved)
         {
-            // Not matched by change.Index: for a subject listed more than once in the property it
-            // is the last of its indices, not the registered one.
+            // Not matched by change.Index: for a subject listed more than once in the property, or
+            // one in a value mutated in place, it need not be the registered index.
             change.Subject.RemoveParent(change.Property.Value);
         }
     }

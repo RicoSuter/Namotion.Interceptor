@@ -174,7 +174,7 @@ Two locks serialize the lifecycle and the registry:
 
 Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`. No deadlock is possible.
 
-Below those two sit the registry's per-object locks: `_children` on each `RegisteredSubjectProperty` and `_lock` on each `RegisteredSubject`. Every change to children and parent entries takes them inside `_knownSubjects`, in that order, both on attach and detach and when a write moved a kept subject (`IChildIndexHandler`, implemented by `SubjectRegistry`). Readers take each of these locks on its own and never nest them.
+Below those two sit the registry's per-object locks: `_children` on each `RegisteredSubjectProperty` and `_lock` on each `RegisteredSubject`. Every change to children and parent entries takes them inside `_knownSubjects`, on attach and detach and when a write moved a kept subject (`IChildIndexHandler`, implemented by `SubjectRegistry`). A `_lock` may be taken while `_children` is held, never the reverse. Readers take each of these locks on its own and never nest them.
 
 The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
 

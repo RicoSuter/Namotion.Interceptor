@@ -437,7 +437,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 oldTouchedSubjects.Overlaps(newTouchedSubjects))
             {
                 ChildIndexRefresher.RefreshMovedChildren(context.Property,
-                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects.Count, newTouchedSubjects);
+                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects, newTouchedSubjects);
             }
         }
         finally

@@ -430,7 +430,7 @@ These rules hold for every index the library keeps, in the registry (`Children`,
 - The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
 - The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing.
 - An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation.
-- Keys are compared with `Equals`. A key whose `Equals` throws makes the write throw after the value is stored, and the indices keep their old values.
+- Keys are compared with `Equals`. A key whose `Equals` throws makes the write throw after the value is stored, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
 - The same requirements apply as to `ILifecycleHandler` (below), and the span is only valid during the call.
 
 ### Thread Safety

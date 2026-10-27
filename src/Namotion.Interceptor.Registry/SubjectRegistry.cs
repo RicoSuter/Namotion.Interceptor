@@ -189,7 +189,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         if (property is not null)
                         {
                             // Not matched by change.Index: for a subject listed more than once in
-                            // the property it is the last of its indices, not the registered one.
+                            // the property, or one in a value mutated in place, it need not be the
+                            // registered index.
                             registeredSubject.RemoveParent(property);
                             property.RemoveChild(change.Subject);
                         }
