@@ -96,6 +96,35 @@ public class PageEditModeMemoryTests
         await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenTheAppNavigatesToAnotherPageInSplit_ThenSaveWaitsForTheEditorOfThatPage()
+    {
+        // Arrange: the observer records whether the button was disabled at any time after the navigation.
+        var page = await OpenAsync("pages/Dashboard.md");
+        await page.SelectEditModeAsync("Split");
+        var saveButton = page.Locator("[data-testid='save-button'] button");
+        await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = Timeout });
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.saveWasDisabled = false;
+                new MutationObserver(() => {
+                    if (document.querySelector("[data-testid='save-button'] button")?.disabled) {
+                        window.saveWasDisabled = true;
+                    }
+                }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled'] });
+            }
+            """);
+
+        // Act
+        await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/pages/Demo/Cards.md");
+
+        // Assert
+        await Assertions.Expect(page).ToHaveTitleAsync("Cards Demo - HomeBlaze", new() { Timeout = Timeout });
+        await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = Timeout });
+        Assert.True(await page.EvaluateAsync<bool>("() => window.saveWasDisabled"), "Save stayed enabled while the editor of the new page loaded.");
+    }
+
     private async Task<IPage> OpenAsync(string path)
     {
         var page = await _fixture.CreatePageAsync();

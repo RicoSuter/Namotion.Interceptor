@@ -22,7 +22,7 @@
 @implements ISubjectEditComponent
 @implements ISubjectRevealTarget
 
-@if (string.IsNullOrEmpty(_originalContent))
+@if (!_isLoaded)
 {
     <MudProgressCircular Indeterminate="true"/>
 }
@@ -116,6 +116,9 @@ else
     private MarkdownSourceEditor? _sourceEditor;
     private Func<int, IInterceptorSubject?>? _getBlockSubject;
     private string _originalContent = string.Empty;
+
+    // Set once the file was read: an empty file is a page without text and not one that is still loading.
+    private bool _isLoaded;
     private string _currentContent = string.Empty;
 
     // Counts the changes of _currentContent, so that a save can tell whether newer text arrived during its write.
@@ -419,6 +422,7 @@ else
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
             SetCurrentContent(_originalContent);
+            _isLoaded = true;
         }
     }
 

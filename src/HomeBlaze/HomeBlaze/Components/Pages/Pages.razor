@@ -347,8 +347,15 @@ else
 
     protected override void OnParametersSet()
     {
+        var previousSubject = _subject;
         LoadSubject();
-        SetEditMode(GetStartMode());
+
+        // Another page in the same mode has an editor and widgets of its own, so it starts like a mode that was switched to.
+        var mode = GetStartMode();
+        if (mode != _editMode || !ReferenceEquals(previousSubject, _subject))
+        {
+            SetEditMode(mode);
+        }
     }
 
     private void LoadSubject()
@@ -387,7 +394,13 @@ else
 
     private async Task ChooseEditModeAsync(PageEditMode mode)
     {
-        if (mode != _editMode && !await ConfirmDiscardAsync())
+        if (mode == _editMode)
+        {
+            EditModeChoice.Mode = mode;
+            return;
+        }
+
+        if (!await ConfirmDiscardAsync())
         {
             return;
         }
@@ -441,17 +454,13 @@ else
 
     private void SetEditMode(PageEditMode mode)
     {
-        if (mode == _editMode)
-        {
-            return;
-        }
-
         _editMode = mode;
         _pendingReveal = null;
         _widgetSelection.Clear();
         WatchEditComponent(null);
 
-        // Every mode with an editor has an edit panel of its own, which reports its validity once it is ready.
+        // Every mode with an editor has an edit panel of its own, and every page an editor of its own, which reports its
+        // validity once it is ready.
         _isEditPanelValid = false;
     }
 
