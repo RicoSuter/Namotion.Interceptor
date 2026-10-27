@@ -1,7 +1,8 @@
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// A property lifecycle handler that is called when a property is attached/detached from the subject tree.
+/// A property lifecycle handler that is called when a property is attached/detached from the subject tree
+/// or when a collection property's children have changed.
 /// The handler can be registered in the subject context and applies to the subject and all its children.
 /// A subject can also implement this interface directly to handle its own property lifecycle changes.
 /// </summary>
@@ -18,4 +19,13 @@ public interface IPropertyLifecycleHandler
     /// </summary>
     /// <param name="change">The lifecycle change information.</param>
     public void DetachProperty(SubjectPropertyLifecycleChange change);
+
+    /// <summary>
+    /// Called after a collection or dictionary property write has been fully reconciled
+    /// (all detach/attach events processed) and kept at least one subject. Allows handlers
+    /// to refresh child index metadata from the live value.
+    /// </summary>
+    /// <param name="property">The collection or dictionary property reference.</param>
+    /// <param name="value">The current collection or dictionary value.</param>
+    void RefreshCollectionProperty(PropertyReference property, object? value) { }
 }

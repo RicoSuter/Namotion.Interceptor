@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.Registry;
 /// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
         ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
@@ -188,7 +188,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                         if (property is not null)
                         {
-                            registeredSubject.RemoveParent(property);
+                            // Not matched by change.Index: for a subject listed more than once in
+                            // the property it is the last of its indices, not the registered one.
+                            registeredSubject.RemoveParentsByProperty(property);
                             property.RemoveChild(change.Subject);
                         }
                     }
@@ -205,7 +207,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             foreach (var child in property.Children)
                             {
                                 var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
-                                childRegistered?.RemoveParent(property);
+                                childRegistered?.RemoveParentsByProperty(property);
                             }
 
                             property.ClearChildren();
@@ -260,15 +262,19 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
     {
+        RegisteredSubjectProperty? registeredProperty;
         lock (_knownSubjects)
         {
-            _knownSubjects
+            registeredProperty = _knownSubjects
                 .GetValueOrDefault(property.Subject)?
-                .TryGetProperty(property.Name)?
-                .UpdateChildIndices(children, _knownSubjects);
+                .TryGetProperty(property.Name);
         }
+
+        // Call outside lock — RefreshCollectionIndices updates parent entries;
+        // holding _knownSubjects would risk deadlock.
+        registeredProperty?.RefreshCollectionIndices(value, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

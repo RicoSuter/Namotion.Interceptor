@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Tracking.Parent;
 
 [RunsBefore(typeof(ContextInheritanceHandler))]
-public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
+public class ParentTrackingHandler : ILifecycleHandler
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void HandleLifecycleChange(SubjectLifecycleChange change)
@@ -25,15 +25,7 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         // Remove parent on reference removed
         if (change.IsPropertyReferenceRemoved)
         {
-            change.Subject.RemoveParent(change.Property.Value);
-        }
-    }
-
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
-    {
-        foreach (var child in children)
-        {
-            child.Subject.UpdateParentIndex(property, child.Index);
+            change.Subject.RemoveParent(change.Property.Value, change.Index);
         }
     }
 }

@@ -112,11 +112,6 @@ public class ParentTraversalReferenceTests
         return subjects;
     }
 
-    private static readonly string[] LinkProperties =
-    [
-        nameof(TraversalNode.Child), nameof(TraversalNode.SecondChild), nameof(TraversalNode.ThirdChild)
-    ];
-
     private static void LinkRandomParents(Random random, IInterceptorSubject[] subjects, int child, double branchShare)
     {
         var parentCount = 1;
@@ -125,10 +120,10 @@ public class ParentTraversalReferenceTests
             parentCount = random.Next(3) switch { 0 => 0, 1 => 2, _ => 3 };
         }
 
-        // The property makes two links to the same parent two parent entries.
-        for (var link = 0; link < parentCount; link++)
+        // The index makes two links to the same parent two parent entries.
+        for (var index = 0; index < parentCount; index++)
         {
-            ParentTraversalGraph.Link(subjects[child], subjects[random.Next(subjects.Length)], LinkProperties[link]);
+            ParentTraversalGraph.Link(subjects[child], subjects[random.Next(subjects.Length)], index);
         }
     }
 
