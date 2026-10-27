@@ -19,6 +19,11 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
         {
             next(ref context);
         }
+        else if (SubjectTransaction.HasActiveTransaction)
+        {
+            // Dropped as unchanged; a Deferred transaction still validates the value at commit.
+            SubjectTransactionInterceptor.RecordUnchangedWrite(ref context);
+        }
     }
 
     // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction holds

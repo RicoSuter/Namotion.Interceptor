@@ -119,7 +119,7 @@ var context = InterceptorSubjectContext
     .WithService<IPropertyValidator>(() => new NoSwearWordsValidator());
 ```
 
-Multiple validators can be registered and all will run. Errors from all validators are combined into a single `ValidationException`.
+Multiple validators can be registered and all will run. The errors from all validators are reported in a single `PropertyValidationException`, a `ValidationException` whose `ValidationResults` hold each result with its member names and whose message joins their messages, one per line. `Property` and `Value` identify what was rejected.
 
 ### Use Cases for Custom Validators
 
@@ -147,8 +147,8 @@ Inside a [transaction](tracking-transactions.md), writes are buffered until comm
 
 | Mode | When a value is written |
 |------|-------------------------|
-| `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `ValidationException` at the setter, so write order matters there. This includes a write back to the landed value: if the landed value is invalid against the transaction's other values, undoing a change throws and the change stays pending. |
-| `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. |
+| `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `PropertyValidationException` at the setter, so write order matters there. This includes a write back to the landed value: if the landed value is invalid against the transaction's other values, undoing a change throws and the change stays pending. A write of the landed value without a pending change is dropped by the equality check and not validated. |
+| `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. A write of a property's landed value, which the equality check otherwise drops, and a write back to it are validated at commit too, so every written value is checked against the final set, changed or not. |
 
 ```csharp
 using var transaction = await context.BeginTransactionAsync(
@@ -162,7 +162,7 @@ await transaction.CommitAsync(cancellationToken);
 ```
 
 At commit:
-- The [commit check](tracking-transactions.md#transaction-handlers) validates every changed property with the validators of its subject's context, before anything is written. Reads return the transaction's values, so write order does not matter (except for derived properties, see below).
+- The [commit check](tracking-transactions.md#transaction-handlers) validates every changed property, and in `Deferred` mode every property written unchanged, with the validators of its subject's context, before anything is written. Reads return the transaction's values, so write order does not matter (except for derived properties, see below).
 - An invalid value makes `CommitAsync` throw `SubjectTransactionValidationException`. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact: fix the values and commit again, see [Retrying](tracking-transactions.md#retrying).
 - With source transactions, the [pre-apply check](tracking-transactions.md#transaction-handlers) validates the changes again right before the local apply. A failure there is terminal and lands no value of the set. It throws a `SubjectTransactionException`, not a `SubjectTransactionValidationException`, whose `FailedChanges` lists every change and whose `Errors` hold the validation errors.
 - The values the commit applies and the values a rollback restores are not validated again. Writes made during the apply, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write.
@@ -172,8 +172,8 @@ At commit:
 
 - **Arguments**: the type parameter is unspecified, so test the value (`context.Value is int speed`), not `typeof(TProperty)`. `Origin` is the captured origin of the change. As a performance detail, both checks currently pass the property type for `int`, `long`, `double`, `float`, `decimal`, `bool`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`, so the check does not box these values, and `object` with the boxed value for every other type, including their nullable forms.
 - **Call count**: with source transactions, a value can be validated up to three times: when written in `Immediate` mode, in the commit check, and in the pre-apply check. Validators must be free of side effects.
-- **Errors**: each invalid property is reported as one `ValidationException` whose message joins the messages of all its errors. The individual `ValidationResult`s, including their member names, are not kept.
-- **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property.
+- **Errors**: each invalid property is reported as one `PropertyValidationException`, a `ValidationException` whose `ValidationResults` hold every result its validators returned, including member names, and whose message joins their messages, one per line. Writes outside transactions and `Immediate` writes throw the same exception.
+- **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property. In `Deferred` mode, a write of an unchanged value is validated as well, so writing every value a rule depends on, changed or not, has the rule checked against the final set.
 - **Object graph and timestamps**: during the checks, registry and lifecycle state, such as parents and children, reflect the landed graph, and `SubjectChangeContext.Current` does not carry the timestamps of the checked changes. Only property reads return the transaction's values.
 - **Derived properties**: a derived property is validated only when the commit applies a value it depends on and recalculates it, after any source write, so it cannot reject the commit before the sources are written. The values are applied one at a time, so the recalculation sees intermediate values and write order matters: with `Free => Capacity - Level` validated as non-negative, writing `Level` before `Capacity` can fail the apply although the final set is valid. The value whose apply triggered the failed recalculation (here `Level`) stays in the local model, because the failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
 - **New subjects**: only writes the transaction captures are validated, so the written subject must already use the context. A subject created without the context and attached in the transaction is not validated.

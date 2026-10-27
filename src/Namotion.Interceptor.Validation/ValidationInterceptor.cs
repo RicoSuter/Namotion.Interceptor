@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
-using System.Text;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
@@ -61,11 +60,11 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
                 continue;
             }
 
-            var errorMessage = ValidateNewValue(validators, change);
-            if (errorMessage is not null)
+            var validationResults = ValidateNewValue(validators, change);
+            if (validationResults is not null)
             {
                 (failedChanges ??= []).Add(change);
-                (errors ??= []).Add(new ValidationException(errorMessage));
+                (errors ??= []).Add(new PropertyValidationException(change.Property, change.GetNewValue<object?>(), validationResults));
             }
         }
 
@@ -92,24 +91,24 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     /// Validates the new value of <paramref name="change"/> with the property type as the type argument for common value
     /// types, so the value is not boxed, and as <c>object</c> otherwise.
     /// </summary>
-    private static string? ValidateNewValue(ImmutableArray<IPropertyValidator> validators, in SubjectPropertyChange change)
+    private static List<ValidationResult>? ValidateNewValue(ImmutableArray<IPropertyValidator> validators, in SubjectPropertyChange change)
     {
         var type = change.Property.Metadata.Type;
         if (type.IsValueType)
         {
-            string? errorMessage;
-            if ((type == typeof(int) && TryValidateAs<int>(validators, change, out errorMessage)) ||
-                (type == typeof(long) && TryValidateAs<long>(validators, change, out errorMessage)) ||
-                (type == typeof(double) && TryValidateAs<double>(validators, change, out errorMessage)) ||
-                (type == typeof(float) && TryValidateAs<float>(validators, change, out errorMessage)) ||
-                (type == typeof(decimal) && TryValidateAs<decimal>(validators, change, out errorMessage)) ||
-                (type == typeof(bool) && TryValidateAs<bool>(validators, change, out errorMessage)) ||
-                (type == typeof(DateTime) && TryValidateAs<DateTime>(validators, change, out errorMessage)) ||
-                (type == typeof(DateTimeOffset) && TryValidateAs<DateTimeOffset>(validators, change, out errorMessage)) ||
-                (type == typeof(TimeSpan) && TryValidateAs<TimeSpan>(validators, change, out errorMessage)) ||
-                (type == typeof(Guid) && TryValidateAs<Guid>(validators, change, out errorMessage)))
+            List<ValidationResult>? validationResults;
+            if ((type == typeof(int) && TryValidateAs<int>(validators, change, out validationResults)) ||
+                (type == typeof(long) && TryValidateAs<long>(validators, change, out validationResults)) ||
+                (type == typeof(double) && TryValidateAs<double>(validators, change, out validationResults)) ||
+                (type == typeof(float) && TryValidateAs<float>(validators, change, out validationResults)) ||
+                (type == typeof(decimal) && TryValidateAs<decimal>(validators, change, out validationResults)) ||
+                (type == typeof(bool) && TryValidateAs<bool>(validators, change, out validationResults)) ||
+                (type == typeof(DateTime) && TryValidateAs<DateTime>(validators, change, out validationResults)) ||
+                (type == typeof(DateTimeOffset) && TryValidateAs<DateTimeOffset>(validators, change, out validationResults)) ||
+                (type == typeof(TimeSpan) && TryValidateAs<TimeSpan>(validators, change, out validationResults)) ||
+                (type == typeof(Guid) && TryValidateAs<Guid>(validators, change, out validationResults)))
             {
-                return errorMessage;
+                return validationResults;
             }
         }
 
@@ -124,28 +123,31 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     private static bool TryValidateAs<TProperty>(
         ImmutableArray<IPropertyValidator> validators,
         in SubjectPropertyChange change,
-        out string? errorMessage)
+        out List<ValidationResult>? validationResults)
     {
         if (change.TryGetNewValue(out TProperty value))
         {
-            errorMessage = Validate(validators, change.Property, value, change.Origin);
+            validationResults = Validate(validators, change.Property, value, change.Origin);
             return true;
         }
 
-        errorMessage = null;
+        validationResults = null;
         return false;
     }
 
     private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
-        var errorMessage = Validate(property.Subject.Context.GetServices<IPropertyValidator>(), property, value, origin);
-        if (errorMessage is not null)
+        var validationResults = Validate(property.Subject.Context.GetServices<IPropertyValidator>(), property, value, origin);
+        if (validationResults is not null)
         {
-            throw new ValidationException(errorMessage);
+            throw new PropertyValidationException(property, value, validationResults);
         }
     }
 
-    private static string? Validate<TProperty>(
+    /// <summary>
+    /// Returns the results of every validator for <paramref name="value"/>, or null when the value is valid.
+    /// </summary>
+    private static List<ValidationResult>? Validate<TProperty>(
         ImmutableArray<IPropertyValidator> validators,
         PropertyReference property,
         TProperty value,
@@ -153,15 +155,15 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     {
         var validationContext = new PropertyValidationContext<TProperty>(property, value, origin);
 
-        StringBuilder? message = null;
+        List<ValidationResult>? validationResults = null;
         foreach (var validator in validators)
         {
-            foreach (var error in validator.Validate(in validationContext))
+            foreach (var validationResult in validator.Validate(in validationContext))
             {
-                (message ??= new StringBuilder()).Append('\n').Append(error.ErrorMessage);
+                (validationResults ??= []).Add(validationResult);
             }
         }
 
-        return message?.ToString();
+        return validationResults;
     }
 }

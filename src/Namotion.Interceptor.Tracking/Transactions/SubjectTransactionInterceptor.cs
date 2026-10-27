@@ -169,6 +169,49 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         next(ref context);
     }
 
+    /// <summary>
+    /// Records a write of the landed value that the equality check drops as unchanged, when the current flow's
+    /// transaction captures in <see cref="TransactionValidationMode.Deferred"/> mode and has handlers, so the commit
+    /// check validates the value (see <see cref="SubjectTransaction.TryRecordValidateOnly{TProperty}"/>). The write is
+    /// still dropped otherwise, including for a derived property and for a subject whose context does not route
+    /// through the transaction's interceptor.
+    /// </summary>
+    internal static void RecordUnchangedWrite<TProperty>(ref PropertyWriteContext<TProperty> context)
+    {
+        var transaction = SubjectTransaction.Current;
+        if (transaction is not { ValidationMode: TransactionValidationMode.Deferred, IsDisposed: false, IsCommitted: false } ||
+            transaction.IsCommitting)
+        {
+            return;
+        }
+
+        if (context.Property.Metadata.IsDerived)
+        {
+            return;
+        }
+
+        var subjectContext = context.Property.Subject.Context;
+        var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
+        if (!ContainsByReference(subjectInterceptors, transaction.Interceptor))
+        {
+            return;
+        }
+
+        transaction.IncludeHandlersOf(subjectContext, subjectInterceptors);
+        if (transaction.Handlers.IsEmpty)
+        {
+            return;
+        }
+
+        InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
+        transaction.TryRecordValidateOnly(
+            context.Property,
+            context.GetFinalOrigin(),
+            context.WriteTimestampForPublishing,
+            SubjectChangeContext.Current.ReceivedTimestamp,
+            context.NewValue);
+    }
+
     // Only with the equality check: without it every write is captured, as outside a transaction every write lands.
     private static bool IsWriteBackWithEqualityCheck<TProperty>(ref PropertyWriteContext<TProperty> context)
     {

@@ -47,6 +47,11 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
+    // Deferred mode with handlers only: writes of the landed value of a property without a pending change, which the
+    // commit check validates but the commit neither writes, applies, publishes nor conflict-checks. Disjoint from the
+    // _pendingChanges keys. Allocated on the first such write; accessed only under _pendingChangesLock.
+    private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _validateOnlyChanges;
+
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
     private int _commitStarted;
@@ -60,6 +65,7 @@ public sealed class SubjectTransaction : IDisposable
     // IsInCommitScope matched on that same thread, so they need no synchronization. The excluded properties are those
     // whose source write failed, set only during the pre-apply check.
     private bool _isInHandlerCheck;
+    private bool _isInCommitCheck;
     private HashSet<PropertyReference>? _checkExcludedProperties;
 
     /// <summary>
@@ -237,8 +243,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Reads a pending value for the handlers during the commit check or the pre-apply check. Returns false when the
-    /// property is not part of the transaction or its source write failed.
+    /// Reads a pending value for the handlers during the commit check or the pre-apply check, and in the commit check
+    /// also a validate-only value. Returns false when the property is not part of the transaction or its source write
+    /// failed.
     /// </summary>
     internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
     {
@@ -246,7 +253,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             lock (_pendingChangesLock)
             {
-                if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
+                if (TryGetCheckedChange(property, out var change))
                 {
                     value = change.GetNewValue<TProperty>();
                     return true;
@@ -256,6 +263,21 @@ public sealed class SubjectTransaction : IDisposable
 
         value = default!;
         return false;
+    }
+
+    /// <summary>
+    /// Returns the pending change of <paramref name="property"/>, or in the commit check its validate-only entry. Must be
+    /// called under <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private bool TryGetCheckedChange(PropertyReference property, out SubjectPropertyChange change)
+    {
+        if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out change))
+        {
+            return true;
+        }
+
+        change = default;
+        return _isInCommitCheck && _validateOnlyChanges is not null && _validateOnlyChanges.TryGetValue(property, out change);
     }
 
     /// <summary>
@@ -273,6 +295,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="restoresLandedValue">
     /// True when the write restores the landed value and the subject's context has the equality check; a pending
     /// change is then removed, the same as never writing the property, and without one the write is captured as usual.
+    /// In <see cref="TransactionValidationMode.Deferred"/> mode with handlers, the removed change is replaced by a
+    /// validate-only entry for the landed value (see <see cref="TryRecordValidateOnly{TProperty}"/>).
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown if a concurrent commit is in progress (TOCTOU race).
@@ -296,9 +320,16 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             if (restoresLandedValue && pendingChanges.Remove(property))
             {
+                if (ValidationMode == TransactionValidationMode.Deferred && _handlerSet.Handlers.Length > 0)
+                {
+                    (_validateOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
+                        property, origin, changedTimestamp, receivedTimestamp, newValue, newValue);
+                }
+
                 return true;
             }
 
+            _validateOnlyChanges?.Remove(property);
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
 
             pendingChanges[property] = SubjectPropertyChange.Create(
@@ -308,6 +339,38 @@ public sealed class SubjectTransaction : IDisposable
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Records a write of the landed value of <paramref name="property"/>, which the equality check drops, so the commit
+    /// check validates it: a validate-only entry whose old and new value are <paramref name="value"/>, which the commit
+    /// neither writes, applies, publishes nor conflict-checks, and which <see cref="GetPendingChanges"/> does not list.
+    /// A later write of another value replaces it with a pending change. Does nothing when the property has a pending
+    /// change, which the commit check already validates, and returns false when the transaction no longer captures.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress.</exception>
+    internal bool TryRecordValidateOnly<TProperty>(
+        PropertyReference property,
+        ChangeOrigin origin,
+        DateTimeOffset changedTimestamp,
+        DateTimeOffset? receivedTimestamp,
+        TProperty value)
+    {
+        lock (_pendingChangesLock)
+        {
+            if (!CanCaptureUnderLock())
+            {
+                return false;
+            }
+
+            if (!_pendingChanges.ContainsKey(property))
+            {
+                (_validateOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
+                    property, origin, changedTimestamp, receivedTimestamp, value, value);
+            }
+
             return true;
         }
     }
@@ -553,7 +616,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
-            if (_pendingChanges is null || _pendingChanges.Count == 0)
+            if ((_pendingChanges?.Count ?? 0) == 0 && (_validateOnlyChanges?.Count ?? 0) == 0)
             {
                 _isCommitted = true;
                 return default;
@@ -615,9 +678,9 @@ public sealed class SubjectTransaction : IDisposable
         SubjectPropertyChange[]? rentedArray = null;
         try
         {
-            var (rented, changes) = SnapshotChanges();
+            var (rented, changes, checkedChanges) = SnapshotChanges();
             rentedArray = rented;
-            RunCommitCheck(changes.Span);
+            RunCommitCheck(checkedChanges.Span);
 
             SubjectTransactionException? failure = null;
             using (EnterCommitModelAccess())
@@ -668,9 +731,16 @@ public sealed class SubjectTransaction : IDisposable
         try
         {
             commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
-            var (rented, changes) = SnapshotChanges();
+            var (rented, changes, checkedChanges) = SnapshotChanges();
             rentedArray = rented;
-            RunCommitCheck(changes.Span);
+            RunCommitCheck(checkedChanges.Span);
+
+            if (changes.IsEmpty)
+            {
+                // Only validate-only entries, which the check accepted: nothing to write or apply.
+                FinishCommit();
+                return;
+            }
 
             using (EnterCommitModelAccess())
             {
@@ -954,6 +1024,7 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             _pendingChanges?.Clear();
+            _validateOnlyChanges = null;
             _isCommitted = true;
         }
     }
@@ -1053,21 +1124,30 @@ public sealed class SubjectTransaction : IDisposable
         return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) SnapshotChanges()
+    /// <summary>
+    /// Snapshots the pending changes, followed by the validate-only entries. <c>Changes</c> holds the pending changes the
+    /// commit writes and applies, <c>CheckedChanges</c> those plus the validate-only entries for the commit check.
+    /// </summary>
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, Memory<SubjectPropertyChange> CheckedChanges) SnapshotChanges()
     {
         lock (_pendingChangesLock)
         {
             // Rent before changing state so an allocation failure leaves the transaction reusable.
             var changeCount = _pendingChanges?.Count ?? 0;
-            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
+            var checkedCount = changeCount + (_validateOnlyChanges?.Count ?? 0);
+            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(checkedCount);
 
             // Set while holding the lock so no write can be captured, and no handler included, between the snapshot
             // and the end of the commit.
             _isCommitting = true;
 
             CopyPendingChanges(rentedArray, excluded: null);
+            if (_validateOnlyChanges is not null)
+            {
+                _validateOnlyChanges.Values.CopyTo(rentedArray, changeCount);
+            }
 
-            return (rentedArray, rentedArray.AsMemory(0, changeCount));
+            return (rentedArray, rentedArray.AsMemory(0, changeCount), rentedArray.AsMemory(0, checkedCount));
         }
     }
 
@@ -1085,7 +1165,7 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        RunHandlerCheck(changes, excludedProperties: null);
+        RunHandlerCheck(changes, excludedProperties: null, isCommitCheck: true);
 
         if (IsDisposed)
         {
@@ -1095,11 +1175,14 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Calls the handlers on this thread with reads returning the pending values, except those of
-    /// <paramref name="excludedProperties"/>, and writes throwing.
+    /// <paramref name="excludedProperties"/>, and in the commit check also the validate-only values, and writes throwing.
     /// </summary>
-    private void RunHandlerCheck(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excludedProperties)
+    private void RunHandlerCheck(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        HashSet<PropertyReference>? excludedProperties,
+        bool isCommitCheck)
     {
-        using var scope = EnterHandlerCheck(excludedProperties);
+        using var scope = EnterHandlerCheck(excludedProperties, isCommitCheck);
         foreach (var handler in _handlerSet.Handlers)
         {
             handler.OnCommitting(this, changes);
@@ -1129,7 +1212,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 try
                 {
-                    RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties);
+                    RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties, isCommitCheck: false);
                 }
                 catch (Exception exception)
                 {
@@ -1183,15 +1266,17 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private CommitScope EnterCommitModelAccess() => new(this, isHandlerCheck: false, checkExcludedProperties: null);
+    private CommitScope EnterCommitModelAccess() => new(this, isHandlerCheck: false, isCommitCheck: false, checkExcludedProperties: null);
 
-    private CommitScope EnterHandlerCheck(HashSet<PropertyReference>? excludedProperties) => new(this, isHandlerCheck: true, excludedProperties);
+    private CommitScope EnterHandlerCheck(HashSet<PropertyReference>? excludedProperties, bool isCommitCheck)
+        => new(this, isHandlerCheck: true, isCommitCheck, excludedProperties);
 
     /// <summary>
     /// Authorizes synchronous commit-owned work of the transaction on this thread: a handler check when
-    /// <c>isHandlerCheck</c> is true, whose reads skip the pending values of <c>checkExcludedProperties</c>, and
-    /// model access otherwise. The previous identity is restored on disposal, so a scope of another transaction can
-    /// nest. Callers must dispose the scope before awaiting external code.
+    /// <c>isHandlerCheck</c> is true, whose reads skip the pending values of <c>checkExcludedProperties</c> and, in the
+    /// commit check (<c>isCommitCheck</c>), also return the validate-only values, and model access otherwise. The
+    /// previous identity is restored on disposal, so a scope of another transaction can nest. Callers must dispose the
+    /// scope before awaiting external code.
     /// </summary>
     private readonly struct CommitScope : IDisposable
     {
@@ -1199,7 +1284,11 @@ public sealed class SubjectTransaction : IDisposable
         private readonly SubjectTransaction? _previousTransaction;
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit identity and restores the previous identity on disposal, including nested scopes.")]
-        public CommitScope(SubjectTransaction transaction, bool isHandlerCheck, HashSet<PropertyReference>? checkExcludedProperties)
+        public CommitScope(
+            SubjectTransaction transaction,
+            bool isHandlerCheck,
+            bool isCommitCheck,
+            HashSet<PropertyReference>? checkExcludedProperties)
         {
             // Dispose resets the check state instead of restoring it, which holds only while the scopes of one
             // transaction run one after another.
@@ -1207,6 +1296,7 @@ public sealed class SubjectTransaction : IDisposable
             _transaction = transaction;
             _previousTransaction = _commitScopeTransaction;
             transaction._isInHandlerCheck = isHandlerCheck;
+            transaction._isInCommitCheck = isCommitCheck;
             transaction._checkExcludedProperties = checkExcludedProperties;
             _commitScopeTransaction = transaction;
         }
@@ -1215,6 +1305,7 @@ public sealed class SubjectTransaction : IDisposable
         {
             _commitScopeTransaction = _previousTransaction;
             _transaction._isInHandlerCheck = false;
+            _transaction._isInCommitCheck = false;
             _transaction._checkExcludedProperties = null;
         }
     }
@@ -1259,6 +1350,7 @@ public sealed class SubjectTransaction : IDisposable
             lock (_pendingChangesLock)
             {
                 _pendingChanges?.Clear();
+                _validateOnlyChanges = null;
                 committing = _isCommitting;
                 if (committing)
                 {

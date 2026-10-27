@@ -24,7 +24,8 @@ public interface ITransactionHandler
 {
     /// <summary>
     /// Called for a write the transaction is about to capture, including a write back that removes a pending change,
-    /// without holding the transaction's internal capture lock. Throwing rejects the write: nothing is captured and the
+    /// and in <see cref="TransactionValidationMode.Deferred"/> mode a write of an unchanged value that the commit check
+    /// receives (see <see cref="OnCommitting"/>), without holding the transaction's internal capture lock. Throwing rejects the write: nothing is captured and the
     /// exception propagates to the setter. Handlers must not write properties. A validating handler skips its
     /// write-time check when <see cref="SubjectTransaction.ValidationMode"/> is
     /// <see cref="TransactionValidationMode.Deferred"/>.
@@ -54,7 +55,10 @@ public interface ITransactionHandler
     /// </remarks>
     /// <param name="transaction">The committing transaction.</param>
     /// <param name="changes">
-    /// The final set of changes in insertion order; in the pre-apply check only the changes that will be applied.
+    /// The final set of changes in insertion order; in the pre-apply check only the changes that will be applied. In
+    /// <see cref="TransactionValidationMode.Deferred"/> mode, the commit check's set is followed by an entry for each
+    /// property written with its unchanged value: its old and new value are equal, and the commit neither writes,
+    /// applies, publishes nor conflict-checks it.
     /// </param>
     void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes);
 }
