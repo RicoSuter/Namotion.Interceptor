@@ -22,17 +22,19 @@
         return widget ? { bar, widget } : null;
     };
 
-    // Space on a focused widget acts as Enter, as on a button. The server cannot tell the widget from an input inside it, so
-    // only a Space whose target is the widget itself is replaced, before it scrolls the page or reaches the server.
+    // Enter and Space on a focused widget select it or open its dialog, Space as on a button. The server cannot tell the
+    // widget from a control inside it, such as an insert button, whose own Enter reaches the widget too, so only a key whose
+    // target is the widget itself is sent on with the code that SubjectComponent.OnKeyDown takes, before Space scrolls the
+    // page. The key that is sent on is not trusted and passes this handler.
     document.addEventListener('keydown', event => {
-        if (event.key !== ' ' || !(event.target instanceof Element) ||
+        if (!event.isTrusted || (event.key !== ' ' && event.key !== 'Enter') || !(event.target instanceof Element) ||
             !event.target.matches('.subject-component-wrapper.selectable')) {
             return;
         }
 
         event.preventDefault();
         event.stopPropagation();
-        event.target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+        event.target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'SelectableWidget', bubbles: true }));
     }, true);
 
     // Capturing, so that the focus has moved before the page handles Escape and removes the bar that holds it.

@@ -361,6 +361,24 @@ public class InlineTextEditingTests
     }
 
     [Fact]
+    public async Task WhenEnterIsPressedOnAnInsertLineInASelectedCard_ThenOnlyItsMenuOpens()
+    {
+        // Arrange
+        var page = await OpenPageInInlineModeAsync();
+        await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
+        var button = page.GetCard("Text Card").GetByRole(AriaRole.Button, new() { Name = "Insert at the end of", Exact = false });
+        await button.FocusAsync();
+
+        // Act
+        await page.Keyboard.PressAsync("Enter");
+
+        // Assert: the menu opens after the server handled the key down, which would have opened the dialog of the card.
+        await Assertions.Expect(page.GetByTestId("insert-text-item")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenTextIsInsertedAtAnInsertLine_ThenItStandsThereInTheFileAndIsSelected()
     {
         // Arrange: the lines of the page stand before the title, the first paragraph, the card and the last paragraph.
