@@ -139,6 +139,54 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
+    public void WhenTwoDictionaryKeysAreSwapped_ThenPathsAndResolutionFollowTheNewKeys()
+    {
+        // Arrange
+        var left = new TestContainer(Context) { Name = "Left" };
+        var right = new TestContainer(Context) { Name = "Right" };
+        var root = new TestContainer(Context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestContainer> { ["Left"] = left, ["Right"] = right }
+        };
+        RootManager.Root = root;
+        var leftPathBefore = Resolver.GetPath(left, PathStyle.Canonical);
+        var resolvedBefore = Resolver.ResolveSubject("/Children[Left]", PathStyle.Canonical);
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["Left"] = right, ["Right"] = left };
+
+        // Assert
+        Assert.Equal("/Children[Left]", leftPathBefore);
+        Assert.Same(left, resolvedBefore);
+        Assert.Equal("/Children[Right]", Resolver.GetPath(left, PathStyle.Canonical));
+        Assert.Equal("/Children[Left]", Resolver.GetPath(right, PathStyle.Canonical));
+        Assert.Same(right, Resolver.ResolveSubject("/Children[Left]", PathStyle.Canonical));
+        Assert.Same(left, Resolver.ResolveSubject("/Children[Right]", PathStyle.Canonical));
+    }
+
+    [Fact]
+    public void WhenDictionaryIsRebuiltInAnotherOrderWithTheSameKeys_ThenPathsVersionIsUnchanged()
+    {
+        // Arrange
+        var first = new TestContainer(Context) { Name = "First" };
+        var second = new TestContainer(Context) { Name = "Second" };
+        var root = new TestContainer(Context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestContainer> { ["First"] = first, ["Second"] = second }
+        };
+        RootManager.Root = root;
+        var versionBefore = Resolver.PathsVersion;
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["Second"] = second, ["First"] = first };
+
+        // Assert
+        Assert.Equal(versionBefore, Resolver.PathsVersion);
+    }
+
+    [Fact]
     public void WhenPathIsBuiltBeforeTheListIndicesAreRefreshed_ThenLaterGetPathReturnsTheNewIndex()
     {
         // Arrange
@@ -218,5 +266,23 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
                 pending();
             }
         }
+    }
+
+    [Fact]
+    public void WhenEqualSubjectsSitAtTwoPositions_ThenEachGetsItsOwnPath()
+    {
+        // Arrange
+        var first = new TestEqualItem();
+        var second = new TestEqualItem();
+        var root = new TestEqualItemList(Context) { Items = [first, second] };
+        RootManager.Root = root;
+
+        // Act
+        var firstPath = Resolver.GetPath(first, PathStyle.Canonical);
+        var secondPath = Resolver.GetPath(second, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal("/Items[0]", firstPath);
+        Assert.Equal("/Items[1]", secondPath);
     }
 }

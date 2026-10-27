@@ -408,6 +408,32 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+### Child Index Changes
+
+A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:
+
+```csharp
+public class MyChildIndexHandler : IChildIndexHandler
+{
+    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    {
+        foreach (var child in children)
+        {
+            // child.Subject now sits at child.Index in the value of property
+        }
+    }
+}
+```
+
+These rules hold for every index the library keeps, in the registry (`Children`, `Parents`) and in parent tracking (`GetParents()`):
+
+- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
+- The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing.
+- An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation.
+- Keys are compared with `Equals`. A key whose `Equals` throws makes the write throw after the value is stored, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
+- The same requirements apply as to `ILifecycleHandler` (below), and the span is only valid during the call.
+- On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with one of its positions or keys, and after an in-place mutation with a position or key read from the mutated value, neither of which needs to be the stored one.
+
 ### Thread Safety
 
 The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property. Reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
@@ -549,6 +575,8 @@ var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is
 ```
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
+
+Every parent carries an `Index`, and a subject has one parent per property that holds it. The index follows the assigned value as described in [Child Index Changes](#child-index-changes).
 
 This enables scenarios like:
 - Finding the root object of a subject graph
