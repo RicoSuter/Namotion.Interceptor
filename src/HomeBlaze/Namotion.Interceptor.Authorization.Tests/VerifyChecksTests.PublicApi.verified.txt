@@ -34,7 +34,7 @@ namespace Namotion.Interceptor.Authorization
     }
     public interface IMemberTagProvider
     {
-        System.Collections.Generic.IReadOnlyCollection<string> GetTags(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
+        System.Collections.Immutable.ImmutableArray<string> GetTags(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(Namotion.Interceptor.Authorization.PermissionActionJsonConverter))]
     public readonly struct PermissionAction : System.IEquatable<Namotion.Interceptor.Authorization.PermissionAction>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -128,11 +129,11 @@ public class AuthorizationBenchmark
 
     private sealed class TagProvider : IMemberTagProvider
     {
-        private static readonly string[] State = ["state"];
-        private static readonly string[] Subjects = ["subjects"];
-        private static readonly string[] Secret = ["state", "secret"];
+        private static readonly ImmutableArray<string> State = ["state"];
+        private static readonly ImmutableArray<string> Subjects = ["subjects"];
+        private static readonly ImmutableArray<string> Secret = ["state", "secret"];
 
-        public IReadOnlyCollection<string> GetTags(RegisteredSubjectProperty member)
+        public ImmutableArray<string> GetTags(RegisteredSubjectProperty member)
         {
             if (member.CanContainSubjects)
             {

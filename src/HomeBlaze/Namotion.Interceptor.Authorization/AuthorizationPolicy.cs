@@ -144,7 +144,7 @@ public sealed class AuthorizationPolicy
 
     private ulong GetBit(PermissionAction action)
     {
-        if (_actionBits.TryGetValue(action.Name ?? string.Empty, out var bit))
+        if (_actionBits.TryGetValue(action.Name, out var bit))
         {
             return bit;
         }
@@ -192,9 +192,17 @@ public sealed class AuthorizationPolicy
             return false;
         }
 
-        if (rule.Tags is not null && !HasAllTags(context.Tags ??= _tagProvider!.GetTags(context.Member), rule.Tags))
+        if (rule.Tags is not null)
         {
-            return false;
+            if (context.Tags.IsDefault)
+            {
+                context.Tags = _tagProvider!.GetTags(context.Member);
+            }
+
+            if (!HasAllTags(context.Tags, rule.Tags))
+            {
+                return false;
+            }
         }
 
         if (rule.Types is not null && !TypeNames.IsAssignableToAny(context.Member.Parent.Subject.GetType(), rule.Types))
@@ -227,7 +235,7 @@ public sealed class AuthorizationPolicy
     private static string GetName(RegisteredSubjectProperty member)
         => member.IsAttribute ? GetName(member.GetAttributedProperty()) + "@" + member.BrowseName : member.Name;
 
-    private static bool HasAllTags(IReadOnlyCollection<string> memberTags, string[] requiredTags)
+    private static bool HasAllTags(ImmutableArray<string> memberTags, string[] requiredTags)
     {
         foreach (var required in requiredTags)
         {
@@ -240,22 +248,8 @@ public sealed class AuthorizationPolicy
         return true;
     }
 
-    private static bool ContainsTag(IReadOnlyCollection<string> memberTags, string tag)
+    private static bool ContainsTag(ImmutableArray<string> memberTags, string tag)
     {
-        // An array avoids the enumerator allocation of the interface, which is why providers are asked to return one.
-        if (memberTags is string[] array)
-        {
-            foreach (var memberTag in array)
-            {
-                if (string.Equals(memberTag, tag, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         foreach (var memberTag in memberTags)
         {
             if (string.Equals(memberTag, tag, StringComparison.OrdinalIgnoreCase))
@@ -349,7 +343,7 @@ public sealed class AuthorizationPolicy
     {
         public RegisteredSubjectProperty Member;
         public string? MemberName;
-        public IReadOnlyCollection<string>? Tags;
+        public ImmutableArray<string> Tags;
         public string? MemberSegment;
         public List<PathLink[]>? Paths;
         public bool PathsComplete;
@@ -359,7 +353,7 @@ public sealed class AuthorizationPolicy
         {
             Member = member;
             MemberName = null;
-            Tags = null;
+            Tags = default;
             MemberSegment = null;
         }
     }
