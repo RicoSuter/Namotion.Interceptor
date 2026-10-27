@@ -163,9 +163,10 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.VERSION }}
 
-      # The E2E tests only launch Chromium. A cached browser is not downloaded again; its system packages still install.
+      # The E2E tests only launch Chromium, and a cached browser is not downloaded again. The runner image already has its
+      # libraries, so --with-deps would only add fonts the tests do not need, from a mirror that can take minutes.
       - name: Install Playwright browsers
-        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install chromium
 
       # Theory rows are listed with their arguments; the part before "(" is the full name, so a theory stays in one job.
       - name: Select the tests of this shard
