@@ -674,6 +674,91 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenAnExplicitImplementationDisplacesAnAncestorProvider_ThenNI0066IsNotReported()
+    {
+        // Arrange: Motor's IMotorFlags.Forward_IsEnabled takes that name from BaseMotor and carries no attribute in the
+        // metadata, so Forward_Enabled is the only provider left. NI0065 reports the displacement itself.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public interface IMotorFlags
+                {
+                    bool Forward_IsEnabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor, IMotorFlags
+                {
+                    bool IMotorFlags.Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_Enabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0066");
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenADynamicOverrideInheritsTheAttributeOfAnObjectProperty_ThenNI0066IsReported()
+    {
+        // Arrange: dynamic is System.Object at runtime, so the override inherits the base attribute.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public virtual object Value { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor
+                {
+                    public override dynamic Value { get => base.Value; set => base.Value = value; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange

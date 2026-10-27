@@ -37,7 +37,9 @@ internal static class SubjectAttributeConflicts
 
     /// <summary>
     /// Groups the names of the subject's property set by the attribute target each carries at runtime, or returns
-    /// null when none carries one. The ancestors from <paramref name="firstAncestorIndex"/> on are the subject's own.
+    /// null when none carries one. The property set is <paramref name="subject"/>'s own properties followed by the
+    /// entries of <paramref name="subjectAncestors"/> from <paramref name="firstAncestorIndex"/> on, which are the
+    /// ancestors of <paramref name="subject"/> (index 1 when <paramref name="subject"/> is the list's first entry).
     /// </summary>
     private static Dictionary<AttributeTarget, List<string>>? BuildProviderMap(
         INamedTypeSymbol subject,
@@ -66,7 +68,7 @@ internal static class SubjectAttributeConflicts
     {
         foreach (var member in type.GetMembers())
         {
-            if (member is not IPropertySymbol property || !TakesPartInUniqueness(property))
+            if (member is not IPropertySymbol property || !IsClassDeclaredSubjectProperty(property))
             {
                 continue;
             }
@@ -80,6 +82,27 @@ internal static class SubjectAttributeConflicts
             if (TryGetRuntimePropertyAttributeTarget(property, out var target))
             {
                 AddProvider(ref providers, target, property.Name);
+            }
+        }
+
+        if (seenNames is not null)
+        {
+            ClaimExplicitImplementationNames(type, seenNames);
+        }
+    }
+
+    // An explicit implementation is keyed by its simple name and displaces an ancestor property of that name, but its
+    // attributes are not part of the metadata, so it claims the name without providing a target. A class-declared
+    // property of the same name keeps it, which is why the class's own properties are added first.
+    private static void ClaimExplicitImplementationNames(INamedTypeSymbol type, HashSet<string> seenNames)
+    {
+        foreach (var member in type.GetMembers())
+        {
+            if (member is IPropertySymbol property &&
+                !SymbolExtensions.IsNeverASubjectProperty(property) &&
+                property.ExplicitInterfaceImplementations.Length > 0)
+            {
+                seenNames.Add(property.ExplicitInterfaceImplementations[0].Name);
             }
         }
     }
@@ -155,8 +178,7 @@ internal static class SubjectAttributeConflicts
         return names[0];
     }
 
-    // An explicit implementation's attributes are not part of the property metadata, and its name is qualified.
-    private static bool TakesPartInUniqueness(IPropertySymbol property)
+    private static bool IsClassDeclaredSubjectProperty(IPropertySymbol property)
     {
         return !SymbolExtensions.IsNeverASubjectProperty(property) && property.ExplicitInterfaceImplementations.Length == 0;
     }
@@ -183,7 +205,18 @@ internal static class SubjectAttributeConflicts
     private static IPropertySymbol? GetParentDeclaration(IPropertySymbol property)
     {
         var parent = (property.GetMethod ?? property.SetMethod)?.OverriddenMethod?.AssociatedSymbol as IPropertySymbol;
-        return parent is not null && SymbolEqualityComparer.Default.Equals(parent.Type, property.Type) ? parent : null;
+        return parent is not null && HaveSameRuntimeType(parent.Type, property.Type) ? parent : null;
+    }
+
+    // dynamic is System.Object at runtime, so an override typed dynamic still finds an object-typed parent.
+    private static bool HaveSameRuntimeType(ITypeSymbol left, ITypeSymbol right)
+    {
+        return SymbolEqualityComparer.Default.Equals(left, right) || (IsObjectAtRuntime(left) && IsObjectAtRuntime(right));
+    }
+
+    private static bool IsObjectAtRuntime(ITypeSymbol type)
+    {
+        return type.TypeKind == TypeKind.Dynamic || type.SpecialType == SpecialType.System_Object;
     }
 
     private static bool TryGetDeclaredPropertyAttributeTarget(
