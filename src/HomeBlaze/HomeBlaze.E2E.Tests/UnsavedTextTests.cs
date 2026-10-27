@@ -94,11 +94,10 @@ public class UnsavedTextTests
     {
         // Arrange
         var page = await OpenPageAsync("Inline");
-        var wrapper = page.Locator(".subject-component-wrapper.selectable:has(> .markdown-text)").Filter(new() { HasText = "Saved paragraph." });
+        var wrapper = page.GetTextWrapper("Saved paragraph.");
         var actionBar = await wrapper.SelectWidgetAsync();
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await page.WaitForFunctionAsync(
-            "() => blazorMonaco.editor.getEditor('markdown-text-editor', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.TypeAsync(Typed);
         await page.WaitForFunctionAsync(AsksBeforeUnload, null, new() { Timeout = Timeout });
 

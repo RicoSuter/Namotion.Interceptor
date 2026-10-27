@@ -161,7 +161,7 @@ public class CardLayoutTests
 
         // Assert
         await Assertions.Expect(wrapper).ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
-        await OpenEditDialogAfterSelectionAsync(page, actionBar);
+        await page.OpenDialogAfterSelectionAsync(actionBar.GetByTestId("edit-subject-button"));
         await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
         await CloseEditDialogAsync(page);
         var heights = await card.EvaluateAsync<double[]>(
@@ -175,16 +175,8 @@ public class CardLayoutTests
         // Assert
         await Assertions.Expect(wrapper).Not.ToHaveAttributeAsync("aria-current", "true", new() { Timeout = Timeout });
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected")).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await OpenEditDialogAfterSelectionAsync(page, page.GetWidgetActionBar());
+        await page.OpenDialogAfterSelectionAsync(page.GetWidgetActionBar().GetByTestId("edit-subject-button"));
         await Assertions.Expect(place.GetByTestId("block-insert-line")).ToHaveCountAsync(0);
-    }
-
-    // A content updates its insert lines only after the render of the selection. The edit dialog comes with a later round
-    // trip, so the lines are final once it shows, and a test can tell that none are left.
-    private static async Task OpenEditDialogAfterSelectionAsync(IPage page, ILocator actionBar)
-    {
-        await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
     private static async Task CloseEditDialogAsync(IPage page)

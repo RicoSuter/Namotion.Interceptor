@@ -157,7 +157,7 @@ public class PageSaveTests
 
             await page.SelectEditModeAsync("Inline");
 
-            var actionBar = await page.Locator(".subject-component-wrapper.selectable:not(:has(> .markdown-text))").First.SelectWidgetAsync();
+            var actionBar = await page.Locator(".subject-component-wrapper.selectable:not(.text-block)").First.SelectWidgetAsync();
             await actionBar.GetByTestId("edit-subject-button").ClickAsync();
 
             var dialog = page.Locator(".mud-dialog");

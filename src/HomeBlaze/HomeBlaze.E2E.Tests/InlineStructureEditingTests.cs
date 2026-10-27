@@ -3,6 +3,7 @@ using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Samples;
 using HomeBlaze.Storage.Files;
 using Microsoft.Playwright;
+using static HomeBlaze.E2E.Tests.Infrastructure.PageEditorExtensions;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -403,13 +404,7 @@ public class InlineStructureEditingTests
         // Act
         var line = GetInsertLineBefore(GetWrapperOf(page, "switch"));
         await OpenWidgetDialogAtAsync(page, line);
-        var dialog = page.GetByTestId("create-subject-dialog");
-        await dialog.GetByTestId("type-search-input").FillAsync("Alert");
-        await dialog.GetByTestId("type-row-alert").ClickAsync();
-
-        // The test id of the name field is on its input.
-        await dialog.GetByTestId("create-name-input").FillAsync("structurealert");
-        await page.GetByTestId("create-button").ClickAsync();
+        await page.CreateAlertAsync("structurealert");
 
         // Assert
         await _fixture.WaitForDemoPageTextAsync(
@@ -431,7 +426,7 @@ public class InlineStructureEditingTests
 
         // Assert: the switch stands on the page, so the page keeps its lines and no content inside a block has any.
         await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line'] button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await WaitForLinesAfterSelectionAsync(page, actionBar.GetByTestId("edit-subject-button"));
+        await page.OpenDialogAfterSelectionAsync(actionBar.GetByTestId("edit-subject-button"));
         await Assertions.Expect(page.Locator(".markdown-fragment [data-testid='block-insert-line']")).ToHaveCountAsync(0);
     }
 
@@ -448,7 +443,7 @@ public class InlineStructureEditingTests
 
         // Assert: the rows become selectable with the selection of the list, and the content of a row belongs to its row.
         await Assertions.Expect(row).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await WaitForLinesAfterSelectionAsync(page, page.GetByTestId("add-value-button"));
+        await page.OpenDialogAfterSelectionAsync(page.GetByTestId("add-value-button"));
         await Assertions.Expect(rowLines).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await page.GetByRole(AriaRole.Dialog).GetByTestId("cancel-button").ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
@@ -473,7 +468,7 @@ public class InlineStructureEditingTests
 
         // Assert: the editor selects the block only after the round trip of the click, so the selection of the preview
         // would have arrived by then.
-        await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(Content, "HomeBlaze.Components.Switch"));
         await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
         await Assertions.Expect(page.Locator(".page-split-preview .subject-component-wrapper.selectable")).ToHaveCountAsync(0);
     }
@@ -493,7 +488,7 @@ public class InlineStructureEditingTests
         await powerSwitch.ClickAsync(new() { Force = true });
 
         // Assert: the editor selects the block after the round trip of the click, by which the toggle would have arrived.
-        await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(Content, "HomeBlaze.Components.Switch"));
         Assert.Equal(isCheckedBefore, await powerSwitch.IsCheckedAsync());
         Assert.Equal(isPoweredBefore, motor.IsPowered);
     }
@@ -517,7 +512,7 @@ public class InlineStructureEditingTests
         // Assert: the click on the preview reveals the block after the round trip of the click, by which a toggle would have
         // arrived.
         await switchWrapper.ClickAsync(new() { Position = new() { X = 2, Y = 2 }, Force = true });
-        await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(Content, "HomeBlaze.Components.Switch"));
         Assert.Equal(isCheckedBefore, await powerSwitch.IsCheckedAsync());
         Assert.Equal(isPoweredBefore, motor.IsPowered);
         Assert.Equal(Content, (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n"));
@@ -597,7 +592,7 @@ public class InlineStructureEditingTests
         // have arrived.
         await page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last
             .ClickAsync(new() { Position = new() { X = 2, Y = 2 }, Force = true });
-        await WaitForEditorSelectionAsync(page, GetLineOf(content, "HomeBlaze.Components.Switch"));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(content, "HomeBlaze.Components.Switch"));
         Assert.Equal(targetSpeedBefore, motor.TargetSpeed);
         Assert.Equal(content, (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n"));
     }
@@ -615,7 +610,7 @@ public class InlineStructureEditingTests
         await progress.ClickAsync(new() { Force = true });
 
         // Assert
-        await WaitForEditorSelectionAsync(page, GetLineOf(content, "HomeBlaze.Components.Progress"));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(content, "HomeBlaze.Components.Progress"));
     }
 
     [Theory]
@@ -654,7 +649,7 @@ public class InlineStructureEditingTests
         await block.ClickAsync(new() { Force = true });
 
         // Assert
-        await WaitForEditorSelectionAsync(page, GetLineOf(ContentWithText, line));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(ContentWithText, line));
     }
 
     [Fact]
@@ -723,14 +718,8 @@ public class InlineStructureEditingTests
     [Fact]
     public async Task WhenThePageIsSplit_ThenTheSourceEditorShowsBlockNamesInBold()
     {
-        // Arrange
-        await _fixture.WriteDemoPageAsync(PageName, Content);
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
-        await page.WaitUntilInteractiveAsync(Timeout);
-
-        // Act
-        await page.SelectEditModeAsync("Split", Timeout);
+        // Arrange & Act
+        var page = await OpenPageInSplitModeAsync();
 
         // Assert
         var name = page.Locator(".monaco-editor .block-name", new() { HasTextString = "HomeBlaze.Components.Switch" });
@@ -889,7 +878,7 @@ public class InlineStructureEditingTests
             Content + "\n:: HomeBlaze.Components.Card Title=\"Phone Card\"\n" + TwoWidgets
             + "::: HomeBlaze.Components.Switch Path=structuremotor/IsPowered\n:::\n::\n\n"
             + string.Concat(Enumerable.Repeat("Text after the card.\n\n", 40)),
-            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
+            PhoneContextOptions);
         var widget = GetWrapperOf(page, "progress");
         var buttonAbove = GetInsertLineBefore(widget).GetByRole(AriaRole.Button);
         var buttonBelow = widget.Locator("xpath=following-sibling::*[@data-testid='block-insert-line'][1]").GetByRole(AriaRole.Button);
@@ -899,12 +888,12 @@ public class InlineStructureEditingTests
         // Act
         await widget.EvaluateAsync("widget => widget.scrollIntoView({ block: 'center' })");
         await Assertions.Expect(actionBar).Not.ToHaveAttributeAsync("data-mudpopover-flip", new Regex("^bottom"), new() { Timeout = Timeout });
-        var isAboveHit = await IsHitWhereItStandsAsync(buttonAbove);
+        var isAboveHit = await IsHitAtItsCenterAsync(buttonAbove, scrollIntoView: false);
 
         // The bar flips below the widget once the app bar leaves it no room above it.
         await widget.EvaluateAsync("widget => window.scrollBy(0, widget.getBoundingClientRect().top - document.querySelector('.mud-appbar').getBoundingClientRect().bottom - 8)");
         await Assertions.Expect(actionBar).ToHaveAttributeAsync("data-mudpopover-flip", new Regex("^bottom"), new() { Timeout = Timeout });
-        var isBelowHit = await IsHitWhereItStandsAsync(buttonBelow);
+        var isBelowHit = await IsHitAtItsCenterAsync(buttonBelow, scrollIntoView: false);
 
         // Assert
         Assert.True(isAboveHit, "The bar above the widget covers the button of the line above it.");
@@ -923,19 +912,6 @@ public class InlineStructureEditingTests
         await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         return page;
     }
-
-    // A content updates its insert lines only after the render of the selection. The dialog that the button opens comes
-    // with a later round trip, so the lines are final once it shows, and a test can tell that none are left.
-    private static async Task WaitForLinesAfterSelectionAsync(IPage page, ILocator dialogButton)
-    {
-        await dialogButton.ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToBeVisibleAsync(new() { Timeout = Timeout });
-    }
-
-    // The 1-based line of the page that contains the text.
-    private static int GetLineOf(string text) => GetLineOf(Content, text);
-
-    private static int GetLineOf(string content, string text) => content.Split('\n').ToList().FindIndex(line => line.Contains(text)) + 1;
 
     // The block of text of the preview that contains the text.
     private static ILocator GetPreviewTextBlock(IPage page, string text) =>
@@ -982,24 +958,8 @@ public class InlineStructureEditingTests
         public double Height { get; set; }
     }
 
-    private static Task WaitForEditorSelectionAsync(IPage page, int startLine) =>
-        page.WaitForFunctionAsync(
-            "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
-            startLine,
-            new() { Timeout = Timeout });
-
-    private async Task<IPage> OpenPageInInlineModeAsync(string content = Content, BrowserNewContextOptions? contextOptions = null)
-    {
-        await _fixture.WriteDemoPageAsync(PageName, content);
-        var page = await _fixture.CreatePageAsync(contextOptions);
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-        // The edit menu is prerendered, and a click before the circuit is connected is lost.
-        await page.WaitUntilInteractiveAsync(Timeout);
-        await page.SwitchToInlineModeAsync();
-        return page;
-    }
+    private Task<IPage> OpenPageInInlineModeAsync(string content = Content, BrowserNewContextOptions? contextOptions = null) =>
+        _fixture.OpenDemoPageInInlineModeAsync(PageName, content, contextOptions);
 
     // A row can be selected once its list is. The list has a bar with a move button as well, so the bar is returned only
     // once it belongs to the row.
@@ -1118,26 +1078,21 @@ public class InlineStructureEditingTests
             }
             """);
 
-    // Whether a click at the center of the element reaches it where it stands, without scrolling it.
-    private static Task<bool> IsHitWhereItStandsAsync(ILocator element) =>
+    // Whether a click at the center of the element reaches it, which it does not when it is covered or cut off. The element
+    // is scrolled to the center of the window first, unless the test put it where it is to be hit.
+    private static Task<bool> IsHitAtItsCenterAsync(ILocator element, bool scrollIntoView = true) =>
         element.EvaluateAsync<bool>(
             """
-            element => {
-                const box = element.getBoundingClientRect();
-                return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
-            }
-            """);
+            (element, scrollIntoView) => {
+                if (scrollIntoView) {
+                    element.scrollIntoView({ block: 'center' });
+                }
 
-    // Whether a click at the center of the element reaches it, which it does not when it is covered or cut off.
-    private static Task<bool> IsHitAtItsCenterAsync(ILocator element) =>
-        element.EvaluateAsync<bool>(
-            """
-            element => {
-                element.scrollIntoView({ block: 'center' });
                 const box = element.getBoundingClientRect();
                 return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
             }
-            """);
+            """,
+            scrollIntoView);
 
     // How far the card and its content can scroll down.
     private static Task<int[]> GetCardScrollRangesAsync(ILocator card) =>

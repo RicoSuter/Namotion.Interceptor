@@ -1,10 +1,8 @@
-using System.Collections.Concurrent;
-using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
-using Namotion.Interceptor.Testing;
+using static HomeBlaze.E2E.Tests.Infrastructure.PageEditorExtensions;
+using static HomeBlaze.E2E.Tests.Infrastructure.TextDialogExtensions;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -20,7 +18,6 @@ public class InlineTextEditingTests
     private const string PageName = "TextEditing.md";
     private const string LayoutPageName = "TextLayout.md";
     private const string EmptyContentPageName = "EmptyContent.md";
-    private const string TextEditorId = "markdown-text-editor";
 
     // The server writes the page in its output folder, so a run that ends with a change of the page would change the
     // baseline of the next run if it were read from there.
@@ -168,8 +165,8 @@ public class InlineTextEditingTests
 
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
-        await SetTextEditorValueAsync(page, "Changed *paragraph*.");
+        await page.ExpectTextEditorValueAsync("First paragraph on the page.");
+        await page.SetTextEditorValueAsync("Changed *paragraph*.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -177,7 +174,7 @@ public class InlineTextEditingTests
             PageName,
             text => text.Contains("# Text Editing Demo\n\nChanged *paragraph*.\n\n:: HomeBlaze.Components.Card"),
             "The paragraph was not changed.");
-        await Assertions.Expect(GetTextWrapper(page, "Changed paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Changed paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -190,7 +187,7 @@ public class InlineTextEditingTests
 
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await SetTextEditorValueAsync(page, "Changed body.");
+        await page.SetTextEditorValueAsync("Changed body.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -199,14 +196,14 @@ public class InlineTextEditingTests
             text => text.Contains(":: HomeBlaze.Components.Card Title=\"Text Card\"\nChanged body.\n::\n") &&
                     text.Contains("\nFirst paragraph on the page.\n"),
             "The card body was not changed.");
-        await Assertions.Expect(GetTextWrapper(page, "Changed body.")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Changed body.")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
     public async Task WhenATextBlockInACardIsMovedUp_ThenItStaysSelected()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(LayoutPageName, LayoutContent);
         await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
         var actionBar = await SelectTextAsync(page, "Last line in the card");
 
@@ -218,7 +215,7 @@ public class InlineTextEditingTests
             LayoutPageName,
             text => text.IndexOf("Last line in the card.", StringComparison.Ordinal) < text.IndexOf("Title=\"Inner Card\"", StringComparison.Ordinal),
             "The text was not moved above the inner card.");
-        await Assertions.Expect(GetTextWrapper(page, "Last line in the card")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Last line in the card")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -232,7 +229,7 @@ public class InlineTextEditingTests
         // Act
         await button.ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
-        await SetTextEditorValueAsync(page, "Inserted in the card.");
+        await page.SetTextEditorValueAsync("Inserted in the card.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -240,7 +237,7 @@ public class InlineTextEditingTests
             PageName,
             text => text.Contains("Card body text.\n\nInserted in the card.\n"),
             "The text was not inserted into the card.");
-        await Assertions.Expect(GetTextWrapper(page, "Inserted in the card.")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Inserted in the card.")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -249,7 +246,7 @@ public class InlineTextEditingTests
         // Arrange: Tab goes from the selected block to the first button of its bar.
         var page = await OpenPageInInlineModeAsync();
         await SelectTextAsync(page, "Last paragraph");
-        await GetTextWrapper(page, "Last paragraph").FocusAsync();
+        await page.GetTextWrapper("Last paragraph").FocusAsync();
         await page.Keyboard.PressAsync("Tab");
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToBeFocusedAsync(new() { Timeout = Timeout });
 
@@ -261,7 +258,7 @@ public class InlineTextEditingTests
             PageName,
             text => text.Contains("First paragraph on the page.\n\nLast paragraph on the page.\n\n:: HomeBlaze.Components.Card"),
             "The text was not moved above the card.");
-        await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToBeFocusedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Last paragraph")).ToBeFocusedAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -293,12 +290,12 @@ public class InlineTextEditingTests
             PageName,
             text => text.Contains("First paragraph on the page.\n\nLast paragraph on the page.\n\n:: HomeBlaze.Components.Card"),
             "The text was not moved above the card.");
-        await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         await page.GetWidgetActionBar().GetByTestId("move-down-button").ClickAsync();
 
         // Assert
         await _fixture.WaitForDemoPageTextAsync(PageName, text => text == Content, "The text was not moved below the card again.");
-        await Assertions.Expect(GetTextWrapper(page, "Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Last paragraph")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-up-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(page.GetWidgetActionBar().GetByTestId("move-down-button")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
@@ -307,7 +304,7 @@ public class InlineTextEditingTests
     public async Task WhenTextIsInsertedThroughThePlaceholderOfAnEmptyItem_ThenTheItemHoldsItAndThePlaceholderIsGone()
     {
         // Arrange: the text of the first item selects the flow, whose items then show their insert lines.
-        var page = await OpenPageInInlineModeAsync(EmptyContentPageName, EmptyContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(EmptyContentPageName, EmptyContent);
         await page.GetByText("First item.", new() { Exact = true }).SelectWidgetAsync();
         var emptyItem = page.GetByTestId("flow-item").Nth(1);
         var placeholder = emptyItem.GetByTestId("content-placeholder");
@@ -317,7 +314,7 @@ public class InlineTextEditingTests
         // Act
         await placeholder.GetByRole(AriaRole.Button).ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
-        await SetTextEditorValueAsync(page, "Filled item.");
+        await page.SetTextEditorValueAsync("Filled item.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -333,7 +330,7 @@ public class InlineTextEditingTests
     public async Task WhenThePlaceholderOfAnEmptyItemIsDoubleClicked_ThenNoDialogOpens()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(EmptyContentPageName, EmptyContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(EmptyContentPageName, EmptyContent);
         await page.GetByText("First item.", new() { Exact = true }).SelectWidgetAsync();
         var button = page.GetByTestId("flow-item").Nth(1).GetByTestId("content-placeholder").GetByRole(AriaRole.Button);
 
@@ -388,7 +385,7 @@ public class InlineTextEditingTests
         // Act
         await lineButton.ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
-        await SetTextEditorValueAsync(page, "Inserted text.");
+        await page.SetTextEditorValueAsync("Inserted text.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -396,7 +393,7 @@ public class InlineTextEditingTests
             PageName,
             text => text.Contains("First paragraph on the page.\n\nInserted text.\n\n:: HomeBlaze.Components.Card"),
             "The text was not inserted before the card.");
-        await Assertions.Expect(GetTextWrapper(page, "Inserted text")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Inserted text")).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -406,16 +403,16 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
         await _fixture.WriteDemoPageAsync(PageName, Content.Replace("Last paragraph on the page.", "Changed elsewhere."));
 
         // Act
-        await SetTextEditorValueAsync(page, "Mine.");
+        await page.SetTextEditorValueAsync("Mine.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
         await Assertions.Expect(page.GetByTestId("markdown-text-refusal")).ToContainTextAsync("Copy your text", new() { Timeout = Timeout });
-        await ExpectTextEditorValueAsync(page, "Mine.");
+        await page.ExpectTextEditorValueAsync("Mine.");
         var text = (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n");
         Assert.Contains("Changed elsewhere.", text);
         Assert.DoesNotContain("Mine.", text);
@@ -430,7 +427,7 @@ public class InlineTextEditingTests
 
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await page.ExpectTextEditorValueAsync("First paragraph on the page.");
         await page.WaitForFunctionAsync(
             $"() => blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
         await page.WaitForFunctionAsync(
@@ -464,16 +461,16 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.TypeAsync(" Unsaved.");
 
         // Act
         await page.Keyboard.PressAsync("Escape");
         await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
-        await WaitForTextEditorFocusAsync(page);
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.TypeAsync(" Two.");
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page. Unsaved. Two.");
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page. Unsaved. Two.");
         await page.GetByTestId("markdown-text-cancel").ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Discard", Exact = true }).ClickAsync();
 
@@ -490,8 +487,8 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
         await page.GetByRole(AriaRole.Dialog).Locator(".mud-dialog-title").ClickAsync();
         await page.WaitForFunctionAsync(
             $"() => !blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus()", null, new() { Timeout = Timeout });
@@ -508,14 +505,14 @@ public class InlineTextEditingTests
     {
         // Arrange: Enter selects the focused block, and a second Enter opens its dialog.
         var page = await OpenPageInInlineModeAsync();
-        var wrapper = GetTextWrapper(page, "First paragraph");
+        var wrapper = page.GetTextWrapper("First paragraph");
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
         await wrapper.FocusAsync();
         await page.Keyboard.PressAsync("Enter");
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         await page.Keyboard.PressAsync("Enter");
-        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("First paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
 
         // Act
         await page.Keyboard.TypeAsync(" Typed.");
@@ -525,7 +522,7 @@ public class InlineTextEditingTests
         await _fixture.WaitForDemoPageTextAsync(
             PageName, text => text.Contains("\nFirst paragraph on the page. Typed.\n"), "The paragraph was not saved.");
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
-        await Assertions.Expect(GetTextWrapper(page, "Typed.")).ToBeFocusedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("Typed.")).ToBeFocusedAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -537,8 +534,8 @@ public class InlineTextEditingTests
         // The last paragraph, whose bar does not cover the menu of the modes.
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.PressAsync("Escape");
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await page.WaitForFunctionAsync(
@@ -568,8 +565,8 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
 
         // Act
         await page.Keyboard.PressAsync("Escape");
@@ -585,13 +582,13 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "First paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
-        await SetTextEditorValueAsync(page, "Before the widget.\n\nAfter the widget.");
-        await SetTextEditorCursorAsync(page, 3);
+        await page.ExpectTextEditorValueAsync("First paragraph on the page.");
+        await page.SetTextEditorValueAsync("Before the widget.\n\nAfter the widget.");
+        await page.SetTextEditorCursorAsync(3);
 
         // Act
         await CreateAlertInTextDialogAsync(page, "textalert");
-        await ExpectTextEditorToContainAsync(page, ":: HomeBlaze.Components.Alert#textalert");
+        await page.ExpectTextEditorToContainAsync(":: HomeBlaze.Components.Alert#textalert");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -612,12 +609,12 @@ public class InlineTextEditingTests
         await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
         var actionBar = await SelectTextAsync(page, "Card body text");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Card body text.");
-        await SetTextEditorCursorAsync(page, 1);
+        await page.ExpectTextEditorValueAsync("Card body text.");
+        await page.SetTextEditorCursorAsync(1);
 
         // Act
         await CreateAlertInTextDialogAsync(page, "cardalert");
-        await ExpectTextEditorToContainAsync(page, "::: HomeBlaze.Components.Alert#cardalert");
+        await page.ExpectTextEditorToContainAsync("::: HomeBlaze.Components.Alert#cardalert");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -637,10 +634,10 @@ public class InlineTextEditingTests
         await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
         var actionBar = await SelectTextAsync(page, "Card body text");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Card body text.");
+        await page.ExpectTextEditorValueAsync("Card body text.");
 
         // Act
-        await SetTextEditorValueAsync(page, "Card body text.\n\n:: HomeBlaze.Components.Alert#pastedalert\n::");
+        await page.SetTextEditorValueAsync("Card body text.\n\n:: HomeBlaze.Components.Alert#pastedalert\n::");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -655,12 +652,7 @@ public class InlineTextEditingTests
     public async Task WhenTheTextDialogIsOpenOnAPhone_ThenItsTextAreaHasTheFocusAndSavesWithControlS()
     {
         // Arrange: Monaco does not support the browsers of phones, so a device whose pointer is coarse gets a text area.
-        await _fixture.WriteDemoPageAsync(PageName, Content);
-        var page = await _fixture.CreatePageAsync(
-            new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 375, Height = 667 } });
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
-        await page.WaitUntilInteractiveAsync(Timeout);
-        await page.SwitchToInlineModeAsync();
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(PageName, Content, PhoneContextOptions);
         var actionBar = await SelectTextAsync(page, "First paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
         var textArea = page.GetByRole(AriaRole.Dialog).GetByTestId("markdown-source-text");
@@ -682,39 +674,27 @@ public class InlineTextEditingTests
     [Fact]
     public async Task WhenTextIsTypedInTheTextDialog_ThenTheDialogIsNotRenderedForEveryCharacter()
     {
-        // Arrange: the server sends a render batch for every render, and calls update of the module of the editor once it
-        // decorated the text of a version of the editor model.
+        // Arrange
         await _fixture.WriteDemoPageAsync(PageName, Content);
         var page = await _fixture.CreatePageAsync();
-        var renderBatchCount = 0;
-        var decoratedVersions = new ConcurrentQueue<string>();
-        page.WebSocket += (_, webSocket) => webSocket.FrameReceived += (_, frame) =>
-        {
-            var text = frame.Binary is { } binary ? Encoding.Latin1.GetString(binary) : frame.Text ?? string.Empty;
-            Interlocked.Add(ref renderBatchCount, Regex.Count(text, "JS\\.RenderBatch"));
-            foreach (Match match in Regex.Matches(text, $"update.{{0,8}}\\[\"{TextEditorId}\",(\\d+),"))
-            {
-                decoratedVersions.Enqueue(match.Groups[1].Value);
-            }
-        };
-
+        var recorder = new RenderBatchRecorder(page, TextEditorId);
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{PageName}");
         await page.WaitUntilInteractiveAsync(Timeout);
         await page.SwitchToInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "First paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("First paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.TypeAsync("a");
-        await WaitForDecoratedVersionAsync(page, decoratedVersions);
-        var renderBatchCountBefore = Volatile.Read(ref renderBatchCount);
+        await recorder.WaitForDecoratedVersionAsync();
+        var renderBatchCountBefore = recorder.RenderBatchCount;
 
         // Act
         await page.Keyboard.TypeAsync("bcdefghi");
-        await WaitForDecoratedVersionAsync(page, decoratedVersions);
+        await recorder.WaitForDecoratedVersionAsync();
 
         // Assert: a render for every character would be at least eight batches.
-        var renderBatchCountWhileTyping = Volatile.Read(ref renderBatchCount) - renderBatchCountBefore;
+        var renderBatchCountWhileTyping = recorder.RenderBatchCount - renderBatchCountBefore;
         Assert.True(renderBatchCountWhileTyping < 4, $"{renderBatchCountWhileTyping} render batches arrived while eight characters were typed.");
     }
 
@@ -725,8 +705,8 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.TypeAsync(" pa");
         await page.EvaluateAsync($"() => blazorMonaco.editor.getEditor('{TextEditorId}').trigger('test', 'editor.action.triggerSuggest', {{}})");
         var suggestions = page.Locator(".suggest-widget.visible");
@@ -749,8 +729,8 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
-        await WaitForTextEditorFocusAsync(page);
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
+        await page.WaitForTextEditorFocusAsync();
         await page.Keyboard.TypeAsync(" Typed.");
         var dialog = (await page.Locator(".mud-dialog.markdown-text-dialog").BoundingBoxAsync())!;
 
@@ -779,7 +759,7 @@ public class InlineTextEditingTests
         var path = _fixture.GetDemoPagePath(PageName);
         var actionBar = await SelectTextAsync(page, "Last paragraph");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Last paragraph on the page.");
+        await page.ExpectTextEditorValueAsync("Last paragraph on the page.");
         var lastWriteTime = File.GetLastWriteTimeUtc(path);
 
         // Act
@@ -795,14 +775,14 @@ public class InlineTextEditingTests
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
-        var wrapper = GetTextWrapper(page, "First paragraph");
+        var wrapper = page.GetTextWrapper("First paragraph");
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         await wrapper.DblClickAsync(new() { Force = true });
 
         // Assert
-        await ExpectTextEditorValueAsync(page, "First paragraph on the page.");
+        await page.ExpectTextEditorValueAsync("First paragraph on the page.");
     }
 
     [Fact]
@@ -811,14 +791,14 @@ public class InlineTextEditingTests
         // Arrange: the text of a card body is selectable once the card is selected.
         var page = await OpenPageInInlineModeAsync();
         await page.GetCard("Text Card").Locator(".mud-card-header").SelectWidgetAsync();
-        var wrapper = GetTextWrapper(page, "Card body text");
+        var wrapper = page.GetTextWrapper("Card body text");
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         await wrapper.DblClickAsync(new() { Force = true });
 
         // Assert: the dialog of the text opened, not the one of the card.
-        await ExpectTextEditorValueAsync(page, "Card body text.");
+        await page.ExpectTextEditorValueAsync("Card body text.");
         await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
@@ -835,7 +815,7 @@ public class InlineTextEditingTests
         await text.DblClickAsync(new() { Force = true });
 
         // Assert
-        await ExpectTextEditorValueAsync(page, "Card body text.");
+        await page.ExpectTextEditorValueAsync("Card body text.");
         await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
         Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.getSelection()?.toString() ?? ''"));
@@ -845,7 +825,7 @@ public class InlineTextEditingTests
     public async Task WhenALinkInATextBlockOfACardThatIsNotSelectedIsClicked_ThenTheCardIsSelectedAndThePageStays()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(PageName, Content.Replace("Card body text.", "Card body [link](https://example.com/).", StringComparison.Ordinal));
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(PageName, Content.Replace("Card body text.", "Card body [link](https://example.com/).", StringComparison.Ordinal));
         var link = page.GetCard("Text Card").GetByRole(AriaRole.Link, new() { Name = "link" });
         await Assertions.Expect(link).ToBeVisibleAsync(new() { Timeout = Timeout });
         var address = page.Url;
@@ -898,7 +878,7 @@ public class InlineTextEditingTests
         var cardColors = new[] { await GetOutlineColorAsync(cardWrapper), await GetBorderColorAsync(cardBar) };
         var textBar = await SelectTextAsync(page, "First paragraph");
         await Assertions.Expect(textBar).ToHaveClassAsync(new Regex(@"\btext-block-bar\b"), new() { Timeout = Timeout });
-        var textColors = new[] { await GetOutlineColorAsync(GetTextWrapper(page, "First paragraph")), await GetBorderColorAsync(textBar) };
+        var textColors = new[] { await GetOutlineColorAsync(page.GetTextWrapper("First paragraph")), await GetBorderColorAsync(textBar) };
 
         // Assert
         Assert.Equal(new[] { primary, primary }, cardColors);
@@ -909,9 +889,9 @@ public class InlineTextEditingTests
     public async Task WhenAOneLineParagraphInASelectedCardIsClickedInItsMiddle_ThenTheParagraphIsSelected()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(LayoutPageName, LayoutContent);
         await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
-        var paragraph = GetTextWrapper(page, "One line in the card");
+        var paragraph = page.GetTextWrapper("One line in the card");
         await Assertions.Expect(paragraph).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -945,8 +925,8 @@ public class InlineTextEditingTests
             ? new BrowserNewContextOptions { HasTouch = true, IsMobile = true, ViewportSize = new() { Width = 1280, Height = 900 } }
             : null;
         var page = content == "page"
-            ? await OpenPageInInlineModeAsync(PageName, Content, contextOptions)
-            : await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent, contextOptions);
+            ? await _fixture.OpenDemoPageInInlineModeAsync(PageName, Content, contextOptions)
+            : await _fixture.OpenDemoPageInInlineModeAsync(LayoutPageName, LayoutContent, contextOptions);
         const string Fragment = ":scope > .subject-component-wrapper > .markdown-fragment";
         var cells = page.Locator(".grid-cell-content");
 
@@ -1053,15 +1033,15 @@ public class InlineTextEditingTests
         var page = await OpenPageInInlineModeAsync();
 
         // Assert
-        await Assertions.Expect(GetTextWrapper(page, "Text Editing Demo")).ToHaveAttributeAsync("aria-label", "Heading: Text Editing Demo", new() { Timeout = Timeout });
-        await Assertions.Expect(GetTextWrapper(page, "First paragraph")).ToHaveAttributeAsync("aria-label", "Paragraph: First paragraph on the page.");
+        await Assertions.Expect(page.GetTextWrapper("Text Editing Demo")).ToHaveAttributeAsync("aria-label", "Heading: Text Editing Demo", new() { Timeout = Timeout });
+        await Assertions.Expect(page.GetTextWrapper("First paragraph")).ToHaveAttributeAsync("aria-label", "Paragraph: First paragraph on the page.");
     }
 
     [Fact]
     public async Task WhenTheBodyTextOfACardIsClickedFirst_ThenTheCardIsSelected()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(LayoutPageName, LayoutContent);
         var cardWrapper = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
             .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Layout Card", new() { Exact = true }) });
 
@@ -1070,14 +1050,14 @@ public class InlineTextEditingTests
 
         // Assert
         await Assertions.Expect(cardWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected:has(> .markdown-text)")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected.text-block")).ToHaveCountAsync(0);
     }
 
     [Fact]
     public async Task WhenABlockInsideACardIsDeleted_ThenTheCardIsSelected()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(LayoutPageName, LayoutContent);
         var layoutCard = page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
             .Filter(new() { Has = page.GetByTestId("card-title").GetByText("Layout Card", new() { Exact = true }) });
         await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
@@ -1141,14 +1121,14 @@ public class InlineTextEditingTests
     public async Task WhenTextInACardIsEmptiedInItsDialog_ThenTheCardIsSelectedAsAfterADelete()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(LayoutPageName, LayoutContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(LayoutPageName, LayoutContent);
         await page.GetCard("Layout Card").Locator(".mud-card-header").First.SelectWidgetAsync();
         var actionBar = await SelectTextAsync(page, "One line in the card.");
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "One line in the card.");
+        await page.ExpectTextEditorValueAsync("One line in the card.");
 
         // Act
-        await SetTextEditorValueAsync(page, string.Empty);
+        await page.SetTextEditorValueAsync(string.Empty);
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -1162,14 +1142,14 @@ public class InlineTextEditingTests
     public async Task WhenRawHtmlStandsBetweenParagraphs_ThenTheParagraphsCanBeEdited()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
         await SelectTextAsync(page, "Paragraph before the HTML");
         var actionBar = await SelectTextAsync(page, "Paragraph after the HTML");
 
         // Act
         await actionBar.GetByTestId("edit-subject-button").ClickAsync();
-        await ExpectTextEditorValueAsync(page, "Paragraph after the HTML.");
-        await SetTextEditorValueAsync(page, "Changed after the HTML.");
+        await page.ExpectTextEditorValueAsync("Paragraph after the HTML.");
+        await page.SetTextEditorValueAsync("Changed after the HTML.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -1183,8 +1163,8 @@ public class InlineTextEditingTests
     public async Task WhenRawHtmlThatShowsSomethingIsSelected_ThenItsBarHasOnlyEditInSource()
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
-        var wrapper = GetTextWrapper(page, "Visible HTML.");
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var wrapper = page.GetTextWrapper("Visible HTML.");
 
         // Act
         var actionBar = await SelectTextAsync(page, "Visible HTML.");
@@ -1203,16 +1183,16 @@ public class InlineTextEditingTests
     public async Task WhenTextIsInsertedRightBeforeTheBlockAfterAComment_ThenItGoesBeforeTheComment()
     {
         // Arrange: the comment has an insert line before it and none after it.
-        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
         var lines = page.Locator(".markdown-content > [data-testid='block-insert-line']");
         await Assertions.Expect(lines).ToHaveCountAsync(5, new() { Timeout = Timeout });
-        var lineBeforeParagraph = GetTextWrapper(page, "Paragraph after the HTML")
+        var lineBeforeParagraph = page.GetTextWrapper("Paragraph after the HTML")
             .Locator("xpath=preceding-sibling::div[@data-testid='block-insert-line'][1]");
 
         // Act
         await lineBeforeParagraph.GetByRole(AriaRole.Button).ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
-        await SetTextEditorValueAsync(page, "Inserted text.");
+        await page.SetTextEditorValueAsync("Inserted text.");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
         // Assert
@@ -1228,8 +1208,8 @@ public class InlineTextEditingTests
     public async Task WhenEditInSourceIsClickedOrRawHtmlIsDoubleClicked_ThenTheSplitModeShowsTheLinesOfTheHtmlInTheEditor(bool doubleClick)
     {
         // Arrange
-        var page = await OpenPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
-        var wrapper = GetTextWrapper(page, "Visible HTML.");
+        var page = await _fixture.OpenDemoPageInInlineModeAsync(RawHtmlPageName, RawHtmlContent);
+        var wrapper = page.GetTextWrapper("Visible HTML.");
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -1245,29 +1225,16 @@ public class InlineTextEditingTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await WaitForPageEditorSelectionAsync(page, GetLineOf(RawHtmlContent, "visible-html-block"));
+        await page.WaitForPageEditorSelectionAsync(GetLineOf(RawHtmlContent, "visible-html-block"));
     }
 
-    private Task<IPage> OpenPageInInlineModeAsync() => OpenPageInInlineModeAsync(PageName, Content);
-
-    private async Task<IPage> OpenPageInInlineModeAsync(string pageName, string content, BrowserNewContextOptions? contextOptions = null)
-    {
-        await _fixture.WriteDemoPageAsync(pageName, content);
-        var page = await _fixture.CreatePageAsync(contextOptions);
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-        // The edit menu is prerendered, and a click before the circuit is connected is lost.
-        await page.WaitUntilInteractiveAsync(Timeout);
-        await page.SwitchToInlineModeAsync();
-        return page;
-    }
+    private Task<IPage> OpenPageInInlineModeAsync() => _fixture.OpenDemoPageInInlineModeAsync(PageName, Content);
 
     // The bar of a widget that was selected before shows until the selection moves, so the wait for the selected text keeps
     // a click on the bar from reaching that widget.
     private static async Task<ILocator> SelectTextAsync(IPage page, string text)
     {
-        var wrapper = GetTextWrapper(page, text);
+        var wrapper = page.GetTextWrapper(text);
         var actionBar = await wrapper.SelectWidgetAsync();
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
         return actionBar;
@@ -1279,83 +1246,21 @@ public class InlineTextEditingTests
     {
         await insertButton.ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
-        await ExpectTextEditorValueAsync(page, string.Empty);
+        await page.ExpectTextEditorValueAsync(string.Empty);
         await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
-
-    // The 1-based line of the content that contains the text.
-    private static int GetLineOf(string content, string text) => content.Split('\n').ToList().FindIndex(line => line.Contains(text)) + 1;
-
-    // The page editor of the Split mode is the only Monaco editor while no text dialog is open.
-    private static Task WaitForPageEditorSelectionAsync(IPage page, int startLine) =>
-        page.WaitForFunctionAsync(
-            "line => monaco.editor.getEditors()[0]?.getSelection()?.startLineNumber === line",
-            startLine,
-            new() { Timeout = Timeout });
 
     private static ILocator GetCardWrapper(IPage page, string title) =>
         page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")
             .Filter(new() { Has = page.GetByTestId("card-title").GetByText(title, new() { Exact = true }) });
 
-    private static ILocator GetTextWrapper(IPage page, string text) =>
-        page.Locator(".subject-component-wrapper.selectable:has(> .markdown-text)").Filter(new() { HasText = text });
-
-    // The dialog edits its text in Monaco, which has no input value, so the text is read and written through the editor.
-    private static async Task ExpectTextEditorValueAsync(IPage page, string expected)
-    {
-        try
-        {
-            await page.WaitForFunctionAsync(
-                $"expected => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true)?.getValue() === expected",
-                expected,
-                new() { Timeout = Timeout });
-        }
-        catch (TimeoutException)
-        {
-            var actual = await page.EvaluateAsync<string?>($"() => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true)?.getValue() ?? null");
-            Assert.Fail($"The text editor has {(actual is null ? "not opened" : $"the text '{actual}'")} and not '{expected}'.");
-        }
-    }
-
-    // Waits until the server decorated the text of the current version of the editor model, after it handled every change.
-    private static async Task WaitForDecoratedVersionAsync(IPage page, ConcurrentQueue<string> decoratedVersions)
-    {
-        var version = (await page.EvaluateAsync<int>($"() => blazorMonaco.editor.getEditor('{TextEditorId}').getModel().getVersionId()"))
-            .ToString(CultureInfo.InvariantCulture);
-        await AsyncTestHelpers.WaitUntilAsync(() => decoratedVersions.Contains(version), message: $"The server did not decorate version {version}.");
-    }
-
-    private static Task WaitForTextEditorFocusAsync(IPage page) =>
-        page.WaitForFunctionAsync(
-            $"() => blazorMonaco.editor.getEditor('{TextEditorId}', true)?.hasTextFocus() === true", null, new() { Timeout = Timeout });
-
-    private static async Task SetTextEditorValueAsync(IPage page, string text)
-    {
-        await page.WaitForFunctionAsync(
-            $"() => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true) != null", null, new() { Timeout = Timeout });
-        await page.EvaluateAsync($"text => blazorMonaco.editor.getEditor('{TextEditorId}').setValue(text)", text);
-    }
-
-    private static Task SetTextEditorCursorAsync(IPage page, int lineNumber) =>
-        page.EvaluateAsync($"line => blazorMonaco.editor.getEditor('{TextEditorId}').setPosition({{ lineNumber: line, column: 1 }})", lineNumber);
-
-    private static Task ExpectTextEditorToContainAsync(IPage page, string expected) =>
-        page.WaitForFunctionAsync(
-            $"expected => window.blazorMonaco?.editor.getEditor('{TextEditorId}', true)?.getValue().includes(expected) === true",
-            expected,
-            new() { Timeout = Timeout });
-
     // Create of the text dialog opens the setup dialog above it, which closes once the alert is configured.
     private static async Task CreateAlertInTextDialogAsync(IPage page, string name)
     {
         await page.GetByTestId("markdown-text-create").ClickAsync();
-        var dialog = page.GetByTestId("create-subject-dialog");
-        await dialog.GetByTestId("type-search-input").FillAsync("Alert");
-        await dialog.GetByTestId("type-row-alert").ClickAsync();
-        await dialog.GetByTestId("create-name-input").FillAsync(name);
-        await page.GetByTestId("create-button").ClickAsync();
-        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = Timeout });
+        await page.CreateAlertAsync(name);
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToBeHiddenAsync(new() { Timeout = Timeout });
     }
 
     private static Task<string> GetOutlineColorAsync(ILocator element) =>

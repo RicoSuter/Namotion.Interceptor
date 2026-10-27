@@ -4,10 +4,4 @@ title: Raw HTML Demo
 
 # Raw HTML Demo
 
-Paragraph before the HTML.
-
-<div class="visible-html-block">Visible HTML.</div>
-
-<!-- A comment shows nothing. -->
-
-Paragraph after the HTML.
+The tests that use this page write their own content into it before they open it, so no test depends on what it holds.

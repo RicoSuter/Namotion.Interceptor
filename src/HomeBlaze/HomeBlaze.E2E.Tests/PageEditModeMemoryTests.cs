@@ -23,8 +23,7 @@ public class PageEditModeMemoryTests
     public async Task WhenSplitIsChosenAndTheAppNavigatesToAnotherPage_ThenThatPageOpensInSplit()
     {
         // Arrange
-        var page = await OpenAsync("pages/Dashboard.md");
-        await page.SelectEditModeAsync("Split");
+        var page = await _fixture.OpenPageInEditModeAsync("Dashboard.md", "Split");
         await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -40,8 +39,7 @@ public class PageEditModeMemoryTests
     public async Task WhenSourceIsChosenAndTheAppLeavesThePagesAndComesBack_ThenThePageOpensInSource()
     {
         // Arrange
-        var page = await OpenAsync("pages/Dashboard.md");
-        await page.SelectEditModeAsync("Source");
+        var page = await _fixture.OpenPageInEditModeAsync("Dashboard.md", "Source");
         await Assertions.Expect(page.Locator(".monaco-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/browser");
         await page.WaitForURLAsync("**/browser", new() { Timeout = Timeout });
@@ -61,8 +59,7 @@ public class PageEditModeMemoryTests
     public async Task WhenSplitIsChosenAndThePageIsReloaded_ThenItOpensInView()
     {
         // Arrange: the choice belongs to the circuit, which a reload ends.
-        var page = await OpenAsync("pages/Dashboard.md");
-        await page.SelectEditModeAsync("Split");
+        var page = await _fixture.OpenPageInEditModeAsync("Dashboard.md", "Split");
         await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
@@ -79,8 +76,7 @@ public class PageEditModeMemoryTests
     public async Task WhenViewIsChosenAgain_ThenTheNextPageOpensInView()
     {
         // Arrange
-        var page = await OpenAsync("pages/Dashboard.md");
-        await page.SelectEditModeAsync("Split");
+        var page = await _fixture.OpenPageInEditModeAsync("Dashboard.md", "Split");
         await Assertions.Expect(page.GetByTestId("edit-splitter")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await page.SelectEditModeAsync("View");
         await Assertions.Expect(page.GetByTestId("edit-splitter")).ToHaveCountAsync(0, new() { Timeout = Timeout });
@@ -100,8 +96,7 @@ public class PageEditModeMemoryTests
     public async Task WhenTheAppNavigatesToAnotherPageInSplit_ThenSaveWaitsForTheEditorOfThatPage()
     {
         // Arrange: the observer records whether the button was disabled at any time after the navigation.
-        var page = await OpenAsync("pages/Dashboard.md");
-        await page.SelectEditModeAsync("Split");
+        var page = await _fixture.OpenPageInEditModeAsync("Dashboard.md", "Split");
         var saveButton = page.Locator("[data-testid='save-button'] button");
         await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = Timeout });
         await page.EvaluateAsync(
@@ -123,14 +118,5 @@ public class PageEditModeMemoryTests
         await Assertions.Expect(page).ToHaveTitleAsync("Cards Demo - HomeBlaze", new() { Timeout = Timeout });
         await Assertions.Expect(saveButton).ToBeEnabledAsync(new() { Timeout = Timeout });
         Assert.True(await page.EvaluateAsync<bool>("() => window.saveWasDisabled"), "Save stayed enabled while the editor of the new page loaded.");
-    }
-
-    private async Task<IPage> OpenAsync(string path)
-    {
-        var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}{path}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-        await page.WaitUntilInteractiveAsync();
-        return page;
     }
 }
