@@ -21,6 +21,8 @@ internal static class AgentMarkdownRenderer
     // A base that no address leaves unless it names a host of its own, which TryGetApplicationPath then rejects.
     private static readonly Uri ApplicationRoot = new("https://application.invalid/");
 
+    private const string MermaidLanguage = "mermaid";
+
     /// <summary>Converts Markdown to sanitized HTML, or to the encoded text with its line breaks kept when Markdig refuses it.</summary>
     public static string ToHtml(string markdown)
     {
@@ -48,10 +50,19 @@ internal static class AgentMarkdownRenderer
             SanitizeAutolink(autolink);
         }
 
-        // The parser turns the info string of a fenced code block into a class name.
+        // The parser turns the info string of a fenced code block into a class name. The diagrams extension renders a
+        // block whose info is a diagram language as <pre> with the class without its language- prefix, so only a closed
+        // mermaid block keeps a fixed info and class; an open one is still being streamed and stays code.
         foreach (var codeBlock in document.Descendants<FencedCodeBlock>())
         {
+            var isDiagram = codeBlock.ClosingFencedCharCount > 0 &&
+                string.Equals(codeBlock.Info, MermaidLanguage, StringComparison.OrdinalIgnoreCase);
             codeBlock.TryGetAttributes()?.Classes?.Clear();
+            codeBlock.Info = isDiagram ? MermaidLanguage : null;
+            if (isDiagram)
+            {
+                codeBlock.GetAttributes().AddClass("language-" + MermaidLanguage);
+            }
         }
 
         return document.ToHtml(Pipeline);
@@ -99,13 +110,15 @@ internal static class AgentMarkdownRenderer
     // An allow list: extensions that copy text into class, id or style attributes (custom containers, generic
     // attributes, footnotes, heading identifiers) or embed content (media links) must stay out, because a class
     // can apply page styles such as a full-viewport overlay and repeated ids collide across timeline entries. The
-    // remaining extensions only emit fixed attributes, such as a table column's text alignment.
+    // remaining extensions only emit fixed attributes, such as a table column's text alignment or the mermaid class
+    // that RenderHtml sets.
     private static MarkdownPipeline CreatePipeline() => new MarkdownPipelineBuilder()
         .UsePipeTables()
         .UseEmphasisExtras()
         .UseAutoLinks()
         .UseTaskLists()
         .UseListExtras()
+        .UseDiagrams()
         .DisableHtml()
         .Build();
 
