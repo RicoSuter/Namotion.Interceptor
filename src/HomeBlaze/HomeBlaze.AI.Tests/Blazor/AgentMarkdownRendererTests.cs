@@ -180,6 +180,7 @@ public class AgentMarkdownRendererTests
     [InlineData("stateDiagram-v2\n  style S mask-image:\\75 rl(//evil.test/x)")]
     [InlineData("stateDiagram-v2\n  style S mask-image:#117;rl(//evil.test/x)")]
     [InlineData("flowchart TD\n  A --> B\n  click A href \"https://evil.test\"")]
+    [InlineData("stateDiagram-v2\n  style S mask:u%%{wrap}%%rl(//evil.test/x)")]
     public void WhenMermaidFenceCouldLoadAnAddress_ThenItIsRenderedAsCode(string source)
     {
         // Act
