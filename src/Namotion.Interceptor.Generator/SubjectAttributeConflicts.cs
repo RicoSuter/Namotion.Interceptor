@@ -105,32 +105,58 @@ internal static class SubjectAttributeConflicts
         return !SymbolExtensions.IsNeverASubjectProperty(property) && property.ExplicitInterfaceImplementations.Length == 0;
     }
 
-    // An override inherits the attribute of the declaration it overrides at runtime, but Roslyn reports only the
-    // attributes declared on the override itself; the nearest declaration wins, matching AllowMultiple = false.
-    // Once the walk passes a subject ancestor, that ancestor sees the attribute too and reports any duplicate itself,
-    // so the target is not the subject's own. An attribute reached through plain classes only is.
+    // The target counts as the subject's own unless the nearest subject ancestor on the override path already sees
+    // the same target for this property: that ancestor then reports the duplicate itself.
     private static bool TryGetPropertyAttributeTarget(
         IPropertySymbol property,
         bool isOwn,
         out AttributeTarget target,
         out bool isOwnTarget)
     {
-        var passedSubjectAncestor = false;
-        for (var current = property; current is not null; current = current.OverriddenProperty)
+        if (!TryGetInheritedPropertyAttributeTarget(property, out target))
         {
-            passedSubjectAncestor |= !ReferenceEquals(current, property) &&
-                SubjectAncestry.HasInterceptorSubjectAttribute(current.ContainingType);
+            isOwnTarget = false;
+            return false;
+        }
 
+        isOwnTarget = isOwn && !IsSeenBySubjectAncestor(property, target);
+        return true;
+    }
+
+    private static bool IsSeenBySubjectAncestor(IPropertySymbol property, AttributeTarget target)
+    {
+        for (var current = GetOverriddenDeclaration(property); current is not null; current = GetOverriddenDeclaration(current))
+        {
+            if (SubjectAncestry.HasInterceptorSubjectAttribute(current.ContainingType))
+            {
+                return TryGetInheritedPropertyAttributeTarget(current, out var ancestorTarget) && ancestorTarget.Equals(target);
+            }
+        }
+
+        return false;
+    }
+
+    // The nearest declaration wins, matching AllowMultiple = false. Roslyn reports only the attributes declared on a
+    // property itself, so the walk adds what the runtime inherits.
+    private static bool TryGetInheritedPropertyAttributeTarget(IPropertySymbol property, out AttributeTarget target)
+    {
+        for (var current = property; current is not null; current = GetOverriddenDeclaration(current))
+        {
             if (TryGetDeclaredPropertyAttributeTarget(current, out target))
             {
-                isOwnTarget = isOwn && !passedSubjectAncestor;
                 return true;
             }
         }
 
         target = default;
-        isOwnTarget = false;
         return false;
+    }
+
+    // The runtime inherits a property's attributes through the declaration its getter overrides, or its setter when
+    // it declares no getter, so an override of one accessor can skip a class that overrides only the other.
+    private static IPropertySymbol? GetOverriddenDeclaration(IPropertySymbol property)
+    {
+        return (property.GetMethod ?? property.SetMethod)?.OverriddenMethod?.AssociatedSymbol as IPropertySymbol;
     }
 
     private static bool TryGetDeclaredPropertyAttributeTarget(

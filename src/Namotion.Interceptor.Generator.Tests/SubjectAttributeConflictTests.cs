@@ -361,6 +361,140 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenAnOverrideRestatesTheAttributeOfABaseDuplicate_ThenNI0066IsReportedOnTheBaseOnly()
+    {
+        // Arrange: restating the base's attribute on the override keeps the same two providers as BaseMotor.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public virtual partial bool Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_Enabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : BaseMotor
+                {
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public override partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'BaseMotor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenASetOnlyOverrideInheritsThroughAGetOnlyOverride_ThenNI0066FollowsTheSetterLikeTheRuntime()
+    {
+        // Arrange: at runtime a set-only override inherits the attribute of the declaration its setter overrides,
+        // which skips the get-only PlainGetOverride, so Split carries IsEnabled and nothing repeats Other.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public class PlainBase
+                {
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    public virtual bool Split { get; set; }
+                }
+
+                public class PlainGetOverride : PlainBase
+                {
+                    [PropertyAttribute("Forward", "Other")]
+                    public override bool Split { get => base.Split; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : PlainGetOverride
+                {
+                    public partial bool Forward { get; set; }
+
+                    public override partial bool Split { set; }
+
+                    [PropertyAttribute(nameof(Forward), "Other")]
+                    public partial bool Forward_Other { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0066");
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
+    public void WhenASetOnlyOverrideInheritsPastAGetOnlySubjectOverride_ThenNI0066IsReportedForTheRuntimeDuplicate()
+    {
+        // Arrange: Split's setter overrides BaseMotor's, so at runtime Split carries IsEnabled, which
+        // Forward_IsEnabled repeats.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class BaseMotor
+                {
+                    public partial bool Forward { get; set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public virtual partial bool Split { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class MiddleMotor : BaseMotor
+                {
+                    [PropertyAttribute(nameof(Forward), "Other")]
+                    public override partial bool Split { get; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : MiddleMotor
+                {
+                    public override partial bool Split { set; }
+
+                    [PropertyAttribute(nameof(Forward), "IsEnabled")]
+                    public partial bool Forward_IsEnabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange
