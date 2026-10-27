@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
@@ -16,13 +15,16 @@ internal static class SubjectPaths
     private const int ParentLinksPerPath = 64;
     private const int CycleDetectionDepthThreshold = 256;
 
+    // A detach releases the reference before the registry clears the flag, so reading in the same order lets the later
+    // read see the more advanced state.
+
     /// <summary>
     /// Whether a subject without parents is a root: no property references it and the registry still holds it. A
     /// detached subject is not a root, and neither is one whose parent is being detached and whose own detach has not
-    /// started yet, since it is still referenced. The reference count is checked first, as it takes no lock.
+    /// started yet, since it is still referenced. Lock-free.
     /// </summary>
     public static bool IsRoot(RegisteredSubject subject)
-        => subject.Subject.GetReferenceCount() == 0 && ReferenceEquals(subject.Subject.TryGetRegisteredSubject(), subject);
+        => subject.Subject.GetReferenceCount() == 0 && subject.IsRegistered;
 
     /// <summary>
     /// The segment of the property as the registry's path writer spells it: the provider's segment, or the browse name
