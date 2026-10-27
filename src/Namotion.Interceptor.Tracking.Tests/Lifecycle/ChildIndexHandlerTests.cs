@@ -1,0 +1,124 @@
+using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Tests.Models;
+
+namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
+
+public class ChildIndexHandlerTests
+{
+    private static (IInterceptorSubjectContext Context, RecordingChildIndexHandler Handler) CreateContext()
+    {
+        var handler = new RecordingChildIndexHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => handler);
+
+        return (context, handler);
+    }
+
+    [Fact]
+    public void WhenDictionaryIsAssignedAgainWithTheSameEntries_ThenHandlerIsNotCalled()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var first = new Car();
+        var second = new Car();
+        var garage = new Garage(context)
+        {
+            CarsByName = new Dictionary<string, Car> { ["First"] = first, ["Second"] = second }
+        };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { ["First"] = first, ["Second"] = second };
+
+        // Assert
+        Assert.Empty(handler.Calls);
+    }
+
+    [Fact]
+    public void WhenDictionaryEntryIsReKeyed_ThenHandlerGetsOnlyThatChildOnce()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var first = new Car();
+        var child = new Car();
+        var last = new Car();
+        var garage = new Garage(context)
+        {
+            CarsByName = new Dictionary<string, Car> { ["First"] = first, ["Motor"] = child, ["Last"] = last }
+        };
+
+        var reKeyed = new Dictionary<string, Car>(garage.CarsByName);
+        reKeyed.Remove("Motor");
+        reKeyed["Engine"] = child;
+
+        // Act
+        garage.CarsByName = reKeyed;
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal(new PropertyReference(garage, nameof(Garage.CarsByName)), call.Property);
+        Assert.Equal([new SubjectChildIndex(child, "Engine")], call.Children);
+    }
+
+    [Fact]
+    public void WhenItemIsInsertedAhead_ThenHandlerGetsTheShiftedItemsButNotTheInsertedOne()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var first = new Car();
+        var second = new Car();
+        var inserted = new Car();
+        var garage = new Garage(context) { Cars = [first, second] };
+
+        // Act
+        garage.Cars = [inserted, first, second];
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChildIndex(first, 1), new SubjectChildIndex(second, 2)], call.Children);
+    }
+
+    [Fact]
+    public void WhenSubjectIsListedTwice_ThenHandlerGetsItOnceWithItsFirstPosition()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var other = new Car();
+        var shared = new Car();
+        var garage = new Garage(context) { Cars = [other, shared] };
+
+        // Act
+        garage.Cars = [shared, other, shared];
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChildIndex(shared, 0), new SubjectChildIndex(other, 1)], call.Children);
+    }
+
+    [Fact]
+    public void WhenCollectionGivesWayToItsOnlyItem_ThenHandlerGetsItWithoutIndex()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var holder = new BroadlyDeclaredHolder(context) { BroadCars = new List<Car> { car } };
+
+        // Act
+        holder.BroadCars = car;
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChildIndex(car, null)], call.Children);
+    }
+
+    private sealed class RecordingChildIndexHandler : IChildIndexHandler
+    {
+        public List<(PropertyReference Property, SubjectChildIndex[] Children)> Calls { get; } = [];
+
+        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
+        {
+            Calls.Add((property, children.ToArray()));
+        }
+    }
+}

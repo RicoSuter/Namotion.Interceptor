@@ -31,8 +31,11 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         }
     }
 
-    void IChildIndexHandler.RefreshChildIndex(IInterceptorSubject child, PropertyReference property, object? index)
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
     {
-        child.UpdateParentIndex(property, index);
+        foreach (var child in children)
+        {
+            child.Subject.UpdateParentIndex(property, child.Index);
+        }
     }
 }

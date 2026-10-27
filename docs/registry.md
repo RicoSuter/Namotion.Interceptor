@@ -56,7 +56,7 @@ var child = garage.TryGetRegisteredProperty(g => g.Cars)!.Children[0]; // Subjec
 ```
 
 - The index follows the assigned value. When a new collection or dictionary keeps a subject at another position or under another key, both entries get the new index, and paths written afterwards use it. The subject stays attached throughout, so no lifecycle callback fires for the move.
-- `Children` is in the order the assigned value enumerates.
+- `Children` of a collection is in position order. A dictionary has no order of its own to follow, so its children stay in the order they were attached.
 - A subject that sits at several positions of one collection, or under several keys of one dictionary, is listed once, with the first of them in enumeration order.
 - The registry reads a collection or dictionary when it is assigned. Mutating one in place changes neither list.
 

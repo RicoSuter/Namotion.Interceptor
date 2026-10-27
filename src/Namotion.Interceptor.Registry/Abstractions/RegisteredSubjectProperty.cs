@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -12,10 +13,7 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 public class RegisteredSubjectProperty
 {
     [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, int>? _reusableCollectionPositions;
-
-    [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, object?>? _reusableDisplacedChildren;
+    private static Dictionary<IInterceptorSubject, int>? _reusableChildPositions;
 
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
@@ -392,86 +390,89 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Syncs children's indices and parent entries with the live collection or dictionary.
+    /// Gives moved children and their parent entries the key or position they have in the value now.
     /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
     /// because this method acquires _children then _knownSubjects, which is the inverse of
     /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
     /// both paths and prevents deadlock.
     /// </summary>
-    /// <param name="collectionValue">The current collection or dictionary value (passed from caller to avoid re-reading through interceptors).</param>
+    /// <param name="children">The children that may have moved, with their key or position.</param>
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
-    internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
-    {
-        // Classifies the value the way LifecycleInterceptor.FindSubjectsInProperty does,
-        // because that scan decided whether each child was attached under a key or a position.
-        switch (collectionValue)
-        {
-            case null or IInterceptorSubject or string:
-                return;
-
-            case IDictionary:
-                RefreshDictionaryKeys(collectionValue, registry);
-                return;
-
-            case ICollection:
-                RefreshCollectionPositions(collectionValue, registry);
-                return;
-
-            case IEnumerable when IsSubjectDictionary || collectionValue.GetType().IsSubjectDictionaryType():
-                RefreshDictionaryKeys(collectionValue, registry);
-                return;
-
-            case IEnumerable:
-                RefreshCollectionPositions(collectionValue, registry);
-                return;
-        }
-    }
-
-    private void RefreshCollectionPositions(object? collectionValue, ISubjectRegistry registry)
+    internal void UpdateChildIndices(ReadOnlySpan<SubjectChildIndex> children, ISubjectRegistry registry)
     {
         lock (_children)
         {
-            // Taken out of its thread-static slot while in use, so that a refresh nested on this
-            // thread, which a sequence that writes a property while it is enumerated can cause,
-            // gets a map of its own.
-            var collectionPositions = _reusableCollectionPositions;
-            _reusableCollectionPositions = null;
-            try
+            // A lookup pays off from the second child on, since a moved collection item usually
+            // shifts the rest. Taken out of its slot while in use, so a nested call gets its own.
+            Dictionary<IInterceptorSubject, int>? positions = null;
+            if (children.Length > 1)
             {
-                collectionPositions = BuildCollectionPositions(collectionValue, collectionPositions, _children.Count);
-                if (collectionPositions is null)
-                    return;
-
+                positions = _reusableChildPositions ?? new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+                _reusableChildPositions = null;
                 for (var i = 0; i < _children.Count; i++)
                 {
-                    var child = _children[i];
-                    if (!collectionPositions.TryGetValue(child.Subject, out var newIndex))
+                    positions[_children[i].Subject] = i;
+                }
+            }
+
+            try
+            {
+                var changed = false;
+                foreach (var child in children)
+                {
+                    var position = positions is not null
+                        ? positions.GetValueOrDefault(child.Subject, -1)
+                        : IndexOfChild(child.Subject);
+
+                    if (position < 0 || Equals(_children[position].Index, child.Index))
                         continue;
 
-                    // Compare unboxed to avoid allocating a boxed int when index hasn't changed
-                    if (child.Index is int oldIndex && oldIndex == newIndex)
-                        continue;
+                    _children[position] = _children[position] with { Index = child.Index };
+                    changed = true;
 
-                    var boxedNewIndex = (object)newIndex;
-                    _children[i] = child with { Index = boxedNewIndex };
-
-                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, boxedNewIndex);
+                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index);
                 }
 
-                // Sort children to match live collection order
-                _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
-                _childrenCache = default;
+                if (changed)
+                {
+                    SortByPosition();
+                    _childrenCache = default;
+                }
             }
             finally
             {
-                if (collectionPositions is not null)
+                if (positions is not null)
                 {
                     // Release references so subjects can be GC'd on idle threads
-                    collectionPositions.Clear();
-                    _reusableCollectionPositions = collectionPositions;
+                    positions.Clear();
+                    _reusableChildPositions = positions;
                 }
             }
         }
+    }
+
+    private int IndexOfChild(IInterceptorSubject subject)
+    {
+        for (var i = 0; i < _children.Count; i++)
+        {
+            if (_children[i].Subject == subject)
+                return i;
+        }
+
+        return -1;
+    }
+
+    // Children of a collection follow its order. A dictionary has no order of its own to follow,
+    // so its children stay in the order they were attached.
+    private void SortByPosition()
+    {
+        foreach (var child in _children)
+        {
+            if (child.Index is not int)
+                return;
+        }
+
+        _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
     }
 
     private static bool IsSetterPublic(PropertyInfo? propertyInfo)
@@ -505,193 +506,5 @@ public class RegisteredSubjectProperty
         }
 
         return false;
-    }
-
-    private void RefreshDictionaryKeys(object dictionaryValue, ISubjectRegistry registry)
-    {
-        lock (_children)
-        {
-            var position = 0;
-            Dictionary<IInterceptorSubject, object?>? displacedChildren = null;
-            try
-            {
-                if (dictionaryValue is IDictionary dictionary)
-                {
-                    // IDictionaryEnumerator hands out key and value separately, where foreach
-                    // would box a DictionaryEntry per entry.
-                    var enumerator = dictionary.GetEnumerator();
-                    try
-                    {
-                        while (enumerator.MoveNext())
-                        {
-                            if (enumerator.Value is IInterceptorSubject subject)
-                            {
-                                RefreshDictionaryChild(subject, enumerator.Key, ref position, ref displacedChildren, registry);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        (enumerator as IDisposable)?.Dispose();
-                    }
-                }
-                else
-                {
-                    var index = 0;
-                    foreach (var item in (IEnumerable)dictionaryValue)
-                    {
-                        if (item is not null && SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var keyedSubject))
-                        {
-                            RefreshDictionaryChild(keyedSubject, key, ref position, ref displacedChildren, registry);
-                        }
-                        else if (item is IInterceptorSubject subject)
-                        {
-                            // A dictionary type that enumerates as its values is attached by position.
-                            RefreshDictionaryChild(subject, index, ref position, ref displacedChildren, registry);
-                        }
-
-                        index++;
-                    }
-                }
-            }
-            finally
-            {
-                if (displacedChildren is not null)
-                {
-                    // Still displaced is a child the walk did not reach, because an exception cut
-                    // it off or the value does not hold it. It must not be lost.
-                    foreach (var displaced in displacedChildren)
-                    {
-                        _children.Add(new SubjectPropertyChild { Subject = displaced.Key, Index = displaced.Value });
-                    }
-
-                    // Release references so subjects can be GC'd on idle threads
-                    displacedChildren.Clear();
-                    _reusableDisplacedChildren = displacedChildren;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gives the child of the next dictionary entry that entry's key and, where the children are
-    /// not in enumeration order, its place in it. A subject under several keys keeps the first,
-    /// which is the one LifecycleInterceptor attaches it with.
-    /// Must be called under the _children lock.
-    /// </summary>
-    private void RefreshDictionaryChild(IInterceptorSubject subject, object? key, ref int position,
-        ref Dictionary<IInterceptorSubject, object?>? displacedChildren, ISubjectRegistry registry)
-    {
-        if (displacedChildren is null)
-        {
-            // Every child is placed, so this is a further key of one of them or a subject
-            // the property does not list.
-            if (position == _children.Count)
-                return;
-
-            if (_children[position].Subject != subject)
-            {
-                // Children sit in enumeration order as long as entries are only appended or
-                // removed, and are then matched without a lookup. Once an entry breaks that
-                // order the remaining children are taken out and put back by lookup, which
-                // restores the order for the next refresh.
-                //
-                // The map is taken out of its thread-static slot while in use and put back by
-                // the caller, so that a refresh nested on this thread, which a dictionary that
-                // writes a property while it is enumerated can cause, gets a map of its own.
-                // Only the map is isolated: a nested write that detaches the subject owning
-                // this property is not supported.
-                displacedChildren = _reusableDisplacedChildren ?? new Dictionary<IInterceptorSubject, object?>(ReferenceEqualityComparer.Instance);
-                _reusableDisplacedChildren = null;
-                for (var i = position; i < _children.Count; i++)
-                {
-                    displacedChildren[_children[i].Subject] = _children[i].Index;
-                }
-
-                _children.RemoveRange(position, _children.Count - position);
-                _childrenCache = default;
-            }
-        }
-
-        if (displacedChildren is not null)
-        {
-            // Not found for a further key of a subject that is already placed, or for a
-            // subject the property does not list.
-            if (!displacedChildren.Remove(subject, out var displacedKey))
-                return;
-
-            // Put back under its old key first, so a throwing key comparison below cannot lose it.
-            _children.Add(new SubjectPropertyChild { Subject = subject, Index = displacedKey });
-        }
-
-        var child = _children[position];
-        position++;
-
-        // Reference-equal keys return before any Equals override runs, and a retained entry
-        // usually carries the same key object.
-        if (Equals(child.Index, key))
-            return;
-
-        _children[position - 1] = child with { Index = key };
-        _childrenCache = default;
-
-        registry.TryGetRegisteredSubject(subject)?.UpdateParentIndex(this, key);
-    }
-
-    /// <summary>
-    /// Maps each subject in the collection to its current position, the first one for a subject
-    /// listed more than once, which is the one LifecycleInterceptor attaches it with.
-    /// Uses IList indexed access when available; falls back to ICollection foreach,
-    /// then IEnumerable for read-only types that implement neither.
-    /// Fills <paramref name="collectionPositions"/> when given, so a reused map avoids allocations.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value,
-        Dictionary<IInterceptorSubject, int>? collectionPositions, int capacityHint)
-    {
-        if (value is null)
-            return collectionPositions;
-
-        collectionPositions?.Clear();
-
-        if (value is IList list)
-        {
-            for (var index = 0; index < list.Count; index++)
-            {
-                if (list[index] is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
-                    collectionPositions.TryAdd(subject, index);
-                }
-            }
-        }
-        else if (value is ICollection collection)
-        {
-            var index = 0;
-            foreach (var item in collection)
-            {
-                if (item is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
-                    collectionPositions.TryAdd(subject, index);
-                }
-                index++;
-            }
-        }
-        else if (value is IEnumerable enumerable and not string)
-        {
-            var index = 0;
-            foreach (var item in enumerable)
-            {
-                if (item is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
-                    collectionPositions.TryAdd(subject, index);
-                }
-                index++;
-            }
-        }
-
-        return collectionPositions;
     }
 }

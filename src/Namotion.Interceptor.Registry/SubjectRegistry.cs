@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.Registry;
 /// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler
 {
     private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
         ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
@@ -262,19 +262,11 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
     {
-        RegisteredSubjectProperty? registeredProperty;
-        lock (_knownSubjects)
-        {
-            registeredProperty = _knownSubjects
-                .GetValueOrDefault(property.Subject)?
-                .TryGetProperty(property.Name);
-        }
-
-        // Call outside lock — RefreshCollectionIndices updates parent entries;
-        // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshCollectionIndices(value, registry: this);
+        // Called outside the _knownSubjects lock: UpdateChildIndices takes _children and then
+        // _knownSubjects for each moved child.
+        TryGetRegisteredProperty(property)?.UpdateChildIndices(children, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

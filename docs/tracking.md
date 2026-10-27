@@ -408,6 +408,28 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+### Child Index Changes
+
+A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:
+
+```csharp
+public class MyChildIndexHandler : IChildIndexHandler
+{
+    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
+    {
+        foreach (var child in children)
+        {
+            // child.Subject now sits at child.Index in the value of property
+        }
+    }
+}
+```
+
+- It is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index may have changed, and not at all when none did. A subject the write attached already carries its index and is not reported.
+- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once is reported once, with the first of them in enumeration order.
+- A subject counts as moved unless the old value held the same subject at the same place under an equal index. The old value is read as it is now, so mutating it in place before assigning a new one hides the moves the two share.
+- The same requirements apply as to `ILifecycleHandler` (below), and the span is only valid during the call. The registry and parent tracking keep their indices current through this hook.
+
 ### Thread Safety
 
 The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property. Reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.

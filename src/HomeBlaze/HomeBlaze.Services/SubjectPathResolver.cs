@@ -20,7 +20,7 @@ namespace HomeBlaze.Services;
 /// </summary>
 // After the registry, so that a change has reached the parents and children it reads when the caches are invalidated.
 [RunsAfter(typeof(SubjectRegistry))]
-public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, ISubjectPathResolver
+public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler, ISubjectPathResolver
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
@@ -209,15 +209,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     {
     }
 
-    // Called after the attach and detach of a collection write, once the registry has given its retained entries their
-    // new positions. A reorder attaches and detaches nothing, so this is the only change it makes. The registry moves
-    // no entry of a dictionary, which some subjects assign again on every poll.
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    // Called after a write kept subjects of a collection or dictionary at another position or under another key, once
+    // the registry has given them their new index. Such a move attaches and detaches nothing, so this is the only change
+    // it makes. A write that moves nothing, such as a dictionary assigned again on every poll, does not get here.
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChildIndex> children)
     {
-        if (property.TryGetRegisteredProperty() is { IsSubjectCollection: true })
-        {
-            InvalidatePaths();
-        }
+        InvalidatePaths();
     }
 
     // A cache entry carries the version read before it was computed and is served only while that version is current,
