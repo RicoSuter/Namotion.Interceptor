@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using Namotion.Interceptor.Authorization.Internal;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -23,6 +24,8 @@ public sealed class AuthorizationPolicy
 
     // The root's single empty path, which a member of the root follows; never mutated, so it is shared.
     private static readonly List<PathLink[]> RootPaths = [[]];
+
+    private static readonly List<PathLink[]> NoPaths = [];
 
     private static readonly TypeNameCache TypeNames = new();
 
@@ -262,13 +265,14 @@ public sealed class AuthorizationPolicy
     }
 
     // Every path of the subject; the root has the single empty path. Incomplete when a path could not be written, more
-    // than MaxPaths exist, or the subject has parents but no path was found.
+    // than MaxPaths exist, the subject has parents but no path was found, or it was detached.
     private List<PathLink[]> GetPaths(RegisteredSubject subject, out bool isComplete)
     {
         if (subject.Parents.Length == 0)
         {
-            isComplete = true;
-            return RootPaths;
+            // Detaching removes the parents and unregisters the subject, so its last paths are unknown rather than empty.
+            isComplete = ReferenceEquals(subject.Subject.TryGetRegisteredSubject(), subject);
+            return isComplete ? RootPaths : NoPaths;
         }
 
         var paths = new List<PathLink[]>(1);

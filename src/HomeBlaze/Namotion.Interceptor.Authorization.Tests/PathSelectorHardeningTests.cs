@@ -50,6 +50,46 @@ public class PathSelectorHardeningTests
     }
 
     [Fact]
+    public void WhenASubjectIsDetached_ThenDenyRulesWithPathsStillApplyAndAllowRulesWithPathsDoNot()
+    {
+        // Arrange
+        var home = Create();
+        var wifi = home.Wifi!;
+        var password = Member(wifi, nameof(Wifi.Password));
+        var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi/**"])]));
+        var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
+        Assert.False(deny.CanRead(password));
+        Assert.True(allow.CanRead(password));
+
+        // Act
+        home.Wifi = null;
+
+        // Assert
+        Assert.Null(wifi.TryGetRegisteredSubject());
+        Assert.Empty(password.Parent.Parents);
+        Assert.False(deny.CanRead(password));
+        Assert.False(deny.CanRead(password.Parent));
+        Assert.False(allow.CanRead(password));
+    }
+
+    [Fact]
+    public void WhenASubjectWithoutParentsIsRegistered_ThenItIsARootAndDenyRulesForOtherPathsDoNotApply()
+    {
+        // Arrange
+        var home = Create();
+        var unattached = new Wifi(CreateContext());
+        var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi/**"])]));
+        var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/*"])]));
+
+        // Act & Assert
+        Assert.True(deny.CanRead(Member(home, nameof(Home.Rooms))));
+        Assert.True(deny.CanRead(Member(unattached, nameof(Wifi.Ssid))));
+        Assert.True(allow.CanRead(Member(home, nameof(Home.Rooms))));
+        Assert.True(allow.CanRead(Member(unattached, nameof(Wifi.Ssid))));
+        Assert.True(deny.CanRead(Registered(unattached)));
+    }
+
+    [Fact]
     public void WhenExactly64ActionsAreKnown_ThenTheLastActionIsUsable()
     {
         // Arrange

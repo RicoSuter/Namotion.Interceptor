@@ -17,8 +17,8 @@ public sealed record PermissionRule
     /// <summary>Gets the path patterns; empty for everywhere. See the README for the syntax.</summary>
     /// <remarks>
     /// A subject reachable by several paths matches when any of them does. When the paths of a subject cannot all be
-    /// listed (a path cannot be written, the subject has parents but no path to a root, or it has more than 64 paths or
-    /// too densely connected parents), an allow rule matches only through the paths that were listed, at most the first
+    /// listed (a path cannot be written, the subject has parents but no path to a root, it was detached from the graph,
+    /// or it has more than 64 paths or too densely connected parents), an allow rule matches only through the paths that were listed, at most the first
     /// 64, and every deny rule with paths matches.
     /// </remarks>
     public ImmutableArray<string> Paths { get; init; } = [];
