@@ -1,6 +1,6 @@
 # Mermaid diagrams in Markdown
 
-Render ```` ```mermaid ```` fenced code blocks as diagrams in pages, metadata notes and agent replies. The implementation stays small: one server-side change in the agent renderer, one script, a few lines of CSS.
+Render ```` ```mermaid ```` fenced code blocks as diagrams in pages, metadata notes and agent replies. The implementation stays small: one server-side change in the agent renderer, one script, one CSS rule.
 
 ## Syntax
 
@@ -33,7 +33,7 @@ The theme is `dark` when an element with the `homeblaze-dark-mode` class (set by
 CSS:
 
 - `pre.mermaid[data-mermaid-state="pending"]` is hidden. A `pre.mermaid` without a state (script not running) or with `error` shows its source like a code block.
-- `pre.mermaid svg` has `max-width: 100%` and `height: auto`, and `pre.mermaid` scrolls horizontally, so a diagram fits narrow notes.
+- No sizing rule: Mermaid's default `useMaxWidth` already renders the SVG with `width="100%"` and its natural width as `max-width`, so a diagram fits narrow notes.
 
 ## Security
 
