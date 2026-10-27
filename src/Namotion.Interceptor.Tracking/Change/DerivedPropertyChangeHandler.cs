@@ -49,28 +49,26 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        var metadata = change.Property.Metadata;
+        // Source data is never kept by a detach, so its current data is already attached.
+        if (!change.Property.Metadata.IsDerived)
+        {
+            return;
+        }
 
         // A detach may remove the fetched data before it is locked: attach the current data instead.
-        while (true)
+        bool isAttached;
+        do
         {
-            // Derived: create data if needed. Source: only get existing (created by Store when first depended on).
-            var data = metadata.IsDerived
-                ? change.Property.GetDerivedPropertyData()
-                : change.Property.TryGetDerivedPropertyData();
-
-            if (data is null || TryAttach(data, change.Property, metadata.IsDerived))
-            {
-                return;
-            }
+            isAttached = TryAttach(change.Property.GetDerivedPropertyData(), change.Property);
         }
+        while (!isAttached);
     }
 
-    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property, bool isDerived)
+    private static bool TryAttach(DerivedPropertyData data, in PropertyReference property)
     {
         lock (data)
         {
-            if (data.IsRemoved)
+            if (!ReferenceEquals(property.TryGetDerivedPropertyData(), data))
             {
                 return false;
             }
@@ -82,18 +80,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             data.IsAttached = true;
-            if (isDerived)
+            Volatile.Write(ref data.IsDerived, true);
+            try
             {
-                Volatile.Write(ref data.IsDerived, true);
-                try
-                {
-                    data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
-                    property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
-                }
-                catch (Exception)
-                {
-                    // Getter threw. The value will be computed on the next dependency write.
-                }
+                data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
+                property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+            }
+            catch (Exception)
+            {
+                // Getter threw. The value will be computed on the next dependency write.
             }
 
             return true;
@@ -127,8 +122,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             else
             {
                 // Removed under the lock, so that a registration or attach that fetched this instance sees
-                // IsRemoved and uses the current data instead.
-                data.IsRemoved = true;
+                // that it is no longer current and uses the current data instead.
                 property.RemoveDerivedPropertyData(data);
             }
         }

@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [RunsBefore(typeof(PropertyChangeInterceptor))]
 internal sealed class ValueBlockingWriteInterceptor(string propertyName, object blockedValue, int occurrence = 1) : IWriteInterceptor
 {
-    private int _count;
+    private int _matchCount;
 
     public ManualResetEventSlim Entered { get; } = new(false);
 
@@ -18,7 +18,7 @@ internal sealed class ValueBlockingWriteInterceptor(string propertyName, object 
     {
         if (context.Property.Name == propertyName &&
             Equals(context.NewValue, blockedValue) &&
-            Interlocked.Increment(ref _count) == occurrence)
+            Interlocked.Increment(ref _matchCount) == occurrence)
         {
             Entered.Set();
             if (!Proceed.Wait(TimeSpan.FromSeconds(10)))

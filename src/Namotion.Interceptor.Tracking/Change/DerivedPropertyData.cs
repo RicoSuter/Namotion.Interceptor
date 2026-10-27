@@ -68,12 +68,6 @@ internal sealed class DerivedPropertyData
     internal bool IsAttached = true;
 
     /// <summary>
-    /// Set under lock(this) when DetachProperty removes this instance from the subject's data.
-    /// A caller that fetched a removed instance fetches the current one again instead of using it.
-    /// </summary>
-    internal bool IsRemoved;
-
-    /// <summary>
     /// True if this data belongs to a derived property (vs. a source property whose data exists only
     /// because a derived depends on it). Lets WriteProperty identify derived-with-setter writes
     /// without touching metadata on the hot path.
@@ -229,7 +223,7 @@ internal sealed class DerivedPropertyData
             var dependencyData = dependency.GetDerivedPropertyData();
             lock (dependencyData)
             {
-                if (!dependencyData.IsRemoved)
+                if (ReferenceEquals(dependency.TryGetDerivedPropertyData(), dependencyData))
                 {
                     dependencyData.AddUsedByProperty(derivedProperty);
                     return;
