@@ -698,4 +698,160 @@ public class SubjectTransactionTests
         Assert.Equal("Modified", person.FirstName);
     }
 
+    [Fact]
+    public async Task WhenPropertyIsWrittenBackToLandedValue_ThenCommitKeepsLandedValueAndPublishesNothing()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = CreateTransactionContext();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var person = new Person(context) { FirstName = "Ann" };
+        changes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        var valueInsideTransaction = person.FirstName;
+        var pendingBeforeCommit = transaction.GetPendingChanges();
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Ann", valueInsideTransaction);
+        Assert.Empty(pendingBeforeCommit);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.DoesNotContain(changes, c => c.Property.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
+    public async Task WhenLandedValueIsWrittenWithoutPendingChange_ThenNothingIsCaptured()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Ann";
+
+        // Assert
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsRewrittenAfterWriteBack_ThenItIsCapturedAsNewChange()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+        person.FirstName = "Bob";
+        person.FirstName = "Ann";
+        person.LastName = "Smith";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "External");
+        person.FirstName = "Carl";
+
+        // Act
+        var pending = transaction.GetPendingChanges();
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal([nameof(Person.LastName), nameof(Person.FirstName)], pending.Select(c => c.Property.Name));
+        Assert.Equal("External", pending[1].GetOldValue<string?>());
+        Assert.Equal("Carl", person.FirstName);
+        Assert.Equal("Smith", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenInterceptorBeforeTransactionWritesAnotherProperty_ThenWriteBackUndoesThatWriteToo()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithEqualityCheck()
+            .WithService(() => new LastNameMirrorInterceptor())
+            .WithTransactions();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        var pendingAfterWrite = transaction.GetPendingChanges();
+        person.FirstName = "Ann";
+        var pendingBeforeCommit = transaction.GetPendingChanges();
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(pendingAfterWrite, c => c.Property.Name == nameof(Person.LastName));
+        Assert.Empty(pendingBeforeCommit);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Equal("mirror-Ann", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenPendingValueIsWrittenAgainAfterItLandedOutside_ThenChangeStaysPendingAndConflicts()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Ann" };
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+        person.FirstName = "Bob";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "Bob");
+        person.FirstName = "Bob";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "Eve");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+    }
+
+    [Fact]
+    public async Task WhenInterceptorNormalizesFirstWriteToLandedValue_ThenItIsCaptured()
+    {
+        // Arrange
+        var context = CreateTransactionContext().WithService(() => new UpperCaseInterceptor());
+        var person = new Person(context) { FirstName = "ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "ann";
+
+        // Assert
+        Assert.Equal("ANN", Assert.Single(transaction.GetPendingChanges()).GetNewValue<string>());
+    }
+
+    [RunsBefore(typeof(SubjectTransactionInterceptor))]
+    private sealed class UpperCaseInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string value)
+            {
+                context.NewValue = (TProperty)(object)value.ToUpperInvariant();
+            }
+
+            next(ref context);
+        }
+    }
+
+    [RunsBefore(typeof(SubjectTransactionInterceptor))]
+    private sealed class LastNameMirrorInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.Property.Name == nameof(Person.FirstName) && context.Property.Subject is Person person)
+            {
+                person.LastName = "mirror-" + context.NewValue;
+            }
+
+            next(ref context);
+        }
+    }
 }
