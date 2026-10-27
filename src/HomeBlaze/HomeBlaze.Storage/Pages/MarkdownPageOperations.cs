@@ -1,4 +1,5 @@
 using System.Text;
+using Markdig.Extensions.Footnotes;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Pages;
@@ -45,7 +46,8 @@ internal static class MarkdownPageOperations
         }
 
         FindSiblings(page, block, out var parent);
-        var source = MarkdownBlockWriter.RemoveBlock(page.Source, block, out var edit);
+        // Cut like text, so that of the empty lines around the block one stays.
+        var source = MarkdownBlockWriter.CutLines(page.Source, block.Line, block.EndLine, out var edit);
         var after = MarkdownPageParser.Parse(source);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
         {
@@ -375,7 +377,10 @@ internal static class MarkdownPageOperations
 
         foreach (var textBlock in MarkdownTextBlocks.Find(page))
         {
-            if (ReferenceEquals(textBlock.Owner, owner) && textBlock.Line >= firstLine && textBlock.Line <= lastLine)
+            // The footnotes are one Markdig block ordered by first reference, so its lines can span other items and even run
+            // backwards. They show at the end of the page wherever they stand, so a move leaves them where they are.
+            if (ReferenceEquals(textBlock.Owner, owner) && textBlock.Line >= firstLine && textBlock.Line <= lastLine &&
+                textBlock.FirstBlock is not FootnoteGroup)
             {
                 items.Add(new MoveItem(textBlock.Line, textBlock.EndLine, null, textBlock.HoldsHtml, textBlock.ShowsNothing));
             }
@@ -547,7 +552,8 @@ internal static class MarkdownPageOperations
     /// <summary>
     /// Inserts a new widget block into the content of <paramref name="owner"/>, or of the page when it is null, before the
     /// 1-based <paramref name="line"/> from <see cref="GetInsertLine"/>. The block takes the fence of the widget block at or
-    /// after the line, or else of the last widget block, and closing lines unless the page has none.
+    /// after the line, or else of the last widget block, and closing lines unless the page has none and no text of the content
+    /// follows it.
     /// </summary>
     public static MarkdownStructureChange? TryInsertWidget(
         MarkdownPage page,
@@ -573,7 +579,7 @@ internal static class MarkdownPageOperations
             : owner is not null ? MarkdownBlockWriter.GetIndentation(source, owner)
             : string.Empty;
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source, reference?.HeadSpan.End ?? owner?.HeadSpan.End ?? 0);
-        var hasClosingLine = !page.AllBlocks.Any(
+        var hasClosingLine = HasTextBeforeNextBlock(page, owner, line) || !page.AllBlocks.Any(
             block => block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot && !block.HasClosingLine);
 
         var text = MarkdownBlockWriter.Indent(
@@ -595,6 +601,31 @@ internal static class MarkdownPageOperations
             FindFirstBlockFrom(after, edit)?.Index ?? -1);
     }
 
+    // Whether the content of `owner` has text from the line up to its next widget or slot block, which a block without a
+    // closing line inserted at the line would take as its own content.
+    private static bool HasTextBeforeNextBlock(MarkdownPage page, MarkdownBlock? owner, int line)
+    {
+        var nextBlockLine = int.MaxValue;
+        foreach (var sibling in owner?.Children ?? page.Blocks)
+        {
+            if (sibling.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot && sibling.Line >= line)
+            {
+                nextBlockLine = sibling.Line;
+                break;
+            }
+        }
+
+        foreach (var textBlock in MarkdownTextBlocks.Find(page))
+        {
+            if (ReferenceEquals(textBlock.Owner, owner) && textBlock.Line >= line && textBlock.Line < nextBlockLine)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Gets how many fence characters a widget block needs at least to stand directly in the content of
     /// <paramref name="owner"/>, or of the page when it is null: one more than the owner, or the shortest fence on the page.
@@ -605,7 +636,7 @@ internal static class MarkdownPageOperations
     /// <summary>Gets the Markdown of a text block: its lines without the indentation of its content, with line feeds.</summary>
     public static string GetText(MarkdownPage page, MarkdownTextBlock textBlock)
     {
-        var lines = MarkdownBlockWriter.GetLines(page.Source, textBlock.Line, textBlock.EndLine).ReplaceLineEndings("\n");
+        var lines = ToLineFeeds(MarkdownBlockWriter.GetLines(page.Source, textBlock.Line, textBlock.EndLine));
         var indentation = GetContentIndentation(page, textBlock.Owner);
         return indentation.Length == 0 ? lines : MarkdownBlockWriter.RemoveIndentation(lines, indentation);
     }
@@ -1017,11 +1048,18 @@ internal static class MarkdownPageOperations
     // white space that starts its first line of text stays, such as that of an indented code block.
     private static string PrepareText(MarkdownPage page, string text, MarkdownBlock? owner, string lineEnding)
     {
-        var trimmed = text.ReplaceLineEndings("\n").AsSpan().TrimEnd();
+        var trimmed = ToLineFeeds(text).AsSpan().TrimEnd();
         var leadingWhiteSpace = trimmed[..(trimmed.Length - trimmed.TrimStart().Length)];
         var lines = trimmed[(leadingWhiteSpace.LastIndexOf('\n') + 1)..].ToString();
-        return MarkdownBlockWriter.Indent(lines.ReplaceLineEndings(lineEnding), GetContentIndentation(page, owner), lineEnding);
+        return MarkdownBlockWriter.Indent(lines.Replace("\n", lineEnding), GetContentIndentation(page, owner), lineEnding);
     }
+
+    /// <summary>
+    /// Gets the text with line feeds for its carriage return line feeds and lone carriage returns. Unlike
+    /// <see cref="string.ReplaceLineEndings()"/>, it keeps the other characters that Unicode counts as line endings, such as
+    /// a form feed or a line separator, which Markdown does not.
+    /// </summary>
+    public static string ToLineFeeds(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     // The content of a block is indented like its head line, and the page has none.
     private static string GetContentIndentation(MarkdownPage page, MarkdownBlock? owner) =>

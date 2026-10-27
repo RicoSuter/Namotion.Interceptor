@@ -240,7 +240,7 @@ internal sealed class MarkdownPageStructureEditor : PageStructureEditor
             {
                 // Text saved as it was opened is not written: the write would still change the block, such as the indentation
                 // of a lazy line.
-                if (string.Equals(newText.ReplaceLineEndings("\n"), text.ReplaceLineEndings("\n"), StringComparison.Ordinal))
+                if (string.Equals(newText.Replace("\r\n", "\n"), text.Replace("\r\n", "\n"), StringComparison.Ordinal))
                 {
                     return null;
                 }

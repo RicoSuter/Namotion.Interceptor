@@ -612,7 +612,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         ArgumentNullException.ThrowIfNull(segment);
         ArgumentNullException.ThrowIfNull(expectedText);
         ArgumentNullException.ThrowIfNull(newText);
-        var expected = expectedText.ReplaceLineEndings("\n");
+        var expected = MarkdownPageOperations.ToLineFeeds(expectedText);
         return EditStructureAsync(
             (snapshot, page) =>
             {

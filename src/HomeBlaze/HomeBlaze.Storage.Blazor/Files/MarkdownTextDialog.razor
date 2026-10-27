@@ -203,7 +203,7 @@
     }
 
     private bool IsUnchanged(string text) =>
-        string.Equals(text.ReplaceLineEndings("\n"), Text.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        string.Equals(text.Replace("\r\n", "\n"), Text.Replace("\r\n", "\n"), StringComparison.Ordinal);
 
     private async Task CreateAsync()
     {

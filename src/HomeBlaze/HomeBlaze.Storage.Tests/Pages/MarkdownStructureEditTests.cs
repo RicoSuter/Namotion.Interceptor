@@ -35,7 +35,7 @@ public class MarkdownStructureEditTests
 
         // Assert
         Assert.True(result.IsWritten);
-        Assert.Equal($"intro\n\n:: {PanelType}#panel Title=P\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::\n\n", written);
+        Assert.Equal($"intro\n\n:: {PanelType}#panel Title=P\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::\n", written);
         Assert.False(page.Children.ContainsKey("leaf"));
     }
 
@@ -662,7 +662,7 @@ public class MarkdownStructureEditTests
         // Assert
         Assert.True(replaced.IsWritten);
         Assert.True(deleted.IsWritten);
-        Assert.Equal($"{large}\n\nNew.\n\n", await fixture.ReadAsync("page.md"));
+        Assert.Equal($"{large}\n\nNew.\n", await fixture.ReadAsync("page.md"));
     }
 
     [Fact]

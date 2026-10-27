@@ -257,6 +257,24 @@ public class MarkdownPageOperationsTests
         Assert.Equal(3, MarkdownPageOperations.CountBlocks(page.Blocks[0]));
     }
 
+    [Theory]
+    [InlineData("Para one.\n\n:: Demo.Card\n::\n\nPara two.", "Para one.\n\nPara two.")]
+    [InlineData("Para one.\r\n\r\n:: Demo.Card\r\n::\r\n\r\nPara two.\r\n", "Para one.\r\n\r\nPara two.\r\n")]
+    [InlineData("Para one.\n\n:: Demo.Card\n::\n", "Para one.\n")]
+    [InlineData(":: Demo.Card\n::\n\nPara two.\n", "Para two.\n")]
+    public void WhenAWidgetBetweenEmptyLinesIsRemoved_ThenOneEmptyLineStays(string source, string expected)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryRemove(page, NoSubjects, page.Blocks[0], out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(expected, change!.Write.Page.Source);
+    }
+
     [Fact]
     public void WhenThePageHasALoneCarriageReturn_ThenRemovingIsRefused()
     {
@@ -371,6 +389,21 @@ public class MarkdownPageOperationsTests
         // Assert
         Assert.Null(refusal);
         Assert.Equal(":: Demo.One\n\n:: Demo.New\n\n:: Demo.Two\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenAWidgetIsInsertedBeforeTextOnAPageWithoutClosingLines_ThenItGetsAClosingLineSoThatTheTextStaysOnThePage()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Intro.\n\nPara2.\n\n:: Demo.Card Title=A\ninside A\n");
+        var line = MarkdownPageOperations.GetInsertLine(page, null, TextAt(page, 3).Line);
+
+        // Act
+        var change = MarkdownPageOperations.TryInsertWidget(page, NoSubjects, null, line, "Demo.New", null, "{}", out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal("Intro.\n\n:: Demo.New\n::\n\nPara2.\n\n:: Demo.Card Title=A\ninside A\n", change!.Write.Page.Source);
     }
 
     [Fact]
@@ -1078,6 +1111,56 @@ public class MarkdownPageOperationsTests
         var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, line), direction, out var refusal);
 
         // Assert
+        Assert.Null(change);
+        Assert.Contains("has nothing", refusal);
+    }
+
+    [Fact]
+    public void WhenTextHasLineSeparatorsFormFeedsOrNextLineCharacters_ThenTheyStayAsTheyAreWhenAWordIsReplaced()
+    {
+        // Arrange
+        const string paragraph = "alpha\u2028beta\u2029gamma\fdelta\u0085epsilon end";
+        var page = MarkdownPageParser.Parse($"Title\n\n{paragraph}\n\n:: Demo.Card\n::\n");
+        var textBlock = TextAt(page, 3);
+
+        // Act
+        var text = MarkdownPageOperations.GetText(page, textBlock);
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, textBlock, text.Replace("end", "END"), out var refusal);
+
+        // Assert
+        Assert.Equal(paragraph, text);
+        Assert.Null(refusal);
+        Assert.Equal($"Title\n\n{paragraph.Replace("end", "END")}\n\n:: Demo.Card\n::\n", change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenTextIsMovedDownOnAPageWithFootnotes_ThenItPassesOnlyTheNextItemAndTheFootnotesStay()
+    {
+        // Arrange: the footnotes are one Markdig block from the first footnote referenced to the last one.
+        var page = MarkdownPageParser.Parse("See [^1] and [^2].\n\nIntro.\n\n[^1]: One.\n\n:: Demo.Card\n::\n\nMiddle.\n\n[^2]: Two.\n\nEnd.\n");
+
+        // Act
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 3), 1, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(
+            "See [^1] and [^2].\n\n[^1]: One.\n\n:: Demo.Card\n::\n\nIntro.\n\nMiddle.\n\n[^2]: Two.\n\nEnd.\n",
+            change!.Write.Page.Source);
+    }
+
+    [Fact]
+    public void WhenFootnotesAreDefinedInAnotherOrderThanReferenced_ThenTextIsNotOfferedAMoveDownThatWouldMoveItUp()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("Para one [^b] and [^a].\n\n[^a]: A.\n\n:: Demo.Card\n::\n\nMiddle.\n\n[^b]: B.\n");
+
+        // Act
+        var directions = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, 8));
+        var change = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 8), 1, out var refusal);
+
+        // Assert
+        Assert.Equal((true, false), directions);
         Assert.Null(change);
         Assert.Contains("has nothing", refusal);
     }
