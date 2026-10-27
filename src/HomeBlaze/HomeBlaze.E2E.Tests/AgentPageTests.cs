@@ -23,6 +23,7 @@ public class AgentPageTests
     private const string ScrollAgentPath = "Agents/ScrollAgent";
     private const string TypingAgentPath = "Agents/TypingAgent";
     private const string ResultAgentPath = "Agents/ResultAgent";
+    private const string DiagramAgentPath = "Agents/DiagramAgent";
     private const int PageLoadTimeout = 30000;
     private const int ReplyTimeout = 30000;
 
@@ -332,6 +333,34 @@ public class AgentPageTests
 
             await page.GetByRole(AriaRole.Tab, new() { Name = "Activity" }).ClickAsync();
             await Assertions.Expect(page.GetByTestId("agent-run-result").First).ToHaveTextAsync(plainResult, new() { Timeout = PageLoadTimeout });
+        }
+        finally
+        {
+            DeleteAgentData(resolver, agent);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReplyContainsAMermaidDiagram_ThenItIsShownAsSvg()
+    {
+        // Arrange - a separate agent, so the seeded entry never reaches the other tests.
+        var (page, resolver, agent) = await OpenSeededAgentPageAsync(DiagramAgentPath);
+        try
+        {
+            await agent.Timeline.AppendAsync(new AgentTimelineEntry
+            {
+                Kind = AgentTimelineEntryKind.Assistant,
+                Timestamp = DateTimeOffset.UtcNow,
+                Text = "The flow:\n\n```mermaid\ngraph TD\n    Pump --> Tank\n```"
+            }, CancellationToken.None);
+
+            // Act
+            await page.ReloadAsync();
+
+            // Assert
+            var diagram = page.GetByTestId("agent-reply").Last.Locator("pre.mermaid");
+            await Assertions.Expect(diagram).ToHaveAttributeAsync("data-mermaid-state", "done", new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(diagram.Locator("svg")).ToBeVisibleAsync();
         }
         finally
         {
