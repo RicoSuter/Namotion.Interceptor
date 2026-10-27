@@ -19,8 +19,8 @@ internal static class ExecuteWithoutRead
     /// the previewed one or an included one, has an allow rule with execute or a deny rule with read. Only then is the
     /// graph walked for it.
     /// </summary>
-    // The built-in roles allow read on every method they allow to execute, and where the system rules deny read on a
-    // method, they deny execute as well.
+    // The built-in roles allow read on every method they allow to execute. The system rules deny read otherwise only on
+    // secrets, which are never methods, and on agents and roles, on which they deny execute as well.
     public static bool MayApply(AuthorizationPolicy policy) =>
         policy.Roles.Any(role => !BuiltInRoles.IsBuiltIn(role.Name) &&
             (role.Allow.Any(rule => rule.Actions.Contains(AuthorizationActions.Execute)) ||
