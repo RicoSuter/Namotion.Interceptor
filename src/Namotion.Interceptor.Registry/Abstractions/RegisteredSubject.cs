@@ -186,19 +186,18 @@ public class RegisteredSubject
         {
             _properties = _properties.ToFrozenDictionary(
                 p => p.Key,
-                p => losers.Contains(p.Key) ? CreatePlainProperty(p.Key) : p.Value,
+                p => losers.Contains(p.Key) ? CreatePlainProperty(p.Value) : p.Value,
                 _properties.Comparer);
         }
     }
 
-    private RegisteredSubjectProperty CreatePlainProperty(string name)
+    private RegisteredSubjectProperty CreatePlainProperty(RegisteredSubjectProperty property)
     {
-        var metadata = Subject.Properties[name];
-        var attributes = metadata.Attributes
+        var attributes = property.ReflectionAttributes
             .Where(attribute => attribute is not PropertyAttributeAttribute)
             .ToArray();
 
-        return new RegisteredSubjectProperty(this, name, metadata.Type, attributes);
+        return new RegisteredSubjectProperty(this, property.Name, property.Type, attributes);
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)

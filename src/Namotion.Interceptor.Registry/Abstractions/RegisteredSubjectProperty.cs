@@ -314,9 +314,8 @@ public class RegisteredSubjectProperty
     /// <returns>The existing or the created attribute property.</returns>
     /// <remarks>
     /// An existing attribute of the same type is returned unchanged, whatever its getter or setter, so a property
-    /// initializer can run again when its subject is re-registered without guarding the call. A miss is checked
-    /// again and added under the subject's and the registry's locks, so concurrent calls for one name return the
-    /// same attribute.
+    /// initializer can run again when its subject is re-registered without guarding the call. Concurrent calls for
+    /// one name return the same attribute.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The property already has an attribute with this name of a different
     /// type, or the attribute's property name is taken by a property that is not this attribute.</exception>
@@ -341,8 +340,7 @@ public class RegisteredSubjectProperty
     /// <remarks>
     /// An existing attribute of the same type is returned unchanged, whatever its getter or setter and whether or
     /// not it is derived, so a property initializer can run again when its subject is re-registered without
-    /// guarding the call. A miss is checked again and added under the subject's and the registry's locks, so
-    /// concurrent calls for one name return the same attribute.
+    /// guarding the call. Concurrent calls for one name return the same attribute.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The property already has an attribute with this name of a different
     /// type, or the attribute's property name is taken by a property that is not this attribute.</exception>

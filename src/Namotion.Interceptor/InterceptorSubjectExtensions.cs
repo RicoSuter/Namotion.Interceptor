@@ -51,8 +51,9 @@ public static class InterceptorSubjectExtensions
         {
             if (!merged.TryAdd(property.Name, property))
             {
-                throw new InvalidOperationException(
-                    $"The subject '{subject.GetType().Name}' already has a property named '{property.Name}'.");
+                throw new InvalidOperationException(existing.ContainsKey(property.Name)
+                    ? $"The subject '{subject.GetType().Name}' already has a property named '{property.Name}'."
+                    : $"The property '{property.Name}' is added to subject '{subject.GetType().Name}' more than once.");
             }
         }
 
