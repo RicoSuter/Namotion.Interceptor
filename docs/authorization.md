@@ -35,7 +35,7 @@ What is left is allowed. `IsAllowed` computes `any allow matches && no deny matc
 - Naming several roles for a principal is the same as one role that includes them all.
 - No matching allow means denied.
 
-A **subject** is readable (`CanRead(RegisteredSubject)`) when at least one of its members is readable and some chain of parents leads from it to a root (a subject without parents) on which every subject-holding property is readable. A deny with `read` on a subject-holding property, such as `Home.Cameras`, therefore hides the subjects it holds and every branch beneath them from browsing, while their members stay readable when asked for directly; `Home.Cameras.**` denies the members as well. The link is the property itself: a pattern naming one entry of a collection or dictionary, such as `Home.Rooms[Kitchen]`, names no member and fails compilation (see [Path patterns](#path-patterns)), so hiding one entry takes `Home.Rooms[Kitchen].**`, which denies the entry's members and hides the entry with them.
+A **subject** is readable (`CanRead(RegisteredSubject)`) when at least one of its members is readable and some chain of parents leads from it to a root (see [Subjects with several paths](#subjects-with-several-paths)) on which every subject-holding property is readable. A deny with `read` on a subject-holding property, such as `Home.Cameras`, therefore hides the subjects it holds and every branch beneath them from browsing, while their members stay readable when asked for directly; `Home.Cameras.**` denies the members as well. The link is the property itself: a pattern naming one entry of a collection or dictionary, such as `Home.Rooms[Kitchen]`, names no member and fails compilation (see [Path patterns](#path-patterns)), so hiding one entry takes `Home.Rooms[Kitchen].**`, which denies the entry's members and hides the entry with them.
 
 ## Path patterns
 
@@ -70,15 +70,15 @@ Compilation cannot catch every pattern that matches nothing, because it does not
 - A pattern matches the spellings the path provider writes plus the bare key of an `[InlinePaths]` entry, so `Security.FullReader.Name` and `Security.Roles[FullReader].Name` both match and `Security.Roles.**` covers every key. A provider that also resolves other spellings, such as names in another case, is matched only in the spelling it writes. A key the reader only resolves in one spelling, because another property's segment shadows the other, is matched in that spelling.
 - Segment text is taken as written, and a segment name or index with leading or trailing whitespace, such as `Home. Kitchen`, fails compilation; a quoted key may contain inner spaces, as in `Rooms['Living Room'].*`.
 - An empty segment, from a doubled or trailing separator as in `Home..Kitchen` or `Home.Kitchen.`, fails compilation, since the parser would otherwise skip it.
-- A pattern written with another provider's separator is read with this provider's: under the default provider `Home/Kitchen` is the single segment `Home/Kitchen`, which matches no member.
+- A pattern that starts with `/` or `\` when that is not the provider's separator, such as `/Home/Kitchen/**` under the default provider, fails compilation with a hint naming the provider's separator. Elsewhere in a pattern these characters are ordinary text, as they can be in an `[InlinePaths]` key, so `Home/Kitchen` without the leading character is the single segment `Home/Kitchen` and matches no member.
 - Quoting a key does not make `*` literal: `Machines['CNC*']` is still a glob.
 - `**` with an index, as in `**[A*]`, is an ordinary glob over exactly one segment.
 
 ### Subjects with several paths
 
-The policy enumerates every path of a member's subject, at most 64, and an allow rule with paths matches through any of them. When the paths cannot all be listed (a property on a path is excluded by the path provider, the subject has parents but no chain to a root, the subject was detached from the graph, more than 64 paths exist, or the parents are too densely connected for the search budget), every deny rule with paths matches and allow rules match only through the paths that were listed. Denies with paths fail closed.
+The policy enumerates every path of a member's subject, at most 64, and an allow rule with paths matches through any of them. When the paths cannot all be listed (a property on a path is excluded by the path provider, the subject has parents but no chain to a root, the subject or the end of a chain has no parents but is not a root, more than 64 paths exist, or the parents are too densely connected for the search budget), every deny rule with paths matches and allow rules match only through the paths that were listed. Denies with paths fail closed.
 
-A registered subject without parents is a root, and the paths of its members have one segment. Detaching a subject removes its parents and unregisters it, so a caller still holding one of its members gets the fail-closed answer rather than the answer for a root.
+A root is a subject without parents that no property references and that the registry still holds; the paths of its members have one segment. A detach unlinks a subject and the subjects below it, then unregisters them, so once the detach has completed none of them is a root, and a caller still holding one of their members gets the fail-closed answer. A question asked while a detach is still running is not covered in the same way: for the short time between a subject losing its last reference and the registry unregistering it, the subject still counts as a root.
 
 ### Known limits
 
@@ -125,7 +125,7 @@ policy.CanRead(registeredSubject);   // visible at all
 
 - Over all roles given: a role that is null, has no name, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
 - For the principal's roles and every role they include: an unknown or empty role name (an unknown include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
-- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
+- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed, starts with `/` or `\` that is not the provider's separator, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
 - For the known actions: one without a name, or more than 64 in total.
 
 Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, which denies every action, known or not; a policy must never partially apply. `policy.Roles` lists the principal's roles and every role they include, included roles first.
@@ -134,7 +134,7 @@ Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, whic
 
 ## Performance and threading
 
-A compiled policy is immutable and safe to share across threads, and a question decided without path rules allocates nothing; the exceptions and measured numbers are in the [design](design/authorization.md#performance). Path rules are the expensive selector: a deny rule with only `Paths` makes every member an allow matched enumerate its subject's paths to prove the deny does not apply. Give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules into the roles that need them rather than into a reusable base role. Callers that evaluate many members of one subject, such as a tree browser, should keep their own per-call memo of `CanRead(subject)`. `IMemberTagProvider.GetTags` is called on every evaluation of a rule with tags, possibly concurrently, so it should return cached arrays.
+A compiled policy is immutable and safe to share across threads, and a question decided without path rules allocates nothing; the exceptions and measured numbers are in the [design](design/authorization.md#performance). Path rules are the expensive selector: a deny rule with only `Paths` makes every member an allow matched enumerate its subject's paths to prove the deny does not apply. Give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules into the roles that need them rather than into a reusable base role. Callers that evaluate many members of one subject, such as a tree browser, should keep their own per-call memo of `CanRead(subject)`. `IMemberTagProvider.GetTags` is called on every evaluation of a rule with tags, possibly concurrently, so it should return cached arrays; it must never return a default array, for which evaluation throws `InvalidOperationException` naming the provider.
 
 ## JSON
 

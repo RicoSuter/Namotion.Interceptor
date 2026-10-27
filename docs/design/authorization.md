@@ -74,9 +74,11 @@ A member's segment is the provider's segment for the property, or its `BrowseNam
 
 Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. A pattern segment without an index matches a path segment with or without one, so `Line.Machines.**` covers every machine. A member has no index, so a pattern whose last segment has an index, or the separator alone, could match no member. `Compile` rejects both and names the fix (`Rooms[Kitchen].**` or `Rooms[Kitchen].*`): a deny that silently matches nothing would be the most dangerous leftover of the prefix semantics. The registry's parser skips empty segments, so `Compile` also rejects a doubled or trailing separator, which would otherwise compile to a pattern other than the one written. The full table is in [Path patterns](../authorization.md#path-patterns).
 
-A pattern names paths from the root, and a registered subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `**` matches every member that has a path, `*` every member of a root. A leading separator is optional and means nothing: the registry's `TryGetPath` writes paths without one, and an application's tools may write them with one, as file paths are written, so both spellings of a path compile to the same pattern. The price is that a pattern written with another provider's separator, such as `/Home/Kitchen/**` under the default provider, is no longer rejected for its missing leading separator; it reads as one segment and matches nothing, one more pattern only a check against the graph finds.
+A pattern names paths from the root, and a registered subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `**` matches every member that has a path, `*` every member of a root. A leading separator is optional and means nothing: the registry's `TryGetPath` writes paths without one, and an application's tools may write them with one, as file paths are written, so both spellings of a path compile to the same pattern. Without the old rule a pattern written for another provider, such as `/Home/Kitchen/**` under the default provider, would read as one segment and match nothing, so a pattern whose first character is `/` or `\` that is not the provider's separator fails with a hint naming the separator. Only the first character is checked, since a bare `[InlinePaths]` key may contain either character; `Home/Kitchen` without it still compiles as one segment and matches nothing, one more pattern only a check against the graph finds.
 
-A subject without parents is not always a root. Detaching a subject removes its parents and unregisters it, and a caller can still hold one of its members, for example a tool that resolved the member before a concurrent detach. Treating such a subject as a root would give it the empty path, and every path deny would stop applying to it. The policy therefore checks, for a subject without parents only, that the registry still holds this `RegisteredSubject` for its subject, and treats one it does not as an incomplete path set. The check is one registry lookup, and only subjects without parents pay it.
+A subject without parents is not always a root. A detach first unlinks the detached subject from its parent and the subjects it holds from it, under the registry's lock, and unregisters each of them only when the detach reaches it, one after the other. A caller can also hold a member it resolved before the detach, or have read a parent list just before it changed. Treating any parentless subject as a root would give it the empty path, and every path deny would stop applying to the members below it. A root is therefore a subject without parents whose reference count is zero and that the registry still holds as this `RegisteredSubject`. The reference count is read first and takes no lock, and it already rejects a subject whose parent is being detached, since the subject's own reference is released only when the detach reaches it; the registry lookup, which takes the registry's lock, runs only for a subject that passes. The same test decides the start of `GetPaths`, the subject each chain ends at in `SubjectPaths`, which marks the paths incomplete when it fails, and the end of the walk in `IsReachable`, which treats such a subject as unreachable.
+
+The test holds once a detach has completed. It does not close every window while one runs: the lifecycle releases a subject's last reference before the registry's handler unlinks and unregisters it, and in between the subject is parentless, unreferenced and still registered, so it counts as a root. Closing that window needs a change in the registry or the lifecycle, for example unregistering before releasing the reference; the documentation promises only the completed case.
 
 ### Every path of a subject
 
@@ -107,7 +109,7 @@ A dense graph can have a number of paths exponential in its depth, so enumeratio
 
 - a property on a chain is excluded by the path provider, or an inline key resolves in neither spelling, so the chain has no path,
 - the subject has parents but no chain reaches a root, as for subjects that only hold each other in a cycle,
-- the subject has no parents and is no longer registered, because it was detached,
+- the subject, or the subject a chain ends at, has no parents but is not a root, as during and after a detach,
 - more than 64 paths exist, or the search budget runs out.
 
 On an incomplete set an allow with paths matches only through the paths that were listed, and every deny with paths matches. Denies with paths fail closed: the missing path may be exactly the one the deny names, and the library cannot tell. The alternative, matching denies only against the listed paths, would let a misconfigured provider or an unusually dense graph widen a principal's permissions without any sign. The cost is that such a subject matches path denies that have nothing to do with it. The other selectors of a deny still apply, which is one more reason to give a path deny a second selector.
@@ -159,17 +161,17 @@ The allocations that remain each have a reason:
 
 A deny rule with only `Paths` is reached by every member that an allow matched for that action, and proving it does not apply requires enumerating the paths. The [user documentation](../authorization.md#performance-and-threading) therefore advises giving a path deny a second selector (a type, a member glob or a tag) and putting path rules only into the roles that need them, not into a reusable base role every principal pays for.
 
-`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers come from one local run of `-LocalOnly` with exact path matching, on an 8-core desktop CPU with a 1-minute load average below 4:
+`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers come from one local run of `-LocalOnly` on an 8-core desktop CPU with a 1-minute load average below 4:
 
 | Question | Time | Allocated |
 |---|---|---|
-| A read decided by a tag rule | about 18 ns | nothing |
-| `CanRead(subject)`, no path rule applies to `read` | about 85 ns | nothing |
-| A write where the deny rules have only path selectors and none matches | about 0.38 µs | 320 B |
-| A write denied by a path rule | about 0.28 µs | 320 B |
-| A browse-shaped pass: `CanRead` of every subject and of the members of the readable ones | about 0.37 ms | 40 B |
+| A read decided by a tag rule | about 22 ns | nothing |
+| `CanRead(subject)`, no path rule applies to `read` | about 175 ns | nothing |
+| A write where the deny rules have only path selectors and none matches | about 0.45 µs | 320 B |
+| A write denied by a path rule | about 0.37 µs | 320 B |
+| A browse-shaped pass: `CanRead` of every subject and of the members of the readable ones | about 0.56 ms | nothing |
 
-The times vary between runs and machines; the allocation column is the reliable part. The two writes allocate the same because both enumerate the lamp's single path once: the list of paths, the search frames and the lamp's one `PathLink` array.
+The times vary between runs and machines; the allocation column is the reliable part. The two writes allocate the same because both enumerate the lamp's single path once: the list of paths, the search frames and the lamp's one `PathLink` array. For the browse-shaped pass BenchmarkDotNet reports 40 to 80 B per pass, which no code on that path allocates; it is measurement noise of a pass that takes half a millisecond. About 80 ns of `CanRead(subject)` and of each write is the root test at the end of the chain, a reference count read and a registry lookup under the registry's lock; a registration flag on `RegisteredSubject` that the registry clears when it unregisters a subject would make that test lock-free.
 
 ### Threading
 
