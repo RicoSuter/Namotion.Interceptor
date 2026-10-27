@@ -683,6 +683,28 @@ public class MarkdownFileTests
     }
 
     [Fact]
+    public async Task WhenAWidgetBetweenParagraphsFails_ThenItsErrorBoxIsBetweenTwoBlockStarts()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\n:: Demo.Unknown\n::\n\nAfter.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Collection(markdown.Children.Values.OfType<HtmlSegment>(),
+            first => Assert.Equal([first.Html.Length], first.BlockStarts.ToArray()),
+            error =>
+            {
+                Assert.Contains("markdown-block-error", error.Html);
+                Assert.True(error.BlockStarts.IsDefault);
+            },
+            after => Assert.Equal([0], after.BlockStarts.ToArray()));
+    }
+
+    [Fact]
     public async Task WhenAPageHasTwoParagraphs_ThenItsHtmlSegmentHasTheStartOfTheSecond()
     {
         // Arrange

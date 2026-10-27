@@ -18,7 +18,7 @@ public abstract record MarkdownSegment;
 /// <param name="BlockStarts">
 /// The offsets into <paramref name="Html"/>, in ascending order, at which a top-level block of the page starts, so that the
 /// HTML from there on does not depend on the HTML before it. An offset of <c>Html.Length</c> means that a block starts
-/// after the segment, and an offset of 0 that one starts after the expression before it. Default when there is none.
+/// after the segment, and an offset of 0 that one starts after the expression or widget before it. Default when there is none.
 /// </param>
 public sealed record HtmlMarkdownSegment(string Html, ImmutableArray<int> BlockStarts = default) : MarkdownSegment
 {
@@ -232,24 +232,21 @@ public static partial class MarkdownSegmentBuilder
             lastRawHtml = document.Count - 1;
         }
 
+        HashSet<Block>? withoutBreak = null;
+        for (var index = firstRawHtml + 1; firstRawHtml >= 0 && index <= lastRawHtml; index++)
+        {
+            (withoutBreak ??= new HashSet<Block>(ReferenceEqualityComparer.Instance)).Add(document[index]);
+        }
+
         var marker = $"<!--BREAK:{token}-->";
-        var blockIndex = 0;
         renderer.ObjectWriteBefore += (_, markdownObject) =>
         {
-            if (markdownObject is not Block block || !ReferenceEquals(block.Parent, document))
-            {
-                return;
-            }
-
-            while (blockIndex < document.Count && !ReferenceEquals(document[blockIndex], block))
-            {
-                blockIndex++;
-            }
-
             // Hooked into the rendering of the whole document, so that each block renders as it does there. The marker
             // is written past the renderer, which then still knows whether the HTML before it ended a line.
-            var isOutsideRawHtml = lastRawHtml < 0 || blockIndex <= firstRawHtml || blockIndex > lastRawHtml;
-            if (isOutsideRawHtml && writer.GetStringBuilder().Length > 0)
+            if (markdownObject is Block block &&
+                ReferenceEquals(block.Parent, document) &&
+                withoutBreak?.Contains(block) != true &&
+                writer.GetStringBuilder().Length > 0)
             {
                 writer.Write(marker);
             }
@@ -338,8 +335,7 @@ public static partial class MarkdownSegmentBuilder
                 continue;
             }
 
-            // Before a widget nothing is kept: a widget ends the markup string anyway.
-            if (hasBreak && expression is not null && run.Length > 0)
+            if (hasBreak && run.Length > 0)
             {
                 blockStarts.Add(run.Length);
             }
@@ -386,8 +382,8 @@ public static partial class MarkdownSegmentBuilder
             return;
         }
 
-        // At the start of a run, a block start matters only after an expression, whose text the view joins with the HTML.
-        if (hasBreak && (run.Length > 0 || current is [.., ExpressionMarkdownSegment]))
+        // At the start of a run, a block start matters only after an expression or a widget, not at the start of the page.
+        if (hasBreak && (run.Length > 0 || current.Count > 0))
         {
             blockStarts.Add(run.Length);
         }

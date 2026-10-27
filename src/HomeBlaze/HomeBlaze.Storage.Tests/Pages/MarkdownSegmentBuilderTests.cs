@@ -934,16 +934,16 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
-    public void WhenAWidgetBlockFollowsAParagraph_ThenNoBlockStartIsKeptBeforeIt()
+    public void WhenAWidgetBlockIsBetweenParagraphs_ThenBlocksStartBeforeAndAfterIt()
     {
         // Act
         var segments = Build("First.\n\n:: Demo.Card\ninside\n::\n\nAfter.");
 
         // Assert
         Assert.Collection(segments,
-            segment => Assert.Equal(new HtmlMarkdownSegment("<p>First.</p>\n"), segment),
+            segment => Assert.Equal(new HtmlMarkdownSegment("<p>First.</p>\n", [14]), segment),
             segment => Assert.IsType<BlockMarkdownSegment>(segment),
-            segment => Assert.Equal(new HtmlMarkdownSegment("\n<p>After.</p>\n"), segment));
+            segment => Assert.Equal(new HtmlMarkdownSegment("\n<p>After.</p>\n", [0]), segment));
     }
 
     [Fact]
