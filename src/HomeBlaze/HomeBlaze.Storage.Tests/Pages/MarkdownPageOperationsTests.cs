@@ -276,6 +276,61 @@ public class MarkdownPageOperationsTests
     }
 
     [Theory]
+    [InlineData("Para one.\n\n\n:: Demo.Card\n::\n\n\nPara two.\n", "Para one.\n\nPara two.\n")]
+    [InlineData("\n\n:: Demo.Card\n::\n\nPara two.\n", "Para two.\n")]
+    [InlineData("Para one.\n\n:: Demo.Card\n::", "Para one.")]
+    [InlineData("Para one.\n\n:: Demo.Card\n::\n\n\n", "Para one.\n")]
+    [InlineData(":: Demo.Row\n::\n:: Demo.Card\n::\n:: Demo.Row\n::\n", ":: Demo.Row\n::\n:: Demo.Row\n::\n")]
+    public void WhenAWidgetIsRemovedFromThePage_ThenOnlyTheSpacingOfThePageStaysAroundIt(string source, string expected)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+        var block = page.Blocks.Single(candidate => candidate.Head!.Name == "Demo.Card");
+
+        // Act
+        var change = MarkdownPageOperations.TryRemove(page, NoSubjects, block, out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(expected, change!.Write.Page.Source);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card\n::: Demo.X\n:::\n\ntext\n::\n", ":: Demo.Card\ntext\n::\n")]
+    [InlineData(":: Demo.Card\ntext\n\n::: Demo.X\n:::\n::\n", ":: Demo.Card\ntext\n::\n")]
+    [InlineData(":: Demo.Card\n\n::: Demo.X\n:::\n\n::\n", ":: Demo.Card\n::\n")]
+    [InlineData(":: Demo.Card\na\n\n::: Demo.X\n:::\n\n\nb\n::\n", ":: Demo.Card\na\n\nb\n::\n")]
+    public void WhenAWidgetIsRemovedFromACard_ThenNoEmptyLineStaysNextToTheHeadOrTheClosingLineOfTheCard(string source, string expected)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryRemove(page, NoSubjects, page.Blocks[0].Children[0], out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(expected, change!.Write.Page.Source);
+    }
+
+    [Theory]
+    [InlineData(":: Demo.Card\nfirst\n\nlast\n::\n", 2, ":: Demo.Card\nlast\n::\n")]
+    [InlineData(":: Demo.Card\nfirst\n\nlast\n::\n", 4, ":: Demo.Card\nfirst\n::\n")]
+    public void WhenTheFirstOrLastTextOfACardIsRemoved_ThenNoEmptyLineStaysNextToTheHeadOrTheClosingLineOfTheCard(
+        string source, int line, string expected)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var change = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, line), out var refusal);
+
+        // Assert
+        Assert.Null(refusal);
+        Assert.Equal(expected, change!.Write.Page.Source);
+    }
+
+    [Theory]
     [InlineData("intro\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n\noutro\n", 0, 3, 0)]
     [InlineData("intro\n\n:: Demo.One\n::\n\n:: Demo.Two\n::\n\noutro\n", 1, -1, 6)]
     [InlineData("intro\n\n:: Demo.One\n::\n\noutro\n\n:: Demo.Two\n::\n", 0, -1, 3)]
@@ -306,7 +361,7 @@ public class MarkdownPageOperationsTests
 
         // Assert
         var after = change!.Write.Page;
-        Assert.Equal("intro\n\n:: Demo.Card\n\n::: Demo.Inner\n:::\n::\n\noutro\n", after.Source);
+        Assert.Equal("intro\n\n:: Demo.Card\n::: Demo.Inner\n:::\n::\n\noutro\n", after.Source);
         Assert.Equal("Demo.Inner", after.AllBlocks[change.ResultBlockIndex].Head!.Name);
         Assert.Equal(0, change.ResultTextLine);
     }

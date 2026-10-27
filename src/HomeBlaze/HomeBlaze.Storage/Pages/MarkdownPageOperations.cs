@@ -49,8 +49,7 @@ internal static class MarkdownPageOperations
         }
 
         FindSiblings(page, block, out var parent);
-        // Cut like text, so that of the empty lines around the block one stays.
-        var source = MarkdownBlockWriter.CutLines(page.Source, block.Line, block.EndLine, out var edit);
+        var source = RemoveLines(page, block.Line, block.EndLine, parent, out var edit);
         var after = MarkdownPageParser.Parse(source);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
         {
@@ -65,6 +64,15 @@ internal static class MarkdownPageOperations
             resultBlockIndex,
             resultTextLine);
     }
+
+    private static string RemoveLines(MarkdownPage page, int line, int endLine, MarkdownBlock? owner, out MarkdownLineEdit edit) =>
+        MarkdownBlockWriter.RemoveLines(
+            page.Source,
+            line,
+            endLine,
+            owner?.Line ?? 0,
+            owner is { HasClosingLine: true } ? owner.EndLine : 0,
+            out edit);
 
     // The item of the content of `owner`, a block of the page before the removal, that stands at the line of the page after
     // it where the removed lines began, or else the last one before it: the index of a widget or slot block, or the line of
@@ -756,7 +764,7 @@ internal static class MarkdownPageOperations
             return null;
         }
 
-        var newSource = MarkdownBlockWriter.CutLines(page.Source, textBlock.Line, textBlock.EndLine, out var edit);
+        var newSource = RemoveLines(page, textBlock.Line, textBlock.EndLine, textBlock.Owner, out var edit);
         var after = MarkdownPageParser.Parse(newSource);
         if (MarkdownBlockAlignment.TryAlign(page, after, edit, expectedInsertedBlockCount: 0, owner: null) is not { } map)
         {

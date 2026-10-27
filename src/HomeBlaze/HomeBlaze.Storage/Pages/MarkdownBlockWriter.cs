@@ -334,6 +334,53 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
+    /// Removes the lines from <paramref name="line"/> to <paramref name="endLine"/> with the empty lines around them, so that
+    /// the text around them keeps the spacing of a page: no empty line at the start or the end of the text, or next to
+    /// <paramref name="headLine"/> or <paramref name="closingLine"/>, the head line and the closing line of the block whose
+    /// content the lines are (0 for none), and one empty line where the lines stood apart from the text around them or that
+    /// text would be joined (see <see cref="RemoveBlock"/>). When the lines end the text without a line ending, the text keeps
+    /// ending without one.
+    /// </summary>
+    /// <remarks><paramref name="source"/> must have no lone carriage return, see <see cref="HasLoneCarriageReturn"/>.</remarks>
+    internal static string RemoveLines(string source, int line, int endLine, int headLine, int closingLine, out MarkdownLineEdit edit)
+    {
+        // The line after the last line ending is no line of its own.
+        var lastLine = source.AsSpan().Count('\n') + (source.EndsWith('\n') ? 0 : 1);
+        var first = line;
+        while (first > 1 && IsEmptyLine(source, GetLineStart(source, first - 1), GetLineStart(source, first)))
+        {
+            first--;
+        }
+
+        var last = endLine;
+        while (last < lastLine && IsEmptyLine(source, GetLineStart(source, last + 1), GetLineStart(source, last + 2)))
+        {
+            last++;
+        }
+
+        var start = GetLineStart(source, first);
+        var end = GetLineStart(source, last + 1);
+        var previous = first - 1;
+        var next = last + 1;
+        if (previous >= 1 && next <= lastLine && previous != headLine && next != closingLine &&
+            (first < line || last > endLine ||
+             (IsTextLine(source, GetLineStart(source, previous), start) && IsTextLine(source, end, GetLineStart(source, next + 1)))))
+        {
+            edit = new MarkdownLineEdit(first, last - first + 1, 1);
+            return source.Remove(start, end - start).Insert(start, GetLineEnding(source, start));
+        }
+
+        // The removed lines end the text without a line ending, so the line before them now ends it and gives up its own.
+        if (end == source.Length && start > 0 && source[^1] != '\n')
+        {
+            start -= start > 1 && source[start - 2] == '\r' ? 2 : 1;
+        }
+
+        edit = new MarkdownLineEdit(first, last - first + 1, 0);
+        return source.Remove(start, end - start);
+    }
+
+    /// <summary>
     /// Inserts <paramref name="text"/>, lines that <see cref="CutLines"/> cut, before the 1-based <paramref name="line"/>. An
     /// empty line separates them from a line before or after them that is not empty when they stood apart before
     /// (<paramref name="standsApart"/>) or that line is text, which they would join otherwise.
