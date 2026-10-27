@@ -1,7 +1,8 @@
 Third-party notices for mermaid.min.js
 
-mermaid.min.js is the browser build of Mermaid (see LICENSE next to this file). It bundles the packages below,
-listed from the npm dependencies of mermaid@11.17.2 with their licenses as published.
+mermaid.min.js is the browser build of Mermaid (see LICENSE next to this file). It bundles code from the npm
+dependencies of mermaid@11.17.2. All of them are listed below with their licenses as published, including some
+that the browser build may not use.
 
 ================================================================================
 @antfu/install-pkg 2.1.0 (MIT)
