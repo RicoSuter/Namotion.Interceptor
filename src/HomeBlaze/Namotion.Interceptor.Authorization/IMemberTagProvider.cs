@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Authorization;
@@ -6,12 +7,11 @@ namespace Namotion.Interceptor.Authorization;
 public interface IMemberTagProvider
 {
     /// <summary>
-    /// Gets the tags of a member, compared ignoring case.
+    /// Gets the tags of a member, compared ignoring case; never a default array, an empty one for a member without tags.
     /// </summary>
     /// <remarks>
     /// Called on every evaluation of a rule with tags and possibly concurrently, so an implementation caches what is
-    /// expensive to derive. Return an array where possible; the policy then compares tags without allocating. Never
-    /// returns null; return an empty array for a member without tags.
+    /// expensive to derive.
     /// </remarks>
-    IReadOnlyCollection<string> GetTags(RegisteredSubjectProperty member);
+    ImmutableArray<string> GetTags(RegisteredSubjectProperty member);
 }
