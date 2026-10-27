@@ -60,6 +60,9 @@
 @code {
     internal const string ConcurrentChangeMessage = "The roles changed while this dialog was open. Close it and open it again.";
 
+    // Shared by the dialogs of every role and every user; held only while a save checks and assigns the lists.
+    private static readonly Lock SaveLock = new();
+
     private string? _name;
     private Authorization? _authorization;
     private LoadedLists _loadedLists;
@@ -149,23 +152,34 @@
             throw new InvalidOperationException("The role has invalid rules and cannot be saved.");
         }
 
-        // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer part of.
-        // Every save assigns new lists, so other lists are the save of another dialog, which this one would revert.
-        if (!ReferenceEquals(FindParent(role).Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
+        // New instances, as the authorization service notices only replaced lists.
+        List<string> includes = [.. _includes];
+        List<PermissionRule> allow = [.. _allow.Select(entry => entry.Rule)];
+        List<PermissionRule> deny = [.. _deny.Select(entry => entry.Rule)];
+
+        // Checked and assigned under the lock, so that the saves of two dialogs never interleave. Taken before
+        // BeginUpdate, whose lock is never held while this one is taken.
+        lock (SaveLock)
         {
-            throw new InvalidOperationException(ConcurrentChangeMessage);
+            // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer
+            // part of. Every save assigns new lists, so other lists are the save of another dialog, which this one would
+            // revert.
+            if (!ReferenceEquals(FindParent(role).Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
+            {
+                throw new InvalidOperationException(ConcurrentChangeMessage);
+            }
+
+            // In one update, so that no policy has the includes without the deny rules.
+            using (AuthorizationService.BeginUpdate())
+            {
+                role.Includes = includes;
+                role.Allow = allow;
+                role.Deny = deny;
+            }
         }
 
-        // New instances, as the authorization service notices only replaced lists; in one update, so that no policy has
-        // the includes without the deny rules.
-        using (AuthorizationService.BeginUpdate())
-        {
-            role.Includes = [.. _includes];
-            role.Allow = [.. _allow.Select(entry => entry.Rule)];
-            role.Deny = [.. _deny.Select(entry => entry.Rule)];
-        }
-
-        _loadedLists = new LoadedLists(role);
+        // What this dialog wrote, not what the role holds now, which may already be the save of another dialog.
+        _loadedLists = new LoadedLists(includes, allow, deny);
 
         _isDirty = false;
         IsDirtyChanged?.Invoke(false);

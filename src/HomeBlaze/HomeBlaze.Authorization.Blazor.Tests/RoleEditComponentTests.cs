@@ -8,6 +8,8 @@ using MudBlazor.Services;
 using Namotion.Interceptor;
 using HomeBlaze.Components.Inputs;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Tracking;
+using System.Reactive.Concurrency;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Blazor.Tests;
@@ -777,6 +779,36 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
         Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], role.Deny);
         Assert.Empty(role.Allow);
+    }
+
+    [Fact]
+    public async Task WhenAnotherSaveLandsRightAfterThisOne_ThenItIsNotTakenAsTheListsThisDialogLoaded()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var otherDeny = new List<PermissionRule> { new() { Actions = [PermissionAction.Write] } };
+        var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 0, "read", true);
+
+        // The other save is made as soon as this one assigned its deny rules, the last of its lists.
+        using var otherSave = ((IInterceptorSubject)role).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property.Name == nameof(Role.Deny) && !ReferenceEquals(role.Deny, otherDeny))
+                {
+                    role.Deny = otherDeny;
+                }
+            });
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        otherSave.Dispose();
+
+        // Act & Assert
+        await SetActionAsync(component, 0, "write", true);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
+        Assert.Same(otherDeny, role.Deny);
     }
 
     [Fact]
