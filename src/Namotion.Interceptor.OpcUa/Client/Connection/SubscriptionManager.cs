@@ -276,7 +276,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Replaces the tracked subscriptions with the ones the reconnected session holds. Subscriptions
-    /// already tracked are left as they are; the ones missing from the new set are unhooked and dropped.
+    /// already tracked are left as they are, new ones are hooked exactly once, and the ones missing
+    /// from the new set are unhooked and dropped.
     /// </summary>
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
@@ -285,10 +286,12 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             if (TryAddSubscription(subscription))
             {
-                // A subscription the SDK recreated is a clone that carries the original's callback,
-                // so hooking without unhooking first would deliver its notifications twice.
-                subscription.FastDataChangeCallback -= OnFastDataChange;
-                subscription.FastDataChangeCallback += OnFastDataChange;
+                // A subscription the SDK recreated is a clone that already carries the original's
+                // callback and may be publishing. Replace it in one write: a plain += would deliver
+                // twice, and a -= followed by += leaves the callback null in between, which drops a batch.
+                FastDataChangeNotificationEventHandler handler = OnFastDataChange;
+                subscription.FastDataChangeCallback = (FastDataChangeNotificationEventHandler?)Delegate.Combine(
+                    Delegate.Remove(subscription.FastDataChangeCallback, handler), handler);
             }
         }
 
