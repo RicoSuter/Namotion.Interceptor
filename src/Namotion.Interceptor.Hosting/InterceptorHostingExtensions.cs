@@ -74,6 +74,21 @@ public static class InterceptorHostingExtensions
     /// <param name="hostedService">The hosted service to detach.</param>
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
     {
+        var wasRemoved = RemoveAttachedHostedService(subject, hostedService);
+        if (wasRemoved)
+        {
+            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+            hostedServiceHandler?.DetachHostedService(hostedService);
+        }
+
+        return wasRemoved;
+    }
+
+    /// <summary>
+    /// Removes a hosted service from the subject's attached services without stopping it.
+    /// </summary>
+    internal static bool RemoveAttachedHostedService(IInterceptorSubject subject, IHostedService hostedService)
+    {
         bool wasRemoved = false;
         subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
             _ => null,
@@ -87,12 +102,6 @@ public static class InterceptorHostingExtensions
                 }
                 return value;
             });
-
-        if (wasRemoved)
-        {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.DetachHostedService(hostedService);
-        }
 
         return wasRemoved;
     }
