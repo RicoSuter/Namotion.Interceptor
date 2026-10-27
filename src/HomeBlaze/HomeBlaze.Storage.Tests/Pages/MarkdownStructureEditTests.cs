@@ -42,22 +42,27 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenARowIsMovedDown_ThenTheFileAndTheSlotHaveTheNewOrder()
+    public async Task WhenAnUnnamedRowIsMovedDown_ThenTheFileAndTheSlotHaveTheNewOrderAndEachRowKeepsItsSubject()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", PanelPage);
         var panel = (TestPanel)page.Children["panel"];
+        var rowA = panel.Rows[0];
+        var rowB = panel.Rows[1];
 
         // Act
-        var result = await page.MoveBlockAsync(panel.Rows[0], 1, CancellationToken.None);
+        var result = await page.MoveBlockAsync(rowA, 1, CancellationToken.None);
         var written = await fixture.ReadAsync("page.md");
         await page.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
         Assert.True(result.IsWritten);
+        Assert.Same(rowA, result.Subject);
         Assert.Contains("::: Row Label=B\n:::\n::: Row Label=A\n:::", written);
         Assert.Equal(["B", "A"], panel.Rows.Select(row => row.Label));
+        Assert.Same(rowB, panel.Rows[0]);
+        Assert.Same(rowA, panel.Rows[1]);
     }
 
     [Fact]
@@ -152,26 +157,6 @@ public class MarkdownStructureEditTests
         Assert.True(page.IsContentOfPage(page));
         Assert.True(page.IsContentOfPage(panel.Rows[0].Content!));
         Assert.False(page.IsContentOfPage(new MarkdownFragment()));
-    }
-
-    [Fact]
-    public async Task WhenAnUnnamedRowIsMovedDown_ThenEachRowKeepsItsSubject()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", PanelPage);
-        var panel = (TestPanel)page.Children["panel"];
-        var rowA = panel.Rows[0];
-        var rowB = panel.Rows[1];
-
-        // Act
-        await page.MoveBlockAsync(rowA, 1, CancellationToken.None);
-        await page.OnFileChangedAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Same(rowB, panel.Rows[0]);
-        Assert.Same(rowA, panel.Rows[1]);
-        Assert.Equal(["B", "A"], panel.Rows.Select(row => row.Label));
     }
 
     [Fact]
@@ -289,21 +274,6 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
-    public async Task WhenARowIsMoved_ThenTheResultNamesTheRow()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", PanelPage);
-        var row = ((TestPanel)page.Children["panel"]).Rows[0];
-
-        // Act
-        var result = await page.MoveBlockAsync(row, 1, CancellationToken.None);
-
-        // Assert
-        Assert.Same(row, result.Subject);
-    }
-
-    [Fact]
     public async Task WhenTheTextOfABlockOfTextIsAskedFor_ThenItIsItsMarkdown()
     {
         // Arrange
@@ -345,21 +315,6 @@ public class MarkdownStructureEditTests
         // Assert
         Assert.Null(text);
         Assert.Equal(default, actions);
-    }
-
-    [Fact]
-    public async Task WhenAParagraphIsReplaced_ThenTheFileHasTheNewText()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", TextPage);
-
-        // Act
-        var result = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", "New *text*.", CancellationToken.None);
-
-        // Assert
-        Assert.True(result.IsWritten);
-        Assert.Equal($"# Title\n\nNew *text*.\n\n:: {LeafType}#leaf\n::\n", await fixture.ReadAsync("page.md"));
     }
 
     [Fact]

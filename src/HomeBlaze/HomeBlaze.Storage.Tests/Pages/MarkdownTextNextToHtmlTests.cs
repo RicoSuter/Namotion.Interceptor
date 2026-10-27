@@ -63,7 +63,8 @@ public class MarkdownTextNextToHtmlTests
 
     [Theory]
     [MemberData(nameof(HtmlBlocks))]
-    public void WhenTheTextBeforeOrAfterRawHtmlIsChanged_ThenOnlyThatTextChanges(string html, HtmlBlockType type)
+    public void WhenTheTextBeforeOrAfterRawHtmlIsChangedRemovedInsertedOrMoved_ThenOnlyThatTextChangesAndStandsApartFromTheHtml(
+        string html, HtmlBlockType type)
     {
         // Arrange
         var source = $"Before.\n\n{html}\n\nAfter.\n";
@@ -71,77 +72,35 @@ public class MarkdownTextNextToHtmlTests
         var afterLine = CountLines(html) + 4;
 
         // Act
-        var changeBefore = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), ChangedText, out var refusalBefore);
-        var changeAfter = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, afterLine), ChangedText, out var refusalAfter);
-
-        // Assert
-        AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{ChangedText}\n\n{html}\n\nAfter.\n");
-        AssertHtmlIsKept(changeAfter, refusalAfter, html, $"Before.\n\n{html}\n\n{ChangedText}\n");
-    }
-
-    [Theory]
-    [MemberData(nameof(HtmlBlocks))]
-    public void WhenTheTextBeforeOrAfterRawHtmlIsRemoved_ThenOnlyThatTextIsGone(string html, HtmlBlockType type)
-    {
-        // Arrange
-        var source = $"Before.\n\n{html}\n\nAfter.\n";
-        var page = ParseHtmlPage(html, type, source);
-        var afterLine = CountLines(html) + 4;
-
-        // Act
-        var changeBefore = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, 1), out var refusalBefore);
-        var changeAfter = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, afterLine), out var refusalAfter);
-
-        // Assert
-        AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{html}\n\nAfter.\n");
-        AssertHtmlIsKept(changeAfter, refusalAfter, html, $"Before.\n\n{html}\n");
-    }
-
-    [Theory]
-    [MemberData(nameof(HtmlBlocks))]
-    public void WhenTextIsInsertedBeforeOrAfterRawHtml_ThenItStandsApartFromTheHtml(string html, HtmlBlockType type)
-    {
-        // Arrange
-        var source = $"Before.\n\n{html}\n\nAfter.\n";
-        var page = ParseHtmlPage(html, type, source);
-        var afterLine = CountLines(html) + 4;
-
-        // Act
-        var changeBefore = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, ChangedText, out var refusalBefore);
-        var changeAfter = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, afterLine, ChangedText, out var refusalAfter);
-
-        // Assert
-        AssertHtmlIsKept(changeBefore, refusalBefore, html, $"Before.\n\n{ChangedText}\n\n{html}\n\nAfter.\n");
-        AssertHtmlIsKept(changeAfter, refusalAfter, html, $"Before.\n\n{html}\n\n{ChangedText}\n\nAfter.\n");
-    }
-
-    [Theory]
-    [MemberData(nameof(HtmlBlocks))]
-    public void WhenTextIsMovedPastRawHtml_ThenItStandsApartFromTheHtmlOnTheOtherSide(string html, HtmlBlockType type)
-    {
-        // Arrange
-        var source = $"Before.\n\n{html}\n\nAfter.\n";
-        var page = ParseHtmlPage(html, type, source);
-        var afterLine = CountLines(html) + 4;
-
-        // Act
+        var changeBefore = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), ChangedText, out var refusalChangeBefore);
+        var changeAfter = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, afterLine), ChangedText, out var refusalChangeAfter);
+        var removeBefore = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, 1), out var refusalRemoveBefore);
+        var removeAfter = MarkdownPageOperations.TryRemoveText(page, NoSubjects, TextAt(page, afterLine), out var refusalRemoveAfter);
+        var insertBefore = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, ChangedText, out var refusalInsertBefore);
+        var insertAfter = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, afterLine, ChangedText, out var refusalInsertAfter);
         var directionsBefore = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, 1));
-        var changeBefore = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 1), 1, out var refusalBefore);
+        var moveBefore = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, 1), 1, out var refusalMoveBefore);
         var directionsAfter = MarkdownPageOperations.GetTextMoveDirections(page, TextAt(page, afterLine));
-        var changeAfter = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, afterLine), -1, out var refusalAfter);
+        var moveAfter = MarkdownPageOperations.TryMoveText(page, NoSubjects, TextAt(page, afterLine), -1, out var refusalMoveAfter);
 
         // Assert: HTML that shows nothing moves with the text after it.
+        AssertHtmlIsKept(changeBefore, refusalChangeBefore, html, $"{ChangedText}\n\n{html}\n\nAfter.\n");
+        AssertHtmlIsKept(changeAfter, refusalChangeAfter, html, $"Before.\n\n{html}\n\n{ChangedText}\n");
+        AssertHtmlIsKept(removeBefore, refusalRemoveBefore, html, $"{html}\n\nAfter.\n");
+        AssertHtmlIsKept(removeAfter, refusalRemoveAfter, html, $"Before.\n\n{html}\n");
+        AssertHtmlIsKept(insertBefore, refusalInsertBefore, html, $"Before.\n\n{ChangedText}\n\n{html}\n\nAfter.\n");
+        AssertHtmlIsKept(insertAfter, refusalInsertAfter, html, $"Before.\n\n{html}\n\n{ChangedText}\n\nAfter.\n");
         Assert.Equal((false, true), directionsBefore);
         Assert.Equal((true, false), directionsAfter);
         if (TextAt(page, 3).ShowsNothing)
         {
-            AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{html}\n\nAfter.\n\nBefore.\n");
-            AssertHtmlIsKept(changeAfter, refusalAfter, html, $"{html}\n\nAfter.\n\nBefore.\n");
+            AssertHtmlIsKept(moveBefore, refusalMoveBefore, html, $"{html}\n\nAfter.\n\nBefore.\n");
+            AssertHtmlIsKept(moveAfter, refusalMoveAfter, html, $"{html}\n\nAfter.\n\nBefore.\n");
         }
         else
         {
-            AssertHtmlIsKept(changeBefore, refusalBefore, html, $"{html}\n\nBefore.\n\nAfter.\n");
-            AssertHtmlIsKept(changeAfter, refusalAfter, html, $"Before.\n\nAfter.\n\n{html}\n");
+            AssertHtmlIsKept(moveBefore, refusalMoveBefore, html, $"{html}\n\nBefore.\n\nAfter.\n");
+            AssertHtmlIsKept(moveAfter, refusalMoveAfter, html, $"Before.\n\nAfter.\n\n{html}\n");
         }
     }
 
@@ -310,31 +269,20 @@ public class MarkdownTextNextToHtmlTests
     }
 
     [Fact]
-    public void WhenChangedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheChangeIsRefusedForThatReason()
+    public void WhenChangedOrInsertedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheChangeIsRefusedForThatReason()
     {
         // Arrange
         var page = MarkdownPageParser.Parse("Before.\n\nAfter.\n");
 
         // Act
-        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), "<div>", out var refusal);
+        var change = MarkdownPageOperations.TryReplaceText(page, NoSubjects, TextAt(page, 1), "<div>", out var changeRefusal);
+        var insert = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, "<div>", out var insertRefusal);
 
         // Assert
         Assert.Null(change);
-        Assert.Equal("The text would leave HTML open over the text after it.", refusal);
-    }
-
-    [Fact]
-    public void WhenInsertedTextWouldLeaveAnElementOpenOverTheTextAfterIt_ThenTheInsertIsRefusedForThatReason()
-    {
-        // Arrange
-        var page = MarkdownPageParser.Parse("Before.\n\nAfter.\n");
-
-        // Act
-        var insert = MarkdownPageOperations.TryInsertText(page, NoSubjects, null, 3, "<div>", out var refusal);
-
-        // Assert
         Assert.Null(insert);
-        Assert.Equal("The text would leave HTML open over the text after it.", refusal);
+        Assert.Equal("The text would leave HTML open over the text after it.", changeRefusal);
+        Assert.Equal("The text would leave HTML open over the text after it.", insertRefusal);
     }
 
     [Fact]

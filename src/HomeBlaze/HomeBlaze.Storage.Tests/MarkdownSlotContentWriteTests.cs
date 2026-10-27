@@ -181,20 +181,24 @@ public class MarkdownSlotContentWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenContentIsAddedToADefaultBodyBeforeASlotBlock_ThenItGoesBeforeTheSlotBlock()
+    public async Task WhenContentIsAddedToADefaultBodyBeforeASlotBlock_ThenItGoesBeforeTheSlotBlockAsAnInsertAtTheEndOfTheBody()
     {
         // Arrange
         var markdown = await LoadAsync(CardWithFooterPage);
+        var inserted = await LoadAsync(CardWithFooterPage, "Inserted.md");
         var card = Assert.IsType<Card>(markdown.Children["card"]);
+        var insertedCard = Assert.IsType<Card>(inserted.Children["card"]);
         var bodyLeaf = ((MarkdownFragment)card.Content!).Children.Values.OfType<TestLeaf>().Single();
         var footerLeaf = ((MarkdownFragment)card.Footer!).Children.Values.OfType<TestLeaf>().Single();
 
         // Act
         var result = await markdown.AddTextToSlotAsync(card, null, "Added.", CancellationToken.None);
+        await inserted.InsertTextAsync(insertedCard.Content!, null, "Added.", CancellationToken.None);
 
         // Assert
         Assert.True(result.IsWritten);
         Assert.Contains($"::: {LeafType}#bodyleaf Name=b\n:::\n\nAdded.\n\n::: Footer\n", ReadPage());
+        Assert.Equal(ReadPage("Inserted.md"), ReadPage());
         Assert.Same(card, markdown.Children["card"]);
         Assert.Same(bodyLeaf, ((MarkdownFragment)card.Content!).Children.Values.OfType<TestLeaf>().Single());
         Assert.Same(footerLeaf, ((MarkdownFragment)card.Footer!).Children.Values.OfType<TestLeaf>().Single());
@@ -262,22 +266,6 @@ public class MarkdownSlotContentWriteTests : IDisposable
         var leaves = ((MarkdownFragment)card.Footer!).Children.Values.OfType<TestLeaf>().ToList();
         Assert.Same(footerLeaf, leaves[0]);
         Assert.Same(leaves[1], result.Subject);
-    }
-
-    [Fact]
-    public async Task WhenTextIsAddedToADefaultBody_ThenItIsWrittenAsAnInsertAtTheEndOfTheBody()
-    {
-        // Arrange
-        var markdown = await LoadAsync(CardWithFooterPage, "Added.md");
-        var inserted = await LoadAsync(CardWithFooterPage, "Inserted.md");
-        var insertedCard = Assert.IsType<Card>(inserted.Children["card"]);
-
-        // Act
-        await markdown.AddTextToSlotAsync(markdown.Children["card"], null, "Added.", CancellationToken.None);
-        await inserted.InsertTextAsync(insertedCard.Content!, null, "Added.", CancellationToken.None);
-
-        // Assert
-        Assert.Equal(ReadPage("Inserted.md"), ReadPage("Added.md"));
     }
 
     [Fact]
@@ -374,13 +362,19 @@ public class MarkdownSlotContentWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheContentSlotsOfBlocksAreAskedFor_ThenTheyAreTheSlotsThatTakeContentWithWhetherTheyHoldAny()
+    public async Task WhenTheSlotsOfBlocksAreAskedFor_ThenTheContentSlotsWithWhetherTheyHoldAnyAndTheSlotsOfConfiguredItemsAreApart()
     {
         // Arrange
         var markdown = await LoadAsync(
             CardPage + "\n" + FlowPage + "\n" + AlertPage +
             "\n:: HomeBlaze.Components.TabLayout#tabs\n::: Tab Title=X\n:::\n::\n" +
+            "\n:: HomeBlaze.Components.Switch#switch\n::\n" +
             "\n:: HomeBlaze.Components.Card#open Title=B\nOpen body.\n");
+        var card = markdown.Children["card"];
+        var flow = markdown.Children["flow"];
+        var tabs = markdown.Children["tabs"];
+        var alert = markdown.Children["alert"];
+        var toggle = markdown.Children["switch"];
 
         // Act & Assert
         Assert.Equal(
@@ -389,35 +383,18 @@ public class MarkdownSlotContentWriteTests : IDisposable
                 new MarkdownContentSlot("HeaderRight", MarkdownContentSlotKind.Named, false),
                 new MarkdownContentSlot("Footer", MarkdownContentSlotKind.Named, false)
             ],
-            markdown.GetContentSlots(markdown.Children["card"]));
-        Assert.Equal([new MarkdownContentSlot("Item", MarkdownContentSlotKind.ListItem, true)], markdown.GetContentSlots(markdown.Children["flow"]));
-        Assert.Equal([new MarkdownContentSlot(null, MarkdownContentSlotKind.Default, false)], markdown.GetContentSlots(markdown.Children["alert"]));
-        Assert.Empty(markdown.GetContentSlots(markdown.Children["tabs"]));
+            markdown.GetContentSlots(card));
+        Assert.Equal([new MarkdownContentSlot("Item", MarkdownContentSlotKind.ListItem, true)], markdown.GetContentSlots(flow));
+        Assert.Equal([new MarkdownContentSlot(null, MarkdownContentSlotKind.Default, false)], markdown.GetContentSlots(alert));
+        Assert.Equal([new MarkdownContentSlot("Badge", MarkdownContentSlotKind.Named, false)], markdown.GetContentSlots(toggle));
+        Assert.Empty(markdown.GetContentSlots(tabs));
         Assert.Empty(markdown.GetContentSlots(markdown.Children["open"]));
         Assert.Empty(markdown.GetContentSlots(new Card()));
-    }
-
-    [Fact]
-    public async Task WhenTheSlotsOfWidgetsThatShipAreAskedFor_ThenTheContentSlotsAndTheSlotsOfConfiguredItemsAreApart()
-    {
-        // Arrange
-        var markdown = await LoadAsync(
-            CardPage + "\n" + FlowPage + "\n" + AlertPage +
-            "\n:: HomeBlaze.Components.TabLayout#tabs\n::: Tab Title=X\n:::\n::\n" +
-            "\n:: HomeBlaze.Components.Switch#switch\n::\n");
-        var card = markdown.Children["card"];
-        var flow = markdown.Children["flow"];
-        var tabs = markdown.Children["tabs"];
-        var alert = markdown.Children["alert"];
-        var toggle = markdown.Children["switch"];
-
-        // Act & Assert
         Assert.Empty(markdown.GetListSlots(card));
         Assert.Empty(markdown.GetListSlots(flow));
         Assert.Equal([new MarkdownListSlot("Tab", typeof(Tab))], markdown.GetListSlots(tabs));
         Assert.Empty(markdown.GetListSlots(alert));
         Assert.Empty(markdown.GetListSlots(toggle));
-        Assert.Equal([new MarkdownContentSlot("Badge", MarkdownContentSlotKind.Named, false)], markdown.GetContentSlots(toggle));
     }
 
     private async Task<MarkdownFile> LoadAsync(string content, string name = "Page.md")

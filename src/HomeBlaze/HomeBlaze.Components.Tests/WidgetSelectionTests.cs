@@ -16,34 +16,12 @@ namespace HomeBlaze.Components.Tests;
 public class WidgetSelectionTests
 {
     [Fact]
-    public async Task WhenTheSubjectToSelectHasNoWidgetYet_ThenTheSelectionStays()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
-        {
-            // Arrange
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
-            var card = renderer.CreateWidget(selection, page);
-            selection.Select(card);
-
-            // Act
-            selection.SelectSubject(new PersistedDevice(), page);
-
-            // Assert
-            Assert.Same(card, selection.Selected);
-        });
-    }
-
-    [Fact]
-    public async Task WhenTheSubjectToSelectHasNoWidgetYet_ThenItIsPendingAndTheChangeIsRaised()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenTheSubjectToSelectHasNoWidgetYet_ThenTheSelectionStaysAndTheSubjectIsPendingAndTheChangeIsRaised() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange: a widget that shows the subject, such as a tab layout that shows a new tab, learns it this way.
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
+            var card = renderer.CreateWidget(selection, page);
+            selection.Select(card);
             var subject = new PersistedDevice();
             var changeCount = 0;
             selection.Changed += () => changeCount++;
@@ -52,20 +30,16 @@ public class WidgetSelectionTests
             selection.SelectSubject(subject, page);
 
             // Assert
+            Assert.Same(card, selection.Selected);
             Assert.Same(subject, selection.PendingSubject);
             Assert.Equal(1, changeCount);
         });
-    }
 
     [Fact]
-    public async Task WhenAWidgetIsSelectedWhileASubjectIsPending_ThenNoSubjectIsPending()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenTheUserSelectsAWidgetWhileASubjectIsPending_ThenNoSubjectIsPendingAndTheWidgetDoesNotTakeTheFocus() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var card = renderer.CreateWidget(selection, page);
             selection.SelectSubject(new PersistedDevice(), page);
 
@@ -74,18 +48,14 @@ public class WidgetSelectionTests
 
             // Assert
             Assert.Null(selection.PendingSubject);
+            Assert.False(selection.TakesFocus(card));
         });
-    }
 
     [Fact]
-    public async Task WhenTheSelectedWidgetIsRemoved_ThenTheWidgetAroundItIsSelected()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenTheSelectedWidgetIsRemoved_ThenTheWidgetAroundItIsSelected() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var card = renderer.CreateWidget(selection, page);
             var text = renderer.CreateWidget(selection, card);
             selection.Select(text);
@@ -96,17 +66,12 @@ public class WidgetSelectionTests
             // Assert
             Assert.Same(card, selection.Selected);
         });
-    }
 
     [Fact]
-    public async Task WhenTheSelectedWidgetIsRemovedAfterTheWidgetAroundIt_ThenTheNextWidgetOutsideIsSelected()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenTheSelectedWidgetIsRemovedAfterTheWidgetAroundIt_ThenTheNextWidgetOutsideIsSelected() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange: a render disposes a widget before the widgets inside it.
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var layout = renderer.CreateWidget(selection, page);
             var card = renderer.CreateWidget(selection, layout);
             var text = renderer.CreateWidget(selection, card);
@@ -119,17 +84,12 @@ public class WidgetSelectionTests
             // Assert
             Assert.Same(layout, selection.Selected);
         });
-    }
 
     [Fact]
-    public async Task WhenTheSelectedWidgetIsRemovedWhileASubjectIsPending_ThenThePendingSubjectIsSelectedOnceItRenders()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenTheSelectedWidgetIsRemovedWhileASubjectIsPending_ThenThePendingSubjectIsSelectedOnceItRenders() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange: an edit of text in a card replaces the widget of the text after the edit asked for its new subject.
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var card = renderer.CreateWidget(selection, page);
             var oldText = renderer.CreateWidget(selection, card);
             selection.Select(oldText);
@@ -144,17 +104,12 @@ public class WidgetSelectionTests
             // Assert
             Assert.Same(newText, selection.Selected);
         });
-    }
 
     [Fact]
-    public async Task WhenAPendingSubjectRendersUnselectable_ThenItIsSelectedOnlyOnceItRendersSelectable()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenAPendingSubjectRendersUnselectable_ThenItIsSelectedOnlyOnceItRendersSelectable() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var card = renderer.CreateWidget(selection, page);
             selection.Select(card);
             var subject = new PersistedDevice();
@@ -172,17 +127,12 @@ public class WidgetSelectionTests
             Assert.Same(card, selectedWhileUnselectable);
             Assert.Same(text, selection.Selected);
         });
-    }
 
     [Fact]
-    public async Task WhenAWidgetIsSelectedWhileASubjectIsPending_ThenThePendingSubjectIsNotSelectedLater()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenAWidgetIsSelectedWhileASubjectIsPending_ThenThePendingSubjectIsNotSelectedLater() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var card = renderer.CreateWidget(selection, page);
             var subject = new PersistedDevice();
             selection.SelectSubject(subject, page);
@@ -195,17 +145,12 @@ public class WidgetSelectionTests
             // Assert
             Assert.Same(card, selection.Selected);
         });
-    }
 
     [Fact]
-    public async Task WhenAPendingSubjectIsSelected_ThenItsWidgetTakesTheFocusOnce()
-    {
-        await using var renderer = new SelectionRenderer();
-        await renderer.Dispatcher.InvokeAsync(() =>
+    public Task WhenAPendingSubjectIsSelected_ThenItsWidgetTakesTheFocusOnce() =>
+        RunAsync((renderer, selection, page) =>
         {
             // Arrange
-            var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
             var subject = new PersistedDevice();
             selection.SelectSubject(subject, page);
             var widget = renderer.CreateWidget(selection, page, subject);
@@ -219,25 +164,15 @@ public class WidgetSelectionTests
             Assert.True(takesFocus);
             Assert.False(takesFocusAgain);
         });
-    }
 
-    [Fact]
-    public async Task WhenAWidgetIsSelectedByTheUser_ThenItDoesNotTakeTheFocus()
+    // Runs the test on the dispatcher of a renderer with a new selection and the widget of a page in edit mode.
+    private static async Task RunAsync(Action<SelectionRenderer, WidgetSelection, SubjectComponent> test)
     {
         await using var renderer = new SelectionRenderer();
         await renderer.Dispatcher.InvokeAsync(() =>
         {
-            // Arrange
             var selection = new WidgetSelection();
-            var page = renderer.CreateWidget(selection, type: SubjectComponentType.Page);
-            var card = renderer.CreateWidget(selection, page);
-            selection.SelectSubject(new PersistedDevice(), page);
-
-            // Act
-            selection.Select(card);
-
-            // Assert
-            Assert.False(selection.TakesFocus(card));
+            test(renderer, selection, renderer.CreateWidget(selection, type: SubjectComponentType.Page));
         });
     }
 
