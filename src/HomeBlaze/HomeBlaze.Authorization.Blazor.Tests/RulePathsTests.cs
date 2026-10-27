@@ -28,6 +28,24 @@ public sealed class RulePathsTests : IDisposable
         Assert.Equal(expectedPattern, pattern);
     }
 
+    [Theory]
+    [InlineData("/Devices/Child", true)] // a property holding a subject
+    [InlineData("/Devices/Child/Child", true)] // a property that can hold a subject but holds none
+    [InlineData("/Devices", false)] // an entry
+    [InlineData("/Devices/Temperature", false)] // a value
+    [InlineData("/Devices/Start", false)] // a method
+    [InlineData("/Devices/*/Child", false)] // an interior wildcard
+    [InlineData("/Devices/Child/**", false)] // a trailing wildcard
+    [InlineData("/Devices/Kitchn", false)] // nothing
+    public void WhenAPatternIsChecked_ThenOnlyOneWithoutWildcardsNamingAPropertyThatHoldsSubjectsNamesSuchAMember(string pattern, bool expected)
+    {
+        // Act
+        var namesMember = RulePaths.NamesMemberHoldingSubjects(pattern, _graph.Root, _graph.Service.PathProvider);
+
+        // Assert
+        Assert.Equal(expected, namesMember);
+    }
+
     [Fact]
     public void WhenTheMembersOfASubjectGetTheirPaths_ThenARuleWithEachPathMatchesThatMember()
     {

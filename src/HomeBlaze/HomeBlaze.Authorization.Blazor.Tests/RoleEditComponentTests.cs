@@ -474,6 +474,10 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     [InlineData("deny", "/Devices/Child/**")] // ends in a wildcard
     [InlineData("deny", "/Devices/Temperature")] // a value, below which is nothing
     [InlineData("deny", "/Devices")] // an entry, which the path warning covers
+    [InlineData("deny", "/Devices/*/Child")] // an interior wildcard, matching several members
+    [InlineData("deny", "/Devices/**/Child")] // an interior wildcard of any depth
+    [InlineData("deny", "/Devices/Kitchn")] // a path that names nothing
+    [InlineData("deny", "/Devices/Child/Start")] // a method
     [InlineData("allow", "/Devices/Child")] // an allow rule
     public void WhenAPathHasNothingBelowItLeftOut_ThenTheCardHasNoHint(string section, string path)
     {

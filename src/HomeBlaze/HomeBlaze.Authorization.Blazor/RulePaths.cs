@@ -65,23 +65,24 @@ internal static class RulePaths
     }
 
     /// <summary>
-    /// Gets whether a valid path pattern resolves below <paramref name="root"/> to a member that holds no subjects, such
-    /// as a value, a method or an attribute, so that nothing is below it.
+    /// Gets whether a valid path pattern resolves below <paramref name="root"/> to a member that can hold subjects, such
+    /// as a reference to a device, and not to an entry of it, so that the pattern matches that member alone and not what
+    /// is below it. A pattern with a wildcard or that resolves to nothing gives false.
     /// </summary>
-    public static bool NamesValue(string pattern, IInterceptorSubject? root, PathProviderBase pathProvider)
+    public static bool NamesMemberHoldingSubjects(string pattern, IInterceptorSubject? root, PathProviderBase pathProvider)
     {
-        if (root?.TryGetRegisteredSubject() is not { } registeredRoot)
+        if (pattern.Contains('*') || root?.TryGetRegisteredSubject() is not { } registeredRoot)
         {
             return false;
         }
 
         try
         {
-            return pathProvider.TryGetPropertyFromPath(registeredRoot, pattern) is { Index: null, Property.CanContainSubjects: false };
+            return pathProvider.TryGetPropertyFromPath(registeredRoot, pattern) is { Index: null, Property.CanContainSubjects: true };
         }
         catch (InvalidOperationException)
         {
-            // The graph changed while it was read; the pattern is then not known to name a value.
+            // The graph changed while it was read; the pattern is then not known to name such a member.
             return false;
         }
     }

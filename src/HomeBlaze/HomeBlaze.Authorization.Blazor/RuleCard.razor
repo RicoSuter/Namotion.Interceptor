@@ -183,16 +183,15 @@
 
     private string? WarnPath(string pattern) => AuthorizationService.GetPathPatternWarning(pattern);
 
-    // The paths of a deny rule that match one member and leave what is below it allowed: without a trailing wildcard,
-    // valid, not naming an entry, which the path warning covers, and not naming a value, below which is nothing.
+    // The paths of a deny rule that match one member and leave what is below it allowed: valid, without a wildcard and
+    // naming a member that holds subjects. An entry is left to the path warning, and a value has nothing below it.
     private List<string> GetSingleMemberPaths()
     {
         var root = PathResolver.ResolveSubject("/", PathStyle.Canonical);
         return _rule.Paths
-            .Where(pattern => !pattern.EndsWith('*') &&
+            .Where(pattern => !pattern.Contains('*') &&
                 AuthorizationService.ValidatePathPattern(pattern) is null &&
-                AuthorizationService.GetPathPatternWarning(pattern) is null &&
-                !RulePaths.NamesValue(pattern, root, AuthorizationService.PathProvider))
+                RulePaths.NamesMemberHoldingSubjects(pattern, root, AuthorizationService.PathProvider))
             .Distinct(StringComparer.Ordinal)
             .ToList();
     }
