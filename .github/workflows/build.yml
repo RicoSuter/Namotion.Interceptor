@@ -163,8 +163,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.VERSION }}
 
-      # The E2E tests only launch Chromium, and a cached browser is not downloaded again. The runner image already has its
-      # libraries, so --with-deps would only add fonts the tests do not need, from a mirror that can take minutes.
+      # No --with-deps: the runner image has Chromium's libraries, and the apt mirror can take minutes.
       - name: Install Playwright browsers
         run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install chromium
 
