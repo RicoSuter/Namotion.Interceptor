@@ -17,10 +17,16 @@
 
     const diagrams = document.getElementsByClassName('mermaid');
 
-    // The SVG by theme and source, so that a diagram Blazor inserts again is shown before the browser paints.
-    const svgs = new Map();
+    // By theme and source: the SVG, null for an error, or the pending render, so that a diagram Blazor inserts again
+    // is shown before the browser paints and the tail of a streaming reply is rendered once.
+    const results = new Map();
     let mermaidLoad = null;
-    let renderCount = 0;
+
+    // Mermaid prefixes the ids of an SVG and scopes its style with the render id, which a remembered SVG holds as a
+    // placeholder so that every copy gets ids of its own; the closing x keeps one id from being the prefix of another.
+    const idPlaceholder = 'mermaid-diagram-id';
+    let idCount = 0;
+    const nextId = () => `mermaid-diagram-${++idCount}x`;
 
     // The Monaco loader defines a global AMD define, which makes the bundle register itself as a module instead of
     // setting window.mermaid. The code runs as an inline script, which executes synchronously, so define is only hidden
@@ -38,6 +44,7 @@
             const script = document.createElement('script');
             script.textContent = code;
             document.head.appendChild(script);
+            script.remove();
         } finally {
             window.define = amdDefine;
         }
@@ -47,7 +54,10 @@
         }
 
         return window.mermaid;
-    })();
+    })().catch(error => {
+        mermaidLoad = null;
+        throw error;
+    });
 
     // Strict still draws a click statement with a URL as a link, so the links are removed and their content stays.
     const withoutLinks = svg => {
@@ -60,26 +70,37 @@
         return template.innerHTML;
     };
 
+    const remember = (key, result) => {
+        results.set(key, result);
+        if (results.size > 100) {
+            results.delete(results.keys().next().value);
+        }
+    };
+
     const show = (element, svg) => {
-        element.innerHTML = svg;
+        if (svg === null) {
+            element.dataset.mermaidState = 'error';
+            return;
+        }
+
+        element.innerHTML = svg.replaceAll(idPlaceholder, nextId());
         element.dataset.mermaidState = 'done';
     };
 
-    const render = async (element, source, theme, key) => {
+    // A failed load rejects instead of returning null, so it is not remembered and a later diagram tries again.
+    const render = async (source, theme) => {
+        const mermaid = await loadMermaid();
         try {
-            const mermaid = await loadMermaid();
             mermaid.initialize({ ...settings, theme });
             if (!await mermaid.parse(source, { suppressErrors: true })) {
-                element.dataset.mermaidState = 'error';
-                return;
+                return null;
             }
 
-            const { svg } = await mermaid.render(`mermaid-diagram-${++renderCount}`, source);
-            const safeSvg = withoutLinks(svg);
-            svgs.set(key, safeSvg);
-            show(element, safeSvg);
+            const id = nextId();
+            const { svg } = await mermaid.render(id, source);
+            return withoutLinks(svg).replaceAll(id, idPlaceholder);
         } catch {
-            element.dataset.mermaidState = 'error';
+            return null;
         }
     };
 
@@ -88,7 +109,8 @@
             return;
         }
 
-        const theme = document.querySelector('.homeblaze-dark-mode') ? 'dark' : 'default';
+        // Not inside an SVG, where a diagram can set any class on its nodes.
+        const theme = document.querySelector('.homeblaze-dark-mode:not(svg *)') ? 'dark' : 'default';
 
         // A copy, as a rendered SVG can contain elements with the class too.
         for (const element of Array.from(diagrams)) {
@@ -98,12 +120,25 @@
 
             const source = element.textContent;
             const key = theme + '\n' + source;
-            const svg = svgs.get(key);
-            if (svg) {
-                show(element, svg);
-            } else {
+            let result = results.get(key);
+            if (result === undefined) {
+                result = render(source, theme).then(
+                    svg => {
+                        remember(key, svg);
+                        return svg;
+                    },
+                    () => {
+                        results.delete(key);
+                        return null;
+                    });
+                remember(key, result);
+            }
+
+            if (result instanceof Promise) {
                 element.dataset.mermaidState = 'pending';
-                render(element, source, theme, key);
+                result.then(svg => show(element, svg));
+            } else {
+                show(element, result);
             }
         }
     };

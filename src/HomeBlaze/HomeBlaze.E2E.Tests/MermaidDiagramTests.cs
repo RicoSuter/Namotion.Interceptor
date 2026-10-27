@@ -22,12 +22,12 @@ public class MermaidDiagramTests
         _fixture = fixture;
     }
 
-    private async Task<IPage> OpenPageAsync(List<string>? requestUrls = null)
+    private async Task<IPage> OpenPageAsync(Func<IPage, Task>? setUp = null)
     {
         var page = await _fixture.CreatePageAsync();
-        if (requestUrls is not null)
+        if (setUp is not null)
         {
-            page.Request += (_, request) => requestUrls.Add(request.Url);
+            await setUp(page);
         }
 
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Diagrams.md");
@@ -67,10 +67,14 @@ public class MermaidDiagramTests
     public async Task WhenDiagramContainsActiveContent_ThenNothingActiveIsRenderedOrLoaded()
     {
         // Arrange
-        var requestUrls = new List<string>();
+        var isRequested = false;
 
         // Act
-        var page = await OpenPageAsync(requestUrls);
+        var page = await OpenPageAsync(openingPage => openingPage.RouteAsync("**/mermaid-exfiltration.test/**", route =>
+        {
+            isRequested = true;
+            return route.AbortAsync();
+        }));
         var diagram = page.Locator("pre.mermaid").Nth(ActiveContentDiagram);
         await Assertions.Expect(diagram).ToHaveAttributeAsync("data-mermaid-state", "done", new() { Timeout = Timeout });
 
@@ -81,6 +85,6 @@ public class MermaidDiagramTests
         var hasEventHandler = await diagram.EvaluateAsync<bool>(
             "element => [...element.querySelectorAll('*')].some(child => [...child.attributes].some(attribute => attribute.name.startsWith('on')))");
         Assert.False(hasEventHandler);
-        Assert.DoesNotContain(requestUrls, url => url.Contains("127.0.0.1:9", StringComparison.Ordinal));
+        Assert.False(isRequested);
     }
 }
