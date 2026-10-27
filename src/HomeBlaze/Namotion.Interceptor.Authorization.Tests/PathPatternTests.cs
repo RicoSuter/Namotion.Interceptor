@@ -59,7 +59,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstMemberPath_ThenResultIsAsExpected(string pattern, string memberPath, bool expected)
     {
         // Arrange
-        var provider = SlashPathProvider.Instance;
+        var provider = Policies.SlashPaths;
         var compiled = PathPattern.Parse(pattern, provider, "Test");
         var (links, member) = ToMemberPath(provider, memberPath);
 
@@ -83,7 +83,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyWithBothSpellings_ThenEitherSpellingMatches(string pattern, bool expected)
     {
         // Arrange
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         PathLink[] links = [new("Security", null, null), new("Roles", "FullReader", "FullReader")];
 
         // Act
@@ -100,7 +100,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyShadowedByAProperty_ThenOnlyTheExplicitSpellingMatches(string pattern, bool expected)
     {
         // Arrange
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         PathLink[] links = [new("Security", null, null), new("Roles", "Wifi", null)];
 
         // Act
@@ -117,7 +117,7 @@ public class PathPatternTests
     public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyWhoseExplicitFormIsShadowed_ThenOnlyTheBareSpellingMatches(string pattern, bool expected)
     {
         // Arrange
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         PathLink[] links = [new("Security", null, null), new(null, "FullReader", "FullReader")];
 
         // Act
@@ -132,7 +132,7 @@ public class PathPatternTests
     {
         // Arrange
         var pattern = "/" + string.Join("/", Enumerable.Repeat("**/A", 30)) + "/Missing";
-        var compiled = PathPattern.Parse(pattern, SlashPathProvider.Instance, "Test");
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
         var links = Enumerable.Range(0, 60).Select(_ => new PathLink("A", null, null)).ToArray();
 
         // Act
@@ -143,25 +143,122 @@ public class PathPatternTests
     }
 
     [Theory]
-    [InlineData("Rooms", "must start with '/'")]
-    [InlineData("", "must start with '/'")]
+    [InlineData("Wifi/Ssid", "Wifi/Ssid", true)]
+    [InlineData("Wifi/Ssid", "Wifi/Password", false)]
+    [InlineData("Rooms[Kitchen]/**", "Rooms[Kitchen]/Lights[Ceiling]/IsOn", true)]
+    [InlineData("Rooms[Kitchen]/**", "Rooms[Bedroom]/Lights", false)]
+    [InlineData("*", "Wifi", true)]
+    [InlineData("*", "Wifi/Ssid", false)]
+    [InlineData("**", "Rooms[Kitchen]/Sensor", true)]
+    public void WhenPatternHasNoLeadingSeparator_ThenItMatchesLikeThePatternWithOne(string pattern, string memberPath, bool expected)
+    {
+        // Arrange
+        var provider = Policies.SlashPaths;
+        var withoutSeparator = PathPattern.Parse(pattern, provider, "Test");
+        var withSeparator = PathPattern.Parse("/" + pattern, provider, "Test");
+        var (links, member) = ToMemberPath(provider, memberPath);
+
+        // Act
+        var result = withoutSeparator.Matches(links, member);
+
+        // Assert
+        Assert.Equal(expected, result);
+        Assert.Equal(withSeparator.Matches(links, member), result);
+    }
+
+    [Fact]
+    public void WhenPatternIsAPathTheRegistryWrote_ThenItCompilesAndMatchesThatMember()
+    {
+        // Arrange
+        var home = TestGraph.Create();
+        var brightness = TestGraph.Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Models.Light.Brightness));
+        var path = brightness.TryGetPath(DefaultPathProvider.Instance, null)!;
+        var policy = AuthorizationPolicy.Compile(
+            [Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [path])])], ["Reader"], [],
+            Policies.KnownActions, TestTags.Default, DefaultPathProvider.Instance);
+
+        // Act
+        var result = policy.CanRead(brightness);
+
+        // Assert
+        Assert.Equal("Rooms[Kitchen].Lights[Ceiling].Brightness", path);
+        Assert.True(result);
+        Assert.False(policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Models.Light.Brightness))));
+    }
+
+    [Theory]
+    [InlineData("", "is empty")]
     [InlineData("/Rooms[", "malformed")]
     [InlineData("/Rooms[]", "malformed")]
     [InlineData("/ Rooms", "whitespace")]
     [InlineData("/Rooms[ Kitchen]", "whitespace")]
-    [InlineData("/", "matches no member; use '/**' for the subject and everything below it, or '/*' for its members")]
+    [InlineData("/", "matches no member; use '**' for the subject and everything below it, or '*' for its members")]
+    [InlineData("//", "matches no member; use '**'")]
     [InlineData("/Rooms[Kitchen]", "matches no member; use '/Rooms[Kitchen]/**' for the subject and everything below it, or '/Rooms[Kitchen]/*' for its members")]
+    [InlineData("Rooms[Kitchen]", "matches no member; use 'Rooms[Kitchen]/**' for the subject and everything below it, or 'Rooms[Kitchen]/*' for its members")]
+    [InlineData("//Rooms/*", "has an empty segment; '/' may only start a pattern and separate segments")]
+    [InlineData("/Rooms//*", "has an empty segment")]
+    [InlineData("Rooms/", "has an empty segment")]
+    [InlineData("/Rooms[Kitchen]/", "has an empty segment")]
+    [InlineData("/Rooms['a/']//*", "has an empty segment")]
     [InlineData("/Rooms[*]", "matches no member")]
     [InlineData("/**/Lights[C*]", "matches no member")]
     [InlineData("/Rooms/**[A]", "matches no member")]
     public void WhenPatternIsInvalid_ThenParseThrowsNamingTheRole(string pattern, string expectedMessagePart)
     {
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, SlashPathProvider.Instance, "Reader"));
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, Policies.SlashPaths, "Reader"));
 
         // Assert
         Assert.Contains("Reader", exception.Message);
         Assert.Contains(expectedMessagePart, exception.Message);
+    }
+
+    [Theory]
+    [InlineData("/Rooms[a/b]/*")]
+    [InlineData("/Rooms['a//b']/*")]
+    [InlineData("/Rooms['it''s/']/*")]
+    [InlineData("Rooms['/']/**")]
+    public void WhenAnIndexContainsTheSeparator_ThenThePatternHasNoEmptySegment(string pattern)
+    {
+        // Act
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
+
+        // Assert
+        Assert.NotNull(compiled);
+    }
+
+    [Theory]
+    [InlineData("/Rooms.*", "starts with '/', which is not the path provider's separator '.'; write the pattern with '.' or without a leading separator")]
+    [InlineData("\\Rooms.*", "starts with '\\', which is not the path provider's separator '.'")]
+    [InlineData("/", "starts with '/'")]
+    public void WhenPatternStartsWithAnotherProvidersSeparator_ThenParseThrowsNamingTheSeparator(string pattern, string expectedMessagePart)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse(pattern, DefaultPathProvider.Instance, "Reader"));
+        Assert.Contains(expectedMessagePart, exception.Message);
+    }
+
+    [Fact]
+    public void WhenSlashPatternStartsWithABackslash_ThenParseThrows()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<AuthorizationException>(() => PathPattern.Parse("\\Rooms/*", Policies.SlashPaths, "Reader"));
+        Assert.Contains("separator '/'", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("Security.a/b.Name")]
+    [InlineData("Security.a\\b.Name")]
+    [InlineData(".Security.Roles['/a'].Name")]
+    [InlineData("Areas[/Garage].**")]
+    public void WhenASeparatorOfAnotherProviderIsNotTheFirstCharacter_ThenThePatternCompiles(string pattern)
+    {
+        // Act
+        var compiled = PathPattern.Parse(pattern, DefaultPathProvider.Instance, "Test");
+
+        // Assert
+        Assert.NotNull(compiled);
     }
 
     private static readonly PathLink Name = new("Name", null, null);

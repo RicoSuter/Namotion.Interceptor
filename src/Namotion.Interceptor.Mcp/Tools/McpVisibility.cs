@@ -49,14 +49,18 @@ internal sealed class McpVisibility
     /// only. Without a policy, <paramref name="listingPathProvider"/> itself.
     /// </summary>
     public PathProviderBase GetListingPathProvider(PathProviderBase listingPathProvider) =>
-        _policy is null ? listingPathProvider : _listingPathProvider ??= new ShownSubjectsPathProvider(listingPathProvider, this);
+        _policy is null ? listingPathProvider : GetShownSubjectsPathProvider(ref _listingPathProvider, listingPathProvider);
 
     /// <summary>
     /// The configuration's resolution provider, <paramref name="resolutionPathProvider"/>, restricted as
     /// <see cref="GetListingPathProvider"/> restricts the listing provider.
     /// </summary>
     public PathProviderBase GetResolutionPathProvider(PathProviderBase resolutionPathProvider) =>
-        _policy is null ? resolutionPathProvider : _resolutionPathProvider ??= new ShownSubjectsPathProvider(resolutionPathProvider, this);
+        _policy is null ? resolutionPathProvider : GetShownSubjectsPathProvider(ref _resolutionPathProvider, resolutionPathProvider);
+
+    // The cache is kept per inner provider, so a call with another provider never gets one wrapping the first.
+    private ShownSubjectsPathProvider GetShownSubjectsPathProvider(ref ShownSubjectsPathProvider? cached, PathProviderBase inner) =>
+        cached is not null && cached.Inner == inner ? cached : cached = new ShownSubjectsPathProvider(inner, this);
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
@@ -146,6 +150,8 @@ internal sealed class McpVisibility
 
     private sealed class ShownSubjectsPathProvider(PathProviderBase inner, McpVisibility visibility) : PathProviderBase
     {
+        public PathProviderBase Inner => inner;
+
         public override char PathSeparator => inner.PathSeparator;
 
         public override char IndexOpen => inner.IndexOpen;

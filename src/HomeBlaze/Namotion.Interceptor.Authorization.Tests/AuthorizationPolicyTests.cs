@@ -21,7 +21,7 @@ public class AuthorizationPolicyTests
         var unit = Attribute(home.Rooms["Kitchen"].Sensor!, nameof(Sensor.Temperature), "Unit");
 
         // Assert
-        Assert.Equal("Rooms[Kitchen]/Lights[Ceiling]/Brightness", brightness.TryGetPath(SlashPathProvider.Instance, null));
+        Assert.Equal("Rooms[Kitchen]/Lights[Ceiling]/Brightness", brightness.TryGetPath(Policies.SlashPaths, null));
         Assert.True(unit.IsAttribute);
         Assert.Equal("Unit", unit.BrowseName);
     }
@@ -238,7 +238,7 @@ public class AuthorizationPolicyTests
         var role = Role("Reader", allow: [Rule(Read)]);
 
         // Act
-        var policy = AuthorizationPolicy.Compile([role], ["Reader"], [], [Execute], TestTags.Default, SlashPathProvider.Instance);
+        var policy = AuthorizationPolicy.Compile([role], ["Reader"], [], [Execute], TestTags.Default, Policies.SlashPaths);
 
         // Assert
         Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
@@ -252,8 +252,21 @@ public class AuthorizationPolicyTests
 
         // Act & Assert
         var exception = Assert.Throws<AuthorizationException>(
-            () => AuthorizationPolicy.Compile([], [], [], actions, TestTags.Default, SlashPathProvider.Instance));
+            () => AuthorizationPolicy.Compile([], [], [], actions, TestTags.Default, Policies.SlashPaths));
         Assert.Equal("At most 64 actions are supported.", exception.Message);
+    }
+
+    [Fact]
+    public void WhenTheTagProviderReturnsADefaultArray_ThenEvaluationThrowsNamingTheProvider()
+    {
+        // Arrange
+        var home = Create();
+        var provider = new DelegateTagProvider(_ => default);
+        var policy = Policies.Compile([Role("Reader", allow: [Rule(Read, tags: ["state"])])], ["Reader"], [], provider);
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        Assert.Contains(typeof(DelegateTagProvider).FullName!, exception.Message);
     }
 
     [Fact]

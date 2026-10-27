@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Mcp.Tools;
@@ -62,14 +61,7 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
-            if (!_configuration.IsAllowed(attribute, McpAccessActions.Read))
-            {
-                continue;
-            }
-
-            // A read-only attribute without a value says nothing about its property; a writable one can be set.
-            var value = attribute.GetValue();
-            if (value is not null || attribute.HasSetter)
+            if (McpToolHelper.TryGetListedAttributeValue(attribute, _configuration, out var value))
             {
                 attributes[attribute.BrowseName] = value;
             }

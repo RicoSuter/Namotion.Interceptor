@@ -345,6 +345,23 @@ public static class PathExtensions
     /// the separator is written as is and does not resolve back.
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
+        => property.TryGetPath(pathProvider, rootSubject, propertyIndex, includedPropertiesOnly: false);
+
+    /// <summary>
+    /// Gets the complete path of the given property, optionally only through properties the provider includes.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="pathProvider">The path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <param name="propertyIndex">The index of the property, or null, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
+    /// <param name="includedPropertiesOnly">Whether every property on the chain the path is written through, also an [InlinePaths] dictionary written as a bare key, must pass <see cref="PathProviderBase.IsPropertyIncluded"/>, checked in the same walk that writes the text.</param>
+    /// <returns>The path, or null as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>, and with <paramref name="includedPropertiesOnly"/> also when a property on the chain is excluded.</returns>
+    public static string? TryGetPath(
+        this RegisteredSubjectProperty property,
+        PathProviderBase pathProvider,
+        IInterceptorSubject? rootSubject,
+        object? propertyIndex,
+        bool includedPropertiesOnly)
     {
         if (!pathProvider.IsPropertyIncluded(property))
         {
@@ -356,7 +373,8 @@ public static class PathExtensions
         var frames = PooledFrames.Rent();
         try
         {
-            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames))
+            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames) ||
+                (includedPropertiesOnly && !AreChainPropertiesIncluded(pathProvider, in frames)))
             {
                 return null;
             }
@@ -366,8 +384,8 @@ public static class PathExtensions
             {
                 var (prop, index) = frames[i];
 
-                // [InlinePaths] frames emit just the key where the reader resolves it back; no IsPropertyIncluded
-                // check, since providers already include them and these frames are only traversed for navigation.
+                // [InlinePaths] frames write just the key where the reader resolves it back. Like any frame above the
+                // leaf, they are checked for inclusion only with includedPropertiesOnly.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))
@@ -402,12 +420,16 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Fills <paramref name="properties"/> with the properties along the path that
-    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> writes for
+    /// Fills <paramref name="properties"/> with the chain of properties that
+    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> walks for
     /// <paramref name="property"/>, from the property owned by <paramref name="rootSubject"/> (or by the absolute top
-    /// when it is null) down to <paramref name="property"/>, each with the collection position or dictionary key it is
-    /// written with. The list is cleared first.
+    /// when it is null) down to <paramref name="property"/>, each with its collection position or dictionary key. The
+    /// list is cleared first.
     /// </summary>
+    /// <remarks>
+    /// No path provider is involved, so the chain is also returned where <c>TryGetPath</c> writes no path: when its
+    /// provider excludes <paramref name="property"/>, or an [InlinePaths] key on the chain cannot be written.
+    /// </remarks>
     /// <param name="property">The property.</param>
     /// <param name="rootSubject">The root subject or null.</param>
     /// <param name="propertyIndex">Optional index of the last property, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
@@ -442,6 +464,20 @@ public static class PathExtensions
         {
             frames.Return();
         }
+    }
+
+    // Frame 0 is the property itself, checked before the walk.
+    private static bool AreChainPropertiesIncluded(PathProviderBase pathProvider, in PooledFrames frames)
+    {
+        for (var i = 1; i < frames.Count; i++)
+        {
+            if (!pathProvider.IsPropertyIncluded(frames[i].Property))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryAppendInlineKey(

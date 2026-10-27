@@ -55,10 +55,13 @@ internal static class McpToolHelper
         return false;
     }
 
+    /// <summary>
+    /// Builds the node of a subject whose path, from <see cref="TryGetSubjectPath"/>, is <paramref name="path"/>.
+    /// </summary>
     internal static SubjectNode BuildSubjectNodeDto(
         RegisteredSubject subject,
+        string? path,
         PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
         McpServerConfiguration configuration,
         bool includeProperties,
         bool includeAttributes,
@@ -66,8 +69,6 @@ internal static class McpToolHelper
         bool includeInterfaces,
         IReadOnlySet<string>? propertyNames = null)
     {
-        var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
-
         // Collect enrichments and extract known fields
         var enrichments = new Dictionary<string, object?>();
         foreach (var enricher in configuration.SubjectEnrichers)
@@ -212,29 +213,46 @@ internal static class McpToolHelper
             return null;
         }
 
-        return property.IsAttribute || !visibility.IsShown(property.Parent) ? null : property;
+        return property.IsAttribute ? null : property;
     }
 
+    /// <summary>
+    /// The path the tools write for the subject from <paramref name="rootSubject"/>, after the configuration's
+    /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty, otherwise null
+    /// when the registry writes no path. With an <see cref="McpServerConfiguration.AccessPolicy"/> also null when a
+    /// property the path is written through is not readable.
+    /// </summary>
     internal static string? TryGetSubjectPath(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
-        string pathPrefix = "")
+        RegisteredSubject subject, McpServerConfiguration configuration, IInterceptorSubject rootSubject)
     {
+        var pathPrefix = configuration.PathPrefix;
         if (subject.Subject == rootSubject)
         {
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        if (subject.Parents.Length > 0)
+        var parents = subject.Parents;
+        if (parents.Length == 0)
         {
-            var parent = subject.Parents[0];
-            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            return path is not null ? $"{pathPrefix}{path}" : null;
+            return null;
         }
 
-        return null;
+        var parent = parents[0];
+        var path = configuration.AccessPolicy is null
+            ? parent.Property.TryGetPath(configuration.ToolPathProvider, rootSubject, parent.Index)
+            : TryGetReadablePath(parent.Property, parent.Index, configuration, rootSubject);
+        return path is not null ? $"{pathPrefix}{path}" : null;
     }
+
+    // The chain is checked in the walk that writes the text, so a subject moved on it while a call runs cannot put the
+    // name of a hidden property into the text. The resolution provider writes the path provider's segments and
+    // includes exactly what the policy allows to read, the holding property too; the path provider's own inclusion
+    // applies to the holding property only, as without a policy.
+    private static string? TryGetReadablePath(
+        RegisteredSubjectProperty property, object? index, McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
+        configuration.PathProvider.IsPropertyIncluded(property)
+            ? property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, index, includedPropertiesOnly: true)
+            : null;
 
     private static ScalarProperty BuildScalarPropertyDto(
         RegisteredSubjectProperty property,
@@ -247,14 +265,7 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                if (!configuration.IsAllowed(attribute, McpAccessActions.Read))
-                {
-                    continue;
-                }
-
-                // A read-only attribute without a value says nothing about its property; a writable one can be set.
-                var value = attribute.GetValue();
-                if (value is not null || attribute.HasSetter)
+                if (TryGetListedAttributeValue(attribute, configuration, out var value))
                 {
                     attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
                 }
@@ -271,6 +282,24 @@ internal static class McpToolHelper
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
             IsWritable: IsWritable(property, configuration),
             Attributes: attributes);
+    }
+
+    /// <summary>
+    /// Whether the tools list the attribute of a listed property, and its value when they do: the policy allows to read
+    /// it, and it has a value or a setter.
+    /// </summary>
+    internal static bool TryGetListedAttributeValue(
+        RegisteredSubjectProperty attribute, McpServerConfiguration configuration, out object? value)
+    {
+        if (!configuration.IsAllowed(attribute, McpAccessActions.Read))
+        {
+            value = null;
+            return false;
+        }
+
+        // A read-only attribute without a value says nothing about its property; a writable one can be set.
+        value = attribute.GetValue();
+        return value is not null || attribute.HasSetter;
     }
 
     /// <summary>

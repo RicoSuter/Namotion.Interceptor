@@ -20,6 +20,11 @@ internal static class RoleClosure
                 throw new AuthorizationException("A role has no name.");
             }
 
+            if (string.Equals(role.Name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new AuthorizationException($"Role name '{AuthorizationPolicy.SystemRoleName}' is reserved.");
+            }
+
             if (!rolesByName.TryAdd(role.Name, role))
             {
                 throw new AuthorizationException($"Role '{role.Name}' is defined more than once.");

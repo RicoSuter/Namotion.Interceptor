@@ -10,6 +10,7 @@ using HomeBlaze.AI.Tests.Mcp;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
@@ -659,7 +660,10 @@ public sealed class AgentRolesTests : IAsyncLifetime
                 ["Authorization"] = authorization
             }
         };
-        await storage.ConnectAsync(CancellationToken.None);
+        // The hosted service handler starts the storage once it is attached, which connects it. A second connect from
+        // here would rebuild the subjects of the storage, possibly while a test already reads them.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => storage.Status == StorageStatus.Connected, message: "The storage should connect.");
 
         var agentServices = new AgentServices(
             new FactoryToolSource(serviceProvider, () => root),

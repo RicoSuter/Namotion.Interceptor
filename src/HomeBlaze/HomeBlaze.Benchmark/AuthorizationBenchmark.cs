@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -60,14 +61,14 @@ public class AuthorizationBenchmark
         var deny = new List<PermissionRule>();
         for (var i = 0; i < 10; i++)
         {
-            allow.Add(new PermissionRule { Paths = [$"/Floors[Floor{i}]/**"], Members = ["Set*"], Actions = [Execute] });
-            deny.Add(new PermissionRule { Paths = [$"/Floors[Floor{40 + i}]/**"], Actions = [PermissionAction.Write, Execute] });
+            allow.Add(new PermissionRule { Paths = [$"Floors[Floor{i}].**"], Members = ["Set*"], Actions = [Execute] });
+            deny.Add(new PermissionRule { Paths = [$"Floors[Floor{40 + i}].**"], Actions = [PermissionAction.Write, Execute] });
         }
 
         deny.Add(new PermissionRule { Tags = ["secret"], Actions = [PermissionAction.Read, PermissionAction.Write] });
 
         var role = new AuthorizationRole { Name = "Operator", Allow = [.. allow], Deny = [.. deny] };
-        _policy = AuthorizationPolicy.Compile([role], ["Operator"], [], [PermissionAction.Read, PermissionAction.Write, Execute], new TagProvider(), SlashPathProvider.Instance);
+        _policy = AuthorizationPolicy.Compile([role], ["Operator"], [], [PermissionAction.Read, PermissionAction.Write, Execute], new TagProvider(), DefaultPathProvider.Instance);
 
         _lampBrightness = Member(_building.Floors["Floor5"].Lamps["Lamp3"], nameof(Lamp.Brightness));
         _restrictedLampBrightness = Member(_building.Floors["Floor45"].Lamps["Lamp3"], nameof(Lamp.Brightness));
@@ -128,11 +129,11 @@ public class AuthorizationBenchmark
 
     private sealed class TagProvider : IMemberTagProvider
     {
-        private static readonly string[] State = ["state"];
-        private static readonly string[] Subjects = ["subjects"];
-        private static readonly string[] Secret = ["state", "secret"];
+        private static readonly ImmutableArray<string> State = ["state"];
+        private static readonly ImmutableArray<string> Subjects = ["subjects"];
+        private static readonly ImmutableArray<string> Secret = ["state", "secret"];
 
-        public IReadOnlyCollection<string> GetTags(RegisteredSubjectProperty member)
+        public ImmutableArray<string> GetTags(RegisteredSubjectProperty member)
         {
             if (member.CanContainSubjects)
             {
@@ -141,13 +142,6 @@ public class AuthorizationBenchmark
 
             return member.Name == nameof(Lamp.Secret) ? Secret : State;
         }
-    }
-
-    private sealed class SlashPathProvider : PathProviderBase
-    {
-        public static readonly SlashPathProvider Instance = new();
-
-        public override char PathSeparator => '/';
     }
 }
 

@@ -290,7 +290,7 @@ public class PathSelectorTests
         Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor))));
     }
 
-    // Attribute paths follow the registry's path syntax, which today spells an attribute by its name alone.
+    // Attribute paths follow the registry's path syntax, which spells an attribute by its name alone.
 
     [Fact]
     public void WhenPathNamesAnAttribute_ThenOnlyThatAttributeMatches()

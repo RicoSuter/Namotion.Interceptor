@@ -25,21 +25,12 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     }
 
     /// <summary>
-    /// The provider the tools list, select and filter through: <paramref name="pathProvider"/> itself without a policy.
+    /// <paramref name="pathProvider"/> restricted to what <paramref name="policy"/> allows to read, or
+    /// <paramref name="pathProvider"/> itself without a policy. <paramref name="appliesInnerInclusion"/> keeps the
+    /// inclusion of <paramref name="pathProvider"/> in addition to the policy.
     /// </summary>
     /// <exception cref="InvalidOperationException"><paramref name="pathProvider"/> does not extend <see cref="PathProviderBase"/>.</exception>
-    public static PathProviderBase CreateForListing(IPathProvider pathProvider, IMcpAccessPolicy? policy)
-        => Create(pathProvider, policy, appliesInnerInclusion: true);
-
-    /// <summary>
-    /// The provider the tools resolve a requested path through, with every property on it included: <paramref name="pathProvider"/>
-    /// itself without a policy, whose inclusion the tools do not apply when resolving.
-    /// </summary>
-    /// <exception cref="InvalidOperationException"><paramref name="pathProvider"/> does not extend <see cref="PathProviderBase"/>.</exception>
-    public static PathProviderBase CreateForResolution(IPathProvider pathProvider, IMcpAccessPolicy? policy)
-        => Create(pathProvider, policy, appliesInnerInclusion: false);
-
-    private static PathProviderBase Create(IPathProvider pathProvider, IMcpAccessPolicy? policy, bool appliesInnerInclusion)
+    public static PathProviderBase Create(IPathProvider pathProvider, IMcpAccessPolicy? policy, bool appliesInnerInclusion)
     {
         var basePathProvider = pathProvider as PathProviderBase
             ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
@@ -74,6 +65,15 @@ internal sealed class McpAccessPathProvider : PathProviderBase
         if (property is null || IsReadable(_policy, property))
         {
             return property;
+        }
+
+        // A later member with the same segment answers as if the hidden one did not exist.
+        foreach (var member in subject.Properties)
+        {
+            if (member != property && _inner.TryGetPropertySegment(member) == segment && IsReadable(_policy, member))
+            {
+                return member;
+            }
         }
 
         // As for a name that does not exist, the segment is a key of the [InlinePaths] dictionary, so a client cannot

@@ -110,3 +110,14 @@ public partial class TestNode
     public partial TestNode? B { get; set; }
     public partial TestNode? Child { get; set; }
 }
+
+[InterceptorSubject]
+public partial class TestDeviceList
+{
+    public partial TestDevice[] Devices { get; set; }
+
+    public TestDeviceList()
+    {
+        Devices = [];
+    }
+}

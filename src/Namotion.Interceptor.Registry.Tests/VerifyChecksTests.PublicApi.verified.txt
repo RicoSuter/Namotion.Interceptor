@@ -20,6 +20,7 @@ namespace Namotion.Interceptor.Registry.Abstractions
     public class RegisteredSubject
     {
         public RegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public bool IsAttached { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyParent> Parents { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> Properties { get; }
         public int ReferenceCount { get; }
@@ -180,6 +181,7 @@ namespace Namotion.Interceptor.Registry.Paths
         public static System.Collections.Generic.List<System.ValueTuple<string, string?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex = null) { }
+        public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex, bool includedPropertiesOnly) { }
         public static bool TryGetPathProperties(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex, [System.Runtime.CompilerServices.TupleElementNames(new string?[]?[] {
                 "Property",
                 "Index"})] System.Collections.Generic.List<System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>> properties) { }

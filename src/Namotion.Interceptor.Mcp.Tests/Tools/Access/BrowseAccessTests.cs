@@ -306,4 +306,27 @@ public class BrowseAccessTests
         Assert.Null(withoutReadableMember);
         Assert.Null(missing);
     }
+
+    [Fact]
+    public async Task WhenHiddenItemsPrecedeAShownOneInACollection_ThenTheShownOneKeepsItsPosition()
+    {
+        // Arrange
+        // Paths keep the collection position so that they resolve back, so it counts the hidden items before.
+        var context = CreateContext();
+        var list = new TestDeviceList(context);
+        var hidden = new TestDevice[] { new(context) { DeviceName = "Hidden1" }, new(context) { DeviceName = "Hidden2" } };
+        list.Devices = [hidden[0], hidden[1], new TestDevice(context) { DeviceName = "Shown" }];
+        var policy = new TestAccessPolicy((member, action) =>
+            action != McpAccessActions.Read || !hidden.Contains(member.Parent.Subject));
+
+        // Act
+        var browse = await BrowseAsync(list, policy, new { format = "json", depth = 1 });
+        var search = await McpToolCaller.CallAsync(list, CreateConfiguration(policy), "search",
+            new { format = "json", types = new[] { nameof(TestDevice) } });
+
+        // Assert
+        var children = browse.GetProperty("result").GetProperty("properties").GetProperty(nameof(TestDeviceList.Devices)).GetProperty("children");
+        Assert.Equal(["Devices[2]"], children.EnumerateArray().Select(child => child.GetProperty("$path").GetString()));
+        Assert.Equal(["Devices[2]"], search.GetProperty("results").EnumerateObject().Select(entry => entry.Name));
+    }
 }

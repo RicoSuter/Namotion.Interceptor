@@ -79,12 +79,12 @@ public class McpServerConfiguration
     /// <see cref="PathProviderBase"/>, restricted to what <see cref="AccessPolicy"/> allows to read.
     /// </summary>
     // Racing first calls create equal providers, so whichever one is kept is correct.
-    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.CreateForListing(PathProvider, AccessPolicy);
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: true);
 
     /// <summary>
     /// The path provider a requested path resolves through: with an <see cref="AccessPolicy"/>, it includes exactly
     /// what the policy allows to read; without one it is <see cref="PathProvider"/>, whose inclusion resolution does
     /// not apply.
     /// </summary>
-    internal PathProviderBase ResolutionPathProvider => _resolutionPathProvider ??= McpAccessPathProvider.CreateForResolution(PathProvider, AccessPolicy);
+    internal PathProviderBase ResolutionPathProvider => _resolutionPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: false);
 }

@@ -1,6 +1,6 @@
 # Authorization: Design
 
-This document describes how `Namotion.Interceptor.Authorization` decides permissions and why it is built the way it is. For its use, the selector and pattern tables, the compile errors and the JSON form, see the [library README](../../src/HomeBlaze/Namotion.Interceptor.Authorization/README.md).
+This document describes how `Namotion.Interceptor.Authorization` decides permissions and why it is built the way it is. For its use, the selector and pattern tables, the compile errors and the JSON form, see [Authorization](../authorization.md). Examples use the registry's default path provider, whose separator is `.`.
 
 ## Problem
 
@@ -38,7 +38,7 @@ Names are resolved once, at compilation: `read` is bit 0, `write` bit 1, and eve
 
 A rule selects members by meaning (state, configuration, secret, an operation that needs confirmation) through tags. The library does not define attributes for these. Code already carries semantic markers of its own, and permission attributes would duplicate them and put role decisions into libraries that cannot know the installation. `IMemberTagProvider` maps whatever an application has (attributes, registry attributes, naming conventions) to tag names, and the mapping can change without touching rules or device code.
 
-The provider is called on every evaluation of a rule with tags, possibly concurrently, so it returns a cached array. The policy compares an array without allocating; any other collection costs an enumerator per comparison.
+The provider is called on every evaluation of a rule with tags, possibly concurrently, so it returns cached arrays. It returns an `ImmutableArray<string>` rather than an interface, so comparing tags never allocates an enumerator, whatever collection a provider would otherwise have chosen.
 
 ## Evaluation
 
@@ -64,21 +64,25 @@ One question can test many rules, and several of them may need the same derived 
 
 ### Patterns match member paths exactly
 
-A path pattern matches the paths of members, and only whole ones, the way a file glob matches file paths. A member's path is the path of its subject followed by the member's segment, so `/Rooms[Kitchen]/Sensor/Temperature` is one member and `/Rooms[Kitchen]/Sensor` is another, the property of the kitchen that holds the sensor. `*` alone is one segment, `**` is zero or more segments anywhere, and `*` inside a segment is a glob over its text. So `/Devices/Sonos/Play` names one member, `/Devices/Sonos/*` every member of that subject, and `/Devices/Sonos/**` every member of it and of every subject below.
+A path pattern matches the paths of members, and only whole ones, the way a file glob matches file paths. A member's path is the path of its subject followed by the member's segment, so `Rooms[Kitchen].Sensor.Temperature` is one member and `Rooms[Kitchen].Sensor` is another, the property of the kitchen that holds the sensor. `*` alone is one segment, `**` is zero or more segments anywhere, and `*` inside a segment is a glob over its text. So `Devices.Sonos.Play` names one member, `Devices.Sonos.*` every member of that subject, and `Devices.Sonos.**` every member of it and of every subject below.
 
-An earlier version matched patterns against the paths of subjects, and a pattern matched when it matched a subject's path or a prefix of it, so a rule on a subject covered its subtree. That could not name one member by its location, nor the members of a subject without its subtree, and a pattern that read like one subject reached a whole branch. Exact matching makes a rule cover what it spells and nothing more, which is the least surprising reading for anyone who knows file globs, and the reach of a rule is visible in its text. The cost falls on rules for a branch, which now end in `/**`. A deny on `/Devices/Sonos` alone denies only the property holding the subject. A deny on `/Devices/Sonos/**` is the branch.
+An earlier version matched patterns against the paths of subjects, and a pattern matched when it matched a subject's path or a prefix of it, so a rule on a subject covered its subtree. That could not name one member by its location, nor the members of a subject without its subtree, and a pattern that read like one subject reached a whole branch. Exact matching makes a rule cover what it spells and nothing more, which is the least surprising reading for anyone who knows file globs, and the reach of a rule is visible in its text. The cost falls on rules for a branch, which now end in `.**`. A deny on `Devices.Sonos` alone denies only the property holding the subject. A deny on `Devices.Sonos.**` is the branch.
 
-The `Members` selector stays: it matches a member's name wherever the member is, which a path pattern spells as `/**/Name`, and combines with types and tags without naming a location.
+The `Members` selector stays: it matches a member's name wherever the member is, which a path pattern spells as `**.Name`, and combines with types and tags without naming a location.
 
-A member's segment is the provider's segment for the property, or its `BrowseName` when the provider gives none. The fallback matters for denies: a member the provider leaves out of paths still has a name a rule can match. An attribute's segment, and the link through an attribute that holds subjects, come from the same place, so attribute paths follow the registry's path syntax rather than one of the library's own. Today the registry's writer and reader spell an attribute by its name alone unless the provider maps it (`/Devices/Sonos/Unit`, and `/Devices/Sonos/Probe/IsOn` below a subject-holding attribute), so attributes of the same name on different properties of one subject currently share a path. The registry's syntax is being changed separately to `Property@Attribute`, recursively; the member segment and `SubjectPaths` then follow it without a change in this library, and only the tests that spell today's form change.
+A member's segment is the provider's segment for the property, or its `BrowseName` when the provider gives none. The fallback matters for denies: a member the provider leaves out of paths still has a name a rule can match. An attribute's segment, and the link through an attribute that holds subjects, come from the same place, so attribute paths follow the registry's path syntax rather than one of the library's own. Today the registry's writer and reader spell an attribute by its name alone unless the provider maps it (`Devices.Sonos.Unit`, and `Devices.Sonos.Probe.IsOn` below a subject-holding attribute), so attributes of the same name on different properties of one subject currently share a path. The registry's syntax is being changed separately to `Property@Attribute`, recursively; the member segment and `SubjectPaths` then follow it without a change in this library, and only the tests that spell today's form change.
 
-Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. A pattern segment without an index matches a path segment with or without one, so `/Line/Machines/**` covers every machine. A member has no index, so a pattern whose last segment has an index, or the separator alone, could match no member. `Compile` rejects both and names the fix (`/Rooms[Kitchen]/**` or `/Rooms[Kitchen]/*`): a deny that silently matches nothing would be the most dangerous leftover of the prefix semantics. The full table is in the README under [Path patterns](../../src/HomeBlaze/Namotion.Interceptor.Authorization/README.md#path-patterns).
+Patterns are parsed with the parser of the `PathProviderBase` given to `Compile`, the provider an application's tools address the graph with, so a segment means in a rule what it means in a request. A pattern segment without an index matches a path segment with or without one, so `Line.Machines.**` covers every machine. A member has no index, so a pattern whose last segment has an index, or the separator alone, could match no member. `Compile` rejects both and names the fix (`Rooms[Kitchen].**` or `Rooms[Kitchen].*`): a deny that silently matches nothing would be the most dangerous leftover of the prefix semantics. The registry's parser skips empty segments, so `Compile` also rejects a doubled or trailing separator, which would otherwise compile to a pattern other than the one written. The full table is in [Path patterns](../authorization.md#path-patterns).
 
-A pattern names absolute paths, and every subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `/**` matches every member that has a path, `/*` every member of a root.
+A pattern names paths from the root, and a registered subject without parents is a root whose path is empty, so the members of a root have one-segment paths. `**` matches every member that has a path, `*` every member of a root. A leading separator is optional and means nothing: the registry's `TryGetPath` writes paths without one, and an application's tools may write them with one, as file paths are written, so both spellings of a path compile to the same pattern. Without the old rule a pattern written for another provider, such as `/Home/Kitchen/**` under the default provider, would read as one segment and match nothing, so a pattern whose first character is `/` or `\` that is not the provider's separator fails with a hint naming the separator. Only the first character is checked, since a bare `[InlinePaths]` key may contain either character; such a key that starts with one of them cannot open a pattern in its bare spelling and is written in the explicit form, `Areas[/Garage].**`; `Home/Kitchen` without it still compiles as one segment and matches nothing, one more pattern only a check against the graph finds.
+
+A subject without parents is not always a root. A detach unlinks the detached subject from its parent and the subjects it holds from it, under the registry's lock, and unregisters each of them when the detach reaches it. A caller can also hold a member it resolved before the detach, or have read a parent list just before it changed. Treating any parentless subject as a root would give it the empty path, and every path deny would stop applying to the members below it. A root is therefore a subject without parents whose `RegisteredSubject.IsAttached` is true. The registry clears the flag when it removes a subject's last parent, in the same change and before the removal is visible, and when it unregisters the subject; outside the subject's own detach, the registry removes a last parent only in the change of a parent that detaches, and the lifecycle then detaches the subject too, so the flag never clears on a subject that stays in the graph. A move detaches and attaches again as a new instance, a subject held by two properties keeps the other parent, and reassigning a value or re-keying a dictionary entry keeps the parent. Every reader reads the flag after the parents, so a reader that sees the parents empty after a removal sees the flag cleared. The flag is checked for every subject a path passes, in `GetPaths`, in `SubjectPaths` and in `IsReachable`, and a subject that is no longer attached makes the paths incomplete or the walk fail. It is a field read, so the check costs nothing measurable.
+
+A question asked while a detach runs therefore sees each subject of the detached branch either still linked on its old path, where a deny for that path applies, or no longer attached, where every path deny applies. A temporary probe that detached and attached a branch 20,000 times while up to three readers asked about members below it found no answer that let a path deny lapse in about 1.8 million questions. An allow rule with paths can still match through the old path for as long as the old link is visible, which is the usual quiescent consistency of evaluation.
 
 ### Every path of a subject
 
-A subject can have several parents, for example a light held both by its room and by a group of favorites. A rule for `/Rooms[Bedroom]/**` must apply to that light's members however a request reached it, or a deny could be bypassed through the other parent. The policy enumerates every path of a subject, one per chain of parents up to a root, and both kinds of rules match through any of them:
+A subject can have several parents, for example a light held both by its room and by a group of favorites. A rule for `Rooms[Bedroom].**` must apply to that light's members however a request reached it, or a deny could be bypassed through the other parent. The policy enumerates every path of a subject, one per chain of parents up to a root, and both kinds of rules match through any of them:
 
 - An allow with paths matches if any path matches: the light is in an allowed branch.
 - A deny with paths matches if any path matches: the light is in a denied branch, and the deny wins wherever the light is also reached.
@@ -87,7 +91,7 @@ A subject can have several parents, for example a light held both by its room an
 
 ### Links carry every spelling
 
-A path is a list of `PathLink`s from the root down to the property holding the subject. A link holds the property's segment, the index text and, for a key of an `[InlinePaths]` dictionary, the bare key when the registry's path reader resolves it without the property's segment. So `/Security/Roles[Reader]` and `/Security/Reader` name the same subject, and a pattern written in either spelling matches its members. A pattern segment with an index never matches the bare spelling, since the bare spelling is a name only.
+A path is a list of `PathLink`s from the root down to the property holding the subject. A link holds the property's segment, the index text and, for a key of an `[InlinePaths]` dictionary, the bare key when the registry's path reader resolves it without the property's segment. So `Security.Roles[Reader]` and `Security.Reader` name the same subject, and a pattern written in either spelling matches its members. A pattern segment with an index never matches the bare spelling, since the bare spelling is a name only.
 
 The rules for which spellings a key has follow the registry's reader: the bare key is offered when it is one non-empty name without the separator or `[`, differs from the inline property's own segment and resolves to the inline property, so it is not shadowed by another property of the same name. The explicit form is offered while the property's own segment still resolves to it. A key that resolves in neither spelling makes the path unwritable, which counts as an incomplete path set.
 
@@ -97,7 +101,7 @@ These rules mirror the registry inside this library, built only on the registry'
 
 `PathPattern.Matches` takes the links of a subject's path and the member as one more link, so no member path string is built. It is the classic glob over segments: it walks the pattern and the member path together, a `**` first matches zero segments, and on a mismatch it backtracks only to the last `**` it passed, which then takes one more segment. That suffices because `**` matches any number of segments and every other pattern segment exactly one: once a later `**` has matched, letting an earlier one consume more segments can only leave less path for the rest of the pattern. The match succeeds when the whole member path is consumed and only `**` segments remain in the pattern. The matcher has no recursion and no allocation, and its worst case is the pattern length times the path length. Segment globs use the same single-backtrack technique over characters (`Glob`).
 
-The member's link is computed once per question and only when a rule with paths gets that far; its segment is a string the provider already holds.
+The member's segment is looked up once per question and only when a rule with paths gets that far; it is a string the provider already holds.
 
 ### Caps and failing closed
 
@@ -105,17 +109,23 @@ A dense graph can have a number of paths exponential in its depth, so enumeratio
 
 - a property on a chain is excluded by the path provider, or an inline key resolves in neither spelling, so the chain has no path,
 - the subject has parents but no chain reaches a root, as for subjects that only hold each other in a cycle,
+- the subject, or a subject a chain passes, is no longer attached, as during and after a detach,
 - more than 64 paths exist, or the search budget runs out.
 
 On an incomplete set an allow with paths matches only through the paths that were listed, and every deny with paths matches. Denies with paths fail closed: the missing path may be exactly the one the deny names, and the library cannot tell. The alternative, matching denies only against the listed paths, would let a misconfigured provider or an unusually dense graph widen a principal's permissions without any sign. The cost is that such a subject matches path denies that have nothing to do with it. The other selectors of a deny still apply, which is one more reason to give a path deny a second selector.
 
+### Known limits
+
+- **A subject held twice in one collection or dictionary.** The registry records one parent per property, so a subject at two keys of one dictionary, or two positions of one collection, has a single parent, at the first. Its second path is not enumerated, and a deny written for it does not apply. The fix belongs in the registry, which should keep one parent per occurrence; scanning the container for every occurrence here would mirror more of the registry and cost a scan per indexed link.
+- **Patterns that match nothing.** Compilation sees no graph, so it rejects only patterns that can match no member in any graph. A misspelled name compiles, and so does the bare key of an `[InlinePaths]` entry as the last segment: the registry writes the subject's path with that key, but the member holding the subject is the inline property, so the pattern names no member. A check of patterns against a live graph, such as a role editor would run, is the place to report them.
+
 ## Subject visibility
 
-`CanRead(member)` answers for one member. Browsing needs a different question: whether the subject itself is visible. A subject is readable when at least one of its members is readable and some chain of parents leads from it to a root on which every subject-holding property is readable. The holding properties are members of the parents and are matched by their own member paths. A deny with `read` on the property holding a subject, `/Devices/Cameras`, therefore still hides the whole branch beneath it from browsing, as an unreadable link makes a subject unreachable even though its own members are readable. Those members stay readable when asked for by path; a deny on `/Devices/Cameras/**` makes them unreadable as well.
+`CanRead(member)` answers for one member. Browsing needs a different question: whether the subject itself is visible. A subject is readable when at least one of its members is readable and some chain of parents leads from it to a root on which every subject-holding property is readable. The holding properties are members of the parents and are matched by their own member paths. A deny with `read` on the property holding a subject, `Devices.Cameras`, therefore still hides the whole branch beneath it from browsing, as an unreadable link makes a subject unreachable even though its own members are readable. Those members stay readable when asked for by path; a deny on `Devices.Cameras.**` makes them unreadable as well.
 
-The link of a chain is a member of the parent subject, not of the child. A rule that allows reading `/Rooms[Kitchen]/**` makes the kitchen's members readable but not `Home.Rooms`, which belongs to the root; the kitchen stays hidden until some rule makes the links on its way readable. An application usually tags subject-holding properties so one rule grants them.
+The link of a chain is a member of the parent subject, not of the child. A rule that allows reading `Rooms[Kitchen].**` makes the kitchen's members readable but not `Home.Rooms`, which belongs to the root; the kitchen stays hidden until some rule makes the links on its way readable. An application usually tags subject-holding properties so one rule grants them.
 
-Visibility uses reachability through any parent rather than the first parent, for the same reason paths use every chain. The registry's first parent depends on attach order, which must not decide visibility, and a subject a principal can reach by browsing through readable links must not be hidden from it. The two notions do not conflict: a `read` deny on the path `/Rooms[Bedroom]/**` makes every member of a light there unreadable, so the light is hidden whatever other parent it has, while a deny on one link only cuts that route.
+Visibility uses reachability through any parent rather than the first parent, for the same reason paths use every chain. The registry's first parent depends on attach order, which must not decide visibility, and a subject a principal can reach by browsing through readable links must not be hidden from it. The two notions do not conflict: a `read` deny on the path `Rooms[Bedroom].**` makes every member of a light there unreadable, so the light is hidden whatever other parent it has, while a deny on one link only cuts that route.
 
 `IsReachable` walks parents depth first and stops at the first route to a root. Along a chain of single parents it allocates nothing. At a subject with several parents, or deeper than 32 levels, it adds the subject to a visited set shared by the whole walk. A subject already in the set is not explored again: its readable links and parents do not depend on how the walk arrived, so a second visit cannot find a route the first missed. Every subject with several parents, and every subject past depth 32, is therefore explored at most once, which bounds the walk and ends cycles of any shape, including two rooms that hold each other twice or three rooms that point at each other.
 
@@ -123,14 +133,14 @@ Visibility uses reachability through any parent rather than the first parent, fo
 
 ## Compilation and failure
 
-`Compile` resolves the principal's role names, assigns the action bits, and parses every selector of every rule it will evaluate. Validation is split by what it protects:
+`Compile` resolves the principal's role names, assigns the action bits, and parses every selector of every rule it will evaluate. Validation is split by what it protects; the checks of each scope are listed under [Usage](../authorization.md#usage).
 
-| Validated over | Checks | Why there |
-|---|---|---|
-| All roles given | null, no name, a name defined twice, the reserved name `System` | Names must resolve unambiguously before any closure can be computed, and a `System` role would be indistinguishable from the system rules in `Explain`. |
-| The principal's closure | unknown or empty role names, cycles of includes, includes nested more than 64 levels | Only these roles take part; a broken role outside the closure must not lock this principal out. |
-| Rules of the closure and the system rules | null rules, rules without actions, unknown actions, empty selector values, malformed patterns, patterns that match no member | Same scoping: only rules the policy evaluates are parsed. |
-| Known actions | an action without a name, more than 64 actions | The bit assignment depends on them. |
+| Validated over | Why there |
+|---|---|
+| All roles given | Names must resolve unambiguously before any closure can be computed, and a role named `System` would be indistinguishable from the system rules in `Explain`. |
+| The principal's closure | Only these roles take part; a broken role outside the closure must not lock this principal out. |
+| Rules of the closure and the system rules | Same scoping: only rules the policy evaluates are parsed. |
+| Known actions | The bit assignment depends on them. |
 
 A principal whose roles fail to compile gets `AuthorizationPolicy.DenyAll`, never a policy built from the parts that compiled. Dropping a broken rule could drop a deny, and dropping a broken role could drop its denies, either of which widens permissions. `DenyAll` knows no actions and answers no to any action, including application actions, so a caller does not have to special-case it.
 
@@ -149,19 +159,19 @@ The allocations that remain each have a reason:
 - **Types.** The first type rule evaluated for a runtime type caches that type's simple and full names, its base types and its interfaces.
 - **Visibility.** `CanRead(subject)` allocates the visited set when a subject on the way has several parents or the chain is deeper than 32 levels.
 
-A deny rule with only `Paths` is reached by every member that an allow matched for that action, and proving it does not apply requires enumerating the paths. The README therefore advises giving a path deny a second selector (a type, a member glob or a tag) and putting path rules only into the roles that need them, not into a reusable base role every principal pays for.
+A deny rule with only `Paths` is reached by every member that an allow matched for that action, and proving it does not apply requires enumerating the paths. The [user documentation](../authorization.md#performance-and-threading) therefore advises giving a path deny a second selector (a type, a member glob or a tag) and putting path rules only into the roles that need them, not into a reusable base role every principal pays for.
 
-`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers were measured before patterns matched member paths exactly; the rules then named floors by prefix and now end in `/**`, and the benchmark has not been run again since:
+`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers come from one local run of `-LocalOnly` on an 8-core desktop CPU with a 1-minute load average below 4:
 
 | Question | Time | Allocated |
 |---|---|---|
-| A read decided by a tag rule | about 23 ns | nothing |
-| `CanRead(subject)`, no path rule applies to `read` | about 150 ns | nothing |
-| A write where the deny rules have only path selectors and none matches | about 0.38 µs | 424 B |
-| A write denied by a path rule | about 0.27 µs | 424 B |
-| A browse-shaped pass: `CanRead` of every subject and of the members of the readable ones | about 0.5 ms | - |
+| A read decided by a tag rule | about 18 ns | nothing |
+| `CanRead(subject)`, no path rule applies to `read` | about 90 ns | nothing |
+| A write where the deny rules have only path selectors and none matches | about 0.40 µs | 320 B |
+| A write denied by a path rule | about 0.25 µs | 320 B |
+| A browse-shaped pass: `CanRead` of every subject and of the members of the readable ones | about 0.38 ms | nothing on the calling thread, see below |
 
-The times were measured on a shared machine and vary between runs; the allocation column is the reliable part. The two writes allocate the same because both enumerate the lamp's single path once.
+The times vary between runs and machines; the allocation column is the reliable part. The two writes allocate the same because both enumerate the lamp's single path once: the list of paths, the search frames and the lamp's one `PathLink` array. For the browse-shaped pass BenchmarkDotNet reports 40 to 80 B per pass. Its counter is process-wide, while a count of the calling thread's own allocations (`GC.GetAllocatedBytesForCurrentThread`) over 1,000 passes after warm-up is zero, as it is for `CanRead(subject)` over 100,000 calls, so those bytes come from other threads of the process, spread over a pass that takes 0.4 ms.
 
 ### Threading
 
@@ -185,7 +195,7 @@ Planned follow-ups:
 - The application integration: role storage, the tag provider, system rules, enforcement in every tool, and operator documentation.
 - A role editor with a permission tester built on `Explain`.
 
-One question is deferred to the integration. Patterns match absolute paths, and any subject without parents is a root. A server that exposes a subtree as its root resolves request paths relative to that subtree, while rules still match from the graph's root, so such a server may need patterns that match relative to its root.
+One question is deferred to the integration. Patterns match paths from the root, and any registered subject without parents is a root. A server that exposes a subtree as its root resolves request paths relative to that subtree, while rules still match from the graph's root, so such a server may need patterns that match relative to its root.
 
 ## Alternatives considered
 

@@ -47,6 +47,23 @@ public class PropertyReadAccessTests
     }
 
     [Fact]
+    public async Task WhenAHiddenPropertySharesItsSegmentWithAReadableMember_ThenTheSegmentResolvesToTheReadableMember()
+    {
+        // Arrange
+        // The attribute's segment is its name, so it is a second member with the segment of the hidden property.
+        var room = CreateRoom();
+        room.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestRoom.Name))!
+            .AddAttribute<string>(nameof(TestRoom.Temperature), _ => "Attribute");
+        var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestRoom.Temperature)));
+
+        // Act
+        var result = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Temperature" });
+
+        // Assert
+        Assert.Equal("Attribute", result.GetProperty("value").GetString());
+    }
+
+    [Fact]
     public async Task WhenThePolicyDeniesReadOnAPropertyOnThePath_ThenGetPropertyReportsThePathAsNotFound()
     {
         // Arrange

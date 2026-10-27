@@ -16,19 +16,21 @@ public readonly record struct PermissionAction
     /// <summary>Writing a member's value.</summary>
     public static readonly PermissionAction Write = new("write");
 
+    private readonly string? _name;
+
     /// <param name="name">The name; must not be empty or whitespace.</param>
     public PermissionAction(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        Name = name;
+        _name = name;
     }
 
-    /// <summary>Gets the name.</summary>
-    public string Name { get; }
+    /// <summary>Gets the name; empty for <see langword="default"/>, which is no action and is known to no policy.</summary>
+    public string Name => _name ?? string.Empty;
 
     public bool Equals(PermissionAction other) => string.Equals(Name, other.Name, StringComparison.OrdinalIgnoreCase);
 
-    public override int GetHashCode() => Name is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Name);
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Name);
 
-    public override string ToString() => Name ?? string.Empty;
+    public override string ToString() => Name;
 }

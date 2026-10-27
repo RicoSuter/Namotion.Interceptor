@@ -26,6 +26,9 @@ internal sealed class AuthorizationSnapshot
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
     private readonly PreviewCache _previews = new();
 
+    // The error of each role with a path pattern the application refuses, see PathPatternChecks; null when there is none.
+    private readonly Dictionary<string, string>? _leadingSeparatorErrors;
+
     private AuthorizationSnapshot(
         long version,
         PathProviderBase pathProvider,
@@ -38,6 +41,7 @@ internal sealed class AuthorizationSnapshot
         _roles = roles;
         _unavailableRoles = unavailableRoles;
         _customRolesError = customRolesError;
+        _leadingSeparatorErrors = PathPatternChecks.GetLeadingSeparatorErrors(roles, pathProvider.PathSeparator);
         RoleNames = ImmutableArray.CreateRange(roles, static role => role.Name);
     }
 
@@ -193,7 +197,7 @@ internal sealed class AuthorizationSnapshot
 
         var index = IndexOfRole(name);
         var roles = index >= 0 ? _roles.SetItem(index, editedRole) : _roles.Add(editedRole);
-        return Compile(roles, [name]);
+        return Compile(roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator));
     }
 
     private AuthorizationResult Compile(string[] roleNames)
@@ -208,11 +212,18 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
-        return Compile(_roles, roleNames);
+        return Compile(_roles, roleNames, _leadingSeparatorErrors);
     }
 
-    private AuthorizationResult Compile(ImmutableArray<AuthorizationRole> roles, string[] roleNames)
+    private AuthorizationResult Compile(
+        ImmutableArray<AuthorizationRole> roles, string[] roleNames, Dictionary<string, string>? leadingSeparatorErrors)
     {
+        if (leadingSeparatorErrors is not null &&
+            PathPatternChecks.FindLeadingSeparatorError(roleNames, roles, leadingSeparatorErrors) is { } patternError)
+        {
+            return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
+        }
+
         try
         {
             var policy = AuthorizationPolicy.Compile(
