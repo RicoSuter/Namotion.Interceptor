@@ -13,8 +13,8 @@ public interface IChildIndexHandler
     /// Not called when there is none.
     /// </summary>
     /// <remarks>
-    /// The handler must not block, and must not write the property that was written. The span is
-    /// only valid during the call.
+    /// The handler must not block, must not throw, and must not write the property that was written:
+    /// a throwing handler skips the handlers after it. The span is only valid during the call.
     /// </remarks>
     /// <param name="property">The property that was written.</param>
     /// <param name="children">The kept subjects with their key or position in the new value, each once.</param>

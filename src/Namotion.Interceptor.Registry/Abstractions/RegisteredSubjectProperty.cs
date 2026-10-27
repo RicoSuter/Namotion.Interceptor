@@ -402,26 +402,21 @@ public class RegisteredSubjectProperty
                 }
             }
 
-            try
+            foreach (var child in children)
             {
-                foreach (var child in children)
-                {
-                    var position = positions?.GetValueOrDefault(child.Subject, -1) ?? IndexOfChild(child.Subject);
-                    if (position < 0)
-                        continue;
+                var position = positions?.GetValueOrDefault(child.Subject, -1) ?? IndexOfChild(child.Subject);
+                if (position < 0)
+                    continue;
 
-                    _children[position] = _children[position] with { Index = child.Index };
-                    knownSubjects.GetValueOrDefault(child.Subject)?.UpdateParentIndex(this, child.Index);
-                }
+                _children[position] = _children[position] with { Index = child.Index };
+                knownSubjects.GetValueOrDefault(child.Subject)?.UpdateParentIndex(this, child.Index);
+            }
 
-                SortByPosition();
-                _childrenCache = default;
-            }
-            finally
-            {
-                // Release references so subjects can be GC'd on idle threads
-                positions?.Clear();
-            }
+            SortByPosition();
+            _childrenCache = default;
+
+            // Release references so subjects can be GC'd on idle threads
+            positions?.Clear();
         }
     }
 
@@ -444,12 +439,11 @@ public class RegisteredSubjectProperty
     private int GetInsertPosition(object? index)
     {
         var position = _children.Count;
-        if (index is int newPosition)
+        if (index is int newPosition && !IsSubjectDictionary)
         {
             while (position > 0 &&
                    _children[position - 1].Index is int previousPosition &&
-                   previousPosition > newPosition &&
-                   !IsSubjectDictionary)
+                   previousPosition > newPosition)
             {
                 position--;
             }

@@ -430,9 +430,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            // Report kept subjects whose key or position changed. Two single references hold no
-            // index, so a write that replaces one reference with another skips the overlap check.
-            // The refresh uses newTouchedSubjects up, so nothing may read the set after it.
+            // Report kept subjects whose key or position changed. A write between two single references
+            // can keep no subject, since writing the same one again returns early, so it skips the overlap
+            // check. The refresh uses newTouchedSubjects up, so nothing may read the set after it.
             if ((lastProcessed is IEnumerable || newValue is IEnumerable) &&
                 oldTouchedSubjects.Overlaps(newTouchedSubjects))
             {
