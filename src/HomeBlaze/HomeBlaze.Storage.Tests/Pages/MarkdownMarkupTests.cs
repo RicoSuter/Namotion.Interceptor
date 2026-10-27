@@ -92,6 +92,39 @@ public class MarkdownMarkupTests
     }
 
     [Fact]
+    public async Task WhenAParagraphIsFollowedByAComment_ThenTheirMarkupIsTheSameStringOnEveryRender()
+    {
+        // Arrange
+        var page = await AddPageAsync("First.\n\n<!-- note -->\n\nSecond {{ meter/Power }}.");
+
+        // Act
+        var first = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
+        var second = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
+
+        // Assert
+        Assert.Equal(
+            new[] { null, "\n<p>First.</p>\n<!-- note -->\n", $"<p>Second {GetPowerText(page)}.</p>\n" },
+            first.Select(segment => segment.Html));
+        Assert.Same(first[1].Html, second[1].Html);
+    }
+
+    [Fact]
+    public async Task WhenTheParagraphBeforeACommentChanges_ThenTheirMarkupHasTheNewParagraph()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", "First.\n\n<!-- note -->\n\nSecond.");
+
+        // Act
+        await fixture.UpdatePageAsync(page, "Changed.\n\n<!-- note -->\n\nSecond.");
+
+        // Assert
+        Assert.Equal(
+            new[] { "<p>Changed.</p>\n<!-- note -->\n", "<p>Second.</p>\n" },
+            MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null).Select(segment => segment.Html));
+    }
+
+    [Fact]
     public async Task WhenAnExpressionIsInARawHtmlAttribute_ThenItsBlockIsOneMarkupString()
     {
         // Arrange

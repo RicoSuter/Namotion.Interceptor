@@ -82,7 +82,8 @@ public static class MarkdownMarkup
     }
 
     // Each top-level block is a markup string of its own, so a value change replaces only the block that shows it. Only
-    // the parts at both ends can join an expression, so the parts between are added as they are.
+    // the parts at both ends can join an expression, so the parts between are added as they are, and so is a block that
+    // the segments before started without an expression in it.
     private static void AppendHtml(HtmlSegment html, StringBuilder builder, List<MarkdownRenderSegment> result)
     {
         var blocks = html.Blocks;
@@ -95,7 +96,12 @@ public static class MarkdownMarkup
                 Flush(builder, result);
             }
 
-            if (joinsBefore || joinsAfter)
+            if (joinsBefore && !joinsAfter && html.JoinedBlock is not null)
+            {
+                builder.Clear();
+                result.Add(new MarkdownRenderSegment(html.JoinedBlock, null));
+            }
+            else if (joinsBefore || joinsAfter)
             {
                 builder.Append(blocks[index]);
             }

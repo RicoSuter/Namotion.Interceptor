@@ -39,6 +39,13 @@ public partial class HtmlSegment
     /// <summary>Gets whether a block starts after the last part of <see cref="Blocks"/>.</summary>
     internal bool EndsWithBlock { get; }
 
+    /// <summary>
+    /// Gets the complete block that ends with the first part of <see cref="Blocks"/> and starts in a segment before it, joined
+    /// from the parts of the segments in between, or null when the first part ends no such block. Set by the parser, which
+    /// knows the segments before.
+    /// </summary>
+    internal string? JoinedBlock { get; set; }
+
     public HtmlSegment(
         string html, HtmlSegmentStart start = HtmlSegmentStart.None, string? kind = null, ImmutableArray<int> blockStarts = default)
     {

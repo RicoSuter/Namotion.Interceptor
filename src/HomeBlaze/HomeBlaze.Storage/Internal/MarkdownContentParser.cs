@@ -314,16 +314,18 @@ public sealed partial class MarkdownContentParser
     {
         var children = new Dictionary<string, IInterceptorSubject>();
         var blockPosition = 0;
+        StringBuilder? openBlock = null;
 
         for (var index = 0; index < segments.Count; index++)
         {
             switch (segments[index])
             {
                 case HtmlMarkdownSegment html:
-                    AddHtml(children, existingChildren, index, html.Html, html.BlockStarts, html.TextBlock, state);
+                    AddHtml(children, existingChildren, index, html.Html, html.BlockStarts, html.TextBlock, state, ref openBlock);
                     break;
 
                 case ExpressionMarkdownSegment expression:
+                    openBlock = null;
                     // The text is part of the key, so that a changed expression replaces the subject.
                     var expressionKey = $"{ExpressionKeyPrefix}{index}_{ComputeHash(expression.Text)}";
                     children[expressionKey] =
@@ -338,10 +340,12 @@ public sealed partial class MarkdownContentParser
                     if (subject is null)
                     {
                         state.AddErrorBox();
-                        AddHtml(children, existingChildren, index, error!.Render(), blockStarts: default, textBlock: null, state);
+                        AddHtml(
+                            children, existingChildren, index, error!.Render(), blockStarts: default, textBlock: null, state, ref openBlock);
                     }
                     else
                     {
+                        openBlock = null;
                         children[key!] = subject;
                     }
 
@@ -359,7 +363,8 @@ public sealed partial class MarkdownContentParser
         string html,
         ImmutableArray<int> blockStarts,
         MarkdownTextBlock? textBlock,
-        ParseState state)
+        ParseState state,
+        ref StringBuilder? openBlock)
     {
         var start = textBlock is null ? HtmlSegmentStart.None
             : textBlock.IsEditable ? HtmlSegmentStart.Text
@@ -370,15 +375,46 @@ public sealed partial class MarkdownContentParser
         // The index is part of the key because the same HTML can occur several times. The block starts are part of the
         // hash so that a change of them replaces the subject.
         var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html, blockStarts.IsDefault ? default : blockStarts.AsSpan())}";
-        var segment = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused &&
-                      reused.Start == start && reused.Kind == kind
-            ? reused
-            : new HtmlSegment(html, start, kind, blockStarts);
+        var isReused = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused &&
+                       reused.Start == start && reused.Kind == kind;
+        var segment = isReused ? (HtmlSegment)existing! : new HtmlSegment(html, start, kind, blockStarts);
+        var joinedBlock = JoinBlock(segment, ref openBlock);
+        if (joinedBlock != segment.JoinedBlock)
+        {
+            if (isReused)
+            {
+                segment = new HtmlSegment(html, start, kind, blockStarts);
+            }
+
+            segment.JoinedBlock = joinedBlock;
+        }
+
         children[key] = segment;
         if (textBlock is not null)
         {
             state.AddTextBlock(segment, textBlock);
         }
+    }
+
+    // Gets the complete block that ends in the first part of the segment and started in a segment before it (see
+    // HtmlSegment.JoinedBlock), and keeps the parts of a block that its last part starts and the segments after it go on.
+    private static string? JoinBlock(HtmlSegment segment, ref StringBuilder? openBlock)
+    {
+        var blocks = segment.Blocks;
+        string? joinedBlock = null;
+        if (openBlock is not null && !segment.StartsWithBlock)
+        {
+            openBlock.Append(blocks[0]);
+            if (blocks.Length == 1 && !segment.EndsWithBlock)
+            {
+                return null;
+            }
+
+            joinedBlock = openBlock.ToString();
+        }
+
+        openBlock = !segment.EndsWithBlock && (blocks.Length > 1 || segment.StartsWithBlock) ? new StringBuilder(blocks[^1]) : null;
+        return joinedBlock;
     }
 
     // The kind of a text block that cannot be edited as text, see HtmlSegment.Kind. A list or a quote with a block inside is
