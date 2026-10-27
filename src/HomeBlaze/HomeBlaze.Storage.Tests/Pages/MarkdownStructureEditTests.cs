@@ -491,6 +491,30 @@ public class MarkdownStructureEditTests
     }
 
     [Fact]
+    public async Task WhenTheNewTextIsNestedBeyondTheDepthLimit_ThenItIsRefusedAndThePageStaysEditable()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $"Old text.\n\n:: {PanelType}#panel Title=P\n::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var panel = page.Children["panel"];
+        var nested = new string('[', 4096);
+
+        // Act
+        var replaced = await page.ReplaceTextBlockAsync(FindText(page, "Old text."), "Old text.", nested, CancellationToken.None);
+        var inserted = await page.InsertTextAsync(page, null, nested, CancellationToken.None);
+        var added = await page.AddTextToSlotAsync(panel, null, nested, CancellationToken.None);
+        var unchanged = await fixture.ReadAsync("page.md");
+        await page.OnFileChangedAsync(CancellationToken.None);
+        var widget = await page.InsertWidgetAsync(page, null, new TestLeaf(), "leaf", CancellationToken.None);
+
+        // Assert
+        Assert.All([replaced, inserted, added], result => Assert.Contains("too deeply nested", result.Refusal));
+        Assert.Equal(content, unchanged);
+        Assert.True(widget.IsWritten);
+    }
+
+    [Fact]
     public async Task WhenTheLastBlockHasNoClosingLine_ThenTextCannotBeInsertedAtTheEnd()
     {
         // Arrange

@@ -153,9 +153,16 @@ internal static partial class MarkdownWriteRules
             throw new ArgumentException(ActiveContentMessage, parameterName);
         }
 
-        // Markdig finds Markdown nested beyond its depth limit only when it renders, and throws an ArgumentException
-        // then, so a source that the page or the notes could never show is refused here instead of written.
-        MarkdownSegmentBuilder.Build(newPage);
+        EnsureRenders(newPage);
+    }
+
+    /// <summary>Ensures that the page can be shown: Markdown nested beyond the depth limit of Markdig cannot.</summary>
+    /// <exception cref="ArgumentException">The page holds Markdown nested beyond the depth limit.</exception>
+    internal static void EnsureRenders(MarkdownPage page)
+    {
+        // Markdig finds such Markdown only when it renders, and throws an ArgumentException then, so a source that the
+        // page or the notes could never show is refused instead of written.
+        MarkdownSegmentBuilder.Build(page);
     }
 
     private static IEnumerable<string> GetUnitKeys(List<UnitText> units) =>

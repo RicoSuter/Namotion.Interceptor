@@ -601,8 +601,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <paramref name="expectedText"/>, as <see cref="GetTextBlockText"/> returned it, when the new text holds a block that is
     /// no widget block at its top level, a widget block with too few fence characters whose blocks raising them would change,
     /// an invalid block, or a widget block whose name a block of the page or another
-    /// block of the text already has, when the file differs from the text the page last read, and the page then reads it, or
-    /// when the page would be larger than <see cref="MaxContentSize"/> bytes.
+    /// block of the text already has, when the text is Markdown nested beyond the depth limit of Markdig, when the file
+    /// differs from the text the page last read, and the page then reads it, or when the page would be larger than
+    /// <see cref="MaxContentSize"/> bytes.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> ReplaceTextBlockAsync(
@@ -638,8 +639,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <remarks>
     /// Refused when the text holds a block that is no widget block at its top level, a widget block with too few fence
     /// characters whose blocks raising them would change, an invalid block, or a widget block whose name a block of
-    /// the page or another block of the text already has, when the file differs from the text the page last read, and the
-    /// page then reads it, or when the page would be larger than <see cref="MaxContentSize"/> bytes.
+    /// the page or another block of the text already has, when the text is Markdown nested beyond the depth limit of Markdig,
+    /// when the file differs from the text the page last read, and the page then reads it, or when the page would be larger
+    /// than <see cref="MaxContentSize"/> bytes.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
     public Task<MarkdownEditResult> InsertTextAsync(
@@ -1054,6 +1056,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             {
                 _parser.LogRefusedWrite(FullPath, sizeRefusal);
                 return MarkdownEditResult.Refused(sizeRefusal);
+            }
+
+            // A page that cannot be shown would fail the read inside the write and every read after it.
+            try
+            {
+                MarkdownWriteRules.EnsureRenders(change.Write.Page);
+            }
+            catch (ArgumentException exception)
+            {
+                _parser.LogRefusedWrite(FullPath, exception.Message);
+                return MarkdownEditResult.Refused(exception.Message);
             }
 
             var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, changedPageRefusal);
