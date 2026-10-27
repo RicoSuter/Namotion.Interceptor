@@ -107,8 +107,8 @@ internal static class SubjectAttributeConflicts
 
     // An override inherits the attribute of the declaration it overrides at runtime, but Roslyn reports only the
     // attributes declared on the override itself; the nearest declaration wins, matching AllowMultiple = false.
-    // The target belongs to the subject only when the subject itself declares the attribute, so an override that
-    // merely inherits it does not make a base subject's duplicate the subject's own.
+    // An attribute inherited from a subject ancestor is reported on that ancestor, so it is not the subject's own.
+    // An attribute inherited from a plain class is, because no other subject reports it.
     private static bool TryGetPropertyAttributeTarget(
         IPropertySymbol property,
         bool isOwn,
@@ -119,7 +119,9 @@ internal static class SubjectAttributeConflicts
         {
             if (TryGetDeclaredPropertyAttributeTarget(current, out target))
             {
-                isOwnTarget = isOwn && SymbolEqualityComparer.Default.Equals(current, property);
+                isOwnTarget = isOwn &&
+                    (SymbolEqualityComparer.Default.Equals(current, property) ||
+                     !SubjectAncestry.HasInterceptorSubjectAttribute(current.ContainingType));
                 return true;
             }
         }

@@ -274,6 +274,47 @@ public class SubjectAttributeConflictTests
     }
 
     [Fact]
+    public void WhenOverridesInheritADuplicateFromAPlainBaseClass_ThenNI0066IsReportedOnTheSubject()
+    {
+        // Arrange: no subject declares the attributes, so only the subject that inherits both can report them.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Registry.Attributes;
+
+            namespace Repro
+            {
+                public class PlainMotorBase
+                {
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    public virtual bool Forward_IsEnabled { get; set; }
+
+                    [PropertyAttribute("Forward", "IsEnabled")]
+                    public virtual bool Forward_Enabled { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class Motor : PlainMotorBase
+                {
+                    public partial bool Forward { get; set; }
+
+                    public override partial bool Forward_IsEnabled { get; set; }
+
+                    public override partial bool Forward_Enabled { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        var diagnostic = result.GeneratorDiagnostics.Single(d => d.Id == "NI0066");
+        Assert.StartsWith("'Motor' attaches", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+    }
+
+    [Fact]
     public void WhenTwoPropertiesAttachDifferentAttributesToOneProperty_ThenNI0066IsNotReported()
     {
         // Arrange
