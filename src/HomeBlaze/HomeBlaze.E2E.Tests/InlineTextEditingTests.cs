@@ -614,10 +614,10 @@ public class InlineTextEditingTests
 
         // Act
         await CreateAlertInTextDialogAsync(page, "cardalert");
-        await page.ExpectTextEditorToContainAsync("::: HomeBlaze.Components.Alert#cardalert");
+        await page.ExpectTextEditorToContainAsync(":: HomeBlaze.Components.Alert#cardalert");
         await page.GetByTestId("markdown-text-save").ClickAsync();
 
-        // Assert
+        // Assert: the dialog writes the alert at the top level of its text, and the save raises its fence into the card.
         await _fixture.WaitForDemoPageTextAsync(
             PageName,
             text => text.Contains(":: HomeBlaze.Components.Card Title=\"Text Card\"\n::: HomeBlaze.Components.Alert#cardalert") &&

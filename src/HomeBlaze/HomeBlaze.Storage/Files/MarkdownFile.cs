@@ -591,8 +591,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Replaces the text block that <paramref name="segment"/> starts with <paramref name="newText"/>, or removes it when that
     /// is empty or white space, and saves the page. A removal names in its result what <see cref="DeleteBlockAsync"/> names.
     /// Complete widget blocks at the top level of the new text become blocks of
-    /// the content, and the page creates their subjects. Such a block with fewer fence characters than
-    /// <see cref="GetWidgetFenceLengthInText"/> gets that many, and the blocks inside it as many more.
+    /// the content, and the page creates their subjects. Such a block with fewer fence characters than a widget block needs
+    /// in the content of the text block, two on the page and one more than the block whose content it is otherwise, gets that
+    /// many, and the blocks inside it as many more.
     /// </summary>
     /// <remarks>
     /// Refused when the segment starts no text block that can be edited any more or its text is no longer
@@ -630,8 +631,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// Inserts <paramref name="text"/> into <paramref name="content"/> before <paramref name="before"/>, as
     /// <see cref="InsertWidgetAsync"/> places a widget, and saves the page. Complete widget blocks at the top level of the text
-    /// become blocks of the content, and the page creates their subjects. Such a block with fewer fence characters than
-    /// <see cref="GetWidgetFenceLengthInContent"/> gets that many, and the blocks inside it as many more.
+    /// become blocks of the content, and the page creates their subjects. Such a block with fewer fence characters than a
+    /// widget block needs in the content, two on the page and one more than the block whose content it is otherwise, gets that
+    /// many, and the blocks inside it as many more.
     /// </summary>
     /// <remarks>
     /// Refused when the text holds a block that is no widget block at its top level, a widget block with too few fence
@@ -682,38 +684,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return snapshot.Page is { } page &&
                TryGetInsertPoint(snapshot, page, content, before, out var owner, out var line, out _) &&
                MarkdownPageOperations.CanInsertTextAt(page, owner, line);
-    }
-
-    /// <summary>
-    /// Gets how many fence characters a widget block needs at least to stand directly in the content of the text block that
-    /// <paramref name="segment"/> starts: two on the page, one more than the block whose content it is otherwise. Zero when
-    /// the segment starts no text block of this page.
-    /// </summary>
-    public int GetWidgetFenceLengthInText(HtmlSegment segment)
-    {
-        ArgumentNullException.ThrowIfNull(segment);
-        var snapshot = _parseResult;
-        return snapshot.TextBlocks.TryGetValue(segment, out var textBlock)
-            ? MarkdownPageOperations.GetWidgetFenceLength(textBlock.Owner)
-            : 0;
-    }
-
-    /// <summary>
-    /// Gets how many fence characters a widget block needs at least to stand directly in <paramref name="content"/>, this
-    /// page or the content of one of its blocks: two on the page, one more than the block whose content it is otherwise. Zero
-    /// when the content is not on this page.
-    /// </summary>
-    public int GetWidgetFenceLengthInContent(IInterceptorSubject content)
-    {
-        if (ReferenceEquals(content, this))
-        {
-            return MarkdownPageOperations.GetWidgetFenceLength(null);
-        }
-
-        var snapshot = _parseResult;
-        return snapshot.Page is { } page && MarkdownPageOperations.FindContentBlock(page, snapshot.BlockSubjects, content) is { } owner
-            ? MarkdownPageOperations.GetWidgetFenceLength(owner)
-            : 0;
     }
 
     // The block whose content `content` is, or null for the page, and the line before which new content goes: the first line

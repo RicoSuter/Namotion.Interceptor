@@ -702,7 +702,7 @@ internal static class MarkdownPageOperations
     /// Gets how many fence characters a widget block needs at least to stand directly in the content of
     /// <paramref name="owner"/>, or of the page when it is null: one more than the owner, or the shortest fence on the page.
     /// </summary>
-    public static int GetWidgetFenceLength(MarkdownBlock? owner) =>
+    private static int GetWidgetFenceLength(MarkdownBlock? owner) =>
         owner is null ? MarkdownBlockFence.MinimumLength : owner.FenceLength + 1;
 
     /// <summary>Gets the Markdown of a text block: its lines without the indentation of its content, with line feeds.</summary>

@@ -453,26 +453,6 @@ public class MarkdownStructureEditTests
         Assert.Same(leafB, leaves[2]);
     }
 
-    [Fact]
-    public async Task WhenTheFenceOfANewWidgetInTextIsAskedFor_ThenItIsOneMoreThanTheBlockAroundTheText()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $"intro\n\n:: {PanelType}#panel Title=P\nPanel text.\n::: Row Label=A\n:::\n::\n");
-        var panel = (TestPanel)page.Children["panel"];
-        var panelText = ((MarkdownFragment)panel.Content!).Children.Values.OfType<HtmlSegment>()
-            .Single(segment => segment.Html.Contains("Panel text."));
-
-        // Act & Assert
-        Assert.Equal(2, page.GetWidgetFenceLengthInText(FindText(page, "intro")));
-        Assert.Equal(3, page.GetWidgetFenceLengthInText(panelText));
-        Assert.Equal(0, page.GetWidgetFenceLengthInText(new HtmlSegment("<p>elsewhere</p>")));
-        Assert.Equal(2, page.GetWidgetFenceLengthInContent(page));
-        Assert.Equal(3, page.GetWidgetFenceLengthInContent(panel.Content!));
-        Assert.Equal(4, page.GetWidgetFenceLengthInContent(panel.Rows[0].Content!));
-        Assert.Equal(0, page.GetWidgetFenceLengthInContent(new MarkdownFragment()));
-    }
-
     // Markdig finds links nested too deep while it renders, and quotes nested too deep while it parses.
     [Theory]
     [InlineData("[", 4096)]

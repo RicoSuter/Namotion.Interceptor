@@ -30,7 +30,6 @@
                                       IsDarkMode="IsDarkMode"
                                       HasMinimap="false"
                                       FocusesEnd="true"
-                                      MinimumFenceLength="MinimumFenceLength"
                                       ReservedNames="ReservedNames"
                                       TextChanged="OnTextChanged"
                                       SaveRequested="SaveAsync"/>
@@ -86,10 +85,6 @@
     /// <summary>Whether the editor shows in the colors of the dark mode.</summary>
     [Parameter]
     public bool IsDarkMode { get; set; } = true;
-
-    /// <summary>The fewest fence characters of a widget that Create writes, so that it stands directly in the content of the text.</summary>
-    [Parameter]
-    public int MinimumFenceLength { get; set; }
 
     /// <summary>The names that the blocks of the page use, which a widget that Create writes cannot take.</summary>
     [Parameter]
@@ -324,7 +319,6 @@
         string title,
         string text,
         bool isDarkMode,
-        int minimumFenceLength,
         IReadOnlyCollection<string> reservedNames,
         Func<string, Task<string?>> save)
     {
@@ -332,7 +326,6 @@
         {
             { dialog => dialog.Text, text },
             { dialog => dialog.IsDarkMode, isDarkMode },
-            { dialog => dialog.MinimumFenceLength, minimumFenceLength },
             { dialog => dialog.ReservedNames, reservedNames },
             { dialog => dialog.Save, save }
         };

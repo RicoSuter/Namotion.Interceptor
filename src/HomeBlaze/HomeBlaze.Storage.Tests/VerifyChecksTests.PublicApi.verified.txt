@@ -104,8 +104,6 @@ namespace HomeBlaze.Storage.Files
                 "EndLine"})]
         public System.ValueTuple<int, int>? GetTextBlockLines(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
         public string? GetTextBlockText(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
-        public int GetWidgetFenceLengthInContent(Namotion.Interceptor.IInterceptorSubject content) { }
-        public int GetWidgetFenceLengthInText(HomeBlaze.Storage.Internal.HtmlSegment segment) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertTextAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, string text, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> InsertWidgetAsync(Namotion.Interceptor.IInterceptorSubject content, Namotion.Interceptor.IInterceptorSubject? before, Namotion.Interceptor.IInterceptorSubject widget, string? name, System.Threading.CancellationToken cancellationToken) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }

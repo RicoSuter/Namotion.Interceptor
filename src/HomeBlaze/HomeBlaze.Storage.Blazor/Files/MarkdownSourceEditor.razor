@@ -143,13 +143,6 @@ else
     [Parameter]
     public Func<int, IInterceptorSubject?>? GetBlockSubject { get; set; }
 
-    /// <summary>
-    /// The fewest fence characters of a block that <see cref="CreateAsync"/> writes, such as one more than the block that the
-    /// text stands in. Zero for none beyond the shortest fence.
-    /// </summary>
-    [Parameter]
-    public int MinimumFenceLength { get; set; }
-
     /// <summary>The names that blocks outside of the text use, which a block that <see cref="CreateAsync"/> writes cannot take.</summary>
     [Parameter]
     public IReadOnlyCollection<string> ReservedNames { get; set; } = [];
@@ -479,10 +472,9 @@ else
 
     /// <summary>
     /// Asks for a new widget with the setup dialog and writes its block into the text before the line of the cursor: after
-    /// the json block of the block around that line, inside it with one fence character more, and with at least
-    /// <see cref="MinimumFenceLength"/> fence characters. Monaco has its cursor on the first line until it had the focus, and
-    /// a text area that never had the focus takes the block at the end. The configured subject is discarded, so that only
-    /// its text lives on.
+    /// the json block of the block around that line, inside it with one fence character more. Monaco has its cursor on the
+    /// first line until it had the focus, and a text area that never had the focus takes the block at the end. The
+    /// configured subject is discarded, so that only its text lives on.
     /// </summary>
     /// <returns>The new text, which the editor shows, or null when nothing was created.</returns>
     public async Task<string?> CreateAsync()
@@ -524,9 +516,8 @@ else
         var page = MarkdownPageParser.Parse(text);
         var lineCount = text.Split(lineEnding).Length;
         var insertLine = Math.Min(page.GetLineForNewBlock(cursorLine ?? lineCount), lineCount + 1);
-        var fenceLength = Math.Max(
-            MinimumFenceLength,
-            page.GetFenceLengthForNewBlock(insertLine, name => TypeProvider.Types.FirstOrDefault(type => type.FullName == name)));
+        var fenceLength = page.GetFenceLengthForNewBlock(
+            insertLine, name => TypeProvider.Types.FirstOrDefault(type => type.FullName == name));
         var blockText = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, fenceLength, lineEnding);
         var newText = MarkdownBlockWriter.InsertBlockText(text, insertLine, blockText, lineEnding);
 
