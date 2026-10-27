@@ -31,7 +31,7 @@ public class MarkdownMarkupTests
     public void WhenABlockStartsAtTheStartOfASegment_ThenTheHtmlBeforeIsMarkupOfItsOwn()
     {
         // Act
-        var markup = GetMarkup(new HtmlSegment("x"), new HtmlSegment("<p>A</p>", blockStarts: [0]));
+        var markup = GetMarkup(new HtmlSegment("x"), new HtmlSegment("<p>A</p>", [0]));
 
         // Assert
         Assert.Equal(new[] { "x", "<p>A</p>" }, markup);
@@ -41,7 +41,7 @@ public class MarkdownMarkupTests
     public void WhenABlockStartsAtTheEndOfASegment_ThenTheHtmlAfterIsMarkupOfItsOwn()
     {
         // Act
-        var markup = GetMarkup(new HtmlSegment("<p>A</p>", blockStarts: [8]), new HtmlSegment("y"));
+        var markup = GetMarkup(new HtmlSegment("<p>A</p>", [8]), new HtmlSegment("y"));
 
         // Assert
         Assert.Equal(new[] { "<p>A</p>", "y" }, markup);
@@ -51,7 +51,7 @@ public class MarkdownMarkupTests
     public void WhenABlockStartsInsideASegment_ThenEachPartIsMarkupOfItsOwn()
     {
         // Act
-        var markup = GetMarkup(new HtmlSegment("x"), new HtmlSegment("<p>A</p><p>B</p>", blockStarts: [8]), new HtmlSegment("y"));
+        var markup = GetMarkup(new HtmlSegment("x"), new HtmlSegment("<p>A</p><p>B</p>", [8]), new HtmlSegment("y"));
 
         // Assert
         Assert.Equal(new[] { "x<p>A</p>", "<p>B</p>y" }, markup);
@@ -61,7 +61,7 @@ public class MarkdownMarkupTests
     public void WhenCompleteBlocksAreRenderedTwice_ThenTheirMarkupIsTheSameStrings()
     {
         // Arrange
-        var segment = new HtmlSegment("<p>A</p><p>B</p><p>C</p>", blockStarts: [0, 8, 16, 24]);
+        var segment = new HtmlSegment("<p>A</p><p>B</p><p>C</p>", [0, 8, 16, 24]);
 
         // Act
         var first = GetMarkup(segment);

@@ -275,7 +275,7 @@ namespace HomeBlaze.Storage.Internal
     [System.ComponentModel.DisplayName("Text")]
     public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public HtmlSegment(string html, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0, string? kind = null, System.Collections.Immutable.ImmutableArray<int> blockStarts = default) { }
+        public HtmlSegment(string html, System.Collections.Immutable.ImmutableArray<int> blockStarts = default, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0, string? kind = null) { }
         public string Html { get; }
         public string? Kind { get; }
         public HomeBlaze.Storage.Internal.HtmlSegmentStart Start { get; }

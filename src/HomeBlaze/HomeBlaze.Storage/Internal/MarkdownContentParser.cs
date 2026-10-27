@@ -377,13 +377,13 @@ public sealed partial class MarkdownContentParser
         var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html, blockStarts.IsDefault ? default : blockStarts.AsSpan())}";
         var isReused = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused &&
                        reused.Start == start && reused.Kind == kind;
-        var segment = isReused ? (HtmlSegment)existing! : new HtmlSegment(html, start, kind, blockStarts);
+        var segment = isReused ? (HtmlSegment)existing! : new HtmlSegment(html, blockStarts, start, kind);
         var joinedBlock = JoinBlock(segment, ref openBlock);
         if (joinedBlock != segment.JoinedBlock)
         {
             if (isReused)
             {
-                segment = new HtmlSegment(html, start, kind, blockStarts);
+                segment = new HtmlSegment(html, blockStarts, start, kind);
             }
 
             segment.JoinedBlock = joinedBlock;

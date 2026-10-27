@@ -47,7 +47,7 @@ public partial class HtmlSegment
     internal string? JoinedBlock { get; set; }
 
     public HtmlSegment(
-        string html, HtmlSegmentStart start = HtmlSegmentStart.None, string? kind = null, ImmutableArray<int> blockStarts = default)
+        string html, ImmutableArray<int> blockStarts = default, HtmlSegmentStart start = HtmlSegmentStart.None, string? kind = null)
     {
         Start = start;
         Kind = kind;

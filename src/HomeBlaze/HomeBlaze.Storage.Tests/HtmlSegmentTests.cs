@@ -27,7 +27,7 @@ public class HtmlSegmentTests
         var html = "<p>A</p>\n";
 
         // Act
-        var segment = new HtmlSegment(html, blockStarts: [0, html.Length]);
+        var segment = new HtmlSegment(html, [0, html.Length]);
 
         // Assert
         Assert.Same(html, Assert.Single(segment.Blocks));
@@ -39,7 +39,7 @@ public class HtmlSegmentTests
     public void WhenABlockStartsInside_ThenTheHtmlIsCutThere()
     {
         // Act
-        var segment = new HtmlSegment("<p>A</p>\n<p>B</p>\n", blockStarts: [9]);
+        var segment = new HtmlSegment("<p>A</p>\n<p>B</p>\n", [9]);
 
         // Assert
         Assert.Equal(["<p>A</p>\n", "<p>B</p>\n"], segment.Blocks.ToArray());
