@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using Markdig.Extensions.Tables;
 using Markdig.Renderers;
@@ -11,14 +13,39 @@ namespace HomeBlaze.Storage.Pages;
 
 public abstract record MarkdownSegment;
 
-public sealed record HtmlMarkdownSegment(string Html) : MarkdownSegment;
+/// <param name="Html">The HTML of the segment.</param>
+/// <param name="BlockStarts">
+/// The offsets into <paramref name="Html"/>, in ascending order, at which a top-level block of the page starts, so that the
+/// HTML from there on does not depend on the HTML before it. An offset of 0 means that a block starts with the segment, not
+/// joined to an expression before it, and an offset of <c>Html.Length</c> that one starts after the segment, so the
+/// HTML between two offsets is a complete block. Default when there is none; an empty array is stored as default.
+/// </param>
+public sealed record HtmlMarkdownSegment(string Html, ImmutableArray<int> BlockStarts = default) : MarkdownSegment
+{
+    private readonly ImmutableArray<int> _blockStarts = Normalize(BlockStarts);
 
-public sealed record ExpressionMarkdownSegment(string Path, ExpressionFormat Format, string? Error) : MarkdownSegment;
+    public ImmutableArray<int> BlockStarts
+    {
+        get => _blockStarts;
+        init => _blockStarts = Normalize(value);
+    }
+
+    private static ImmutableArray<int> Normalize(ImmutableArray<int> blockStarts) =>
+        blockStarts.IsDefaultOrEmpty ? default : blockStarts;
+
+    // By content, because the equality of an immutable array compares the array it wraps.
+    public bool Equals(HtmlMarkdownSegment? other) =>
+        other is not null && Html == other.Html && BlockStarts.AsSpan().SequenceEqual(other.BlockStarts.AsSpan());
+
+    public override int GetHashCode() => HashCode.Combine(Html, BlockStarts.IsDefault ? 0 : BlockStarts.Length);
+}
+
+public sealed record ExpressionMarkdownSegment(string Text) : MarkdownSegment;
 
 public sealed record BlockMarkdownSegment(MarkdownBlock Block, IReadOnlyList<MarkdownSegment> Content) : MarkdownSegment;
 
-/// <summary>One {{ path }} expression in the text of a page: where it stands, the path between the braces without the format, the format, and what is wrong with the format.</summary>
-public readonly record struct MarkdownExpression(MarkdownSpan Span, string Path, ExpressionFormat Format, string? Error);
+/// <summary>One {{ … }} expression in the text of a page: where it stands, and the text between the braces without the white space around it.</summary>
+public readonly record struct MarkdownExpression(MarkdownSpan Span, string Text);
 
 public static class MarkdownErrorBox
 {
@@ -29,50 +56,92 @@ public static class MarkdownErrorBox
 /// <summary>Renders a parsed page to HTML and cuts it into segments per block.</summary>
 public static partial class MarkdownSegmentBuilder
 {
-    // The path takes no brace and no '<'. Without that, an opening pair of braces that is never closed would
-    // take everything up to the closing pair of a later expression, and in the rendered HTML also the
-    // markers of the blocks in between.
+    // The text takes no brace and no '<'. Without that, an opening pair of braces that is never closed would take
+    // everything up to the closing pair of a later expression, and in the rendered HTML also the markers in between.
+    // It finds the expressions in HTML that the page writes; those in running text are markers already.
     private const string ExpressionPattern = @"\{\{\s*([^{}<]+?)\s*\}\}";
 
-    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
+    // The source is searched with '<' allowed, because running text has the operators of an expression as written.
+    [GeneratedRegex(@"\{\{\s*([^{}]+?)\s*\}\}")]
+    private static partial Regex SourceExpressionRegex();
+
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern + @"|<!--BREAK:([0-9a-f]{32})-->")]
     private static partial Regex MarkerRegex();
 
-    [GeneratedRegex(ExpressionPattern)]
-    private static partial Regex ExpressionRegex();
-
     private static readonly char[] Braces = ['{', '}'];
+
+    // A comment, whose content opens nothing, or the name of an opening tag, each with whether it is never ended.
+    // "<!-->" and "<!--->" are complete comments.
+    [GeneratedRegex(@"<!--(?:-?>|[\s\S]*?(?:-->|(?<unended>$)))|<(?<name>[A-Za-z][A-Za-z0-9-]*)(?<unended>(?>[^>]*)$)?")]
+    private static partial Regex OpeningTagRegex();
+
+    private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"
+    };
 
     private static readonly string OldSubjectFenceError =
         "The subject(name) fence is no longer supported. Write the subject as a block: a line with " +
         $"{MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} Full.Type.Name#name key=value, " +
         $"then a closing {MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} line.";
 
-    // The characters that the path part of the expression pattern excludes.
-    private static readonly char[] ExcludedFromPath = ['{', '}', '<'];
+    // A brace that the HTML has as a character reference comes from markdown code, and encloses no expression.
+    private static readonly char[] ExcludedFromText = ['{', '}'];
 
     /// <summary>
-    /// Gets the expressions in the text of the page in document order. An expression is a path between two
-    /// pairs of braces that contains no brace and no '&lt;'. A brace inside markdown code neither opens nor
-    /// closes one.
+    /// Gets the expressions in the text of the page in document order: the text between two pairs of braces that
+    /// contains no brace. A brace inside markdown code neither opens nor closes one. The head line of a block and its json block are skipped.
     /// </summary>
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
     /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
-    /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
-    /// A path with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, while the
-    /// segment has the character.
+    /// block, and one whose braces enclose markdown markup or the border of a block.
+    /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, except one
+    /// in HTML that the page writes: its text has the character, like its segment, and one whose character
+    /// is a brace is skipped. The segment of an expression in running text keeps it as written.
     /// </remarks>
     public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
     {
         var source = page.Source;
-        foreach (Match match in ExpressionRegex().Matches(HideBracesInCode(page)))
+        foreach (Match match in SourceExpressionRegex().Matches(HideBracesInCode(page)))
         {
-            var path = match.Groups[1];
-            var text = MarkdownExpressionText.Parse(source.Substring(path.Index, path.Length));
-            yield return new MarkdownExpression(
-                new MarkdownSpan(match.Index, match.Length), text.Path, text.Format, text.Error);
+            if (IsInBlockArguments(page, match.Index))
+            {
+                continue;
+            }
+
+            var group = match.Groups[1];
+            var text = source.Substring(group.Index, group.Length);
+
+            // Raw HTML is HTML to the page, which reads a character reference in it, so a '<' is written as &lt;.
+            if (page.IsInsideRawHtml(match.Index))
+            {
+                text = WebUtility.HtmlDecode(text);
+                if (text.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
+                {
+                    continue;
+                }
+            }
+
+            yield return new MarkdownExpression(new MarkdownSpan(match.Index, match.Length), text);
         }
     }
+
+    // The head line and the json block of a block hold its arguments, whose expressions the widget evaluates itself.
+    private static bool IsInBlockArguments(MarkdownPage page, int position)
+    {
+        foreach (var block in page.AllBlocks)
+        {
+            if (IsInside(block.HeadSpan, position) || (block.ConfigurationSpan is { } configuration && IsInside(configuration, position)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInside(MarkdownSpan span, int position) => position >= span.Start && position < span.End;
 
     /// <summary>Gets the text of the page with every brace inside markdown code replaced. All offsets stay the same.</summary>
     private static string HideBracesInCode(MarkdownPage page)
@@ -103,6 +172,8 @@ public static partial class MarkdownSegmentBuilder
         var renderer = new HtmlRenderer(writer) { LinkRewriter = linkRewriter };
         MarkdownPageParser.Pipeline.Setup(renderer);
         renderer.ObjectRenderers.Insert(0, new BlockMarkerRenderer(page, token));
+        var expressions = new List<string>();
+        renderer.ObjectRenderers.Insert(0, new ExpressionMarkerRenderer(token, expressions));
 
         // Extensions configure the code renderers by exact type during Setup, so the
         // replacements are put in afterwards and take over what they configured.
@@ -140,48 +211,118 @@ public static partial class MarkdownSegmentBuilder
             renderer.ObjectRenderers.Replace<HtmlTableRenderer>(scrollableRenderer);
         }
 
+        WriteBreaksBetweenBlocks(renderer, page, writer, token);
         renderer.Render(page.Document);
         writer.Flush();
 
-        return Split(writer.ToString(), page, token);
+        return Split(writer.ToString(), page, token, expressions);
     }
 
-    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token)
+    /// <summary>Writes a break marker before each top-level block of the page that may start a markup string of its own.</summary>
+    private static void WriteBreaksBetweenBlocks(HtmlRenderer renderer, MarkdownPage page, StringWriter writer, string token)
+    {
+        // Blazor parses each markup string on its own, in a fresh context. So raw HTML stays with the block before it,
+        // and after a block whose raw HTML opens an element, which would be closed early, the rest stays joined.
+        var document = page.Document;
+        var marker = $"<!--BREAK:{token}-->";
+        var isJoined = false;
+        renderer.ObjectWriteBefore += (_, markdownObject) =>
+        {
+            if (markdownObject is not Block block || !ReferenceEquals(block.Parent, document))
+            {
+                return;
+            }
+
+            // Hooked into the rendering of the whole document, so that each block renders as it does there. The marker
+            // is written past the renderer, which then still knows whether the HTML before it ended a line.
+            if (!isJoined && block is not HtmlBlock && writer.GetStringBuilder().Length > 0)
+            {
+                writer.Write(marker);
+            }
+
+            isJoined = isJoined || OpensAnElement(page, block);
+        };
+    }
+
+    // The content of a widget block is markup of its own, so only the content of a style block counts for the page.
+    private static bool OpensAnElement(MarkdownPage page, Block block) => block switch
+    {
+        HtmlBlock html => OpensAnElement(html.Lines.ToString()),
+        LeafBlock { Inline: { } inline } => inline.Descendants<HtmlInline>().Any(tag => OpensAnElement(tag.Tag)),
+        MarkdownBlockContainer container when page.GetBlock(container).Kind != MarkdownBlockKind.Style => false,
+        ContainerBlock container => container.Any(child => OpensAnElement(page, child)),
+        _ => false
+    };
+
+    private static bool OpensAnElement(string rawHtml)
+    {
+        foreach (Match match in OpeningTagRegex().Matches(rawHtml))
+        {
+            var name = match.Groups["name"];
+            if (match.Groups["unended"].Success || (name.Success && !VoidElements.Contains(name.Value)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token, IReadOnlyList<string> expressions)
     {
         var root = new List<MarkdownSegment>();
         var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
         var current = root;
         var lastIndex = 0;
 
+        // A break marker does not end a segment: the HTML around it is one run, and the break is kept as an offset into it.
+        var run = new StringBuilder();
+        var blockStarts = new List<int>();
+        var hasBreak = false;
+
         foreach (Match match in MarkerRegex().Matches(html))
         {
-            var isForgedMarker = match.Groups[2].Success && match.Groups[2].Value != token;
+            var isForgedMarker =
+                (match.Groups[2].Success && match.Groups[2].Value != token) ||
+                (match.Groups[4].Success && match.Groups[4].Value != token) ||
+                (match.Groups[7].Success && match.Groups[7].Value != token);
             if (isForgedMarker)
             {
                 continue;
             }
 
-            // The path is HTML here, so a quote or an ampersand in it is a character reference.
-            var path = match.Groups[4].Success ? WebUtility.HtmlDecode(match.Groups[4].Value) : null;
+            // An expression in HTML that the page writes is HTML, so a quote or an ampersand in it is a character reference.
+            var expression = match.Groups[4].Success
+                ? expressions[int.Parse(match.Groups[5].Value)]
+                : match.Groups[6].Success ? WebUtility.HtmlDecode(match.Groups[6].Value) : null;
 
-            // The pattern cannot see a '<' or a brace that the page text has literally, because the HTML has
-            // a character reference for it. In the text such braces enclose no expression, so they stay text here.
-            if (path is not null && path.AsSpan().IndexOfAny(ExcludedFromPath) >= 0)
+            if (match.Groups[6].Success && expression!.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
             {
                 continue;
             }
 
-            if (match.Index > lastIndex)
-            {
-                current.Add(new HtmlMarkdownSegment(html[lastIndex..match.Index]));
-            }
-
+            AppendToRun(html, lastIndex, match.Index, root, current, run, blockStarts, ref hasBreak);
             lastIndex = match.Index + match.Length;
 
-            if (path is not null)
+            if (match.Groups[7].Success)
             {
-                var text = MarkdownExpressionText.Parse(path);
-                current.Add(new ExpressionMarkdownSegment(text.Path, text.Format, text.Error));
+                hasBreak = true;
+                continue;
+            }
+
+            // A widget on the page ends the markup string in any case.
+            var opensWidget = expression is null && match.Groups[1].Length == 0;
+            if ((hasBreak || (opensWidget && ReferenceEquals(current, root))) && run.Length > 0)
+            {
+                blockStarts.Add(run.Length);
+            }
+
+            hasBreak = false;
+            EndRun(current, run, blockStarts);
+
+            if (expression is not null)
+            {
+                current.Add(new ExpressionMarkdownSegment(expression));
             }
             else if (match.Groups[1].Length == 0)
             {
@@ -196,10 +337,13 @@ public static partial class MarkdownSegmentBuilder
             }
         }
 
-        if (lastIndex < html.Length)
+        AppendToRun(html, lastIndex, html.Length, root, current, run, blockStarts, ref hasBreak);
+        if (ReferenceEquals(current, root) && run.Length > 0)
         {
-            current.Add(new HtmlMarkdownSegment(html[lastIndex..]));
+            blockStarts.Add(run.Length);
         }
+
+        EndRun(current, run, blockStarts);
 
         // A closing marker that was not found must not take the content of its block out of the result.
         while (stack.Count > 0)
@@ -210,6 +354,54 @@ public static partial class MarkdownSegmentBuilder
         }
 
         return root;
+    }
+
+    private static void AppendToRun(
+        string html,
+        int start,
+        int end,
+        List<MarkdownSegment> root,
+        List<MarkdownSegment> current,
+        StringBuilder run,
+        List<int> blockStarts,
+        ref bool hasBreak)
+    {
+        if (end <= start)
+        {
+            return;
+        }
+
+        // The start of the page and the end of a widget on it start a block in any case.
+        var isAfterWidgetOrStartOfPage = run.Length == 0 && ReferenceEquals(current, root) && current is [] or [.., BlockMarkdownSegment];
+        if ((hasBreak && (run.Length > 0 || current.Count > 0)) || isAfterWidgetOrStartOfPage)
+        {
+            blockStarts.Add(run.Length);
+        }
+
+        hasBreak = false;
+        run.Append(html, start, end - start);
+    }
+
+    private static void EndRun(List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts)
+    {
+        if (run.Length == 0)
+        {
+            return;
+        }
+
+        current.Add(new HtmlMarkdownSegment(run.ToString(), blockStarts.Count > 0 ? [.. blockStarts] : default));
+        run.Clear();
+        blockStarts.Clear();
+    }
+
+    // The marker holds an index and not the text, so that no text of an expression, such as "-->", can end the comment.
+    private sealed class ExpressionMarkerRenderer(string token, List<string> expressions) : HtmlObjectRenderer<MarkdownExpressionInline>
+    {
+        protected override void Write(HtmlRenderer renderer, MarkdownExpressionInline expression)
+        {
+            renderer.Write($"<!--EXPR:{token}:{expressions.Count}-->");
+            expressions.Add(expression.Text);
+        }
     }
 
     private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<MarkdownBlockContainer>

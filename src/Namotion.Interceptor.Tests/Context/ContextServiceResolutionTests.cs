@@ -89,6 +89,27 @@ public class ContextServiceResolutionTests
         Assert.Same(duplicate1, services[2]);
     }
 
+    [Fact]
+    public void WhenFallbackContextIsRemoved_ThenTheOthersAreListedInOrderAndEarlierSnapshotIsUnchanged()
+    {
+        // Arrange
+        var first = InterceptorSubjectContext.Create();
+        var second = InterceptorSubjectContext.Create();
+        var third = InterceptorSubjectContext.Create();
+        var context = InterceptorSubjectContext.Create();
+        context.AddFallbackContext(first);
+        context.AddFallbackContext(second);
+        context.AddFallbackContext(third);
+        var snapshot = context.FallbackContexts;
+
+        // Act
+        context.RemoveFallbackContext(second);
+
+        // Assert
+        Assert.Equal(new IInterceptorSubjectContext[] { first, third }, context.FallbackContexts);
+        Assert.Equal(new IInterceptorSubjectContext[] { first, second, third }, snapshot);
+    }
+
     private interface IOrderedTestService { }
 
     private class DuplicateOrderedService : IOrderedTestService { }

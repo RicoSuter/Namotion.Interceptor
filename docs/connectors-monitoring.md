@@ -90,7 +90,7 @@ Detaching the awaited branch empties its scope the same way, and there the answe
 
 A source that fails terminally sets `Stopped` but is not disposed, so it stays registered and its branch keeps reporting whatever the stop earned. The same applies to a source whose registration itself failed. That is correct while nothing replaced it, and it is not free: the monitor holds every registered source, and through it the subtree under that source's root, until the source is disposed. If you do replace it, dispose the one you are replacing: the monitor cannot distinguish an abandoned source from a dead one, so leaving both registered keeps the branch on the dead one's verdict forever, and keeps both alive.
 
-A subject referenced from two trees participates fully in only the first: the context fallback is added on first attach and left alone afterwards, so claims publish to the first tree's stream and a wait anchored through the second tree sees only the first tree's sources. Avoid sharing a subject across two independently monitored trees.
+A subject referenced from two trees participates fully in only the first: the context fallback is added on first attach and only changes when that parent releases the subject (see [Context Inheritance](tracking.md#context-inheritance)), so claims publish to the first tree's stream and a wait anchored through the second tree sees only the first tree's sources. Avoid sharing a subject across two independently monitored trees.
 
 ## Reading Per-Property State
 
@@ -163,7 +163,7 @@ using var subscription = context.GetSourceMonitor().Subscribe(sourceEvent =>
 });
 ```
 
-Delivery is queued per subscription and runs outside every lock, so a slow handler delays only itself. Handlers run on a thread-pool thread, so a UI consumer must marshal. `Subscribe` also returns the sources registered at that moment (`SourceSubscription.Sources`), captured atomically with the subscription, so seeding from that snapshot and then processing the stream sees every source exactly once.
+Delivery is queued per subscription and runs outside every lock, so a slow handler delays only itself. Handlers run on a thread-pool thread, so a UI consumer must marshal. They do not run in the publisher's execution context, so its `AsyncLocal` values do not flow into them. `Subscribe` also returns the sources registered at that moment (`SourceSubscription.Sources`), captured atomically with the subscription, so seeding from that snapshot and then processing the stream sees every source exactly once.
 
 `OldState` and `NewState` describe one transition and must not be applied blindly: the ownership compare-and-set and the enqueue are not atomic, so events for one property can arrive inverted. Apply `CurrentState`, which re-resolves at read time.
 

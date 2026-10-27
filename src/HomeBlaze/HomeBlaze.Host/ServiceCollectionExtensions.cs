@@ -1,5 +1,6 @@
 using HomeBlaze.Components.Controls;
 using HomeBlaze.History.Blazor;
+using HomeBlaze.Host.Clients;
 using HomeBlaze.Host.Preferences;
 using HomeBlaze.Host.Services;
 using HomeBlaze.Host.TimeZones;
@@ -33,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<TimeZoneInterop>();
         services.AddScoped<BrowserPreferences>();
+        services.AddScoped<CurrentClientConnection>();
         services.AddScoped<PropertyWriter>();
 
         // Value widgets open the history of their property through it.

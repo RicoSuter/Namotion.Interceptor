@@ -27,13 +27,17 @@
                           Placeholder="@_navigationTitlePlaceholder"
                           Clearable="true"
                           data-testid="metadata-navigation-title" />
-            <MudTextField @bind-Value="_icon"
+            @* The value, which only the icon beside the field shows, follows the text after the debounce interval, so
+               that the icon does not change on every keystroke. A save takes the text, as the value can still be behind
+               right after typing. *@
+            <MudTextField @bind-Value="_iconPreview"
+                          TextChanged="@(text => _icon = text)"
                           Label="Icon"
                           Placeholder="@_iconPlaceholder"
                           Clearable="true"
                           DebounceInterval="300"
                           Adornment="Adornment.End"
-                          AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_icon) ?? _iconPlaceholder)"
+                          AdornmentIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(GetValue(_iconPreview) ?? _iconPlaceholder)"
                           HelperText="A MudBlazor icon name, such as Dashboard or Settings"
                           data-testid="metadata-icon" />
             @if (!_isFolder)
@@ -124,6 +128,7 @@
     private string? _title;
     private string? _navigationTitle;
     private string? _icon;
+    private string? _iconPreview;
     private NavigationLocation? _location;
     private AppBarAlignment? _alignment;
     private string? _notes;
@@ -162,7 +167,7 @@
             _isFolder = IsFolder(Owner);
             _navigationTitlePlaceholder = Owner.GetTitle();
             _navigationTitle = metadata.GetString(MetadataKeys.NavigationTitle);
-            _icon = metadata.GetString(MetadataKeys.Icon);
+            _icon = _iconPreview = metadata.GetString(MetadataKeys.Icon);
             if (_isFolder)
             {
                 _titlePlaceholder = Owner.TryGetRegisteredSubject()?.Parents.FirstOrDefault().Index?.ToString();

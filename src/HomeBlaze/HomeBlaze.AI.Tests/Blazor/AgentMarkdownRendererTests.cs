@@ -144,6 +144,66 @@ public class AgentMarkdownRendererTests
     }
 
     [Theory]
+    [InlineData("```mermaid\ngraph TD\n  A --> B\n```")]
+    [InlineData("```MERMAID\ngraph TD\n  A --> B\n```")]
+    [InlineData("~~~mermaid\ngraph TD\n  A --> B\n~~~")]
+    public void WhenMermaidFenceIsClosed_ThenItIsRenderedAsDiagram(string markdown)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+
+        // Assert
+        Assert.Contains("<pre class=\"mermaid\">", html);
+        Assert.Contains("A --> B", html);
+        Assert.DoesNotContain("<code", html);
+    }
+
+    [Theory]
+    [InlineData("```mermaid\ngraph TD\n  A --> B")]
+    [InlineData("```mermaidjs\ngraph TD\n  A --> B\n```")]
+    [InlineData("```nomnoml\n[A] -> [B]\n```")]
+    public void WhenFenceIsNoClosedMermaidFence_ThenItIsRenderedAsCodeWithoutClass(string markdown)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml(markdown);
+
+        // Assert
+        Assert.Contains("<pre><code>", html);
+        Assert.DoesNotContain("class=", html);
+    }
+
+    [Theory]
+    [InlineData("flowchart TD\n  A@{ img: \"http://evil.test/x.png\" }")]
+    [InlineData("stateDiagram-v2\n  classDef bad mask-image:url(//evil.test/x)\n  class S bad")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:URL(//evil.test/x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:image-set(\"//evil.test/x\" 1x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:\\75 rl(//evil.test/x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:#117;rl(//evil.test/x)")]
+    [InlineData("flowchart TD\n  A --> B\n  click A href \"https://evil.test\"")]
+    [InlineData("stateDiagram-v2\n  style S mask:u%%{wrap}%%rl(//evil.test/x)")]
+    public void WhenMermaidFenceCouldLoadAnAddress_ThenItIsRenderedAsCode(string source)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("```mermaid\n" + source + "\n```");
+
+        // Assert
+        Assert.Contains("<pre><code>", html);
+        Assert.DoesNotContain("class=", html);
+    }
+
+    [Fact]
+    public void WhenMermaidFenceContainsHtml_ThenItIsEncoded()
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("```mermaid\n</pre><script>alert(1)</script>\n```");
+
+        // Assert
+        Assert.Contains("&lt;/pre>&lt;script>", html);
+        Assert.DoesNotContain("<script", html);
+        Assert.DoesNotContain("</pre><", html);
+    }
+
+    [Theory]
     [InlineData("[click](java\u0001script:alert(1))")]
     [InlineData("[click](\u0000javascript:alert(1))")]
     public void WhenLinkTargetContainsControlCharacters_ThenNoLinkIsRendered(string markdown)

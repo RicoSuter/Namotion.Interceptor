@@ -2,7 +2,10 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Display;
+using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -37,10 +40,15 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         var page = _folder.FindPage(pagePath);
 
         // Assert
-        var pathsToNothing = DocumentationFolderFixture.FindSubjects(page)
-            .OfType<RenderExpression>()
-            .Where(expression => resolver.ResolveScopedProperty(expression.Path, PathStyle.Canonical, page) is null)
-            .Select(expression => expression.Path);
+        var expressions = DocumentationFolderFixture.FindSubjects(page).OfType<RenderExpression>().ToList();
+        var expressionsWithAnError = expressions
+            .Where(expression => expression.Error is not null)
+            .Select(expression => $"{pagePath}: the expression '{expression.Text}' does not parse: {expression.Error}");
+        Assert.Empty(expressionsWithAnError);
+
+        var pathsToNothing = expressions
+            .SelectMany(expression => MarkdownExpressions.Parse(expression.Text, out _)!.Paths)
+            .Where(path => resolver.ResolveScopedProperty(path, PathStyle.Canonical, page) is null);
 
         Assert.Empty(pathsToNothing);
     }
@@ -64,6 +72,90 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         Assert.Empty(pathsToNothing);
     }
 
+    [Theory]
+    [MemberData(nameof(Pages))]
+    public void WhenPageIsLoadedWithItsFolder_ThenEveryTemplateArgumentPassesTheCheckOfItsHostAndItsPathsLeadToAProperty(string pagePath)
+    {
+        // Arrange
+        var resolver = _folder.Services.GetRequiredService<SubjectPathResolver>();
+
+        // Act
+        var page = _folder.FindPage(pagePath);
+
+        // Assert: a variable is bound by the widget from its Path, every other path resolves from the widget like the paths of the page
+        var mistakes = DocumentationFolderFixture.FindSubjects(page)
+            .SelectMany(subject => FindTemplates(subject).SelectMany(template => FindMistakes(template, subject, resolver)));
+
+        Assert.Empty(mistakes);
+    }
+
+    private static IEnumerable<(string PropertyName, string Text)> FindTemplates(IInterceptorSubject subject)
+    {
+        foreach (var property in subject.TryGetRegisteredSubject()!.Properties)
+        {
+            if (property.ReflectionAttributes.OfType<TextTemplateAttribute>().Any() &&
+                property.GetValue() is string { Length: > 0 } text &&
+                text.Contains("{{", StringComparison.Ordinal))
+            {
+                yield return (property.Name, text);
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindMistakes(
+        (string PropertyName, string Text) template, IInterceptorSubject subject, SubjectPathResolver resolver)
+    {
+        var name = $"{subject.GetType().Name}.{template.PropertyName}={template.Text}";
+        if (!TextTemplate.TryParse(template.Text, ExpressionDisplay.PathSeparator, out var parsed, out var error))
+        {
+            yield return $"{name}: {error}";
+            yield break;
+        }
+
+        // The use of the host, as its render checks the expressions
+        var use = subject is Card ? ExpressionUse.WidgetTextWithoutPath
+            : subject is ValueMapCase ? ExpressionUse.CaseText
+            : ExpressionUse.WidgetText;
+
+        // What the widget binds to 'subject' depends on the widget that applies the map, so that a case is not followed.
+        var boundSubject = subject is Card or ValueMapCase ? null : ValueBinding.FromPath(resolver, subject, GetPath(subject)).Subject;
+
+        foreach (var expression in parsed.Expressions)
+        {
+            if (ExpressionDisplay.Check(expression, use) is { } mistake)
+            {
+                yield return $"{name}: {mistake}";
+                continue;
+            }
+
+            foreach (var path in expression.Paths)
+            {
+                if (ExpressionVariables.TryGetVariable(path, ExpressionDisplay.PathSeparator, out var variable))
+                {
+                    if (variable == ExpressionVariables.Subject && subject is not (Card or ValueMapCase) &&
+                        path.StartsWith("subject/", StringComparison.Ordinal))
+                    {
+                        if (boundSubject is null)
+                        {
+                            yield return $"{name}: the path '{path}' needs a subject, and the Path of the widget leads to none";
+                        }
+                        else if (resolver.ResolveDisplayablePropertyFrom(path["subject/".Length..], PathStyle.Canonical, boundSubject) is null)
+                        {
+                            yield return $"{name}: the path '{path}' leads to no property of the subject of the Path";
+                        }
+                    }
+                }
+                else if (resolver.ResolveScopedProperty(path, PathStyle.Canonical, subject) is null)
+                {
+                    yield return $"{name}: the path '{path}' leads to no property";
+                }
+            }
+        }
+    }
+
+    private static string? GetPath(IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject()!.TryGetProperty("Path")?.GetValue() as string;
+
     /// <summary>
     /// Gets the paths that the subject holds: the path of a <see cref="Widget"/>, which leads to any subject, and
     /// every property marked with <see cref="SubjectPathAttribute"/>, which says where its path leads.
@@ -86,11 +178,19 @@ public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFi
         }
     }
 
-    // The same lookups as the widgets do: a path without a subject type ends at a property.
+    // The widgets that show the value of their path, and so may lead it to a subject when they have a Map.
+    private static readonly HashSet<Type> ValueWidgets = [typeof(ValueTile), typeof(ValueRow), typeof(Indicator)];
+
+    // The same lookups as the widgets do: a path without a subject type ends at a property. With a Map a value widget
+    // may also end at a subject, which the cases of the map read as 'subject'.
     private static bool LeadsToTarget(WidgetPath path, IInterceptorSubject subject, SubjectPathResolver resolver) =>
         path.SubjectType is null
-            ? resolver.ResolveScopedProperty(path.Text, PathStyle.Canonical, subject) is not null
+            ? resolver.ResolveScopedProperty(path.Text, PathStyle.Canonical, subject) is not null ||
+              (ValueWidgets.Contains(subject.GetType()) && HasMap(subject) && resolver.ResolveScopedSubject(path.Text, PathStyle.Canonical, subject) is not null)
             : path.SubjectType.IsInstanceOfType(resolver.ResolveScopedSubject(path.Text, PathStyle.Canonical, subject));
+
+    private static bool HasMap(IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject()!.TryGetProperty("Map")?.GetValue() is string { Length: > 0 };
 
     /// <summary>A path that a widget holds. <see cref="SubjectType"/> is null for a path to a property.</summary>
     private readonly record struct WidgetPath(string PropertyName, string Text, Type? SubjectType);

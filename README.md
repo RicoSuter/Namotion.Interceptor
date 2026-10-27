@@ -403,6 +403,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
+| **Namotion.Interceptor.Expressions** | Expressions over property values: comparisons, conditions and templates | [Expressions](docs/expressions.md) |
 
 ### Connectors
 

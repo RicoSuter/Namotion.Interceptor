@@ -65,6 +65,10 @@ public interface IInterceptorSubjectContext
     /// </summary>
     /// <param name="context">The fallback context to add.</param>
     /// <returns>True if the fallback context was added, false if it was already present.</returns>
+    /// <remarks>
+    /// The fallback context keeps this context, and the subject it belongs to, reachable until the
+    /// fallback context is removed again.
+    /// </remarks>
     bool AddFallbackContext(IInterceptorSubjectContext context);
 
     /// <summary>

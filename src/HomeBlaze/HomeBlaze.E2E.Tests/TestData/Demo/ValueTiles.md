@@ -30,6 +30,13 @@ This page is changed by the value tile widget tests.
 :: HomeBlaze.Components.ValueTile Kind=Tile Path=valuemotor/TargetSpeed Label="Alone"
 ::
 
+:: HomeBlaze.Components.GridLayout#subtitlegrid Rows=1 Columns=2 CellAspectRatio=1:1
+::: Cell Row=0 Column=0
+:::: HomeBlaze.Components.ValueTile Kind=Tile Path=valuemotor/TargetSpeed Label="Subtitled" Subtitle="Of {{ subject/Name }}" Icon=Speed
+::: Cell Row=0 Column=1
+:::: HomeBlaze.Components.ValueTile Path=valuemotor/TargetSpeed Label="Subtitled box" Subtitle="Of {{ subject/Name }}"
+::
+
 :: HomeBlaze.Components.CanvasLayout#gaugecanvas MinHeight=200 Width=400
 ::: Node X=0 Y=0 Width=200 Height=200
 :::: HomeBlaze.Components.Gauge Path=valuemotor/TargetSpeed Label="Canvas gauge" Size=Small
