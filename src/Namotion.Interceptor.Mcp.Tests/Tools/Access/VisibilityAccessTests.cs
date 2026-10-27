@@ -82,7 +82,7 @@ public class VisibilityAccessTests
     }
 
     [Fact]
-    public void WhenAskedForAnotherInnerProvider_ThenTheVisibilityRestrictsThatProvider()
+    public void WhenAskedForAnotherInnerProvider_ThenTheVisibilityWrapsThatProvider()
     {
         // Arrange
         var context = CreateContext();
