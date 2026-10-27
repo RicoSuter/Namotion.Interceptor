@@ -89,9 +89,10 @@ public partial class RepositoryPagesTests
         // Arrange
         var text = ReadPage(relativePath);
 
-        // Act
+        // Act: a Razor expression is a component parameter in a code sample, not a page argument.
         var unknownIconNames = IconArgument().Matches(text)
             .Select(match => match.Groups["name"].Value)
+            .Where(name => !name.StartsWith('@'))
             .Where(name => name != "Article" && MudBlazorIconResolver.Resolve(name) == Icons.Material.Filled.Article)
             .ToList();
 
