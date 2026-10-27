@@ -8,11 +8,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </summary>
 internal static class ChildIndexRefresher
 {
+    // Taken out of its slot while in use: a handler, or the Equals override of a key, can start a
+    // nested structural write on this thread, which then gets buffers of its own.
     [ThreadStatic]
-    private static List<SubjectChild>? _reusableChanges;
-
-    [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, object?>? _reusableOldIndices;
+    private static Buffers? _reusableBuffers;
 
     /// <summary>
     /// Reports every subject both values hold whose first key or position differs between them.
@@ -35,19 +34,17 @@ internal static class ChildIndexRefresher
             return;
         }
 
-        // Taken out of its slot while in use, so that a handler which writes another structural
-        // property gets a list of its own.
-        var changes = _reusableChanges ?? [];
-        _reusableChanges = null;
+        var buffers = _reusableBuffers ?? new Buffers();
+        _reusableBuffers = null;
         try
         {
-            CollectMovedChildren(oldChildren, newChildren, oldSubjects, newSubjects, changes);
-            if (changes.Count == 0)
+            CollectMovedChildren(oldChildren, newChildren, oldSubjects, newSubjects, buffers);
+            if (buffers.Changes.Count == 0)
             {
                 return;
             }
 
-            var span = CollectionsMarshal.AsSpan(changes);
+            var span = CollectionsMarshal.AsSpan(buffers.Changes);
             for (var i = 0; i < handlers.Length; i++)
             {
                 handlers[i].HandleChildIndexChanges(property, span);
@@ -55,8 +52,10 @@ internal static class ChildIndexRefresher
         }
         finally
         {
-            changes.Clear();
-            _reusableChanges = changes;
+            // Release references so subjects can be GC'd on idle threads
+            buffers.Changes.Clear();
+            buffers.OldIndices.Clear();
+            _reusableBuffers = buffers;
         }
     }
 
@@ -65,7 +64,7 @@ internal static class ChildIndexRefresher
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> newChildren,
         HashSet<IInterceptorSubject> oldSubjects,
         HashSet<IInterceptorSubject> newSubjects,
-        List<SubjectChild> changes)
+        Buffers buffers)
     {
         var oldSpan = CollectionsMarshal.AsSpan(oldChildren);
         var newSpan = CollectionsMarshal.AsSpan(newChildren);
@@ -74,36 +73,27 @@ internal static class ChildIndexRefresher
         // by place cannot tell from a later one, so every first occurrence is looked up instead.
         var holdsDuplicates = oldSubjects.Count != oldSpan.Length || newSubjects.Count != newSpan.Length;
 
-        // Filled on the first kept subject that needs a lookup.
-        Dictionary<IInterceptorSubject, object?>? oldIndices = null;
-        try
+        var oldIndices = buffers.OldIndices;
+        for (var i = 0; i < newSpan.Length; i++)
         {
-            for (var i = 0; i < newSpan.Length; i++)
+            var (subject, _, index) = newSpan[i];
+
+            // Taking a subject out of the set is what skips its later occurrences.
+            if (holdsDuplicates ? !newSubjects.Remove(subject) : IsWhereItWas(oldSpan, i, subject, index))
+                continue;
+
+            // A subject this write attached already carries its index.
+            if (!oldSubjects.Contains(subject))
+                continue;
+
+            if (oldIndices.Count == 0)
             {
-                var (subject, _, index) = newSpan[i];
-
-                // Taking a subject out of the set is what skips its later occurrences.
-                if (holdsDuplicates ? !newSubjects.Remove(subject) : IsWhereItWas(oldSpan, i, subject, index))
-                    continue;
-
-                // A subject this write attached already carries its index.
-                if (!oldSubjects.Contains(subject))
-                    continue;
-
-                oldIndices ??= TakeOldIndices(oldSpan);
-                if (!Equals(oldIndices[subject], index))
-                {
-                    changes.Add(new SubjectChild(subject, index));
-                }
+                MapFirstIndices(oldSpan, oldIndices);
             }
-        }
-        finally
-        {
-            if (oldIndices is not null)
+
+            if (!Equals(oldIndices[subject], index))
             {
-                // Release references so subjects can be GC'd on idle threads
-                oldIndices.Clear();
-                _reusableOldIndices = oldIndices;
+                buffers.Changes.Add(new SubjectChild(subject, index));
             }
         }
     }
@@ -119,18 +109,20 @@ internal static class ChildIndexRefresher
                Equals(oldSpan[position].index, index);
     }
 
-    // Taken out of its slot while in use, because comparing keys runs Equals overrides, which
-    // could start a nested write on this thread.
-    private static Dictionary<IInterceptorSubject, object?> TakeOldIndices(
-        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan)
+    private static void MapFirstIndices(
+        ReadOnlySpan<(IInterceptorSubject subject, PropertyReference property, object? index)> oldSpan,
+        Dictionary<IInterceptorSubject, object?> oldIndices)
     {
-        var oldIndices = _reusableOldIndices ?? new Dictionary<IInterceptorSubject, object?>(ReferenceEqualityComparer.Instance);
-        _reusableOldIndices = null;
         foreach (var (subject, _, index) in oldSpan)
         {
             oldIndices.TryAdd(subject, index);
         }
+    }
 
-        return oldIndices;
+    private sealed class Buffers
+    {
+        public List<SubjectChild> Changes { get; } = [];
+
+        public Dictionary<IInterceptorSubject, object?> OldIndices { get; } = new(ReferenceEqualityComparer.Instance);
     }
 }

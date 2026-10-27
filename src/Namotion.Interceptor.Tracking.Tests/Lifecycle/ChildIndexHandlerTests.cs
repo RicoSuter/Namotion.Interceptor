@@ -131,6 +131,50 @@ public class ChildIndexHandlerTests
         Assert.Equal([new SubjectChild(car, null)], call.Children);
     }
 
+    [Fact]
+    public void WhenHandlerMovesAnotherPropertyDuringTheCall_ThenTheOuterCallKeepsItsChildren()
+    {
+        // Arrange
+        var first = new Car();
+        var second = new Car();
+        var handler = new NestedWritingChildIndexHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => handler);
+        var garage = new Garage(context)
+        {
+            Cars = [first, second],
+            CarsByName = new Dictionary<string, Car> { ["A"] = first }
+        };
+        handler.NestedWrite = () => garage.CarsByName = new Dictionary<string, Car> { ["B"] = first };
+
+        // Act
+        garage.Cars = [second, first];
+
+        // Assert
+        var outer = handler.Calls.Single(call => call.Property.Name == nameof(Garage.Cars));
+        Assert.Equal([new SubjectChild(second, 0), new SubjectChild(first, 1)], outer.Before);
+        Assert.Equal(outer.Before, outer.After);
+        Assert.Contains(handler.Calls, call => call.Property.Name == nameof(Garage.CarsByName));
+    }
+
+    private sealed class NestedWritingChildIndexHandler : IChildIndexHandler
+    {
+        public Action? NestedWrite { get; set; }
+
+        public List<(PropertyReference Property, SubjectChild[] Before, SubjectChild[] After)> Calls { get; } = [];
+
+        public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        {
+            var before = children.ToArray();
+            var nestedWrite = NestedWrite;
+            NestedWrite = null;
+            nestedWrite?.Invoke();
+            Calls.Add((property, before, children.ToArray()));
+        }
+    }
+
     private sealed class RecordingChildIndexHandler : IChildIndexHandler
     {
         public List<(PropertyReference Property, SubjectChild[] Children)> Calls { get; } = [];
