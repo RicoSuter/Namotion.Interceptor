@@ -1232,6 +1232,67 @@ In the Inline mode of a page, a click on a widget selects it, and the host shows
 - The content of a widget takes no mouse input while the page is edited, so that a click selects the widget instead of operating it. A part that is meant to be used while the page is edited takes it back with the class `edit-mode-interactive`, as the slider above does, or with `edit-mode-selected-interactive` once its widget is selected
 - No boilerplate needed in widget components
 
+### Editor Support
+
+Most widgets need nothing for the editing of a page. The host selects them, shows their bar, moves, adds and deletes their blocks, and opens their edit dialog. Each `[Slot]` gets its entries in the "+" menu, and content that a widget renders with `SubjectComponent`, as [Rendering Slots](#rendering-slots) shows, gets insert lines and selectable blocks of text. The Split preview is `inert` and needs no handling either.
+
+Three cases ask for a few lines:
+
+| Case | What to do | Example |
+|------|------------|---------|
+| The widget shows nothing on a viewed page | Render a `WidgetChip` while the page is edited inline, so that the widget has an area to click | `ValueMapWidget`, a `Responsive` whose content the screen hides |
+| Parts of the widget become blocks of their own once it is selected | Derive from `SelectionContainingWidgetBase` and render those parts only while `ContainsSelection` is true | The rows of a `ValueList`, the cases of a `ValueMap` |
+| The widget has controls that act, such as a button or a switch | Disable them while `IsEditing` is true. The host takes the pointer from the content of a widget while the page is edited, but the keyboard still reaches a control | `DoorLockWidget` |
+
+A widget that shows nothing, with a chip while it is edited inline. `Selection` is only set while the page is edited inline, never in the Split preview:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Schedule))]
+@implements ISubjectComponent
+
+@if (IsEditing && Selection is not null)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.Schedule" Text="Schedule" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+}
+```
+
+`SelectionContainingWidgetBase` provides `IsEditing`, `Selection` and `ContainsSelection`, and renders the widget again only when the selection enters or leaves it. A widget that overrides `OnParametersSet` calls the base first:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Schedule))]
+@implements ISubjectComponent
+@inherits SelectionContainingWidgetBase
+
+@if (IsEditing && Selection is not null)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.Schedule" Text="Schedule" />
+
+    @if (ContainsSelection && Subject is Schedule schedule)
+    {
+        @foreach (var entry in schedule.Entries)
+        {
+            <SubjectComponent Subject="@entry" Type="SubjectComponentType.Widget" />
+        }
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}
+```
+
 ### Content Slots
 
 A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
