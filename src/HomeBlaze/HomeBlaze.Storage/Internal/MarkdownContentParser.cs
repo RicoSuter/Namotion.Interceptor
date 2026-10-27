@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
@@ -318,7 +320,7 @@ public sealed partial class MarkdownContentParser
             switch (segments[index])
             {
                 case HtmlMarkdownSegment html:
-                    AddHtml(children, existingChildren, index, html.Html, html.TextBlock, state);
+                    AddHtml(children, existingChildren, index, html.Html, html.BlockStarts, html.TextBlock, state);
                     break;
 
                 case ExpressionMarkdownSegment expression:
@@ -336,7 +338,7 @@ public sealed partial class MarkdownContentParser
                     if (subject is null)
                     {
                         state.AddErrorBox();
-                        AddHtml(children, existingChildren, index, error!.Render(), textBlock: null, state);
+                        AddHtml(children, existingChildren, index, error!.Render(), blockStarts: default, textBlock: null, state);
                     }
                     else
                     {
@@ -355,6 +357,7 @@ public sealed partial class MarkdownContentParser
         IDictionary<string, IInterceptorSubject> existingChildren,
         int index,
         string html,
+        ImmutableArray<int> blockStarts,
         MarkdownTextBlock? textBlock,
         ParseState state)
     {
@@ -364,12 +367,13 @@ public sealed partial class MarkdownContentParser
             : HtmlSegmentStart.Source;
         var kind = textBlock is null ? null : GetKind(textBlock);
 
-        // The index is part of the key because the same HTML can occur several times.
-        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
+        // The index is part of the key because the same HTML can occur several times. The block starts are part of the
+        // hash so that a change of them replaces the subject.
+        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html, blockStarts.IsDefault ? default : blockStarts.AsSpan())}";
         var segment = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment reused &&
                       reused.Start == start && reused.Kind == kind
             ? reused
-            : new HtmlSegment(html, start, kind);
+            : new HtmlSegment(html, start, kind, blockStarts);
         children[key] = segment;
         if (textBlock is not null)
         {
@@ -633,15 +637,17 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private static string ComputeHash(string content)
+    private static string ComputeHash(string content, ReadOnlySpan<int> blockStarts = default)
     {
-        var byteCount = Encoding.UTF8.GetByteCount(content);
+        var blockStartBytes = MemoryMarshal.AsBytes(blockStarts);
+        var byteCount = Encoding.UTF8.GetByteCount(content) + blockStartBytes.Length;
         var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
         try
         {
             var bytesWritten = Encoding.UTF8.GetBytes(content, buffer);
+            blockStartBytes.CopyTo(buffer.AsSpan(bytesWritten));
             Span<byte> hashBuffer = stackalloc byte[32];
-            SHA256.HashData(buffer.AsSpan(0, bytesWritten), hashBuffer);
+            SHA256.HashData(buffer.AsSpan(0, bytesWritten + blockStartBytes.Length), hashBuffer);
             return Convert.ToHexStringLower(hashBuffer[..8]);
         }
         finally

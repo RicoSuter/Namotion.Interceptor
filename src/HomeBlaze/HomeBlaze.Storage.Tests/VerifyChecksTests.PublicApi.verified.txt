@@ -275,7 +275,7 @@ namespace HomeBlaze.Storage.Internal
     [System.ComponentModel.DisplayName("Text")]
     public class HtmlSegment : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public HtmlSegment(string html, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0, string? kind = null) { }
+        public HtmlSegment(string html, HomeBlaze.Storage.Internal.HtmlSegmentStart start = 0, string? kind = null, System.Collections.Immutable.ImmutableArray<int> blockStarts = default) { }
         public string Html { get; }
         public string? Kind { get; }
         public HomeBlaze.Storage.Internal.HtmlSegmentStart Start { get; }
@@ -316,6 +316,17 @@ namespace HomeBlaze.Storage.Internal
         public string? NavTitleSnakeCase { get; set; }
         [YamlDotNet.Serialization.YamlMember(Alias="title")]
         public string? Title { get; set; }
+    }
+    public static class MarkdownMarkup
+    {
+        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, bool groupsText = false) { }
+    }
+    public readonly struct MarkdownRenderSegment : System.IEquatable<HomeBlaze.Storage.Internal.MarkdownRenderSegment>
+    {
+        public MarkdownRenderSegment(string? Html, Namotion.Interceptor.IInterceptorSubject? Widget, HomeBlaze.Storage.Internal.HtmlSegment? Start = null) { }
+        public string? Html { get; init; }
+        public HomeBlaze.Storage.Internal.HtmlSegment? Start { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject? Widget { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.All)]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -367,8 +378,11 @@ namespace HomeBlaze.Storage.Pages
     }
     public sealed class HtmlMarkdownSegment : HomeBlaze.Storage.Pages.MarkdownSegment, System.IEquatable<HomeBlaze.Storage.Pages.HtmlMarkdownSegment>
     {
-        public HtmlMarkdownSegment(string Html) { }
+        public HtmlMarkdownSegment(string Html, System.Collections.Immutable.ImmutableArray<int> BlockStarts = default) { }
+        public System.Collections.Immutable.ImmutableArray<int> BlockStarts { get; init; }
         public string Html { get; init; }
+        public bool Equals(HomeBlaze.Storage.Pages.HtmlMarkdownSegment? other) { }
+        public override int GetHashCode() { }
     }
     public sealed class MarkdownAddSlot : System.IEquatable<HomeBlaze.Storage.Pages.MarkdownAddSlot>
     {

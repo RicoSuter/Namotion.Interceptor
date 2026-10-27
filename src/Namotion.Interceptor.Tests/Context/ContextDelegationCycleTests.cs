@@ -153,6 +153,65 @@ public class ContextDelegationCycleTests
         Assert.Single(contextB.GetServices<MarkerService>());
     }
 
+    [Fact]
+    public void WhenFallbackContextIsReplaced_ThenServicesOfTheNewOneResolve()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var oldContext = InterceptorSubjectContext.Create();
+        var newContext = InterceptorSubjectContext.Create();
+        var service = new MarkerService();
+        newContext.AddService(service);
+        context.AddFallbackContext(oldContext);
+
+        // Act
+        var isReplaced = context.ReplaceFallbackContext(oldContext, newContext);
+
+        // Assert
+        Assert.True(isReplaced);
+        Assert.Same(service, Assert.Single(context.GetServices<MarkerService>()));
+        Assert.False(context.HasFallbackContext(oldContext));
+    }
+
+    [Fact]
+    public void WhenFallbackContextIsReplacedByAnotherFallbackContext_ThenOnlyTheOtherOneIsLeft()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var oldContext = InterceptorSubjectContext.Create();
+        var newContext = InterceptorSubjectContext.Create();
+        context.AddFallbackContext(oldContext);
+        context.AddFallbackContext(newContext);
+
+        // Act
+        var isReplaced = context.ReplaceFallbackContext(oldContext, newContext);
+
+        // Assert
+        Assert.True(isReplaced);
+        Assert.False(context.HasFallbackContext(oldContext));
+        Assert.True(context.HasFallbackContext(newContext));
+    }
+
+    [Fact]
+    public void WhenFallbackContextIsReplacedByOneThatFallsBackOnIt_ThenItIsKept()
+    {
+        // Arrange: replacing the root by the child would leave the two contexts delegating to each other.
+        var root = InterceptorSubjectContext.Create();
+        root.AddService(new MarkerService());
+        var context = InterceptorSubjectContext.Create();
+        var child = InterceptorSubjectContext.Create();
+        context.AddFallbackContext(root);
+        child.AddFallbackContext(context);
+
+        // Act
+        var isReplaced = context.ReplaceFallbackContext(root, child);
+
+        // Assert
+        Assert.False(isReplaced);
+        Assert.Single(context.GetServices<MarkerService>());
+        Assert.Single(child.GetServices<MarkerService>());
+    }
+
     /// <summary>
     /// The pre-existing behaviour that must not change: a fallback cycle is legal and resolves
     /// normally as long as it does not consist purely of delegating contexts, which is the shape the

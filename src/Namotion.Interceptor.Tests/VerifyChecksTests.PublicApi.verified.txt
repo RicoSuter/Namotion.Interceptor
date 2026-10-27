@@ -81,11 +81,13 @@ namespace Namotion.Interceptor
     }
     public class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
     {
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.IInterceptorSubjectContext> FallbackContexts { get; }
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
-        protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public virtual bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public bool ReplaceFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext oldContext, Namotion.Interceptor.IInterceptorSubjectContext newContext) { }
         public bool TryAddService<TService>(System.Func<TService> factory, System.Func<TService, bool> exists) { }
         public TInterface? TryGetService<TInterface>() { }
         public static Namotion.Interceptor.InterceptorSubjectContext Create() { }
