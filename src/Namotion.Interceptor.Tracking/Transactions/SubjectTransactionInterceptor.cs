@@ -171,10 +171,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
     /// <summary>
     /// Records a write of the landed value that the equality check drops as unchanged, when the current flow's
-    /// transaction captures in <see cref="TransactionValidationMode.Deferred"/> mode and has handlers, so the commit
-    /// check validates the value (see <see cref="SubjectTransaction.TryRecordValidateOnly{TProperty}"/>). The write is
-    /// still dropped otherwise, including for a derived property and for a subject whose context does not route
-    /// through the transaction's interceptor.
+    /// transaction captures in <see cref="TransactionValidationMode.Deferred"/> mode, so the commit check validates the
+    /// value (see <see cref="SubjectTransaction.TryRecordValidateOnly{TProperty}"/>). The write is still dropped
+    /// otherwise, including for a derived property and for a subject whose context does not route through the
+    /// transaction's interceptor.
     /// </summary>
     internal static void RecordUnchangedWrite<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
@@ -198,11 +198,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         transaction.IncludeHandlersOf(subjectContext, subjectInterceptors);
-        if (transaction.Handlers.IsEmpty)
-        {
-            return;
-        }
-
         InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
         transaction.TryRecordValidateOnly(
             context.Property,

@@ -47,8 +47,8 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Deferred mode with handlers only: writes of the landed value of a property without a pending change, which the
-    // commit check validates but the commit neither writes, applies, publishes nor conflict-checks. Disjoint from the
+    // Deferred mode only: writes of the landed value of a property without a pending change, which the commit check
+    // validates and conflict detection checks, but the commit neither writes, applies nor publishes. Disjoint from the
     // _pendingChanges keys. Allocated on the first such write; accessed only under _pendingChangesLock.
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _validateOnlyChanges;
 
@@ -295,8 +295,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="restoresLandedValue">
     /// True when the write restores the landed value and the subject's context has the equality check; a pending
     /// change is then removed, the same as never writing the property, and without one the write is captured as usual.
-    /// In <see cref="TransactionValidationMode.Deferred"/> mode with handlers, the removed change is replaced by a
-    /// validate-only entry for the landed value (see <see cref="TryRecordValidateOnly{TProperty}"/>).
+    /// In <see cref="TransactionValidationMode.Deferred"/> mode, the removed change is replaced by a validate-only
+    /// entry for the landed value (see <see cref="TryRecordValidateOnly{TProperty}"/>).
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown if a concurrent commit is in progress (TOCTOU race).
@@ -320,7 +320,7 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             if (restoresLandedValue && pendingChanges.Remove(property))
             {
-                if (ValidationMode == TransactionValidationMode.Deferred && _handlerSet.Handlers.Length > 0)
+                if (ValidationMode == TransactionValidationMode.Deferred)
                 {
                     (_validateOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
                         property, origin, changedTimestamp, receivedTimestamp, newValue, newValue);
@@ -345,12 +345,13 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Records a write of the landed value of <paramref name="property"/>, which the equality check drops, so the commit
-    /// check validates it: a validate-only entry whose old and new value are <paramref name="value"/>, which the commit
-    /// neither writes, applies, publishes nor conflict-checks, and which <see cref="GetPendingChanges"/> does not list.
-    /// A later write of another value replaces it with a pending change. Does nothing when the property has a pending
-    /// change, which the commit check already validates, and returns false when the transaction no longer captures.
+    /// check validates it: a validate-only entry whose old and new value are <paramref name="value"/>. Conflict
+    /// detection checks it like a pending change, so the check never validates a value that moved meanwhile, but the
+    /// commit neither writes, applies nor publishes it, and <see cref="GetPendingChanges"/> does not list it. A later
+    /// write of another value replaces it with a pending change. Does nothing when the property has a pending change,
+    /// which the commit check already validates, and returns false, dropping the write as unchanged, when the
+    /// transaction no longer captures or a commit has started.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress.</exception>
     internal bool TryRecordValidateOnly<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
@@ -360,7 +361,8 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (!CanCaptureUnderLock())
+            // A commit that started after the caller's lock-free check owns the snapshot; the write stays dropped.
+            if (_isCommitting || !CanCaptureUnderLock())
             {
                 return false;
             }
@@ -685,7 +687,7 @@ public sealed class SubjectTransaction : IDisposable
             SubjectTransactionException? failure = null;
             using (EnterCommitModelAccess())
             {
-                ThrowIfConflictsDetected(changes.Span);
+                ThrowIfConflictsDetected(checkedChanges.Span);
 
                 var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, MarkingTransaction);
 
@@ -735,16 +737,16 @@ public sealed class SubjectTransaction : IDisposable
             rentedArray = rented;
             RunCommitCheck(checkedChanges.Span);
 
-            if (changes.IsEmpty)
-            {
-                // Only validate-only entries, which the check accepted: nothing to write or apply.
-                FinishCommit();
-                return;
-            }
-
             using (EnterCommitModelAccess())
             {
-                ThrowIfConflictsDetected(changes.Span);
+                ThrowIfConflictsDetected(checkedChanges.Span);
+            }
+
+            if (changes.IsEmpty)
+            {
+                // Only validate-only entries, which the check and conflict detection accepted: nothing to write or apply.
+                FinishCommit();
+                return;
             }
 
             using var timeoutCts = CreateCommitTimeoutCts();
@@ -1126,7 +1128,8 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Snapshots the pending changes, followed by the validate-only entries. <c>Changes</c> holds the pending changes the
-    /// commit writes and applies, <c>CheckedChanges</c> those plus the validate-only entries for the commit check.
+    /// commit writes and applies, <c>CheckedChanges</c> those plus the validate-only entries for the commit check and
+    /// conflict detection.
     /// </summary>
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, Memory<SubjectPropertyChange> CheckedChanges) SnapshotChanges()
     {

@@ -105,6 +105,33 @@ public class SubjectTransactionHandlerUnchangedWriteTests
     }
 
     [Fact]
+    public async Task WhenUnchangedValueIsWrittenBeforeAnyHandlerIsIncluded_ThenCommitCheckStillReceivesIt()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var transactionContext = CreateContext();
+        var subjectContext = InterceptorSubjectContext.Create();
+        subjectContext.AddService<ITransactionHandler>(handler);
+        subjectContext.AddFallbackContext(transactionContext);
+        var first = new Person(transactionContext) { FirstName = "Ann" };
+        var second = new Person(subjectContext);
+        SubjectPropertyChange[]? changesSeen = null;
+        handler.OnCommittingAction = (_, changes) => changesSeen = changes;
+
+        // Act
+        using var transaction = await transactionContext.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+        first.FirstName = "Ann";
+        second.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(changesSeen);
+        Assert.Equal([second, first], changesSeen.Select(change => (object)change.Property.Subject));
+        Assert.Equal(["Bob", "Ann"], changesSeen.Select(change => change.GetNewValue<string>()));
+    }
+
+    [Fact]
     public async Task WhenImmediateAndUnchangedValueIsWritten_ThenHandlersAreNotCalled()
     {
         // Arrange

@@ -57,8 +57,8 @@ public interface ITransactionHandler
     /// <param name="changes">
     /// The final set of changes in insertion order; in the pre-apply check only the changes that will be applied. In
     /// <see cref="TransactionValidationMode.Deferred"/> mode, the commit check's set is followed by an entry for each
-    /// property written with its unchanged value: its old and new value are equal, and the commit neither writes,
-    /// applies, publishes nor conflict-checks it.
+    /// property written with its unchanged value: its old and new value are equal, conflict detection checks it, and
+    /// the commit neither writes, applies nor publishes it.
     /// </param>
     void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes);
 }

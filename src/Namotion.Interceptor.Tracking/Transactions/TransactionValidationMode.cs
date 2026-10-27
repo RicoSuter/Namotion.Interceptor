@@ -18,8 +18,9 @@ public enum TransactionValidationMode
     /// Writes are not validated when written. The final set of values is validated at commit, before any source
     /// write or local apply, with reads returning the transaction's values. The commit check does not depend on
     /// write order or intermediate values. With the equality check, it also receives each property written with its
-    /// landed value and no pending change, or written back to it, as an entry whose old and new value are equal; the
-    /// commit neither writes, applies, publishes nor conflict-checks those entries.
+    /// landed value and no pending change, or written back to it, as an entry whose old and new value are equal.
+    /// Conflict detection checks those entries like pending changes, but the commit neither writes, applies nor
+    /// publishes them.
     /// </summary>
     Deferred
 }
