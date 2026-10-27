@@ -31,7 +31,7 @@
             ? widget.Label
             : (target is null ? null : SubjectNames.TryGetTitle(target)) ?? path ?? string.Empty;
         var subtitle = widget.Subtitle ?? (target is null ? null : appearance.Subtitle);
-        var disabled = IsEditing || IsReadOnly || _isRunning || operation is null;
+        var disabled = IsEditing || _isRunning || operation is null;
 
         @* The label is the accessible name, which hides the subtitle, so the description carries the state, also under a custom subtitle. *@
         <TileView TestId="door-lock-tile"
@@ -61,10 +61,6 @@
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
-
-    /// <summary>Whether the page is shown without being operated, as in the preview next to the editor of a page.</summary>
-    [CascadingParameter(Name = "IsReadOnly")]
-    public bool IsReadOnly { get; set; }
 
     protected override void OnInitialized()
     {

@@ -64,16 +64,13 @@ else
                             @* The preview shows the saved page and never writes it, so that it cannot overwrite the
                                unsaved text of the editor. Its content is inert, so that neither the pointer nor the
                                keyboard reaches a control of any widget. Pages.razor.js passes a click on the preview to
-                               the widget under the pointer, which reveals its block in the editor. The controls that read
-                               IsReadOnly disable themselves as well. *@
+                               the widget under the pointer, which reveals its block in the editor. *@
                             <div class="page-split-preview-content" style="height: 100%;" inert>
                                 <CascadingValue Value="false" Name="IsEditing">
-                                    <CascadingValue Value="true" Name="IsReadOnly" IsFixed="true">
-                                        <CascadingValue Value="@((ISubjectRevealTarget)this)" IsFixed="true">
-                                            <SubjectComponent @key="_componentKey"
-                                                              Subject="@_subject"
-                                                              Type="SubjectComponentType.Page"/>
-                                        </CascadingValue>
+                                    <CascadingValue Value="@((ISubjectRevealTarget)this)" IsFixed="true">
+                                        <SubjectComponent @key="_componentKey"
+                                                          Subject="@_subject"
+                                                          Type="SubjectComponentType.Page"/>
                                     </CascadingValue>
                                 </CascadingValue>
                             </div>

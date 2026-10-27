@@ -1183,8 +1183,6 @@ namespace HomeBlaze.Components.Components
         public DoorLockWidget() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsReadOnly")]
-        public bool IsReadOnly { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
@@ -1332,8 +1330,6 @@ namespace HomeBlaze.Components.Components
         public string? Icon { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsReadOnly")]
-        public bool IsReadOnly { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Components.OperationButtonKind Kind { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1381,8 +1377,6 @@ namespace HomeBlaze.Components.Components
         public SelectView() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsReadOnly")]
-        public bool IsReadOnly { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1407,8 +1401,6 @@ namespace HomeBlaze.Components.Components
         public SliderView() { }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsReadOnly")]
-        public bool IsReadOnly { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1451,8 +1443,6 @@ namespace HomeBlaze.Components.Components
         public string? Icon { get; set; }
         [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
         public bool IsEditing { get; set; }
-        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsReadOnly")]
-        public bool IsReadOnly { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Components.SwitchKind Kind { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

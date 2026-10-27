@@ -30,7 +30,7 @@ else
                    Value="@(value is Enum ? value.ToString() : null)"
                    ValueChanged="_chooseCallback"
                    ToStringFunc="_textFunc"
-                   Disabled="@(IsEditing || IsReadOnly || !canWrite)"
+                   Disabled="@(IsEditing || !canWrite)"
                    Variant="Variant.Outlined"
                    Margin="Margin.Dense"
                    Dense="true">
@@ -94,10 +94,6 @@ else
 
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
-
-    /// <summary>Whether the page is shown without being operated, as in the preview next to the editor of a page.</summary>
-    [CascadingParameter(Name = "IsReadOnly")]
-    public bool IsReadOnly { get; set; }
 
     protected override void OnInitialized()
     {

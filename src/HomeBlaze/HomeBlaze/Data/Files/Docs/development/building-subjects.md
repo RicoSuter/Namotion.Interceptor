@@ -1221,12 +1221,7 @@ public bool IsEditing { get; set; }
 | Ignore | Read-only widget, no editing support | Status displays |
 | Hybrid | Simple fields inline, complex via dialog | Basic fields inline, advanced via dialog |
 
-The page next to the text editor of the Split mode gets `IsEditing` false and an `IsReadOnly` cascading parameter that is true, because it must not write the page under the unsaved text of the editor. A control that writes disables itself on either, as the control widgets that ship do:
-
-```csharp
-[CascadingParameter(Name = "IsReadOnly")]
-public bool IsReadOnly { get; set; }
-```
+The page next to the text editor of the Split mode gets `IsEditing` false. Its content is `inert`, so that neither the pointer nor the keyboard reaches a control, and a widget needs nothing to keep the preview from writing the page under the unsaved text of the editor.
 
 ### Auto Edit Button
 

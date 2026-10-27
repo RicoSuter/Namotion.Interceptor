@@ -586,9 +586,34 @@ public class InlineStructureEditingTests
     }
 
     [Fact]
+    public async Task WhenSpaceIsPressedOnTheSwitchOfTheSplitPreview_ThenNeitherTheMotorNorThePageChanges()
+    {
+        // Arrange: only the inert content keeps the switch from the keyboard, as nothing in the preview disables it.
+        var page = await OpenPageInSplitModeAsync();
+        var powerSwitch = page.Locator(".page-split-preview").GetByRole(AriaRole.Switch, new() { IncludeHidden = true });
+        await Assertions.Expect(powerSwitch).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var isCheckedBefore = await powerSwitch.IsCheckedAsync();
+        var motor = (Motor)((MarkdownFile)_fixture.GetDemoFolder().Children[PageName]).Children["structuremotor"];
+        var isPoweredBefore = motor.IsPowered;
+        var switchWrapper = page.Locator(".page-split-preview .subject-component-wrapper.revealable:has([data-testid='switch'])").Last;
+
+        // Act: focused as Tab would focus it if it reached it.
+        await powerSwitch.EvaluateAsync("element => element.focus()");
+        await page.Keyboard.PressAsync("Space");
+
+        // Assert: the click on the preview reveals the block after the round trip of the click, by which a toggle would have
+        // arrived.
+        await switchWrapper.ClickAsync(new() { Position = new() { X = 2, Y = 2 }, Force = true });
+        await WaitForEditorSelectionAsync(page, GetLineOf("HomeBlaze.Components.Switch"));
+        Assert.Equal(isCheckedBefore, await powerSwitch.IsCheckedAsync());
+        Assert.Equal(isPoweredBefore, motor.IsPowered);
+        Assert.Equal(Content, (await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName))).Replace("\r\n", "\n"));
+    }
+
+    [Fact]
     public async Task WhenThePageIsSplit_ThenThePreviewIsInertAndItsControlsTakeNoFocus()
     {
-        // Arrange: a link ignores IsReadOnly, so only the inert content keeps the focus from it.
+        // Arrange: only the inert content keeps the focus from the link.
         var page = await OpenPageInSplitModeAsync(Content + "\n[Preview link](https://example.com/preview)\n");
         var link = page.Locator(".page-split-preview a[href='https://example.com/preview']");
         await Assertions.Expect(link).ToBeVisibleAsync(new() { Timeout = Timeout });
