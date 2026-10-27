@@ -164,6 +164,33 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
+    public void WhenTwoDictionaryKeysAreSwapped_ThenPathsAndResolutionFollowTheNewKeys()
+    {
+        // Arrange
+        var left = new TestContainer(Context) { Name = "Left" };
+        var right = new TestContainer(Context) { Name = "Right" };
+        var root = new TestContainer(Context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestContainer> { ["Left"] = left, ["Right"] = right }
+        };
+        RootManager.Root = root;
+        var leftPathBefore = Resolver.GetPath(left, PathStyle.Canonical);
+        var resolvedBefore = Resolver.ResolveSubject("/Children[Left]", PathStyle.Canonical);
+
+        // Act
+        root.Children = new Dictionary<string, TestContainer> { ["Left"] = right, ["Right"] = left };
+
+        // Assert
+        Assert.Equal("/Children[Left]", leftPathBefore);
+        Assert.Same(left, resolvedBefore);
+        Assert.Equal("/Children[Right]", Resolver.GetPath(left, PathStyle.Canonical));
+        Assert.Equal("/Children[Left]", Resolver.GetPath(right, PathStyle.Canonical));
+        Assert.Same(right, Resolver.ResolveSubject("/Children[Left]", PathStyle.Canonical));
+        Assert.Same(left, Resolver.ResolveSubject("/Children[Right]", PathStyle.Canonical));
+    }
+
+    [Fact]
     public void WhenDictionaryIsAssignedAgainWithTheSameEntries_ThenPathsVersionIsUnchanged()
     {
         // Arrange
