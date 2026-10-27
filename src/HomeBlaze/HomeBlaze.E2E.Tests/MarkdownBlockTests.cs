@@ -781,11 +781,8 @@ public class MarkdownBlockTests
         await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
         await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
 
-        // The editor shows the block before the page is saved, so the file is read until it has the block.
-        var source = await _fixture.WaitForDemoPageTextAsync(
-            ScratchPage,
-            text => text.Contains("\n:: HomeBlaze.Samples.Motor#livingroom Name=\"Living Room Motor\"", StringComparison.Ordinal),
-            "The created block was not written to the page");
+        var source = await File.ReadAllTextAsync(GetPagePath(ScratchPage));
+        Assert.Contains("\n:: HomeBlaze.Samples.Motor#livingroom Name=\"Living Room Motor\"", source);
         Assert.Contains("Text before the block", source);
     }
 
@@ -875,12 +872,7 @@ public class MarkdownBlockTests
             ":: HomeBlaze.Components.ValueTile",
             new() { Timeout = 30000 });
 
-        // The editor shows the block before the page is saved, so the file is read until it has the block.
-        var source = await _fixture.WaitForDemoPageTextAsync(
-            ScratchPage,
-            text => text.Contains(":: HomeBlaze.Components.ValueTile", StringComparison.Ordinal),
-            "The created tile was not written to the page");
-        var lines = source.Split('\n');
+        var lines = (await File.ReadAllTextAsync(GetPagePath(ScratchPage))).Replace("\r\n", "\n").Split('\n');
         var headLineIndex = Array.FindIndex(lines, line => line.StartsWith(":: HomeBlaze.Components.ValueTile", StringComparison.Ordinal));
         Assert.True(headLineIndex >= 0, "The page has no head line of a ValueTile.");
         Assert.Contains("Path=scratchmotor/CurrentSpeed", lines[headLineIndex]);

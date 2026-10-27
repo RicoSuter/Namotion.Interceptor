@@ -9,20 +9,12 @@ public interface ITraversalMarker;
 public partial class TraversalNode
 {
     public partial IInterceptorSubject? Child { get; set; }
-
-    public partial IInterceptorSubject? SecondChild { get; set; }
-
-    public partial IInterceptorSubject? ThirdChild { get; set; }
 }
 
 [InterceptorSubject]
 public partial class MarkedTraversalNode : ITraversalMarker
 {
     public partial IInterceptorSubject? Child { get; set; }
-
-    public partial IInterceptorSubject? SecondChild { get; set; }
-
-    public partial IInterceptorSubject? ThirdChild { get; set; }
 }
 
 internal static class ParentTraversalGraph
@@ -36,11 +28,11 @@ internal static class ParentTraversalGraph
 
     /// <summary>
     /// Makes <paramref name="parent"/> a parent of <paramref name="child"/>. Two links between the same
-    /// subjects are two parent entries only when their property differs.
+    /// subjects are two parent entries only when their index differs.
     /// </summary>
-    public static void Link(IInterceptorSubject child, IInterceptorSubject parent, string propertyName = nameof(TraversalNode.Child))
+    public static void Link(IInterceptorSubject child, IInterceptorSubject parent, object? index = null)
     {
-        child.AddParent(new PropertyReference(parent, propertyName), null);
+        child.AddParent(new PropertyReference(parent, nameof(TraversalNode.Child)), index);
     }
 
     /// <summary>

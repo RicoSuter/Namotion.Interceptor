@@ -430,13 +430,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            // Report kept subjects whose key or position changed. A write between two single references
-            // keeps no subject, since writing the same one again returns early. The refresh uses
-            // newTouchedSubjects up, so nothing may read the set after it.
-            if (lastProcessed is IEnumerable || newValue is IEnumerable)
+            // Refresh child index metadata for retained subjects whose
+            // positions may have shifted in the new collection.
+            if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
             {
-                ChildIndexRefresher.RefreshMovedChildren(context.Property,
-                    oldCollectedSubjects, newCollectedSubjects, oldTouchedSubjects, newTouchedSubjects);
+                var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
+                for (var i = 0; i < handlers.Length; i++)
+                {
+                    handlers[i].RefreshCollectionProperty(context.Property, newValue);
+                }
             }
         }
         finally
