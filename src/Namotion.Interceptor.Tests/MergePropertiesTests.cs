@@ -41,7 +41,7 @@ public class MergePropertiesTests
 
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(() => subject.MergeProperties([first, second]));
-        Assert.Equal("The property 'Color' is added to subject 'Car' more than once.", exception.Message);
+        Assert.Equal("The property 'Color' appears more than once in the properties added to subject 'Car'.", exception.Message);
     }
 
     [Fact]

@@ -53,7 +53,7 @@ public static class InterceptorSubjectExtensions
             {
                 throw new InvalidOperationException(existing.ContainsKey(property.Name)
                     ? $"The subject '{subject.GetType().Name}' already has a property named '{property.Name}'."
-                    : $"The property '{property.Name}' is added to subject '{subject.GetType().Name}' more than once.");
+                    : $"The property '{property.Name}' appears more than once in the properties added to subject '{subject.GetType().Name}'.");
             }
         }
 
