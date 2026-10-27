@@ -866,6 +866,62 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
+    public void WhenAnHtmlBlockIsNeverClosed_ThenNoBlockStartsAfterIt()
+    {
+        // Act
+        var segments = Build("Before\n\n<div class=\"x\">\n\nUnclosed {{ a/B }}\n\nAfter {{ c/D }}");
+
+        // Assert
+        var html = segments.OfType<HtmlMarkdownSegment>().ToArray();
+        Assert.Equal([BlockStart(html[0].Html, "<div")], html[0].BlockStarts.ToArray());
+        Assert.All(html.Skip(1), segment => Assert.True(segment.BlockStarts.IsDefault));
+        Assert.Equal(["a/B", "c/D"], segments.OfType<ExpressionMarkdownSegment>().Select(segment => segment.Text));
+    }
+
+    [Fact]
+    public void WhenInlineHtmlIsNeverClosed_ThenNoBlockStartsAfterIt()
+    {
+        // Act
+        var segments = Build("Some <b>bold\n\nNext {{ a/B }}\n\nLast.");
+
+        // Assert
+        Assert.All(segments.OfType<HtmlMarkdownSegment>(), segment => Assert.True(segment.BlockStarts.IsDefault));
+    }
+
+    [Fact]
+    public void WhenATagIsClosedBeforeItIsOpenedAndNeverClosedAfter_ThenNoBlockStartsAfterIt()
+    {
+        // Act
+        var segments = Build("Before.\n\n</span>\n\nText <span>open\n\nAfter.\n\nLast.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.Equal([BlockStart(html.Html, "</span>")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public void WhenRawHtmlHasVoidAndSelfClosingTagsAndComments_ThenItIsClosed()
+    {
+        // Act
+        var segments = Build("Before.\n\nAn <img src=\"a.png\"> image<br/> and <!-- <div> --> text.\n\nAfter.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.Equal([BlockStart(html.Html, "<p>An"), BlockStart(html.Html, "<p>After.")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
+    public void WhenAnHtmlTagIsClosedInALaterHtmlBlock_ThenBlocksStartAfterTheClosingBlock()
+    {
+        // Act
+        var segments = Build("<section>\n<div title=\"a>b\">\n\nInside.\n\n</div>\n</section>\n\nAfter.\n\nLast.");
+
+        // Assert
+        var html = Assert.IsType<HtmlMarkdownSegment>(Assert.Single(segments));
+        Assert.Equal([BlockStart(html.Html, "<p>After."), BlockStart(html.Html, "<p>Last.")], html.BlockStarts.ToArray());
+    }
+
+    [Fact]
     public void WhenPageTextContainsABreakMarker_ThenItIsNoBreak()
     {
         // Act

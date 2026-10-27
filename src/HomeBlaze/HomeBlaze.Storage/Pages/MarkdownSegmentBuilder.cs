@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Markdig.Extensions.Tables;
@@ -59,6 +60,15 @@ public static partial class MarkdownSegmentBuilder
     private static partial Regex MarkerRegex();
 
     private static readonly char[] Braces = ['{', '}'];
+
+    // A comment, whose content is no tag, or a tag: its name, and a slash that closes it when it ends with one.
+    [GeneratedRegex(@"<!--[\s\S]*?(?:-->|$)|<(/?)([A-Za-z][A-Za-z0-9-]*)(?:[^>""']|""[^""]*""|'[^']*')*?(/?)>")]
+    private static partial Regex HtmlTagRegex();
+
+    private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"
+    };
 
     private static readonly string OldSubjectFenceError =
         "The subject(name) fence is no longer supported. Write the subject as a block: a line with " +
@@ -203,15 +213,23 @@ public static partial class MarkdownSegmentBuilder
     {
         // Blazor parses each markup string on its own, so a tag opened in one block and closed in a later one would be
         // closed early. No break is written between the first and the last top-level block that contains raw HTML.
+        // A tag that is still open after the last of them reaches to the end of the page.
         var firstRawHtml = -1;
         var lastRawHtml = -1;
+        Dictionary<string, int>? openTags = null;
         for (var index = 0; index < document.Count; index++)
         {
-            if (ContainsRawHtml(document[index]))
+            foreach (var rawHtml in GetRawHtml(document[index]))
             {
                 firstRawHtml = firstRawHtml < 0 ? index : firstRawHtml;
                 lastRawHtml = index;
+                CountOpenTags(rawHtml, openTags ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
             }
+        }
+
+        if (openTags is not null && openTags.Values.Any(count => count > 0))
+        {
+            lastRawHtml = document.Count - 1;
         }
 
         var marker = $"<!--BREAK:{token}-->";
@@ -238,13 +256,45 @@ public static partial class MarkdownSegmentBuilder
         };
     }
 
-    private static bool ContainsRawHtml(Block block) => block switch
+    /// <summary>Gets the raw HTML that a block and the blocks and inlines inside it write, in document order.</summary>
+    private static IEnumerable<string> GetRawHtml(Block block)
     {
-        HtmlBlock => true,
-        LeafBlock leaf => leaf.Inline?.Descendants<HtmlInline>().Any() == true,
-        ContainerBlock container => container.Descendants().Any(descendant => descendant is HtmlBlock or HtmlInline),
-        _ => false
-    };
+        IEnumerable<MarkdownObject> descendants = block switch
+        {
+            HtmlBlock => [block],
+            LeafBlock { Inline: { } inline } => inline.Descendants<HtmlInline>(),
+            ContainerBlock container => container.Descendants(),
+            _ => []
+        };
+
+        foreach (var descendant in descendants)
+        {
+            if (descendant is HtmlBlock htmlBlock)
+            {
+                yield return htmlBlock.Lines.ToString();
+            }
+            else if (descendant is HtmlInline htmlInline)
+            {
+                yield return htmlInline.Tag;
+            }
+        }
+    }
+
+    private static void CountOpenTags(string rawHtml, Dictionary<string, int> openTags)
+    {
+        foreach (Match match in HtmlTagRegex().Matches(rawHtml))
+        {
+            var name = match.Groups[2];
+            if (!name.Success || match.Groups[3].Length > 0 || VoidElements.Contains(name.Value))
+            {
+                continue;
+            }
+
+            // A closing tag without an opening one before it closes nothing, also not one that is opened later.
+            ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(openTags, name.Value, out _);
+            count = match.Groups[1].Length == 0 ? count + 1 : Math.Max(0, count - 1);
+        }
+    }
 
     internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token, IReadOnlyList<string> expressions)
     {
