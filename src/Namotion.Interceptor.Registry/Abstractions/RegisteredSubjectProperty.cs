@@ -276,16 +276,7 @@ public class RegisteredSubjectProperty
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyName = $"{Name}@{name}";
-        
-        var attribute = Parent.AddProperty(
-            propertyName,
-            type, getValue, setValue,
-            attributes
-                .Concat([new PropertyAttributeAttribute(Name, name)])
-                .ToArray());
-
-        return attribute;
+        return AddAttributeCore(name, type, getValue, setValue, attributes, isDerived: false, returnExistingAttribute: false);
     }
 
     /// <summary>
@@ -305,16 +296,7 @@ public class RegisteredSubjectProperty
         Action<IInterceptorSubject, object?>? setValue, 
         params Attribute[] attributes)
     {
-        var propertyName = $"{Name}@{name}";
-        
-        var attribute = Parent.AddDerivedProperty(
-            propertyName,
-            type, getValue, setValue,
-            attributes
-                .Concat([new PropertyAttributeAttribute(Name, name)])
-                .ToArray());
-
-        return attribute;
+        return AddAttributeCore(name, type, getValue, setValue, attributes, isDerived: true, returnExistingAttribute: false);
     }
 
     /// <summary>
@@ -379,7 +361,7 @@ public class RegisteredSubjectProperty
         // Unlocked read: registered properties are never removed and the property table is published through a
         // volatile field, so a hit is final; a miss is checked again under the locks in AddPropertyCore.
         var attribute = Parent.TryGetPropertyAttribute(Name, name)
-            ?? AddAttributeOnMiss(name, type, getValue, setValue, attributes, isDerived);
+            ?? AddAttributeCore(name, type, getValue, setValue, attributes, isDerived, returnExistingAttribute: true);
 
         if (attribute.Type != type)
         {
@@ -391,19 +373,21 @@ public class RegisteredSubjectProperty
         return attribute;
     }
 
-    private RegisteredSubjectProperty AddAttributeOnMiss(
+    // The attribute order matches what AddDerivedProperty appends: caller attributes, the pair, then Derived.
+    private RegisteredSubjectProperty AddAttributeCore(
         string name, Type type,
         Func<IInterceptorSubject, object?>? getValue,
         Action<IInterceptorSubject, object?>? setValue,
         Attribute[] attributes,
-        bool isDerived)
+        bool isDerived,
+        bool returnExistingAttribute)
     {
         Attribute[] reflectionAttributes = isDerived
             ? [.. attributes, new PropertyAttributeAttribute(Name, name), new DerivedAttribute()]
             : [.. attributes, new PropertyAttributeAttribute(Name, name)];
 
         return Parent.AddPropertyCore(
-            $"{Name}@{name}", type, getValue, setValue, reflectionAttributes, returnExistingAttribute: true);
+            $"{Name}@{name}", type, getValue, setValue, reflectionAttributes, returnExistingAttribute);
     }
 
     /// <summary>

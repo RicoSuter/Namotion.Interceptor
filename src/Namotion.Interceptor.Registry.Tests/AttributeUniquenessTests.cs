@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Reactive.Concurrency;
 using System.Text.Json;
 using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -91,6 +94,26 @@ public class AttributeUniquenessTests
 
         Assert.Equal("The subject 'Person' already has a property named 'FirstName'.", exception.Message);
         Assert.Same(before, subject.Properties);
+    }
+
+    [Fact]
+    public void WhenASubjectReplacesRepeatedNames_ThenTheRegistryRejectsADuplicateBeforeTheSubjectChanges()
+    {
+        // Arrange: this subject's AddProperties replaces a repeated name instead of throwing, so only the
+        // registry's own check can keep the first property.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new ReplacingSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var first = registered.AddProperty("Flag", typeof(string), _ => "first", null);
+        var before = ((IInterceptorSubject)subject).Properties;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            registered.AddProperty("Flag", typeof(string), _ => "second", null));
+
+        Assert.Equal("The subject 'ReplacingSubject' already has a property named 'Flag'.", exception.Message);
+        Assert.Same(before, ((IInterceptorSubject)subject).Properties);
+        Assert.Equal("first", first.GetValue());
     }
 
     [Fact]
@@ -545,6 +568,40 @@ public class AttributeUniquenessTests
             else
             {
                 property.AddAttribute("Flag", typeof(bool), _ => true, null);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A hand-written subject whose AddProperties keeps the last of a repeated name, as subjects written
+    /// against the old contract do.
+    /// </summary>
+    private sealed class ReplacingSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _context;
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties =
+            FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+        public ReplacingSubject(IInterceptorSubjectContext context)
+        {
+            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+        }
+
+        object IInterceptorSubject.SyncRoot { get; } = new();
+
+        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+
+        ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
+
+        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        {
+            lock (((IInterceptorSubject)this).SyncRoot)
+            {
+                _properties = _properties
+                    .Concat(properties.Select(property => KeyValuePair.Create(property.Name, property)))
+                    .ToFrozenDictionary();
             }
         }
     }
