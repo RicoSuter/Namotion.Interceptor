@@ -159,17 +159,17 @@ The allocations that remain each have a reason:
 
 A deny rule with only `Paths` is reached by every member that an allow matched for that action, and proving it does not apply requires enumerating the paths. The [user documentation](../authorization.md#performance-and-threading) therefore advises giving a path deny a second selector (a type, a member glob or a tag) and putting path rules only into the roles that need them, not into a reusable base role every principal pays for.
 
-`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers were measured before patterns matched member paths exactly; the rules then named floors by prefix and now end in `/**`, and the benchmark has not been run again since:
+`AuthorizationBenchmark` evaluates a policy of 24 rules, among them ten allow rules with paths and ten deny rules with only paths, against a graph of 50 floors with 40 lamps each (2050 subjects). The numbers come from one local run of `-LocalOnly` with exact path matching, on an 8-core desktop CPU with a 1-minute load average below 4:
 
 | Question | Time | Allocated |
 |---|---|---|
-| A read decided by a tag rule | about 23 ns | nothing |
-| `CanRead(subject)`, no path rule applies to `read` | about 150 ns | nothing |
-| A write where the deny rules have only path selectors and none matches | about 0.38 µs | 424 B |
-| A write denied by a path rule | about 0.27 µs | 424 B |
-| A browse-shaped pass: `CanRead` of every subject and of the members of the readable ones | about 0.5 ms | - |
+| A read decided by a tag rule | about 18 ns | nothing |
+| `CanRead(subject)`, no path rule applies to `read` | about 85 ns | nothing |
+| A write where the deny rules have only path selectors and none matches | about 0.38 µs | 320 B |
+| A write denied by a path rule | about 0.28 µs | 320 B |
+| A browse-shaped pass: `CanRead` of every subject and of the members of the readable ones | about 0.37 ms | 40 B |
 
-The times were measured on a shared machine and vary between runs; the allocation column is the reliable part. The two writes allocate the same because both enumerate the lamp's single path once.
+The times vary between runs and machines; the allocation column is the reliable part. The two writes allocate the same because both enumerate the lamp's single path once: the list of paths, the search frames and the lamp's one `PathLink` array.
 
 ### Threading
 
