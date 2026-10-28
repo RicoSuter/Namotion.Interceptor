@@ -12,7 +12,7 @@ public class CommitWriteMarkerTests
     }
 
     [Fact]
-    public async Task WhenValueDiffers_ThenMarkDoesNotMatchButIsConsumed()
+    public async Task WhenValueDiffers_ThenMarkDoesNotMatchAndStaysSet()
     {
         // Arrange
         var (context, handler, person) = CreateContextWithPerson();
@@ -27,7 +27,7 @@ public class CommitWriteMarkerTests
 
             // Assert
             Assert.False(changedValue);
-            Assert.False(checkedValue);
+            Assert.True(checkedValue);
         }
     }
 

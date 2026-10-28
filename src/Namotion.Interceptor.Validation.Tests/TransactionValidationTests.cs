@@ -62,6 +62,26 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenHookWritesAnotherValueToTheAppliedProperty_ThenTheCheckedApplyIsNotRejected()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        motor.MotorSpeed = 150;
+        motor.MaxAllowedSpeed = 200;
+        motor.SpeedToWriteOnSpeedChanging = 10;
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, motor.MaxAllowedSpeed);
+        Assert.Equal(150, motor.MotorSpeed);
+    }
+
+    [Fact]
     public async Task WhenFinalSetIsInvalid_ThenCommitThrowsBeforeAnythingIsWritten()
     {
         // Arrange

@@ -17,8 +17,8 @@ internal static class CommitWriteMarker
     }
 
     // Thread-static: the local apply and the rollback are synchronous, so the mark is set and consumed within one
-    // call frame, never across an await. Same-property re-entry before the consumer runs (an OnChanging hook or an
-    // earlier interceptor) takes the mark instead, the same limitation as PendingOrigin.
+    // call frame, never across an await. A nested write of the same property with another value does not take the
+    // mark; one with the same value can, the same limitation as PendingOrigin.
     [ThreadStatic] private static Frame _frame;
 
     internal static Scope Set(SubjectTransaction transaction, PropertyReference target, object? value)
@@ -53,21 +53,28 @@ internal static class CommitWriteMarker
             return false;
         }
 
-        _frame = default;
-
         // References match by identity: the apply passes the marked instance itself, and a loose Equals must not let
         // a replaced, unchecked instance pass as checked.
+        bool matches;
         if (!typeof(TProperty).IsValueType)
         {
-            return ReferenceEquals(frame.Value, value);
+            matches = ReferenceEquals(frame.Value, value);
         }
-
-        if (frame.Value is null)
+        else if (frame.Value is null)
         {
-            return value is null;
+            matches = value is null;
+        }
+        else
+        {
+            matches = frame.Value is TProperty typedValue && EqualityComparer<TProperty>.Default.Equals(typedValue, value);
         }
 
-        return frame.Value is TProperty typedValue && EqualityComparer<TProperty>.Default.Equals(typedValue, value);
+        if (matches)
+        {
+            _frame = default;
+        }
+
+        return matches;
     }
 
     internal readonly ref struct Scope
