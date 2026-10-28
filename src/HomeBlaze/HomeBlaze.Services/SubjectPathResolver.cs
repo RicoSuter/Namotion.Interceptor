@@ -15,17 +15,17 @@ namespace HomeBlaze.Services;
 /// <summary>
 /// Thread-safe service that resolves subjects from paths and builds paths from subjects.
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
-/// Implements lifecycle handling to invalidate caches when subjects are attached or detached, when a list is reordered,
-/// and when a property is added at run time.
+/// Implements lifecycle handling to invalidate caches when subjects are attached or detached, when a kept subject moves
+/// to another position or key, and when a property is added at run time.
 /// </summary>
 // After the registry, so that a change has reached the parents and children it reads when the caches are invalidated.
 [RunsAfter(typeof(SubjectRegistry))]
-public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, ISubjectPathResolver
+public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler, ISubjectPathResolver
 {
     private readonly Func<IInterceptorSubject?> _getRoot;
 
     // Subject → canonical paths cache (with leading /), see InvalidatePaths for the version
-    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new();
+    private readonly ConcurrentDictionary<IInterceptorSubject, (long Version, IReadOnlyList<string> Paths)> _canonicalPathsCache = new(ReferenceEqualityComparer.Instance);
 
     // (path, style) → Subject resolve cache (absolute paths only), see InvalidatePaths for the version
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject)> _resolveCache = new();
@@ -209,15 +209,10 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     {
     }
 
-    // Called after the attach and detach of a collection write, once the registry has given its retained entries their
-    // new positions. A reorder attaches and detaches nothing, so this is the only change it makes. The registry moves
-    // no entry of a dictionary, which some subjects assign again on every poll.
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    // A move attaches and detaches nothing, so this is the only change it makes.
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        if (property.TryGetRegisteredProperty() is { IsSubjectCollection: true })
-        {
-            InvalidatePaths();
-        }
+        InvalidatePaths();
     }
 
     // A cache entry carries the version read before it was computed and is served only while that version is current,
@@ -375,7 +370,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             return Array.Empty<string>();
 
         var paths = new List<string>();
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
 
         foreach (var parent in parents)
         {
