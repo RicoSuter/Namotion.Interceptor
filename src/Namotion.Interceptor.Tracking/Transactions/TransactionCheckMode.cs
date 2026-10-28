@@ -19,8 +19,9 @@ public enum TransactionCheckMode
     /// before any source write or local apply, independent of write order and intermediate values. With the equality
     /// check, <see cref="TransactionConflictBehavior.FailOnConflict"/> and handlers, the commit check also receives
     /// each property written with its landed value, without a pending change or written back to it, as an entry whose
-    /// old and new value are equal; conflict detection checks it before the source writes, the pre-apply check
-    /// validates its current landed value, and the commit neither writes, applies nor publishes it.
+    /// old and new value are equal; conflict detection checks it before the source writes against the value of its
+    /// latest such write, and the pre-apply check validates its current landed value. The commit neither writes,
+    /// applies nor publishes such an entry, and <see cref="SubjectTransaction.GetPendingChanges"/> does not list it.
     /// </summary>
     Deferred
 }

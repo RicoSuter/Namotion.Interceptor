@@ -18,17 +18,16 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <see cref="SubjectTransaction.TryConsumeCommitWrite"/>, and a value type with a loose <c>Equals</c> can pass an
 /// equal, unchecked value as the checked one. A write to a subject whose context does not route through the
 /// transaction interceptor is not intercepted and lands immediately, even during a check. See
-/// docs/tracking-transactions.md (Transaction Handlers) for details.
+/// docs/tracking-transactions.md (Writing a Transaction Handler) for details.
 /// </remarks>
 public interface ITransactionHandler
 {
     /// <summary>
     /// Called, without holding the transaction's capture lock, for a write the transaction is about to capture,
-    /// including a write back that removes a pending change, and in <see cref="TransactionCheckMode.Deferred"/>
-    /// mode with <see cref="TransactionConflictBehavior.FailOnConflict"/> a write of an unchanged value that the commit
-    /// check receives (see <see cref="OnCommitting"/>). Throwing rejects the write: nothing is captured and the exception
-    /// propagates to the setter. Handlers must not write properties. A checking handler skips its write-time check in
-    /// <see cref="TransactionCheckMode.Deferred"/> mode (<see cref="SubjectTransaction.CheckMode"/>).
+    /// including a write back that removes a pending change and a write of an unchanged value that the commit check
+    /// receives (see <see cref="TransactionCheckMode.Deferred"/>). Throwing rejects the write: nothing is captured and
+    /// the exception propagates to the setter. Handlers must not write properties. A checking handler skips its
+    /// write-time check in <see cref="TransactionCheckMode.Deferred"/> mode (<see cref="SubjectTransaction.CheckMode"/>).
     /// </summary>
     /// <typeparam name="TProperty">The property type.</typeparam>
     /// <param name="context">The write about to be captured.</param>

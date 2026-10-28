@@ -111,9 +111,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
-With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), writing a property back to its landed value removes its pending change, the same as never writing it: it no longer appears in `GetPendingChanges()`, and the commit neither writes, publishes nor conflict-checks it. A later write captures it again as a new change, with the then-landed value as its old value and at the end of the commit order. A write that ends at the landed value after an interceptor changed it (for example one that normalizes the value) is dropped the same way instead of captured. Without the equality check, a write back is captured like any other write.
-
-In `Deferred` [validation mode](#validation-mode) with `FailOnConflict` (the default), such a write back, and a write of the landed value to a property without a pending change (otherwise dropped by the equality check), are still validated: the [commit check](#transaction-handlers) receives each as an entry whose old and new value are equal. Conflict detection checks these entries like pending changes before the source writes, against the value of the latest such write, so a concurrent change to such a property fails the commit instead of leaving it validated against a value it no longer has; writing the new landed value again resolves that conflict. After the source writes, the [pre-apply check](#transaction-handlers) receives them with their landed value at that point instead. The commit neither writes, applies nor publishes them, `GetPendingChanges()` does not list them, a later write of another value turns one into a pending change, and a transaction without handlers ignores them. With `Ignore`, which detects no conflicts, these writes stay dropped.
+With the equality check (`WithEqualityCheck`, part of `WithFullPropertyTracking`), writing a property back to its landed value removes its pending change, the same as never writing it: it no longer appears in `GetPendingChanges()`, and the commit neither writes, publishes nor conflict-checks it. A later write captures it again as a new change, with the then-landed value as its old value and at the end of the commit order. A write that ends at the landed value after an interceptor changed it (for example one that normalizes the value) is dropped the same way instead of captured. Without the equality check, a write back is captured like any other write. In `Deferred` [validation mode](#validation-mode) with `FailOnConflict` and handlers, such a write is still validated and conflict-checked.
 
 ## Configuration Options
 
@@ -160,22 +158,22 @@ Controls value-based conflict detection in both locking modes; `BestEffort` fail
 
 | Value | Description |
 |-------|-------------|
-| `FailOnConflict` | Throw `SubjectTransactionConflictException` if the landed value of a written property changed since the transaction first wrote it, or in `Deferred` mode with transaction handlers and the equality check since it last wrote an unchanged value to it. (default) |
+| `FailOnConflict` | Throw `SubjectTransactionConflictException` if the landed value of a written property changed since the transaction first wrote it, or, for a value it wrote unchanged in [`Deferred` mode](#validation-mode), since it last wrote it. (default) |
 | `Ignore` | Overwrite any concurrent changes without checking. |
 
 Only properties the transaction writes are checked. A property it only reads can change before the commit without a conflict, so a write based on that read is not protected (write skew): for example, writing `Speed = 150` after reading `MaxSpeed = 200` still commits when `MaxSpeed` was lowered to 100 meanwhile, unless a validator encodes that rule and rejects the final set. Such a validator rejects write skew only against transactions [serialized](#guarantees) with this one: transactions bound to different contexts are not, even when they write subjects of a shared context.
 
-A property written back to its landed value has no pending change, so a concurrent change to it is kept without a conflict, except in `Deferred` mode with transaction handlers, where it is checked (see [Last-Write-Wins and Commit Order](#last-write-wins-and-commit-order)).
-
 ### Validation Mode
 
-Controls when transaction handlers, such as property validation, validate the written values: `Immediate` (default) each write and the final set at commit, `Deferred` only the final set at commit, with `FailOnConflict` including values written unchanged (see [Last-Write-Wins and Commit Order](#last-write-wins-and-commit-order)). See [Validation in transactions](validation.md#transactions).
+Controls when transaction handlers, such as property validation, validate the written values: `Immediate` (default) each write and the final set at commit, `Deferred` only the final set at commit. See [Validation in transactions](validation.md#transactions).
 
 ```csharp
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
     checkMode: TransactionCheckMode.Deferred);
 ```
+
+In `Deferred` mode with `FailOnConflict` (the default), writes of the landed value, a write back ([Last-Write-Wins and Commit Order](#last-write-wins-and-commit-order)) or a write to a property without a pending change, which the equality check otherwise drops, are still validated: the [commit check](#transaction-handlers) receives each as an entry whose old and new value are equal, so writing every value a rule depends on, changed or not, has the rule checked against the final set. Conflict detection checks these entries like pending changes before the source writes, against the value of the latest such write, so a concurrent change fails the commit as a retryable conflict instead of leaving the property validated against a value it no longer has; writing the new landed value again resolves it. After the source writes, the [pre-apply check](#transaction-handlers) receives them with their landed value at that point as old and new value, so the commit lands when the set is still valid and reverts the source writes when it became invalid. The commit neither writes, applies nor publishes them, `GetPendingChanges()` does not list them, a later write of another value turns one into a pending change, and a transaction without handlers ignores them. With `Ignore`, which detects no conflicts, these writes stay dropped.
 
 ### Requirements
 
@@ -266,62 +264,6 @@ A commit attempt ends in one of three states:
 
 A failure is retryable when nothing was written yet, or when the commit timeout's `OperationCanceledException` propagates (see the [Failure Table](#failure-table) and [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)). Every other failure is terminal: writes may have reached sources or the local model and compensation already ran, so a retry would apply the snapshot again onto state that has moved on, for example re-pushing values a source already accepted. A committed or terminally failed transaction is inactive even before disposal: later reads and writes use the landed model.
 
-### Failure Table
-
-"Old" is the value before the transaction, "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
-
-| Failure | End state | `FailedChanges` | Retry |
-|---------|-----------|-----------------|-------|
-| Commit check rejects | All old, nothing written. The handler's exception propagates unchanged, for validation a `SubjectTransactionValidationException`. | Validation: only the invalid changes; the valid ones did not land either (`AppliedChanges` is empty) | Yes |
-| Conflict detected (`SubjectTransactionConflictException`, see `ConflictingProperties`) | All old, nothing written | Empty | Yes |
-| Optimistic lock wait canceled (`OperationCanceledException`) | All old, nothing written | n/a | Yes |
-| Source write fails or times out, `BestEffort` | Successful writes new at the source and locally, failed ones old | The failed source writes | No |
-| Source write fails, or times out with no other change written, or a custom writer reports errors without failed changes, `Rollback` | All old, written sources reverted | The failed source writes, the changes without a source, and any failed source revert | No |
-| Commit timeout during a source write while another change was written, or during the revert after a failed source write or writer error, `Rollback` (`OperationCanceledException`) | Local all old; a source that accepted a write keeps the new value unless the revert reached it before the timeout fired, because the revert does not run once the timeout fired | n/a | Yes, a successful retry writes every source again |
-| Pre-apply check rejects, any mode | All old, written sources reverted | Every change (failed source writes first), then each failed source revert again | No |
-| Local apply fails, `BestEffort` without handlers | Applied changes new, failed ones old with their source write reverted | The failed source writes and the failed applies, then each failed source revert again | No |
-| Local apply fails, `Rollback` without handlers | All old, local applies and source writes reverted | The failed applies and any failed local or source revert; with source transactions, also the changes without a source | No |
-| Local apply fails, with handlers, any mode | All old: no further change is applied, the applied ones and the source writes are reverted | Every change (failed source writes first), then each failed local revert (in reverse apply order), then each remaining failed source revert | No |
-| Custom writer reports errors without failed changes, `BestEffort` | All new | Empty, the errors are in `Errors` | No |
-| Custom writer throws, or violates its contract | Local all old, sources unknown and not reverted | Every change | No |
-
-Notes:
-- `AppliedChanges` lists the changes that landed. It is empty whenever the commit reverted or applied nothing.
-- A change whose apply threw after its value was written, for example because a derived recalculation failed, keeps that value: the failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
-- `Errors` is not aligned one to one with `FailedChanges`: a failed source write or revert yields one error per source, a failed local apply or revert one per change.
-- The built-in writer reports a commit timeout during a source write as a failed write. During a source revert after a pre-apply rejection or after the local apply started, it is reported as a failed revert.
-- Usage errors throw `InvalidOperationException` (nested transaction, already committed, transactions not enabled, commit from a different async flow, concurrent `CommitAsync`) or `ObjectDisposedException` (transaction disposed, also while the commit check ran).
-
-### When a Revert Fails
-
-Reverts are compensating writes, not an undo, and they can fail too. A source that just failed or timed out is asked to accept another write, so this is the most likely way to end inconsistent. The affected property then has different values at the source and in the local model:
-
-| Stuck revert | Source ends | Local ends | Reported |
-|--------------|-------------|------------|----------|
-| A source revert fails or throws, or times out after a pre-apply rejection or after the local apply started | New | Old | In `FailedChanges` and `Errors`, terminal |
-| A local revert fails (`Rollback`, or with handlers) | Old, if it has a source | New | In `FailedChanges` and `Errors`, terminal |
-| The commit timeout fires during a source write while another change was written, or during the `Rollback` revert after a failed source write or writer error | New, unless the revert reached it before the timeout fired, because the revert does not run once the timeout fired | Old | `OperationCanceledException`, retryable; the divergence is transient, a successful retry writes everything again |
-| A custom writer throws from `WriteToSourcesAsync` | Unknown, never reverted | Old | Not identifiable: the transaction cannot know which sources were touched |
-| A failed apply wrote its value ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)) | Old | New | Listed once, as a failed apply, not as a stuck revert |
-
-`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. A stuck property is listed a second time, after the full list when it lists every change (after a pre-apply rejection, or a failed apply with handlers), so it can be told apart.
-
-### Local Apply Failures
-
-A local apply fails when an `OnChanging`/`OnChanged` hook or a write interceptor throws, for example in hardware integrations:
-
-```csharp
-[InterceptorSubject]
-public partial class GpioDevice
-{
-    public partial bool LedA { get; set; }
-    public partial bool LedB { get; set; }
-
-    partial void OnLedAChanged(bool newValue) => _gpio.Write(pinA, newValue); // can throw!
-    partial void OnLedBChanged(bool newValue) => _gpio.Write(pinB, newValue); // can throw!
-}
-```
-
 ### Retrying
 
 Conflicts and commit check rejections leave the pending changes intact. A rejected set can be fixed and committed again. A conflict on a pending change is not fixed by writing the intended value again, because the change keeps its first old value. With the equality check, write the property back to its current landed value, which removes the pending change, then write the intended value. Otherwise begin a new transaction. Both exception types derive from `SubjectTransactionException`, so catch them before the base type. The sample uses the `Motor` model and validator of [Validation in transactions](validation.md#transactions):
@@ -355,43 +297,65 @@ catch (SubjectTransactionException exception)
 }
 ```
 
+### Failure Table
+
+"Old" is the value before the transaction, "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
+
+| Failure | End state | `FailedChanges` | Retry |
+|---------|-----------|-----------------|-------|
+| Commit check rejects | All old, nothing written. The handler's exception propagates unchanged, for validation a `SubjectTransactionValidationException`. | Validation: only the invalid changes; the valid ones did not land either (`AppliedChanges` is empty) | Yes |
+| Conflict detected (`SubjectTransactionConflictException`, see `ConflictingProperties`) | All old, nothing written | Empty | Yes |
+| Optimistic lock wait canceled (`OperationCanceledException`) | All old, nothing written | n/a | Yes |
+| Source write fails or times out, `BestEffort` | Successful writes new at the source and locally, failed ones old | The failed source writes | No |
+| Source write fails or times out with nothing else written, or a custom writer reports errors without failed changes, `Rollback` | All old, written sources reverted | The failed source writes, the changes without a source, and any failed source revert | No |
+| Commit timeout (`OperationCanceledException`), `Rollback`, during a source write after another change was written, or during the revert after a failed source write or writer error | Local all old; a source that accepted a write keeps the new value unless reverted before the timeout fired, since no revert runs after it | n/a | Yes, a successful retry writes every source again |
+| Pre-apply check rejects, any mode | All old, written sources reverted | Every change (failed source writes first), then each failed source revert again | No |
+| Local apply fails, `BestEffort` without handlers | Applied changes new, failed ones old with their source write reverted | The failed source writes and the failed applies, then each failed source revert again | No |
+| Local apply fails, `Rollback` without handlers | All old, local applies and source writes reverted | The failed applies and any failed local or source revert; with source transactions, also the changes without a source | No |
+| Local apply fails, with handlers, any mode | All old: no further change is applied, the applied ones and the source writes are reverted | Every change (failed source writes first), then each failed local revert (in reverse apply order), then each remaining failed source revert | No |
+| Custom writer reports errors without failed changes, `BestEffort` | All new | Empty, the errors are in `Errors` | No |
+| Custom writer throws, or violates its contract | Local all old, sources unknown and not reverted | Every change | No |
+
+Notes:
+- `AppliedChanges` lists the changes that landed. It is empty whenever the commit reverted or applied nothing.
+- A change whose apply threw after its value was written, for example because a derived recalculation failed, keeps that value: the failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
+- `Errors` is not aligned one to one with `FailedChanges`: a failed source write or revert yields one error per source, a failed local apply or revert one per change.
+- The built-in writer reports a commit timeout during a source write as a failed write. During a source revert after a pre-apply rejection or after the local apply started, it is reported as a failed revert.
+- Usage errors throw `InvalidOperationException` (nested transaction, already committed, transactions not enabled, commit from a different async flow, concurrent `CommitAsync`) or `ObjectDisposedException` (transaction disposed, also while the commit check ran).
+
+### When a Revert Fails
+
+Reverts are compensating writes, not an undo, and they can fail too. A source that just failed or timed out is asked to accept another write, so this is the most likely way to end inconsistent. The affected property then has different values at the source and in the local model:
+
+| Stuck revert | Source ends | Local ends | Reported |
+|--------------|-------------|------------|----------|
+| A source revert fails or throws, or times out after a pre-apply rejection or after the local apply started | New | Old | In `FailedChanges` and `Errors`, terminal |
+| A local revert fails (`Rollback`, or with handlers) | Old, if it has a source | New | In `FailedChanges` and `Errors`, terminal |
+| A `Rollback` commit timeout during a source write after another change was written, or during the revert after a failed source write or writer error | New, unless reverted before the timeout fired | Old | `OperationCanceledException`, retryable; transient, a successful retry writes everything again |
+| A custom writer throws from `WriteToSourcesAsync` | Unknown, never reverted | Old | Not identifiable: the transaction cannot know which sources were touched |
+| A failed apply wrote its value ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)) | Old | New | Listed once, as a failed apply, not as a stuck revert |
+
+`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. A stuck property is listed a second time, after the full list when it lists every change (after a pre-apply rejection, or a failed apply with handlers), so it can be told apart.
+
+### Local Apply Failures
+
+A local apply fails when an `OnChanging`/`OnChanged` hook or a write interceptor throws, for example in hardware integrations:
+
+```csharp
+[InterceptorSubject]
+public partial class GpioDevice
+{
+    public partial bool LedA { get; set; }
+    public partial bool LedB { get; set; }
+
+    partial void OnLedAChanged(bool newValue) => _gpio.Write(pinA, newValue); // can throw!
+    partial void OnLedBChanged(bool newValue) => _gpio.Write(pinB, newValue); // can throw!
+}
+```
+
 ## Transaction Handlers
 
-An `ITransactionHandler` is called for each write a transaction captures and checks the final set at commit. Property validation is one.
-
-**Resolution.**
-- A handler takes part when it is registered on the transaction's context, or on the context of a subject written in the transaction, for example a subject's own context that reaches the transaction's context through a fallback.
-- Handlers of the transaction's context are resolved when the transaction begins. Those of a subject's context are resolved when a subject of it is first written, and again on its next write after the context's services or fallback contexts change, for example when the subject is attached under another parent.
-- Whether a handler registered while a transaction is open takes part in it is undefined, but a registration never removes a handler that takes part otherwise. Register handlers before beginning transactions.
-- A resolved handler takes part for the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. To handle only some subjects, filter by `context.Property.Subject` (`change.Property.Subject` for each of `context.Changes` in `OnCommitting`).
-- Handlers are called in the order they were resolved, each context's in its service order. A handler that `Equals` one already taking part is not added again. `ValidationInterceptor` equals any instance of its type, so validation registered on several contexts of a fallback chain runs once.
-
-**Capture.** `OnCapturing(in TransactionCaptureContext<TProperty> context)` is called before a write is captured, including a write back that removes a pending change, and in `Deferred` mode with `FailOnConflict` a write of an unchanged value that the commit check receives. Throwing rejects the write: nothing is captured and the exception propagates to the setter. The context is a `ref struct` that holds the `Transaction`, the written `Property`, the `NewValue` and the attempted `Origin`, and is valid only during the call.
-
-**Checks.** `OnCommitting(in TransactionCheckContext context)` is called in up to two checks, both on the committing thread while the transaction is committing. The first handler that throws stops the rest. Do not assume a single call per commit. The context is a `ref struct`, valid only during the call, that holds the `Transaction`, the checked `Changes` and the `Stage`, which is `Commit` in the commit check and `PreApply` in the pre-apply check.
-
-| | Commit check | Pre-apply check |
-|-|--------------|-----------------|
-| Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
-| Receives | The final set, in commit order, followed in `Deferred` mode with `FailOnConflict` by an entry for each value written unchanged, whose old and new value are equal | The changes that will be applied, each with the origin it is applied with: `Confirmed` with the accepting source for a change a source accepted, the captured origin otherwise, followed by the entries for values written unchanged, each with its current landed value as old and new value and its captured origin (normally `Local`), also when that value came from an inbound update |
-| Skipped | When nothing is pending and, in `Deferred` mode with `FailOnConflict`, no value was written unchanged | When nothing will be applied, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
-| Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: written sources are reverted, nothing from the set lands, and the transaction is terminal, see the [Failure Table](#failure-table). A transaction disposed from another flow during the commit is rejected the same way, with an `ObjectDisposedException`, and so is a throwing read (a getter or read interceptor) of the landed value of a property written unchanged. |
-
-To treat a source's acceptance as final, skip changes with a `Confirmed` origin. To ignore only inbound data, skip `FromSource`, which keeps the pre-apply check.
-
-The pre-apply check exists because writes outside transactions, such as inbound updates, are not blocked by a commit and can change what a handler reads while the sources are written; it narrows that window to the synchronous apply itself. It rejects the whole set because the other changes were checked against the rejected values. The exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the exception the handler or the landed-value read threw, after any source write errors and before any revert errors.
-
-**Reads and writes during a check.** Handlers must not write properties.
-- On the committing thread, a read returns the checked value: the pending value of a changed property, in the commit check also the value of a property written unchanged, and the landed value otherwise. In the pre-apply check, a property whose source write failed also reads its landed value.
-- On the committing thread, a write throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check, same as outside a transaction.
-- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes writing a pending property back to its landed value; a write of the landed value is dropped as unchanged instead when the property has no pending change or its pending value equals the landed value.
-- Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
-- A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
-
-**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction, which no handler checked, and skip checking it. Its limits:
-- Reference-type values match by identity and value-type values by equality, so a struct with a loose `Equals` can pass an equal, unchecked value as the checked one.
-- Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again.
-- It does not recognize any apply after the transaction was disposed during the commit.
+An `ITransactionHandler` is called for each write a transaction captures and checks the final set at commit. Property validation is one. It checks the set in the commit check, before anything is written, and with source transactions in the pre-apply check, right before the local apply. See [Writing a Transaction Handler](#writing-a-transaction-handler) for the contract. The pre-apply check exists because writes outside transactions, such as inbound updates, are not blocked by a commit and can change what a handler reads while the sources are written; it narrows that window to the synchronous apply itself. It rejects the whole set because the other changes were checked against the rejected values.
 
 With handlers, a failed apply invalidates the checked set, so in both failure handling modes the commit applies no further changes and reverts the applied values and every written source, see the [Failure Table](#failure-table).
 
@@ -442,7 +406,7 @@ Notification boundaries follow the evaluation nesting. A top-level derived recal
 - A successful or terminally failed commit is inactive for property interception even before disposal. Later reads and writes use the landed model normally; retryable failures remain active.
 - While a live ambient transaction is committing, property reads and writes on a flow carrying it throw `InvalidOperationException`. This includes custom writer callbacks. Getter reads are also rejected because sibling or landed-model state is outside the frozen snapshot and can make the source payload inconsistent.
 - The commit's own synchronous local apply remains allowed, including property hooks, change handlers, and derived cascades initiated by that apply. This authorization does not extend into custom writer callbacks or child tasks.
-- For reads and writes during the handler checks, see [Transaction Handlers](#transaction-handlers).
+- For reads and writes during the handler checks, see [Writing a Transaction Handler](#writing-a-transaction-handler).
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
@@ -452,6 +416,39 @@ Notification boundaries follow the evaluation nesting. A top-level derived recal
 2. **Keep transactions short** - Long transactions hold pending changes in memory
 3. **Handle exceptions from CommitAsync** - Commits can fail partially
 4. **Don't share transactions across threads** - Each async context should have its own transaction
+
+## Writing a Transaction Handler
+
+**Resolution.** A handler implements `ITransactionHandler` and takes part when it is registered as a service of the transaction's context, or of the context of a subject written in the transaction, for example a subject's own context that reaches the transaction's context through a fallback.
+- Handlers of the transaction's context are resolved when the transaction begins. Those of a subject's context are resolved when a subject of it is first written, and again on its next write after the context's services or fallback contexts change, for example when the subject is attached under another parent.
+- Whether a handler registered while a transaction is open takes part in it is undefined, but a registration never removes a handler that takes part otherwise. Register handlers before beginning transactions.
+- A resolved handler takes part for the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. To handle only some subjects, filter by `context.Property.Subject` (`change.Property.Subject` for each of `context.Changes` in `OnCommitting`).
+- Handlers are called in the order they were resolved, each context's in its service order. A handler that `Equals` one already taking part is not added again. `ValidationInterceptor` equals any instance of its type, so validation registered on several contexts of a fallback chain runs once.
+
+**Capture.** `OnCapturing(in TransactionCaptureContext<TProperty> context)` is called before a write is captured, including a write back that removes a pending change and a write of an unchanged value that the commit check receives (see [Validation Mode](#validation-mode)). Throwing rejects the write: nothing is captured and the exception propagates to the setter. The context is a `ref struct` that holds the `Transaction`, the written `Property`, the `NewValue` and the attempted `Origin`, and is valid only during the call.
+
+**Checks.** `OnCommitting(in TransactionCheckContext context)` is called in up to two checks, both on the committing thread while the transaction is committing. The first handler that throws stops the rest. Do not assume a single call per commit. The context is a `ref struct`, valid only during the call, that holds the `Transaction`, the checked `Changes` and the `Stage`, which is `Commit` in the commit check and `PreApply` in the pre-apply check.
+
+| | Commit check | Pre-apply check |
+|-|--------------|-----------------|
+| Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
+| Receives | The final set, in commit order, followed by the entries for values written unchanged ([`Deferred` mode](#validation-mode)) | The changes that will be applied, each with the origin it is applied with: `Confirmed` with the accepting source for a change a source accepted, the captured origin otherwise, followed by the entries for values written unchanged, each with its current landed value and its captured origin (normally `Local`, also for a value from an inbound update) |
+| Skipped | When nothing is pending and no value was written unchanged | When nothing will be applied, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
+| Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: written sources are reverted, nothing from the set lands, and the transaction is terminal, see the [Failure Table](#failure-table). A transaction disposed from another flow during the commit is rejected the same way, with an `ObjectDisposedException`, and so is a throwing read (a getter or read interceptor) of the landed value of a property written unchanged. |
+
+To treat a source's acceptance as final, skip changes with a `Confirmed` origin. To ignore only inbound data, skip `FromSource`, which keeps the pre-apply check. After a pre-apply rejection, the exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the exception the handler or the landed-value read threw, after any source write errors and before any revert errors.
+
+**Reads and writes during a check.** Handlers must not write properties.
+- On the committing thread, a read returns the checked value: the pending value of a changed property, in the commit check also the value of a property written unchanged, and the landed value otherwise. In the pre-apply check, a property whose source write failed also reads its landed value.
+- On the committing thread, a write throws `InvalidOperationException`, including a write to a settable derived property. A write of a property's landed value is dropped by the equality check, same as outside a transaction.
+- On other threads that carry the transaction, reads and writes throw `InvalidOperationException` because a commit is in progress, so handlers must read synchronously on the calling thread. This includes writing a pending property back to its landed value; a write of the landed value is dropped as unchanged instead when the property has no pending change or its pending value equals the landed value.
+- Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
+- A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
+
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction, which no handler checked, and skip checking it. Its limits:
+- Reference-type values match by identity and value-type values by equality, so a struct with a loose `Equals` can pass an equal, unchecked value as the checked one.
+- Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again.
+- It does not recognize any apply after the transaction was disposed during the commit.
 
 ## Implementing a Custom Transaction Writer
 
@@ -499,7 +496,7 @@ TransactionAwaitable BeginTransactionAsync(
 | `ConflictBehavior` | The conflict detection behavior |
 | `CheckMode` | When transaction handlers validate the written values |
 | `Current` (static) | The transaction of the current async flow, or null |
-| `TryConsumeCommitWrite(...)` (static) | Lets a handler recognize a value it already checked, see [Transaction Handlers](#transaction-handlers) |
+| `TryConsumeCommitWrite(...)` (static) | Lets a handler recognize a value it already checked, see [Writing a Transaction Handler](#writing-a-transaction-handler) |
 | `ValidateWriterContract` (static) | Enables the writer contract check, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer) |
 
 ### Enums
