@@ -193,6 +193,12 @@ public sealed class MarkdownPageFixture
         await Storage.WriteBlobAsync(name, stream, CancellationToken.None);
     }
 
+    /// <summary>Deletes the file without telling the page, like a deletion that the file watcher has not reported yet.</summary>
+    public Task DeleteAsync(string name) => Storage.Connection.Client.DeleteAsync([name], CancellationToken.None);
+
+    public async Task<bool> ExistsAsync(string name) =>
+        (await Storage.Connection.Client.ExistsAsync([name], CancellationToken.None)).Single();
+
     private sealed class MarkerHostedService : IHostedService
     {
         public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
