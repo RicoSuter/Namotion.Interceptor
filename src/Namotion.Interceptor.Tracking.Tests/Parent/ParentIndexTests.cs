@@ -461,4 +461,23 @@ public class ParentIndexTests
         Assert.True(parentsOfCar == car.GetParents());
         Assert.True(parentsOfKeyed == keyed.GetParents());
     }
+
+    [Fact]
+    public void WhenSubjectIsRemovedInPlaceAndAssignedAgain_ThenItKeepsItsOldIndex()
+    {
+        // Arrange
+        var context = CreateContext().WithRegistry();
+        var first = new Car();
+        var second = new Car();
+        var assigned = new List<Car> { first, second };
+        var garage = new Garage(context) { Cars = assigned };
+
+        // Act: the removed subject still counts as attached, so it is neither attached again nor reported.
+        assigned.Remove(first);
+        garage.Cars = new List<Car> { second, first };
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(first.GetParents()));
+        Assert.Equal(0, garage.TryGetRegisteredProperty(g => g.Cars)!.Children.Single(c => c.Subject == first).Index);
+    }
 }

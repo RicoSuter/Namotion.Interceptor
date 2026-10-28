@@ -1,3 +1,5 @@
+using System.Reactive.Concurrency;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -157,6 +159,58 @@ public class ChildIndexHandlerTests
         Assert.Equal([new SubjectChild(second, 0), new SubjectChild(first, 1)], outer.Before);
         Assert.Equal(outer.Before, outer.After);
         Assert.Contains(handler.Calls, call => call.Property.Name == nameof(Garage.CarsByName));
+    }
+
+    [Fact]
+    public void WhenSubjectUnderTwoKeysIsReordered_ThenHandlerGetsItWithItsNewFirstKey()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var garage = new Garage(context)
+        {
+            CarsByName = new Dictionary<string, Car> { ["P"] = car, ["Q"] = car }
+        };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { ["Q"] = car, ["P"] = car };
+
+        // Assert
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal([new SubjectChild(car, "Q")], call.Children);
+    }
+
+    [Fact]
+    public void WhenKeyEqualsThrows_ThenThatWriteMissesItsChangeAndTheNextWriteIsReconciled()
+    {
+        // Arrange
+        var (context, handler) = CreateContext();
+        var car = new Car();
+        var holder = new BroadlyDeclaredHolder(context)
+        {
+            BroadCars = new Dictionary<CastingKey, Car> { [new CastingKey()] = car }
+        };
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act & Assert: the old key is compared with a key of another type, and its Equals casts.
+        var stored = new Dictionary<string, Car> { ["A"] = car };
+        Assert.Throws<InvalidCastException>(() => holder.BroadCars = stored);
+        Assert.Same(stored, holder.BroadCars);
+        Assert.Empty(changes);
+
+        holder.BroadCars = new Dictionary<string, Car> { ["B"] = car };
+        Assert.Single(changes);
+        Assert.Equal([new SubjectChild(car, "B")], handler.Calls[^1].Children);
+    }
+
+    private sealed class CastingKey
+    {
+        public override bool Equals(object? obj) => ReferenceEquals(this, (CastingKey)obj!);
+
+        public override int GetHashCode() => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
     }
 
     private sealed class NestedWritingChildIndexHandler : IChildIndexHandler

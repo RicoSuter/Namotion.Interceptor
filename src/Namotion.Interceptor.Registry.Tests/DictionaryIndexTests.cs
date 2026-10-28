@@ -449,6 +449,23 @@ public class DictionaryIndexTests
     }
 
     [Fact]
+    public void WhenBroadlyDeclaredDictionaryHasIntegerKeysOutOfOrder_ThenChildrenAreOrderedByKey()
+    {
+        // Arrange
+        var first = new TestItem();
+        var second = new TestItem();
+        var holder = new BroadlyDeclaredHolder(CreateContext());
+
+        // Act
+        holder.Items = new Dictionary<int, TestItem> { [5] = first, [1] = second };
+
+        // Assert
+        var children = GetProperty(holder, nameof(BroadlyDeclaredHolder.Items)).Children;
+        Assert.Equal([second, first], children.Select(c => c.Subject));
+        Assert.Equal([1, 5], children.Select(c => c.Index));
+    }
+
+    [Fact]
     public void WhenBroadlyDeclaredCollectionGivesWayToItsOnlyItem_ThenIndexIsNull()
     {
         // Arrange
