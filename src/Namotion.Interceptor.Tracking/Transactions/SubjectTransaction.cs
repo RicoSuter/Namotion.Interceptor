@@ -552,6 +552,11 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
+            if (IsDisposed)
+            {
+                throw new ObjectDisposedException(nameof(SubjectTransaction));
+            }
+
             if ((_pendingChanges?.Count ?? 0) == 0 && CheckedCheckOnlyCount == 0)
             {
                 _isCommitted = true;
