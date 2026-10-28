@@ -1,0 +1,51 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Interceptor.Validation
+{
+    public class DataAnnotationsValidator : Namotion.Interceptor.Validation.IPropertyValidator
+    {
+        public DataAnnotationsValidator() { }
+        public System.Collections.Generic.IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> Validate<TProperty>(in Namotion.Interceptor.Validation.PropertyValidationContext<TProperty> context) { }
+    }
+    public interface IPropertyValidator
+    {
+        System.Collections.Generic.IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> Validate<TProperty>(in Namotion.Interceptor.Validation.PropertyValidationContext<TProperty> context);
+    }
+    public static class InterceptorSubjectContextExtensions
+    {
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithDataAnnotationValidation(this Namotion.Interceptor.IInterceptorSubjectContext builder) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyValidation(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+    }
+    public readonly struct PropertyValidationContext<TProperty>
+    {
+        public PropertyValidationContext(Namotion.Interceptor.PropertyReference property, TProperty value, Namotion.Interceptor.ChangeOrigin origin) { }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public TProperty Value { get; }
+    }
+    public sealed class PropertyValidationException : System.ComponentModel.DataAnnotations.ValidationException
+    {
+        public PropertyValidationException(Namotion.Interceptor.PropertyReference property, object? value, System.Collections.Generic.IReadOnlyList<System.ComponentModel.DataAnnotations.ValidationResult> validationResults) { }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public System.Collections.Generic.IReadOnlyList<System.ComponentModel.DataAnnotations.ValidationResult> ValidationResults { get; }
+    }
+    public sealed class SubjectTransactionValidationException : Namotion.Interceptor.Tracking.Transactions.SubjectTransactionException
+    {
+        public SubjectTransactionValidationException(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Collections.Generic.IReadOnlyList<System.Exception> errors) { }
+    }
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
+    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler),
+            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor),
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
+    public class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
+    {
+        public ValidationInterceptor() { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context) { }
+        public void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context) { }
+        public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
+    }
+}
