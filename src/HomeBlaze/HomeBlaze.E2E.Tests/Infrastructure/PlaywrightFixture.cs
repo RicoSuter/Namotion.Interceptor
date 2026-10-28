@@ -25,6 +25,9 @@ public class PlaywrightFixture : IAsyncLifetime
     private WebTestingHostFactory<App>? _factory;
     private IBrowserContext? _context;
 
+    // Where the server log stood when the current page was created, see WaitForUrlAsync.
+    private int _serverLogCountAtPage;
+
     public IBrowser Browser => _browser ?? throw new InvalidOperationException("Browser not initialized");
 
     public string ServerAddress => _factory?.ServerAddress ?? throw new InvalidOperationException("Server not started");
@@ -352,8 +355,39 @@ public class PlaywrightFixture : IAsyncLifetime
             await _context.CloseAsync();
         }
 
+        _serverLogCountAtPage = ServerLog.Count;
         _context = await Browser.NewContextAsync(contextOptions);
         return await _context.NewPageAsync();
+    }
+
+    /// <summary>
+    /// Waits until the app has navigated the page to <paramref name="url"/>. A timeout fails with what the page and the server
+    /// show, so that a failure on a build server tells why the app did not navigate.
+    /// </summary>
+    public Task WaitForUrlAsync(IPage page, string url, float timeout = 30000) =>
+        WaitForUrlAsync(page, timeout, options => page.WaitForURLAsync(url, options));
+
+    /// <inheritdoc cref="WaitForUrlAsync(IPage, string, float)"/>
+    public Task WaitForUrlAsync(IPage page, Func<string, bool> url, float timeout = 30000) =>
+        WaitForUrlAsync(page, timeout, options => page.WaitForURLAsync(url, options));
+
+    private async Task WaitForUrlAsync(IPage page, float timeout, Func<PageWaitForURLOptions, Task> waitForUrl)
+    {
+        try
+        {
+            // A navigation of the app changes the URL of the document and loads no other, so no load event follows it.
+            await waitForUrl(new() { Timeout = timeout, WaitUntil = WaitUntilState.Commit });
+        }
+        catch (TimeoutException exception)
+        {
+            var dialogs = string.Join(" | ", await page.Locator(".mud-dialog").AllInnerTextsAsync());
+            var showsErrorUi = await page.Locator("#blazor-error-ui").IsVisibleAsync();
+            var serverLog = string.Join('\n', ServerLog.GetEntriesSince(_serverLogCountAtPage)
+                .Select(entry => $"{entry.Level} {entry.Category}: {entry.Message} {entry.Exception}"));
+            throw new TimeoutException(
+                $"The page stayed at {page.Url}. Dialogs: [{dialogs}]. Error UI shown: {showsErrorUi}. Server log since the page was created:\n{serverLog}",
+                exception);
+        }
     }
 }
 
