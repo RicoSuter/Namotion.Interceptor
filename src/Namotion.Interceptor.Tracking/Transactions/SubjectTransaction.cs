@@ -349,14 +349,13 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns true with the pending value when the current flow's transaction holds a pending change for
+    /// Returns true with the pending value when this transaction holds a pending change for
     /// <paramref name="property"/> and is capturing, or is committing outside this thread's commit scope.
     /// </summary>
-    internal static bool TryGetPendingValueInCurrentTransaction<TProperty>(PropertyReference property, out TProperty value)
+    internal bool TryGetPendingValueForWriteBack<TProperty>(PropertyReference property, out TProperty value)
     {
         value = default!;
-        var transaction = CurrentTransaction.Value;
-        if (transaction is null || transaction.IsDisposed || transaction._isCommitted)
+        if (IsDisposed || _isCommitted)
         {
             return false;
         }
@@ -364,14 +363,14 @@ public sealed class SubjectTransaction : IDisposable
         // The commit's own applies and rollbacks rely on the equality drop. A write back from another thread or the
         // writer's flow must reach the transaction interceptor, which rejects it while the commit runs, so the
         // undo it intends is not lost silently.
-        if (transaction._isCommitting && transaction.IsInCommitScope)
+        if (_isCommitting && IsInCommitScope)
         {
             return false;
         }
 
-        lock (transaction._pendingChangesLock)
+        lock (_pendingChangesLock)
         {
-            if (transaction._pendingChanges is null || !transaction._pendingChanges.TryGetValue(property, out var change))
+            if (_pendingChanges is null || !_pendingChanges.TryGetValue(property, out var change))
             {
                 return false;
             }

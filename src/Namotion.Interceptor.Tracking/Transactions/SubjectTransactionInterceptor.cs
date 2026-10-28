@@ -170,14 +170,13 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     }
 
     /// <summary>
-    /// Records a write of the landed value, which the equality check drops as unchanged, for the commit check when the
-    /// current flow's transaction captures and <see cref="SubjectTransaction.RecordsCheckOnlyEntries"/> (see
+    /// Records a write of the landed value, which the equality check drops as unchanged, for the commit check when
+    /// <paramref name="transaction"/>, the current flow's transaction, captures and <see cref="SubjectTransaction.RecordsCheckOnlyEntries"/> (see
     /// <see cref="SubjectTransaction.RecordCheckOnly{TProperty}"/>). Otherwise, and for a derived property or a
     /// subject whose context does not route through the transaction's interceptor, the write stays dropped.
     /// </summary>
-    internal static void RecordUnchangedWrite<TProperty>(ref PropertyWriteContext<TProperty> context)
+    internal static void RecordUnchangedWrite<TProperty>(SubjectTransaction transaction, ref PropertyWriteContext<TProperty> context)
     {
-        var transaction = SubjectTransaction.Current;
         if (transaction is not { RecordsCheckOnlyEntries: true, IsDisposed: false, IsCommitted: false } ||
             transaction.IsCommitting)
         {

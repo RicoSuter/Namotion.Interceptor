@@ -14,26 +14,33 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) ||
-            IsWriteBackOfPendingChange(context.Property, context.NewValue))
+        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {
             next(ref context);
         }
-        else if (SubjectTransaction.HasActiveTransaction)
+        else if (SubjectTransaction.HasActiveTransaction && SubjectTransaction.Current is { } transaction)
         {
-            // Dropped as unchanged, with or without a transaction. A Deferred transaction with FailOnConflict still
-            // records it for the commit check. Recording follows the async flow of SubjectTransaction.Current, so
-            // tasks started in the transaction's flow record too; it is not tied to the thread or sync context.
-            SubjectTransactionInterceptor.RecordUnchangedWrite(ref context);
+            if (IsWriteBackOfPendingChange(transaction, context.Property, context.NewValue))
+            {
+                next(ref context);
+            }
+            else
+            {
+                // Dropped as unchanged, with or without a transaction. A Deferred transaction with FailOnConflict
+                // still records it for the commit check. Recording follows the async flow of
+                // SubjectTransaction.Current, so tasks started in the transaction's flow record too; it is not tied to
+                // the thread or sync context.
+                SubjectTransactionInterceptor.RecordUnchangedWrite(transaction, ref context);
+            }
         }
     }
 
     // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction holds
     // another value, so it is passed on and the transaction removes its pending change.
-    private static bool IsWriteBackOfPendingChange<TProperty>(PropertyReference property, TProperty newValue)
+    private static bool IsWriteBackOfPendingChange<TProperty>(
+        SubjectTransaction transaction, PropertyReference property, TProperty newValue)
     {
-        return SubjectTransaction.HasActiveTransaction &&
-            SubjectTransaction.TryGetPendingValueInCurrentTransaction(property, out TProperty pendingValue) &&
+        return transaction.TryGetPendingValueForWriteBack(property, out TProperty pendingValue) &&
             !EqualityComparer<TProperty>.Default.Equals(pendingValue, newValue);
     }
 }
