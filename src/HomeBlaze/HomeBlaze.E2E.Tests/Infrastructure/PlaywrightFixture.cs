@@ -25,6 +25,9 @@ public class PlaywrightFixture : IAsyncLifetime
     private WebTestingHostFactory<App>? _factory;
     private IBrowserContext? _context;
 
+    // Where the server log stood when the current page was created, see WaitForUrlAsync.
+    private int _serverLogCountAtPage;
+
     public IBrowser Browser => _browser ?? throw new InvalidOperationException("Browser not initialized");
 
     public string ServerAddress => _factory?.ServerAddress ?? throw new InvalidOperationException("Server not started");
@@ -352,8 +355,31 @@ public class PlaywrightFixture : IAsyncLifetime
             await _context.CloseAsync();
         }
 
+        _serverLogCountAtPage = ServerLog.Count;
         _context = await Browser.NewContextAsync(contextOptions);
         return await _context.NewPageAsync();
+    }
+
+    /// <summary>
+    /// Waits until the page is at <paramref name="url"/>. A timeout fails with what the page and the server show, so that a
+    /// failure on a build server tells why the app did not navigate.
+    /// </summary>
+    public async Task WaitForUrlAsync(IPage page, string url, float timeout = 30000)
+    {
+        try
+        {
+            await page.WaitForURLAsync(url, new() { Timeout = timeout });
+        }
+        catch (TimeoutException exception)
+        {
+            var dialogs = string.Join(" | ", await page.Locator(".mud-dialog").AllInnerTextsAsync());
+            var showsErrorUi = await page.Locator("#blazor-error-ui").IsVisibleAsync();
+            var serverLog = string.Join('\n', ServerLog.GetEntriesSince(_serverLogCountAtPage)
+                .Select(entry => $"{entry.Level} {entry.Category}: {entry.Message} {entry.Exception}"));
+            throw new TimeoutException(
+                $"The page stayed at {page.Url}. Dialogs: [{dialogs}]. Error UI shown: {showsErrorUi}. Server log since the page was created:\n{serverLog}",
+                exception);
+        }
     }
 }
 
