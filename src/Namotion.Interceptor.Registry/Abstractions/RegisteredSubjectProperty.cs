@@ -197,7 +197,8 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Gets the collection or dictionary items of the property.
+    /// Gets the collection or dictionary items of the property, each subject once with its first key or position.
+    /// A collection's items are in position order, a declared dictionary's in the order they were attached.
     /// Thread-safe: Lock on private readonly List ensures thread-safe access.
     /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>

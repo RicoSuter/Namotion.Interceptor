@@ -10,7 +10,8 @@ public interface IChildIndexHandler
     /// <summary>
     /// Called after a structural write that kept subjects in the property, while the lifecycle
     /// interceptor holds its lock, with each kept subject whose key or position changed.
-    /// Not called when there is none.
+    /// Not called when there is none. A subject the write attached is not reported, since its
+    /// attach carries its index.
     /// </summary>
     /// <remarks>
     /// The handler must not block, must not throw, and must not write the property that was written:

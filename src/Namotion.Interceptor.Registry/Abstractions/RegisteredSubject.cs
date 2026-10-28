@@ -36,6 +36,7 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
+    /// There is one entry per property, with the subject's first key or position in it.
     /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents

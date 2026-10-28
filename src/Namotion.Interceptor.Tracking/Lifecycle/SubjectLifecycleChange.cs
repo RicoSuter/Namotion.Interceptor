@@ -12,6 +12,10 @@ public readonly struct SubjectLifecycleChange
     public PropertyReference? Property { get; init; }
 
     /// <summary>Gets the index defining the place of the subject in the property's dictionary or collection.</summary>
+    /// <remarks>
+    /// On detach, this can be another key or position of the subject than the one it was attached with,
+    /// so remove a stored index by its property.
+    /// </remarks>
     public object? Index { get; init; }
 
     /// <summary>Gets the number of properties pointing to the referenced subject.</summary>
