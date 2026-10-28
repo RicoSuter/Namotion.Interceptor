@@ -15,11 +15,8 @@ public class SubjectTransactionException : Exception
         IReadOnlyList<SubjectPropertyChange> appliedChanges,
         IReadOnlyList<SubjectPropertyChange> failedChanges,
         IReadOnlyList<Exception> errors)
-        : base(message, CreateInnerException(errors))
+        : this(message, appliedChanges, failedChanges, errors, CreateInnerException(errors))
     {
-        AppliedChanges = appliedChanges;
-        FailedChanges = failedChanges;
-        Errors = errors;
     }
 
     /// <summary>

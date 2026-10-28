@@ -20,7 +20,10 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
         }
         else if (SubjectTransaction.HasActiveTransaction && SubjectTransaction.Current is { } transaction)
         {
-            if (IsWriteBackOfPendingChange(transaction, context.Property, context.NewValue))
+            // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction
+            // holds another value, so it is passed on and the transaction removes its pending change.
+            if (transaction.TryGetPendingValueForWriteBack(context.Property, out TProperty pendingValue) &&
+                !EqualityComparer<TProperty>.Default.Equals(pendingValue, context.NewValue))
             {
                 next(ref context);
             }
@@ -33,14 +36,5 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
                 SubjectTransactionInterceptor.RecordUnchangedWrite(transaction, ref context);
             }
         }
-    }
-
-    // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction holds
-    // another value, so it is passed on and the transaction removes its pending change.
-    private static bool IsWriteBackOfPendingChange<TProperty>(
-        SubjectTransaction transaction, PropertyReference property, TProperty newValue)
-    {
-        return transaction.TryGetPendingValueForWriteBack(property, out TProperty pendingValue) &&
-            !EqualityComparer<TProperty>.Default.Equals(pendingValue, newValue);
     }
 }

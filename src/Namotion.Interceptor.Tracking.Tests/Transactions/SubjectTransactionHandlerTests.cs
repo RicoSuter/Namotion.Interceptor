@@ -547,11 +547,8 @@ public class SubjectTransactionHandlerTests
         // Arrange
         var context = CreateContext(out var handler);
         var person = new Person(context) { FirstName = "Ann" };
-        handler.OnCommittingAction = (committingTransaction, _) =>
-        {
-            RunOutsideTransactionFlow(committingTransaction.Dispose);
-            throw new InvalidOperationException("rejected");
-        };
+        handler.OnCommittingAction = (committingTransaction, _) => RunOutsideTransactionFlow(committingTransaction.Dispose);
+        handler.RejectCommit = true;
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
 

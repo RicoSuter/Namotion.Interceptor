@@ -171,15 +171,8 @@ public class SubjectTransactionHandlerResolutionTests
     public async Task WhenHandlerIsIncludedBeforeRetryOfFailedCommit_ThenItChecksTheRetry()
     {
         // Arrange
-        var rejectCommit = true;
         var transactionContext = CreateContext(out var rejectingHandler);
-        rejectingHandler.OnCommittingAction = (_, _) =>
-        {
-            if (rejectCommit)
-            {
-                throw new InvalidOperationException("rejected");
-            }
-        };
+        rejectingHandler.RejectCommit = true;
         var includedHandler = new RecordingHandler();
         var subjectContext = InterceptorSubjectContext.Create();
         subjectContext.AddService<ITransactionHandler>(includedHandler);
@@ -196,7 +189,7 @@ public class SubjectTransactionHandlerResolutionTests
 
         // Act
         person.FirstName = "Bob";
-        rejectCommit = false;
+        rejectingHandler.RejectCommit = false;
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert

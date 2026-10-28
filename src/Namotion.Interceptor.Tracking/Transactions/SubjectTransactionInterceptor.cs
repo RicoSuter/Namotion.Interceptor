@@ -178,12 +178,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     internal static void RecordUnchangedWrite<TProperty>(SubjectTransaction transaction, ref PropertyWriteContext<TProperty> context)
     {
         if (transaction is not { RecordsCheckOnlyEntries: true, IsDisposed: false, IsCommitted: false } ||
-            transaction.IsCommitting)
-        {
-            return;
-        }
-
-        if (context.Property.Metadata.IsDerived)
+            transaction.IsCommitting ||
+            context.Property.Metadata.IsDerived)
         {
             return;
         }

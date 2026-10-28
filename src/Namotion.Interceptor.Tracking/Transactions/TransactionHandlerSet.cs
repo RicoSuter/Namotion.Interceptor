@@ -62,7 +62,7 @@ internal struct TransactionHandlerSet
         IInterceptorSubjectContext subjectContext,
         ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors,
         SubjectTransaction transaction,
-        bool skipWhileCommitting = false)
+        bool skipWhileCommitting)
     {
         var interceptors = ImmutableCollectionsMarshal.AsArray(subjectInterceptors)!;
         return ReferenceEquals(interceptors, Volatile.Read(ref _lastIncludedInterceptors)) ||

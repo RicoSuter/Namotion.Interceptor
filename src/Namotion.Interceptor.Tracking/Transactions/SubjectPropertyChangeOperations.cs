@@ -226,16 +226,14 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Returns the changes in <paramref name="changes"/> whose property is in neither
-    /// <paramref name="excludeFirst"/> nor <paramref name="excludeSecond"/> (matched by
-    /// <see cref="SubjectPropertyChange.Property"/>), as a new list.
+    /// Returns the changes in <paramref name="changes"/> whose property is in none of <paramref name="excludedLists"/>
+    /// (matched by <see cref="SubjectPropertyChange.Property"/>), as a new list.
     /// </summary>
     internal static IReadOnlyList<SubjectPropertyChange> ExcludeByProperty(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        IReadOnlyList<SubjectPropertyChange> excludeFirst,
-        IReadOnlyList<SubjectPropertyChange> excludeSecond)
+        params ReadOnlySpan<IReadOnlyList<SubjectPropertyChange>> excludedLists)
     {
-        var excluded = CreatePropertySet(excludeFirst, excludeSecond);
+        var excluded = CreatePropertySet(excludedLists);
         if (excluded is null)
         {
             return changes.ToArray();

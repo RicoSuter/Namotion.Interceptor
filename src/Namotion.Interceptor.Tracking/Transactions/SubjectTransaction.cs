@@ -47,12 +47,10 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Deferred mode with FailOnConflict only (see RecordsCheckOnlyEntries): check-only entries, writes of the
-    // landed value of a property without a pending change.
-    // The commit check validates them and conflict detection checks them, so the check never validates a value that
-    // moved meanwhile, but the commit neither writes, applies nor publishes them, and GetPendingChanges does not list
-    // them. A later write of another value replaces the entry with a pending change, so the keys stay disjoint from
-    // _pendingChanges. Allocated on the first such write; accessed only under _pendingChangesLock.
+    // Check-only entries (see TransactionCheckMode.Deferred and RecordsCheckOnlyEntries): writes of the landed value
+    // of a property without a pending change. A later write of another value replaces the entry with a pending change,
+    // so the keys stay disjoint from _pendingChanges. Allocated on the first such write; accessed only under
+    // _pendingChangesLock.
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _checkOnlyChanges;
 
     private volatile bool _isCommitting;
@@ -237,7 +235,9 @@ public sealed class SubjectTransaction : IDisposable
         {
             lock (_pendingChangesLock)
             {
-                if (TryGetCheckedChange(property, out var change))
+                var checkOnlyChanges = _checkStage == TransactionCheckStage.Commit ? _checkOnlyChanges : null;
+                if (_pendingChanges?.TryGetValue(property, out var change) == true ||
+                    checkOnlyChanges?.TryGetValue(property, out change) == true)
                 {
                     value = change.GetNewValue<TProperty>();
                     return true;
@@ -247,21 +247,6 @@ public sealed class SubjectTransaction : IDisposable
 
         value = default!;
         return false;
-    }
-
-    /// <summary>
-    /// Returns the pending change of <paramref name="property"/>, or in the commit check its check-only entry. Must
-    /// be called under <see cref="_pendingChangesLock"/>.
-    /// </summary>
-    private bool TryGetCheckedChange(PropertyReference property, out SubjectPropertyChange change)
-    {
-        if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out change))
-        {
-            return true;
-        }
-
-        change = default;
-        return _checkStage == TransactionCheckStage.Commit && _checkOnlyChanges is not null && _checkOnlyChanges.TryGetValue(property, out change);
     }
 
     /// <summary>
@@ -862,7 +847,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         return SubjectPropertyChangeOperations.Concat(
             failedSource,
-            SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource, []),
+            SubjectPropertyChangeOperations.ExcludeByProperty(changes, failedSource),
             revertFailed,
             SubjectPropertyChangeOperations.FilterByProperty(sourceRevertFailed, revertFailed, keepMatches: false));
     }
@@ -880,10 +865,9 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> sourceRevertFailed)
     {
         // Nothing failed at a source here, so every change outside 'written' has no source.
-        var reported = SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed);
         return SubjectPropertyChangeOperations.Concat(
             applyFailed,
-            SubjectPropertyChangeOperations.ExcludeByProperty(changes, written, reported),
+            SubjectPropertyChangeOperations.ExcludeByProperty(changes, written, applyFailed, revertFailed),
             revertFailed,
             SubjectPropertyChangeOperations.FilterByProperty(sourceRevertFailed, revertFailed, keepMatches: false));
     }

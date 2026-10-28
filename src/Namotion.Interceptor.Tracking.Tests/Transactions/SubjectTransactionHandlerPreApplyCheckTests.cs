@@ -208,13 +208,12 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     public async Task WhenDisposedFromAnotherFlowDuringPreApplyCheck_ThenItsRejectionIsKept()
     {
         // Arrange
-        var calls = 0;
         var writer = new CountingTransactionWriter();
         var context = CreateContext(out var handler, writer);
         var person = new Person(context) { FirstName = "Ann" };
         handler.OnCommittingAction = (committingTransaction, _) =>
         {
-            if (++calls == 2)
+            if (handler.CommittingCalls == 2)
             {
                 RunOutsideTransactionFlow(committingTransaction.Dispose);
                 throw new InvalidOperationException("rejected");

@@ -13,7 +13,7 @@ internal sealed class RecordingHandler : ITransactionHandler
 
     public List<(RecordingHandler Handler, object? Value)>? CaptureLog { get; init; }
 
-    public int CommittingCalls { get; private set; }
+    public int CommittingCalls => Stages.Count;
 
     public List<TransactionCheckStage> Stages { get; } = [];
 
@@ -74,7 +74,6 @@ internal sealed class RecordingHandler : ITransactionHandler
 
     public void OnCommitting(in TransactionCheckContext context)
     {
-        CommittingCalls++;
         Stages.Add(context.Stage);
         OnCommittingAction?.Invoke(context.Transaction, context.Changes.ToArray());
         if (RejectCommit)
