@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Reactive.Concurrency;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -784,6 +786,26 @@ public class TransactionValidationTests
         Assert.Equal(40, motor.MaxAllowedSpeed);
     }
 
+    [Fact]
+    public async Task WhenInterceptorBeforeTransactionReturnsEqualNewInstance_ThenDeferredCommitDoesNotValidateTheApplyAgain()
+    {
+        // Arrange
+        var context = CreateContext(new TextLengthValidator());
+        context.AddService(new CopyingStringInterceptor());
+        var field = new TextField(context) { MaxLength = 3 };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        field.Text = "abcdef";
+        field.MaxLength = 10;
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("abcdef", field.Text);
+        Assert.Equal(10, field.MaxLength);
+    }
+
     private static async Task RunWithoutAsyncLocalFlowAsync(Action action, CancellationToken cancellationToken = default)
     {
         Task task;
@@ -817,6 +839,43 @@ public class TransactionValidationTests
             }
 
             return [];
+        }
+    }
+
+    /// <summary>
+    /// Rejects a Text longer than MaxLength, read through the getter like <see cref="MotorSpeedValidator"/>.
+    /// </summary>
+    private sealed class TextLengthValidator : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            if (context.Property.Name == nameof(TextField.Text) &&
+                context.Value is string text &&
+                context.Property.Subject is TextField field &&
+                text.Length > field.MaxLength)
+            {
+                return [new ValidationResult($"Text length {text.Length} exceeds MaxLength {field.MaxLength}.")];
+            }
+
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Replaces every string written with an equal, distinct instance before the transaction sees it, like a
+    /// normalizing interceptor whose result is already normalized.
+    /// </summary>
+    [RunsBefore(typeof(SubjectTransactionInterceptor))]
+    private sealed class CopyingStringInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string text)
+            {
+                context.NewValue = (TProperty)(object)new string(text.AsSpan());
+            }
+
+            next(ref context);
         }
     }
 

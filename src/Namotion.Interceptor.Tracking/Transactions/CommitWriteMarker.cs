@@ -53,21 +53,11 @@ internal static class CommitWriteMarker
             return false;
         }
 
-        // References match by identity: the apply passes the marked instance itself, and a loose Equals must not let
-        // a replaced, unchecked instance pass as checked.
-        bool matches;
-        if (!typeof(TProperty).IsValueType)
-        {
-            matches = ReferenceEquals(frame.Value, value);
-        }
-        else if (frame.Value is null)
-        {
-            matches = value is null;
-        }
-        else
-        {
-            matches = frame.Value is TProperty typedValue && EqualityComparer<TProperty>.Default.Equals(typedValue, value);
-        }
+        // Equality, not identity: an interceptor ahead of the transaction interceptor can pass an equal new instance
+        // of the checked value at the apply.
+        var matches = frame.Value is null
+            ? value is null
+            : frame.Value is TProperty typedValue && EqualityComparer<TProperty>.Default.Equals(typedValue, value);
 
         if (matches)
         {

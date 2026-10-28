@@ -87,8 +87,9 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
     /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
-    /// the property's value from before the transaction, which no handler checked. Reference-type values match by
-    /// identity, value-type values by equality.
+    /// the property's value from before the transaction, which no handler checked. Values match by
+    /// <see cref="EqualityComparer{T}.Default"/>, so a value whose <c>Equals</c> is looser than what the handler checks
+    /// can pass an equal, unchecked value as the checked one.
     /// </summary>
     /// <remarks>
     /// The first call by one of the transaction's handlers consumes the mark, so another handler that checks the same

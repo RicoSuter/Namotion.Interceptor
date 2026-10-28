@@ -446,7 +446,7 @@ To treat a source's acceptance as final, skip changes with a `Confirmed` origin.
 - A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
 
 **Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction, which no handler checked, and skip checking it. Its limits:
-- Reference-type values match by identity and value-type values by equality, so a struct with a loose `Equals` can pass an equal, unchecked value as the checked one.
+- Values match by equality (`EqualityComparer<T>.Default`), so an equal new instance, for example from an interceptor that runs before `SubjectTransactionInterceptor`, is recognized as checked. A value whose `Equals` is looser than what the handler checks can pass an equal, unchecked value as the checked one.
 - Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again.
 - It does not recognize any apply after the transaction was disposed during the commit.
 

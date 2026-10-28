@@ -15,8 +15,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// to one already taking part is not added again. Handlers are called in resolution order, each context's in its
 /// service order (registration order unless ordering attributes say otherwise); the first that throws stops the rest.
 /// Only one handler can consume the mark of an applied value, see
-/// <see cref="SubjectTransaction.TryConsumeCommitWrite"/>, and a value type with a loose <c>Equals</c> can pass an
-/// equal, unchecked value as the checked one. A write to a subject whose context does not route through the
+/// <see cref="SubjectTransaction.TryConsumeCommitWrite"/>, and a value whose <c>Equals</c> is looser than what the
+/// handler checks can pass an equal, unchecked value as the checked one. A write to a subject whose context does not route through the
 /// transaction interceptor is not intercepted and lands immediately, even during a check. See
 /// docs/tracking-transactions.md (Writing a Transaction Handler) for details.
 /// </remarks>

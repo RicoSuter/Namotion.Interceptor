@@ -197,7 +197,7 @@ public class CommitWriteMarkerTests
     }
 
     [Fact]
-    public async Task WhenInterceptorReplacesAppliedValueWithEqualInstance_ThenCommitWriteIsNotConsumed()
+    public async Task WhenInterceptorReplacesAppliedValueWithEqualInstance_ThenCommitWriteIsConsumed()
     {
         // Arrange
         var context = CreateContext(out var handler);
@@ -213,7 +213,7 @@ public class CommitWriteMarkerTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+        Assert.True(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
     }
 
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
