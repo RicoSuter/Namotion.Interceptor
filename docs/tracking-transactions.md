@@ -279,7 +279,7 @@ A failure is retryable when nothing was written yet, or when the commit timeout'
 | Source write fails or times out, or a custom writer reports errors without failed changes, `Rollback` | All old, written sources reverted | The failed source writes, the changes without a source, and any failed source revert | No |
 | Commit timeout during that `Rollback` revert (`OperationCanceledException`) | Local all old, sources partially reverted | n/a | Yes, a successful retry writes every source again |
 | Pre-apply check rejects, any mode | All old, written sources reverted | Every change (failed source writes first), then each failed source revert again | No |
-| Local apply fails, `BestEffort` without handlers | Applied changes new, failed ones old with their source write reverted | The failed source writes and the failed applies | No |
+| Local apply fails, `BestEffort` without handlers | Applied changes new, failed ones old with their source write reverted | The failed source writes and the failed applies, then each failed source revert again | No |
 | Local apply fails, `Rollback` without handlers | All old, local applies and source writes reverted | The failed applies and any failed local or source revert; with source transactions, also the changes without a source | No |
 | Local apply fails, with handlers, any mode | All old: no further change is applied, the applied ones and the source writes are reverted | Every change (failed source writes first), then each failed local revert (in reverse apply order), then each remaining failed source revert | No |
 | Custom writer reports errors without failed changes, `BestEffort` | All new | Empty, the errors are in `Errors` | No |
@@ -303,7 +303,7 @@ Reverts are compensating writes, not an undo, and they can fail too. A source th
 | The commit timeout interrupts the `Rollback` revert after a failed source write or writer error | Partially reverted | Old | `OperationCanceledException`, retryable; the divergence is transient, a successful retry writes everything again |
 | A custom writer throws from `WriteToSourcesAsync` | Unknown, never reverted | Old | Not identifiable: the transaction cannot know which sources were touched |
 
-`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. When it lists every change (after a pre-apply rejection, or a failed apply with handlers), each stuck property is listed a second time after the full list, so it can be told apart.
+`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. A stuck property is listed a second time, after the full list when it lists every change (after a pre-apply rejection, or a failed apply with handlers), so it can be told apart.
 
 ### Local Apply Failures
 

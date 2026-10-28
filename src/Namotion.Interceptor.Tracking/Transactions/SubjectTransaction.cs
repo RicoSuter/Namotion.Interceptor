@@ -879,14 +879,12 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             // BestEffort without handlers: keep source == model for failed-apply properties by reverting only their
-            // source writes. A failed revert is one of those writes (a throwing writer fails all of them, and a
-            // reporting writer may only report requested ones, see ITransactionWriter.RevertSourceWritesAsync), so
-            // applyFailed already reports it.
+            // source writes. A failed revert lists its property a second time, so a stuck property can be told apart.
             var toRevert = SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateBestEffortFailureException(
                 applied,
-                SubjectPropertyChangeOperations.Concat(failedSource, applyFailed),
+                SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
