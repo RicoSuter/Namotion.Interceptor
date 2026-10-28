@@ -256,11 +256,11 @@ public class OpcUaReconnectionTests
     }
 
     [Fact]
-    public async Task WhenTheSdkTransfersItsSubscriptions_ThenLivenessRisesWithoutWaitingForTheNextHealthCheck()
+    public async Task WhenTheSdkRecreatesTheSessionAfterAServerRestart_ThenLivenessRisesWithoutWaitingForTheNextHealthCheck()
     {
-        // A server restart makes the SDK recreate the session and carry the subscriptions across, so
-        // reporting the connector as down until the next health check would show an operator
-        // "disconnected" while values update.
+        // A server restart makes the SDK recreate the session with fresh subscriptions, so reporting the
+        // connector as down until the next health check would show an operator "disconnected" while
+        // values update.
 
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
@@ -293,7 +293,7 @@ public class OpcUaReconnectionTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
-                message: "Client should report operational as soon as the reconnect transferred its subscriptions");
+                message: "Client should report operational as soon as the reconnect recreated its subscriptions");
 
             Assert.True(client.Source!.Diagnostics.Reconnects.TotalSucceeded >= 1,
                 "The rise should follow a completed reconnect rather than an outage that never happened");

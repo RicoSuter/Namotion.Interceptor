@@ -471,12 +471,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         reconnectedSession.SessionId,
                         reconnectedSession.Connected);
 
-                    // Check if subscriptions transferred BEFORE accepting the new session,
-                    // to avoid having two sessions that need disposal with only one pending slot.
+                    // Checked BEFORE accepting the new session, to avoid having two sessions that need
+                    // disposal with only one pending slot. The SDK either transfers the subscriptions or
+                    // recreates the ones it could not transfer, and fails the whole reconnect otherwise,
+                    // so a new session normally holds every subscription the client had.
                     var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
                     if (transferredSubscriptions.Count > 0)
                     {
-                        // Transfer succeeded - accept new session, defer old session disposal
+                        // Accept the new session, defer old session disposal
                         if (oldSession is not null)
                         {
                             oldSession.KeepAlive -= OnKeepAlive;
@@ -498,16 +500,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         transferSucceeded = true;
 
                         _logger.LogInformation(
-                            "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
+                            "OPC UA session reconnected with {Count} subscriptions, transferred or recreated. Full state sync pending.",
                             transferredSubscriptions.Count);
                     }
                     else
                     {
-                        // Transfer failed - reject new session, abandon old session.
+                        // A session without subscriptions, which happens when the client had none to carry
+                        // over. Reject it and abandon the old session so the health check rebuilds both.
                         // The reconnected session has a live TCP connection so it must be disposed.
-                        // The old session's connection is already dead (server restarted) and will be GC'd.
                         _logger.LogWarning(
-                            "OPC UA session reconnected but subscription transfer failed (server restart). " +
+                            "OPC UA session reconnected without subscriptions. " +
                             "Clearing session to trigger full reconnection via health check.");
                         AbandonCurrentSession();
                         reconnectedSession.KeepAlive -= OnKeepAlive;

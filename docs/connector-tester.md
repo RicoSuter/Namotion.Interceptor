@@ -255,8 +255,8 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 |----------|------|------------|-------------------|
 | Abrupt server crash | Current attempt cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
 | Abrupt client crash | Session disposed without CloseSession RPC | Transport channel disposed, session preserved | Health check detects missing session, triggers full reconnection |
-| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler.BeginReconnect` with subscription transfer |
-| Server restart (clean state) | Full server restart, new node manager | N/A | Client subscription transfer fails, falls back to full state reload |
+| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler` reactivates the session, the client abandons the preserved session and reconnects manually with a full state read |
+| Server restart (clean state) | Full server restart, new node manager | N/A | SDK recreates the session with fresh subscriptions, then a full state read |
 | Session stall / hung reconnect | N/A | N/A | Stall detection after 30s forces SDK handler reset, triggers manual reconnection |
 | Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |
 | Port already in use on restart | N/A | N/A | Retried with exponential backoff |
