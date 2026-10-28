@@ -324,59 +324,47 @@ public class SubjectTransactionConcurrencyTests
         }
     }
 
-    [Fact]
-    public async Task WhenCommitIsParkedOnTheTransactionLockAndTheTransactionIsDisposed_ThenTheCommitCompletesWithoutFailing()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task WhenCommitIsParkedOnTheTransactionLockAndTheTransactionIsDisposed_ThenCommitThrowsObjectDisposed(
+        bool withHandler, bool withWriter)
     {
-        // Arrange: an optimistic commit parks acquiring the per-context transaction lock. A dispose on
-        // another flow then releases the pending-changes buffer while the commit is still parked, so the
-        // commit resumes with a null buffer. The null tolerance in SnapshotChanges and
-        // FinishCommit is what keeps that from being a NullReferenceException; it is load-bearing, not
-        // defensive.
+        // Arrange
         var context = CreateContext();
-        var person = new Person(context) { LastName = "Model" };
-
-        var lockHolder = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        SubjectTransaction? parkedTransaction = null;
-        Task? parkedCommit = null;
-        var commitParked = new ManualResetEventSlim();
-
-        // Suppressed so the parked transaction does not inherit lockHolder as its ambient transaction.
-        var flowControl = ExecutionContext.SuppressFlow();
-        Task starter;
-        try
+        var handler = new RecordingHandler();
+        if (withHandler)
         {
-            starter = Task.Run(async () =>
-            {
-                parkedTransaction = await context.BeginTransactionAsync(
-                    TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
-                person.LastName = "Pending";
-
-                // CommitAsync has already parked on the lock by the time it returns its incomplete task.
-                parkedCommit = parkedTransaction.CommitAsync(CancellationToken.None).AsTask();
-                commitParked.Set();
-                await parkedCommit;
-            });
-        }
-        finally
-        {
-            flowControl.Undo();
+            context.AddService<ITransactionHandler>(handler);
         }
 
-        Assert.True(commitParked.Wait(TimeSpan.FromSeconds(10)), "commit did not reach the transaction lock");
+        var writer = new CountingTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        var person = new Person(context) { FirstName = "Ann" };
+        var lockHolder = await BeginInOwnFlowAsync(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, TransactionLocking.Optimistic);
+        person.FirstName = "Bob";
+        var commit = transaction.CommitAsync(CancellationToken.None).AsTask();
+        Assert.False(commit.IsCompleted);
 
         // Act
-        parkedTransaction!.Dispose();
-        lockHolder.Dispose();
-        await starter.WaitAsync(TimeSpan.FromSeconds(10));
+        RunOutsideTransactionFlow(transaction.Dispose);
+        RunOutsideTransactionFlow(lockHolder.Dispose);
 
         // Assert
-        Assert.True(parkedCommit!.IsCompletedSuccessfully);
-        Assert.Empty(parkedTransaction.GetPendingChanges());
-
-        string? modelLastName = null;
-        await RunOnThreadPoolWithoutFlowAsync(() => modelLastName = person.LastName);
-        Assert.Equal("Model", modelLastName);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => commit);
+        Assert.Empty(handler.Stages);
+        Assert.Equal(0, writer.WriteCalls);
+        string? landedFirstName = null;
+        RunOutsideTransactionFlow(() => landedFirstName = person.FirstName);
+        Assert.Equal("Ann", landedFirstName);
     }
 
     [Fact]

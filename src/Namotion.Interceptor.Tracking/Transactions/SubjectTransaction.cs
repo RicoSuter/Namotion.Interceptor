@@ -545,7 +545,8 @@ public sealed class SubjectTransaction : IDisposable
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">
-    /// Thrown when the transaction has been disposed, or was disposed while the commit check ran.
+    /// Thrown when the transaction has been disposed, or was disposed while the commit waited for the lock or the
+    /// commit check ran.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when commit is called from a different async flow than the one the transaction is active in,
@@ -1082,6 +1083,12 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
+            // A dispose while the commit waited for the optimistic lock detached the pending changes.
+            if (IsDisposed)
+            {
+                throw new ObjectDisposedException(nameof(SubjectTransaction));
+            }
+
             // Rent before changing state so an allocation failure leaves the transaction reusable.
             var changeCount = _pendingChanges?.Count ?? 0;
             var checkOnlyCount = CheckedCheckOnlyCount;

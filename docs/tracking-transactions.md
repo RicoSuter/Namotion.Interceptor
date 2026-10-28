@@ -321,7 +321,7 @@ Notes:
 - A change whose apply threw after its value was written, for example because a derived recalculation failed, keeps that value: the failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
 - `Errors` is not aligned one to one with `FailedChanges`: a failed source write or revert yields one error per source, a failed local apply or revert one per change.
 - The built-in writer reports a commit timeout during a source write as a failed write. During a source revert after a pre-apply rejection or after the local apply started, it is reported as a failed revert.
-- Usage errors throw `InvalidOperationException` (nested transaction, already committed, transactions not enabled, commit from a different async flow, concurrent `CommitAsync`) or `ObjectDisposedException` (transaction disposed, also while the commit check ran).
+- Usage errors throw `InvalidOperationException` (nested transaction, already committed, transactions not enabled, commit from a different async flow, concurrent `CommitAsync`) or `ObjectDisposedException` (transaction disposed, also while the commit waited for the lock or the commit check ran).
 
 ### When a Revert Fails
 
