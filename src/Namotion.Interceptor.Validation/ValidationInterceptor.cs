@@ -31,22 +31,22 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     }
 
     /// <inheritdoc />
-    public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
+    public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
     {
-        if (transaction.CheckMode == TransactionCheckMode.Immediate)
+        if (context.Transaction.CheckMode == TransactionCheckMode.Immediate)
         {
-            ThrowIfInvalid(property, newValue, origin);
+            ThrowIfInvalid(context.Property, context.NewValue, context.Origin);
         }
     }
 
     /// <inheritdoc />
-    public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
+    public void OnCommitting(in TransactionCheckContext context)
     {
         List<SubjectPropertyChange>? failedChanges = null;
         List<Exception>? errors = null;
         IInterceptorSubjectContext? validatorsContext = null;
         var validators = ImmutableArray<IPropertyValidator>.Empty;
-        foreach (ref readonly var change in changes)
+        foreach (ref readonly var change in context.Changes)
         {
             var subjectContext = change.Property.Subject.Context;
             if (!ReferenceEquals(subjectContext, validatorsContext))

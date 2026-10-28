@@ -286,9 +286,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         TProperty newValue,
         ChangeOrigin origin)
     {
+        var context = new TransactionCaptureContext<TProperty>(transaction, property, newValue, origin);
         foreach (var handler in handlers)
         {
-            handler.OnCapturing(transaction, property, newValue, origin);
+            handler.OnCapturing(in context);
         }
     }
 

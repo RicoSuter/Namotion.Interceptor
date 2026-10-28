@@ -37,6 +37,27 @@ public class SubjectTransactionHandlerTests
         Assert.Equal(TransactionCheckMode.Deferred, passedMode);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenCommitting_ThenHandlersReceiveTheCheckStages(bool withWriter)
+    {
+        // Arrange
+        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        TransactionCheckStage[] expected = withWriter
+            ? [TransactionCheckStage.Commit, TransactionCheckStage.PreApply]
+            : [TransactionCheckStage.Commit];
+        Assert.Equal(expected, handler.Stages);
+    }
+
     [Fact]
     public async Task WhenLocalAndSourceWritesAreCaptured_ThenOnCapturingReceivesValueAndAttemptedOrigin()
     {
@@ -649,11 +670,11 @@ public class SubjectTransactionHandlerTests
     [RunsLast]
     private sealed class MisorderedHandler : ITransactionHandler
     {
-        public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
+        public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
         {
         }
 
-        public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
+        public void OnCommitting(in TransactionCheckContext context)
         {
         }
     }

@@ -219,11 +219,11 @@ public class SubjectTransactionHandlerResolutionTests
     {
         public int CommittingCalls { get; private set; }
 
-        public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
+        public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
         {
         }
 
-        public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
+        public void OnCommitting(in TransactionCheckContext context)
         {
             CommittingCalls++;
         }

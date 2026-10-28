@@ -265,8 +265,8 @@ namespace Namotion.Interceptor.Tracking.Transactions
 {
     public interface ITransactionHandler
     {
-        void OnCapturing<TProperty>(Namotion.Interceptor.Tracking.Transactions.SubjectTransaction transaction, Namotion.Interceptor.PropertyReference property, TProperty newValue, Namotion.Interceptor.ChangeOrigin origin);
-        void OnCommitting(Namotion.Interceptor.Tracking.Transactions.SubjectTransaction transaction, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes);
+        void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context);
+        void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context);
     }
     public interface ITransactionWriter
     {
@@ -339,10 +339,28 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public void OnCompleted(System.Action continuation) { }
         public void UnsafeOnCompleted(System.Action continuation) { }
     }
+    public readonly ref struct TransactionCaptureContext<TProperty>
+    {
+        public TProperty NewValue { get; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
+    }
+    public readonly ref struct TransactionCheckContext
+    {
+        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Changes { get; }
+        public Namotion.Interceptor.Tracking.Transactions.TransactionCheckStage Stage { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
+    }
     public enum TransactionCheckMode
     {
         Immediate = 0,
         Deferred = 1,
+    }
+    public enum TransactionCheckStage
+    {
+        Commit = 0,
+        PreApply = 1,
     }
     public enum TransactionConflictBehavior
     {

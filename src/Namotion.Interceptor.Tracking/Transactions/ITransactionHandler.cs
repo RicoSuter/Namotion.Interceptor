@@ -26,26 +26,23 @@ public interface ITransactionHandler
     /// Called, without holding the transaction's capture lock, for a write the transaction is about to capture,
     /// including a write back that removes a pending change, and in <see cref="TransactionCheckMode.Deferred"/>
     /// mode with <see cref="TransactionConflictBehavior.FailOnConflict"/> a write of an unchanged value that the commit
-    /// check receives (see <see cref="OnCommitting"/>). Throwing
-    /// rejects the write: nothing is captured and the exception propagates to the setter. Handlers must not write
-    /// properties. A validating handler skips its write-time check in <see cref="TransactionCheckMode.Deferred"/>
-    /// mode (<see cref="SubjectTransaction.CheckMode"/>).
+    /// check receives (see <see cref="OnCommitting"/>). Throwing rejects the write: nothing is captured and the exception
+    /// propagates to the setter. Handlers must not write properties. A checking handler skips its write-time check in
+    /// <see cref="TransactionCheckMode.Deferred"/> mode (<see cref="SubjectTransaction.CheckMode"/>).
     /// </summary>
     /// <typeparam name="TProperty">The property type.</typeparam>
-    /// <param name="transaction">The capturing transaction.</param>
-    /// <param name="property">The written property.</param>
-    /// <param name="newValue">The written value.</param>
-    /// <param name="origin">The attempted origin of the write.</param>
-    void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin);
+    /// <param name="context">The write about to be captured.</param>
+    void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context);
 
     /// <summary>
     /// Called in the commit check before any source write or local apply, and, with a registered
     /// <see cref="ITransactionWriter"/>, in the pre-apply check after the source writes, right before the local apply
     /// (skipped when nothing will be applied, and in <see cref="TransactionFailureHandling.Rollback"/> mode after a
-    /// source write failure or writer error). Property reads on the calling thread return the transaction's values for
-    /// the passed changes and the landed values otherwise; reads and writes from other threads that carry the
-    /// transaction throw <see cref="InvalidOperationException"/>. Handlers must not write properties and must not
-    /// assume a single call per commit.
+    /// source write failure or writer error); <see cref="TransactionCheckContext.Stage"/> tells them apart. Property
+    /// reads on the calling thread return the transaction's values for the passed changes and the landed values
+    /// otherwise; reads and writes from other threads that carry the transaction throw
+    /// <see cref="InvalidOperationException"/>. Handlers must not write properties and must not assume a single call
+    /// per commit.
     /// </summary>
     /// <remarks>
     /// Throwing in the commit check aborts the commit without writing anything and leaves the transaction retryable
@@ -53,13 +50,6 @@ public interface ITransactionHandler
     /// passed changes in either failure handling mode: their source writes are reverted, every passed change is
     /// reported as failed, and the transaction is terminal.
     /// </remarks>
-    /// <param name="transaction">The committing transaction.</param>
-    /// <param name="changes">
-    /// The final set of changes in insertion order; in the pre-apply check only the changes that will be applied. In
-    /// <see cref="TransactionCheckMode.Deferred"/> mode with
-    /// <see cref="TransactionConflictBehavior.FailOnConflict"/>, the commit check's set is followed by an entry for
-    /// each property written with its unchanged value: its old and new value are equal, conflict detection checks it,
-    /// and the commit neither writes, applies nor publishes it.
-    /// </param>
-    void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes);
+    /// <param name="context">The checked changes, the transaction and the check stage.</param>
+    void OnCommitting(in TransactionCheckContext context);
 }

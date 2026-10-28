@@ -1165,7 +1165,7 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        RunHandlerCheck(changes, excludedProperties: null, isCommitCheck: true);
+        RunHandlerCheck(changes, excludedProperties: null, TransactionCheckStage.Commit);
 
         if (IsDisposed)
         {
@@ -1180,12 +1180,13 @@ public sealed class SubjectTransaction : IDisposable
     private void RunHandlerCheck(
         ReadOnlySpan<SubjectPropertyChange> changes,
         HashSet<PropertyReference>? excludedProperties,
-        bool isCommitCheck)
+        TransactionCheckStage stage)
     {
-        using var scope = EnterHandlerCheck(excludedProperties, isCommitCheck);
+        using var scope = EnterHandlerCheck(excludedProperties, isCommitCheck: stage == TransactionCheckStage.Commit);
+        var context = new TransactionCheckContext(this, changes, stage);
         foreach (var handler in _handlerSet.Handlers)
         {
-            handler.OnCommitting(this, changes);
+            handler.OnCommitting(in context);
         }
     }
 
@@ -1212,7 +1213,7 @@ public sealed class SubjectTransaction : IDisposable
             {
                 try
                 {
-                    RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties, isCommitCheck: false);
+                    RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties, TransactionCheckStage.PreApply);
                 }
                 catch (Exception exception)
                 {

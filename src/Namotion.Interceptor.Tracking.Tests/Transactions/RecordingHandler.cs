@@ -13,6 +13,8 @@ internal sealed class RecordingHandler : ITransactionHandler
 
     public int CommittingCalls { get; private set; }
 
+    public List<TransactionCheckStage> Stages { get; } = [];
+
     public Action<SubjectTransaction, SubjectPropertyChange[]>? OnCommittingAction { get; set; }
 
     /// <summary>
@@ -53,21 +55,22 @@ internal sealed class RecordingHandler : ITransactionHandler
         };
     }
 
-    public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
+    public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
     {
-        if (RejectCapture?.Invoke(property, newValue) is { } exception)
+        if (RejectCapture?.Invoke(context.Property, context.NewValue) is { } exception)
         {
             throw exception;
         }
 
-        Captured.Add((property, newValue, origin));
-        CaptureLog?.Add((this, newValue));
+        Captured.Add((context.Property, context.NewValue, context.Origin));
+        CaptureLog?.Add((this, context.NewValue));
     }
 
-    public void OnCommitting(SubjectTransaction transaction, ReadOnlySpan<SubjectPropertyChange> changes)
+    public void OnCommitting(in TransactionCheckContext context)
     {
         CommittingCalls++;
-        OnCommittingAction?.Invoke(transaction, changes.ToArray());
+        Stages.Add(context.Stage);
+        OnCommittingAction?.Invoke(context.Transaction, context.Changes.ToArray());
         if (RejectCommit)
         {
             throw new InvalidOperationException("rejected");
