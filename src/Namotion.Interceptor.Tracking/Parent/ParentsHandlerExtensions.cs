@@ -162,8 +162,7 @@ public static class ParentsHandlerExtensions
     /// <summary>
     /// Gets the parents of the subject as an immutable array.
     /// This is the preferred method for accessing parents with zero-allocation enumeration.
-    /// There is one entry per property that holds the subject, with its first key or position, or
-    /// <c>null</c> for a subject reference, and the entry follows the subject when it moves.
+    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
     /// </summary>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
