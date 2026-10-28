@@ -361,14 +361,15 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Waits until the page is at <paramref name="url"/>. A timeout fails with what the page and the server show, so that a
-    /// failure on a build server tells why the app did not navigate.
+    /// Waits until the app has navigated the page to <paramref name="url"/>. A timeout fails with what the page and the server
+    /// show, so that a failure on a build server tells why the app did not navigate.
     /// </summary>
     public async Task WaitForUrlAsync(IPage page, string url, float timeout = 30000)
     {
         try
         {
-            await page.WaitForURLAsync(url, new() { Timeout = timeout });
+            // A navigation of the app changes the URL of the document and loads no other, so no load event follows it.
+            await page.WaitForURLAsync(url, new() { Timeout = timeout, WaitUntil = WaitUntilState.Commit });
         }
         catch (TimeoutException exception)
         {
