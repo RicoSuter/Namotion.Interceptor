@@ -335,7 +335,7 @@ Reverts are compensating writes, not an undo, and they can fail too. A source th
 | A custom writer throws from `WriteToSourcesAsync` | Unknown, never reverted | Old | Not identifiable: the transaction cannot know which sources were touched |
 | A failed apply wrote its value ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)) | Old | New | Listed once, as a failed apply, not as a stuck revert |
 
-`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. A stuck property is listed a second time, after the full list when it lists every change (after a pre-apply rejection, or a failed apply with handlers), so it can be told apart.
+`FailedChanges` can also hold properties that ended consistent, such as changes without a source that a `Rollback` commit reverted cleanly. A stuck property is listed a second time, after the full list when it lists every change (after a pre-apply rejection, or a failed apply with handlers), so it can be told apart. A property whose local and source reverts both fail ends at the new value on both sides and is still listed again.
 
 ### Local Apply Failures
 

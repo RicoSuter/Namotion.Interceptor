@@ -430,7 +430,7 @@ public class SubjectTransactionWriterTests
     }
 
     [Fact]
-    public async Task WhenApplyAndSourceRevertFailForOnePropertyInRollbackWithoutHandlers_ThenItIsListedOnce()
+    public async Task WhenApplyAndSourceRevertFailForOnePropertyInRollbackWithoutHandlers_ThenItIsListedTwice()
     {
         // Arrange
         var context = CreateContext();
@@ -450,7 +450,7 @@ public class SubjectTransactionWriterTests
 
         // Assert
         Assert.Equal(
-            [nameof(FailingApplyDevice.PropertyB), nameof(Person.FirstName)],
+            [nameof(FailingApplyDevice.PropertyB), nameof(Person.FirstName), nameof(FailingApplyDevice.PropertyB)],
             exception.FailedChanges.Select(change => change.Property.Name));
     }
 

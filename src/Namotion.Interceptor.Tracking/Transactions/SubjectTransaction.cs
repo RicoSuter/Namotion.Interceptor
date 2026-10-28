@@ -884,8 +884,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns the changes a Rollback commit without handlers reports after a failed apply: the apply and revert
-    /// failures, and the changes without a source, which were applied and reverted.
+    /// Returns the changes a Rollback commit without handlers reports after a failed apply: the apply failures, the
+    /// other changes without a source, then the changes whose local revert failed, then those whose source revert
+    /// failed, so a stuck property appears a second time.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetRolledBackFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -900,7 +901,7 @@ public sealed class SubjectTransaction : IDisposable
             applyFailed,
             SubjectPropertyChangeOperations.ExcludeByProperty(changes, written, reported),
             revertFailed,
-            SubjectPropertyChangeOperations.FilterByProperty(sourceRevertFailed, reported, keepMatches: false));
+            SubjectPropertyChangeOperations.FilterByProperty(sourceRevertFailed, revertFailed, keepMatches: false));
     }
 
     private SubjectTransactionException? CreateFailureAfterSuccessfulLocalApply(
