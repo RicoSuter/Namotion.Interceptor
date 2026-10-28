@@ -311,6 +311,53 @@ public class TransactionValidationTests
         Assert.Single(writer.Reverted);
     }
 
+    [Fact]
+    public async Task WhenUnchangedValueBecomesInvalidWhileSourcesAreWritten_ThenPreApplyCheckRejectsAndRevertsSources()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context) { MotorSpeed = 90 };
+        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MotorSpeed = 99);
+        context.AddService<ITransactionWriter>(writer);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        motor.MaxAllowedSpeed = 95;
+        motor.MotorSpeed = 90;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        var error = Assert.IsType<PropertyValidationException>(Assert.Single(exception.Errors));
+        Assert.Equal(nameof(Motor.MotorSpeed), error.Property.Name);
+        Assert.Equal(100, motor.MaxAllowedSpeed);
+        Assert.Equal(99, motor.MotorSpeed);
+        Assert.Equal(nameof(Motor.MaxAllowedSpeed), Assert.Single(writer.Reverted).Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenUnchangedValueChangesButStaysValidWhileSourcesAreWritten_ThenSetLandsWithoutRevert()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context) { MotorSpeed = 90 };
+        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MotorSpeed = 80);
+        context.AddService<ITransactionWriter>(writer);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        motor.MaxAllowedSpeed = 95;
+        motor.MotorSpeed = 90;
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(95, motor.MaxAllowedSpeed);
+        Assert.Equal(80, motor.MotorSpeed);
+        Assert.Empty(writer.Reverted);
+    }
+
     public enum OriginRule
     {
         IgnoresOrigin,

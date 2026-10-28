@@ -744,7 +744,7 @@ public sealed class SubjectTransaction : IDisposable
             using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            var failure = await ReconcileWithWriterAsync(writer, changes, commitToken).ConfigureAwait(false);
+            var failure = await ReconcileWithWriterAsync(writer, changes, checkedChanges[changes.Length..], commitToken).ConfigureAwait(false);
 
             FinishCommit();
 
@@ -765,6 +765,7 @@ public sealed class SubjectTransaction : IDisposable
     private async ValueTask<SubjectTransactionException?> ReconcileWithWriterAsync(
         ITransactionWriter writer,
         Memory<SubjectPropertyChange> changes,
+        Memory<SubjectPropertyChange> checkOnlyChanges,
         CancellationToken cancellationToken)
     {
         // The writer marks accepted snapshot slots with the confirming source so the local apply and
@@ -815,8 +816,9 @@ public sealed class SubjectTransaction : IDisposable
 
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
-        // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = RunPreApplyCheck(changes.Span, failedSource);
+        // change and the landed value of a property written with its unchanged value, so a rejection invalidates the
+        // whole checked set in both failure handling modes.
+        var rejectionErrors = RunPreApplyCheck(changes.Span, checkOnlyChanges.Span, failedSource);
         if (rejectionErrors is not null)
         {
             // Timeout not propagated here: a retry would lose the rejection, and once the local model changed
@@ -1186,11 +1188,13 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Calls the handlers again right before the local apply with the snapshot slots of the changes that will be
-    /// applied. Returns null when they accept the set, or otherwise the errors of a thrown
+    /// applied, followed by the check-only entries with their current landed value. Returns null when they accept the
+    /// set, or otherwise, when a handler or a landed-value read throws, the errors of a thrown
     /// <see cref="SubjectTransactionException"/> that has any, or the thrown exception itself.
     /// </summary>
     private IReadOnlyList<Exception>? RunPreApplyCheck(
         ReadOnlySpan<SubjectPropertyChange> changes,
+        ReadOnlySpan<SubjectPropertyChange> checkOnlyChanges,
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
         if (_handlerSet.Handlers.Length == 0)
@@ -1213,28 +1217,26 @@ public sealed class SubjectTransaction : IDisposable
         try
         {
             var landingChanges = changes;
-            if (failedProperties is not null)
+            if (failedProperties is not null || !checkOnlyChanges.IsEmpty)
             {
-                rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length);
-                var count = SubjectPropertyChangeOperations.CopyExcludingProperties(changes, failedProperties, rentedArray);
+                rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length + checkOnlyChanges.Length);
+                var count = CopyLandingChanges(changes, checkOnlyChanges, failedProperties, rentedArray);
                 landingChanges = new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, count);
             }
 
             if (!landingChanges.IsEmpty)
             {
-                try
-                {
-                    RunHandlerCheck(landingChanges, failedProperties, TransactionCheckStage.PreApply);
-                }
-                catch (Exception exception)
-                {
-                    return exception is SubjectTransactionException { Errors.Count: > 0 } transactionException
-                        ? transactionException.Errors
-                        : [exception];
-                }
+                RunHandlerCheck(landingChanges, failedProperties, TransactionCheckStage.PreApply);
             }
 
             return IsDisposed ? [new ObjectDisposedException(nameof(SubjectTransaction))] : null;
+        }
+        catch (Exception exception)
+        {
+            // Also catches a throwing landed-value read of a check-only entry, so the sources are reverted.
+            return exception is SubjectTransactionException { Errors.Count: > 0 } transactionException
+                ? transactionException.Errors
+                : [exception];
         }
         finally
         {
@@ -1243,6 +1245,55 @@ public sealed class SubjectTransaction : IDisposable
                 ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
             }
         }
+    }
+
+    /// <summary>
+    /// Copies the changes that will be applied into <paramref name="destination"/>, followed by the check-only entries
+    /// when at least one change is applied, and returns the number of copied changes.
+    /// </summary>
+    private int CopyLandingChanges(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        ReadOnlySpan<SubjectPropertyChange> checkOnlyChanges,
+        HashSet<PropertyReference>? failedProperties,
+        Span<SubjectPropertyChange> destination)
+    {
+        int count;
+        if (failedProperties is null)
+        {
+            changes.CopyTo(destination);
+            count = changes.Length;
+        }
+        else
+        {
+            count = SubjectPropertyChangeOperations.CopyExcludingProperties(changes, failedProperties, destination);
+        }
+
+        // Nothing lands without a landing change, so the entries are checked only alongside one.
+        return count == 0 ? 0 : count + CopyCheckOnlyChangesWithLandedValues(checkOnlyChanges, destination[count..]);
+    }
+
+    /// <summary>
+    /// Copies the check-only entries into <paramref name="destination"/> with their captured origin and timestamps and
+    /// their current landed value as old and new value, and returns the number of copied entries.
+    /// </summary>
+    private int CopyCheckOnlyChangesWithLandedValues(
+        ReadOnlySpan<SubjectPropertyChange> checkOnlyChanges,
+        Span<SubjectPropertyChange> destination)
+    {
+        using (EnterCommitModelAccess())
+        {
+            for (var index = 0; index < checkOnlyChanges.Length; index++)
+            {
+                var entry = checkOnlyChanges[index];
+
+                // Never applied, so a value changed since conflict detection loses no update and is only validated.
+                var landedValue = entry.Property.Metadata.GetValue?.Invoke(entry.Property.Subject);
+                destination[index] = SubjectPropertyChange.Create(
+                    entry.Property, entry.Origin, entry.ChangedTimestamp, entry.ReceivedTimestamp, landedValue, landedValue);
+            }
+        }
+
+        return checkOnlyChanges.Length;
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)

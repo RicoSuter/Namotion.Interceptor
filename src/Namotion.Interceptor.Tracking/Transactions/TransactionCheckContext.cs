@@ -22,9 +22,12 @@ public readonly ref struct TransactionCheckContext
     /// set, each with its captured origin; in <see cref="TransactionCheckMode.Deferred"/> mode with
     /// <see cref="TransactionConflictBehavior.FailOnConflict"/> followed by an entry for each property written with its
     /// unchanged value, whose old and new value are equal, which conflict detection checks and the commit neither
-    /// writes, applies nor publishes. In the <see cref="TransactionCheckStage.PreApply"/> stage: only the changes that
-    /// will be applied, each with the origin it is applied with: <see cref="ChangeOriginKind.Confirmed"/> with the
-    /// accepting source for a change a source accepted, the captured origin otherwise.
+    /// writes, applies nor publishes. In the <see cref="TransactionCheckStage.PreApply"/> stage: the changes that will
+    /// be applied, each with the origin it is applied with: <see cref="ChangeOriginKind.Confirmed"/> with the
+    /// accepting source for a change a source accepted, the captured origin otherwise; followed by the entries for
+    /// properties written with their unchanged value, each with its current landed value as old and new value and its
+    /// captured origin, normally <see cref="ChangeOriginKind.Local"/>, also when that value came from an inbound
+    /// update.
     /// </summary>
     public ReadOnlySpan<SubjectPropertyChange> Changes { get; }
 

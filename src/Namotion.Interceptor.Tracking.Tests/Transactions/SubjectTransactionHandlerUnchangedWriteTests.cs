@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -7,14 +8,14 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 /// <summary>
 /// Covers writes of an unchanged value, which the equality check drops: in Deferred mode with FailOnConflict the
-/// commit check still receives them, as entries the commit neither writes, applies nor publishes.
+/// commit check and the pre-apply check still receive them, as entries the commit neither writes, applies nor publishes.
 /// </summary>
 public class SubjectTransactionHandlerUnchangedWriteTests
 {
     [Theory]
     [InlineData(false, 1)]
     [InlineData(true, 2)]
-    public async Task WhenDeferredAndUnchangedValueIsWritten_ThenOnlyCommitCheckReceivesItAfterPendingChanges(
+    public async Task WhenDeferredAndUnchangedValueIsWritten_ThenEveryCheckReceivesItAfterPendingChanges(
         bool withWriter, int expectedChecks)
     {
         // Arrange
@@ -41,15 +42,101 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         Assert.Equal([nameof(Person.LastName)], pendingChanges.Select(change => change.Property.Name));
         Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], handler.Captured.Select(capture => capture.Property.Name));
         Assert.Equal(expectedChecks, changesSeen.Count);
-        Assert.Equal(
-            [nameof(Person.LastName), nameof(Person.FirstName)],
-            changesSeen[0].Select(change => change.Property.Name));
-        Assert.Equal("Ann", changesSeen[0][1].GetOldValue<string>());
-        Assert.Equal("Ann", changesSeen[0][1].GetNewValue<string>());
-        Assert.All(changesSeen.Skip(1), changes => Assert.Equal(nameof(Person.LastName), Assert.Single(changes).Property.Name));
+        Assert.All(changesSeen, changes =>
+        {
+            Assert.Equal([nameof(Person.LastName), nameof(Person.FirstName)], changes.Select(change => change.Property.Name));
+            Assert.Equal("Ann", changes[1].GetOldValue<string>());
+            Assert.Equal("Ann", changes[1].GetNewValue<string>());
+        });
         Assert.Equal(Enumerable.Repeat<string?>("Ann", expectedChecks), firstNamesSeen);
         Assert.Equal(withWriter ? [nameof(Person.LastName)] : [], writer.ReceivedPropertyNames);
         Assert.Equal("Kim", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenLandedValueReadOfUnchangedValueThrowsInPreApplyCheck_ThenSetIsRejectedAndTransactionIsTerminal()
+    {
+        // Arrange
+        var readException = new InvalidOperationException("landed value read failed");
+        var readInterceptor = new ThrowingReadInterceptor(nameof(Person.FirstName), readException);
+        var writer = new CountingTransactionWriter { DuringWrite = () => readInterceptor.IsArmed = true };
+        var context = CreateContext(out var handler, writer);
+        context.AddService(readInterceptor);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        person.FirstName = "Ann";
+        person.LastName = "Kim";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Same(readException, Assert.Single(exception.Errors));
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(nameof(Person.LastName), Assert.Single(writer.Reverted).Property.Name);
+        Assert.Equal(1, writer.WriteCalls);
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Contains("already been committed", retryException.Message);
+        Assert.Equal("Lee", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenDeferredAndSourceWriteFails_ThenPreApplyCheckReceivesRemainingChangesFollowedByUnchangedValue()
+    {
+        // Arrange
+        var changesSeen = new List<SubjectPropertyChange[]>();
+        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.LastName) } };
+        var context = CreateContext(out var handler, writer);
+        var first = new Person(context) { FirstName = "Ann" };
+        var second = new Person(context) { FirstName = "Eve", LastName = "Lee" };
+        handler.OnCommittingAction = (_, changes) => changesSeen.Add(changes);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
+        first.FirstName = "Bob";
+        second.LastName = "Kim";
+        second.FirstName = "Eve";
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(2, changesSeen.Count);
+        var preApplyChanges = changesSeen[1];
+        Assert.Equal(
+            [(first, nameof(Person.FirstName)), (second, nameof(Person.FirstName))],
+            preApplyChanges.Select(change => ((Person)change.Property.Subject, change.Property.Name)));
+        Assert.Equal("Bob", preApplyChanges[0].GetNewValue<string>());
+        Assert.Equal("Eve", preApplyChanges[1].GetOldValue<string>());
+        Assert.Equal("Eve", preApplyChanges[1].GetNewValue<string>());
+        Assert.Equal("Bob", first.FirstName);
+        Assert.Equal("Lee", second.LastName);
+    }
+
+    [Fact]
+    public async Task WhenDeferredAndEverySourceWriteFails_ThenUnchangedValueIsNotCheckedAgain()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.LastName) } };
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
+        person.FirstName = "Ann";
+        person.LastName = "Kim";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(nameof(Person.LastName), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal("Lee", person.LastName);
     }
 
     [Fact]
@@ -280,5 +367,20 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         // Assert
         Assert.Empty(handler.Captured);
         Assert.Equal(0, handler.CommittingCalls);
+    }
+
+    private sealed class ThrowingReadInterceptor(string propertyName, Exception exception) : IReadInterceptor
+    {
+        public bool IsArmed { get; set; }
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            if (IsArmed && context.Property.Name == propertyName)
+            {
+                throw exception;
+            }
+
+            return next(ref context);
+        }
     }
 }
