@@ -435,7 +435,7 @@ public class RegisteredSubjectProperty
     }
 
     // Children of a collection are kept in position order, which an append leaves as it is. A
-    // property declared as a dictionary has no order of its own to follow, so its children stay in
+    // property declared as a dictionary is not reordered by key, so its children stay in
     // the order they were attached, whatever the type of their keys.
     private int GetInsertPosition(object? index)
     {

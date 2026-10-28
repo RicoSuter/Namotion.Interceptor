@@ -62,6 +62,8 @@ team.Roles = new Dictionary<string, Person>(team.Roles) { ["leader"] = person };
 
 **Why?** Property interceptors hook into the setter. Collection mutations bypass the setter entirely.
 
+Treat a collection or dictionary as frozen once it is assigned: fill a new instance, then assign it. Assigning again after an in-place mutation does not repair it, because the next assignment is compared with the assigned instance as it reads now. A subject added in place is never attached, one removed in place is never detached, and an index both values share is not corrected. Mutating a collection while another thread reads the graph is also a data race on a type that is not thread-safe.
+
 All of the following work when replaced entirely (assigning a new value to the property):
 
 **Supported collection types:**
