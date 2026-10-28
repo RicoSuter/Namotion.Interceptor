@@ -268,11 +268,14 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         Assert.Equal("Carl", person.FirstName);
     }
 
-    [Fact]
-    public async Task WhenUnchangedValueIsWrittenWithAnotherValueAfterAConcurrentChange_ThenCommitConflicts()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenUnchangedValueIsWrittenWithAnotherValueAfterAConcurrentChange_ThenOldValueIsTheValueLandedAtThatWrite(
+        bool withHandler)
     {
         // Arrange
-        var context = CreateContext(out _);
+        var context = withHandler ? CreateContext(out _) : CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
@@ -282,14 +285,14 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         person.FirstName = "Ann";
         await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Bob");
         person.FirstName = "Carl";
+        var oldValue = Assert.Single(transaction.GetPendingChanges()).GetOldValue<string>();
 
         // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.ConflictingProperties).Name);
-        Assert.Equal("Ann", Assert.Single(transaction.GetPendingChanges()).GetOldValue<string>());
+        Assert.Equal("Bob", oldValue);
+        Assert.Equal("Carl", person.FirstName);
     }
 
     [Fact]
