@@ -10,8 +10,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// <remarks>
 /// The transaction invokes both callbacks while its live ambient transaction is committing. Subject
 /// property reads and writes on a flow carrying that transaction throw <see cref="InvalidOperationException"/>.
-/// Commit-owned synchronous local replay remains allowed, including property hooks, change handlers,
-/// and derived cascades initiated by that replay. This authorization does not extend into these callbacks.
+/// The commit's own synchronous local apply remains allowed, including property hooks, change handlers,
+/// and derived cascades initiated by that apply. This authorization does not extend into these callbacks.
 /// Disposed and terminal transactions are inactive and use normal property access semantics.
 /// </remarks>
 public interface ITransactionWriter

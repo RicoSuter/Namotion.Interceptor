@@ -148,7 +148,35 @@ Inside a [transaction](tracking-transactions.md), writes are buffered until comm
 | Mode | When a value is written |
 |------|-------------------------|
 | `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `PropertyValidationException` at the setter, so write order matters there. This includes a write back to the landed value: if it is invalid against the transaction's other values, undoing a change throws and the change stays pending. A write of the landed value without a pending change is dropped by the equality check and not validated. |
-| `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. With `FailOnConflict` (the default), values written unchanged are validated at commit too, see [Last-Write-Wins and Commit Order](tracking-transactions.md#last-write-wins-and-commit-order). |
+| `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. With `FailOnConflict` (the default), values written unchanged are validated at commit too, see [Last-Write-Wins and Commit Order](tracking-transactions.md#last-write-wins-and-commit-order). Writes to settable derived properties are not captured: they land and are validated immediately in both modes. |
+
+The samples use this model and validator:
+
+```csharp
+[InterceptorSubject]
+public partial class Motor
+{
+    public partial int MaxAllowedSpeed { get; set; }
+
+    public partial int MotorSpeed { get; set; }
+}
+
+public class MotorSpeedValidator : IPropertyValidator
+{
+    public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+    {
+        if (context.Property.Name == nameof(Motor.MotorSpeed) &&
+            context.Value is int speed &&
+            context.Property.Subject is Motor motor &&
+            speed > motor.MaxAllowedSpeed)
+        {
+            return [new ValidationResult($"MotorSpeed {speed} exceeds MaxAllowedSpeed {motor.MaxAllowedSpeed}.")];
+        }
+
+        return [];
+    }
+}
+```
 
 ```csharp
 using var transaction = await context.BeginTransactionAsync(
@@ -166,21 +194,21 @@ At commit:
 - An invalid value makes `CommitAsync` throw `SubjectTransactionValidationException`. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact: fix the values and commit again, see [Retrying](tracking-transactions.md#retrying).
 - With source transactions, the [pre-apply check](tracking-transactions.md#transaction-handlers) validates the changes again right before the local apply. A failure there is terminal and lands no value of the set: `CommitAsync` throws a `SubjectTransactionException`, not a `SubjectTransactionValidationException`, whose `FailedChanges` lists every change and whose `Errors` hold the validation errors.
 - The values the commit applies and the values a rollback restores are not validated again. Writes made during the apply, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write.
-- If applying one value fails, for example because a hook throws, no value of the set lands in either failure handling mode, except the value whose apply failed after it was written, see [Commit Failures](tracking-transactions.md#commit-failures).
+- If applying one value fails, for example because a hook throws, no value of the set lands in either failure handling mode, except the value whose apply failed after it was written, see [Commit Failures](tracking-transactions.md#commit-failures). The local apply stops at the first failed change, so the remaining values are not applied and their hooks and notifications do not run.
 
 ### Writing Validators for Transactions
 
-- **Arguments**: the type parameter is unspecified, so test the value (`context.Value is int speed`), not `typeof(TProperty)`. `Origin` is the captured origin in the commit check, and in the pre-apply check `Confirmed` with the accepting source for a value a source accepted. To treat a source's acceptance as final, skip values with a `Confirmed` origin. To ignore only inbound data, skip `FromSource`, which keeps the pre-apply check. To avoid boxing, both checks currently pass the property type for `int`, `long`, `double`, `float`, `decimal`, `bool`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`, and `object` with the boxed value for every other type, including their nullable forms.
+- **Arguments**: the type parameter is unspecified, so test the value (`context.Value is int speed`), not `typeof(TProperty)`. `Origin` is the captured origin in the commit check, and in the pre-apply check `Confirmed` with the accepting source for a value a source accepted. The captured origin can be `Local` where the `Immediate` write-time check saw `FromSource`, when an interceptor before the transaction interceptor changed the value. To treat a source's acceptance as final, skip values with a `Confirmed` origin. To ignore only inbound data, skip `FromSource`, which keeps the pre-apply check. To avoid boxing, both checks currently pass the property type for `int`, `long`, `double`, `float`, `decimal`, `bool`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`, and `object` with the boxed value for every other type, including their nullable forms.
 - **Call count**: with source transactions, a value can be validated up to three times: when written in `Immediate` mode, in the commit check, and in the pre-apply check. Validators must be free of side effects.
 - **Errors**: each invalid property is reported as one `PropertyValidationException` (see [Custom Validators](#custom-validators)), the exception that writes outside transactions and `Immediate` writes throw.
-- **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property. In `Deferred` mode with `FailOnConflict` (the default), values written unchanged are validated and conflict-checked too, so writing every value a rule depends on, changed or not, has the rule checked against the final set. Before the source writes, a change of such a value fails the commit as a retryable conflict. While the sources are written, the pre-apply check validates its new landed value instead, so the commit lands when the set is still valid and reverts the source writes when it became invalid. With `Ignore`, values written unchanged are not validated.
+- **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property. In `Deferred` mode with `FailOnConflict` (the default), values written unchanged are validated and conflict-checked too, so writing every value a rule depends on, changed or not, has the rule checked against the final set. Before the source writes, a change of such a value fails the commit as a retryable conflict. After the source writes, the pre-apply check validates its landed value at that point instead, so the commit lands when the set is still valid and reverts the source writes when it became invalid. With `Ignore`, values written unchanged are not validated.
 - **Object graph and timestamps**: during the checks, registry and lifecycle state, such as parents and children, reflect the landed graph, and `SubjectChangeContext.Current` does not carry the timestamps of the checked changes. Only property reads return the transaction's values.
 - **Derived properties**: a derived property is validated only when the commit applies a value it depends on and recalculates it, after any source write, so it cannot reject the commit before the sources are written. The values are applied one at a time, so the recalculation sees intermediate values and write order matters: with `Free => Capacity - Level` validated as non-negative, writing `Level` before `Capacity` can fail the apply although the final set is valid. The value whose apply triggered the failed recalculation (here `Level`) stays in the local model, because a failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
 - **New subjects**: only writes the transaction captures are validated, so the written subject must already use the context. A subject created without the context and attached in the transaction is not validated.
 
 ### Interceptor Order
 
-`ValidationInterceptor` runs after the transaction interceptor and before derived property recalculation, change notifications and lifecycle handling. A custom write interceptor without ordering attributes is placed by registration order and can end up on either side of validation and of the transaction interceptor. An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]`: after the transaction interceptor it runs only when the commit applies the value, so inside a transaction the raw value is validated and captured, and its own writes are not captured. `[RunsBefore(typeof(ValidationInterceptor))]` alone does not place it before the transaction interceptor.
+`ValidationInterceptor` runs after the transaction interceptor and before derived property recalculation, change notifications and lifecycle handling. A custom write interceptor without ordering attributes is placed by registration order and can end up on either side of validation and of the transaction interceptor. An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]`: after the transaction interceptor it runs only when the commit applies the value, so inside a transaction the raw value is validated and captured, and its own writes are not captured. Its transform must be idempotent, see [Edge Cases and Limitations](tracking-transactions.md#edge-cases-and-limitations). `[RunsBefore(typeof(ValidationInterceptor))]` alone does not place it before the transaction interceptor.
 
 ## Dynamic Properties
 

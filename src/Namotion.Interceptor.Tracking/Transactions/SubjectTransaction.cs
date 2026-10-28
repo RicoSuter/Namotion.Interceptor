@@ -41,7 +41,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Last write wins if the same property is written multiple times.
-    /// Preserves insertion order so that commit replays changes in the order they were written.
+    /// Preserves insertion order so that the commit applies changes in the order they were written.
     /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
     /// </summary>
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
@@ -87,7 +87,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
     /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
-    /// it. Reference-type values match by identity, value-type values by equality.
+    /// the property's value from before the transaction, which no handler checked. Reference-type values match by
+    /// identity, value-type values by equality.
     /// </summary>
     /// <remarks>
     /// The first call by one of the transaction's handlers consumes the mark, so another handler that checks the same
@@ -318,8 +319,9 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             if (restoresLandedValue)
             {
-                // Without a pending change left to remove, another write back won the race: the write is unchanged
-                // either way, so it is not captured as a change to the landed value.
+                // Without a pending change left to remove, the write still ends at the landed value: another write
+                // back won the race, or an earlier interceptor normalized the written value to the landed value. It
+                // is unchanged either way, so it is not captured as a change to the landed value.
                 pendingChanges.Remove(property);
                 if (RecordsCheckOnlyEntries)
                 {
@@ -825,7 +827,7 @@ public sealed class SubjectTransaction : IDisposable
         if (rejectionErrors is not null)
         {
             // Timeout not propagated here: a retry would lose the rejection, and once the local model changed
-            // it would replay the snapshot onto it, so the timeout is reported as a failed revert instead.
+            // it would apply the snapshot again onto it, so the timeout is reported as a failed revert instead.
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateRollbackFailureException(
                 GetCheckedSetFailedChanges(changes.Span, failedSource, [], revert.Failed),
