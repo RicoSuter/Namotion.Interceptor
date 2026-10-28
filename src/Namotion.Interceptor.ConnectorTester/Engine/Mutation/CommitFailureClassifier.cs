@@ -32,6 +32,28 @@ public static class CommitFailureClassifier
     }
 
     /// <summary>
+    /// Counts the commit of <paramref name="transaction"/>, commits it and records a
+    /// <see cref="SubjectTransactionException"/> it throws (see <see cref="Record"/>); other exceptions propagate.
+    /// </summary>
+    public static async ValueTask CommitAndRecordAsync(
+        SubjectTransaction transaction,
+        MutationCounters counters,
+        ILogger logger,
+        string participantName,
+        CancellationToken cancellationToken)
+    {
+        counters.IncrementCommit();
+        try
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (SubjectTransactionException exception)
+        {
+            Record(exception, counters, logger, participantName);
+        }
+    }
+
+    /// <summary>
     /// Counts <paramref name="exception"/> in its category and logs it when it is the first failure of its category
     /// and exception types in the cycle: as an error when unexpected, and as a warning otherwise.
     /// </summary>

@@ -140,16 +140,7 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
             }
         }
 
-        _counters.IncrementCommit();
-        try
-        {
-            await transaction.CommitAsync(cancellationToken);
-        }
-        catch (SubjectTransactionException exception)
-        {
-            // Expected under chaos or not, see CommitFailureClassifier.
-            CommitFailureClassifier.Record(exception, _counters, _logger, _participantName);
-        }
+        await CommitFailureClassifier.CommitAndRecordAsync(transaction, _counters, _logger, _participantName, cancellationToken);
     }
 
     private void MutateBatchParallel(
