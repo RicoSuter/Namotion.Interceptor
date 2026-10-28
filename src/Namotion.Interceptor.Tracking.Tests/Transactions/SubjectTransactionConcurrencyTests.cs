@@ -624,6 +624,36 @@ public class SubjectTransactionConcurrencyTests
         Assert.Empty(transaction.GetPendingChanges());
     }
 
+    [Fact]
+    public async Task WhenTwoWriteBacksOfTheLandedValueRace_ThenNoChangeIsCaptured()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann" };
+        using var barrier = new Barrier(2);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        handler.RejectCapture = (property, value) =>
+        {
+            if (property.Name == nameof(Person.FirstName) && Equals(value, "Ann"))
+            {
+                barrier.SignalAndWait();
+            }
+
+            return null;
+        };
+
+        // Act
+        await Task.WhenAll(Task.Run(() => person.FirstName = "Ann"), Task.Run(() => person.FirstName = "Ann"));
+        handler.RejectCapture = null;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(writer.ReceivedPropertyNames);
+        Assert.Equal("Ann", person.FirstName);
+    }
+
     private sealed class ControllableTransactionWriter : ITransactionWriter
     {
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);

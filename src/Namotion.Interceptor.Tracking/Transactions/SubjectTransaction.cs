@@ -292,8 +292,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <paramref name="currentValue"/>, the landed model value, as old value for conflict detection; subsequent writes
     /// preserve the original old value (last write wins). <paramref name="restoresLandedValue"/> is true when the write
     /// restores the landed value and the subject's context has the equality check: a pending change is then removed,
-    /// the same as never writing the property (without one the write is captured as usual), and replaced by a
-    /// check-only entry for the landed value when <see cref="RecordsCheckOnlyEntries"/>.
+    /// the same as never writing the property, and without one the write is dropped the same way; either way a
+    /// check-only entry for the landed value is recorded when <see cref="RecordsCheckOnlyEntries"/>.
     /// Returns false when disposal wins the race, allowing the caller to continue the normal write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -316,8 +316,11 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             var pendingChanges = _pendingChanges;
-            if (restoresLandedValue && pendingChanges.Remove(property))
+            if (restoresLandedValue)
             {
+                // Without a pending change left to remove, another write back won the race: the write is unchanged
+                // either way, so it is not captured as a change to the landed value.
+                pendingChanges.Remove(property);
                 if (RecordsCheckOnlyEntries)
                 {
                     (_checkOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(

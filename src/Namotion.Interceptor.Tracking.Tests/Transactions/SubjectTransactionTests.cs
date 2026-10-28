@@ -818,18 +818,22 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenInterceptorNormalizesFirstWriteToLandedValue_ThenItIsCaptured()
+    public async Task WhenInterceptorNormalizesFirstWriteToLandedValue_ThenItIsNotCaptured()
     {
         // Arrange
-        var context = CreateContext().WithService(() => new UpperCaseInterceptor());
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out _, writer).WithService(() => new UpperCaseInterceptor());
         var person = new Person(context) { FirstName = "ann" };
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "ann";
+        var pendingChanges = transaction.GetPendingChanges();
+        await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal("ANN", Assert.Single(transaction.GetPendingChanges()).GetNewValue<string>());
+        Assert.Empty(pendingChanges);
+        Assert.Empty(writer.ReceivedPropertyNames);
     }
 
     [RunsBefore(typeof(SubjectTransactionInterceptor))]
