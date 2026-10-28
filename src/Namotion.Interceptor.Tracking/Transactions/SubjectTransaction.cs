@@ -836,8 +836,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns the changes a pre-apply rejection or a failed apply reports after handlers checked them. Handlers
     /// checked the set as a whole, so once one change fails none commits: every change is reported, source-write
-    /// failures first, then the changes whose local revert failed, then those whose source revert failed, so a stuck
-    /// property appears a second time.
+    /// failures first, then the changes whose local revert failed, then those whose source revert failed and local
+    /// revert did not, so a stuck property appears exactly a second time.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetCheckedSetFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
@@ -854,8 +854,9 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Returns the changes a Rollback commit without handlers reports after a failed apply: the apply failures, the
-    /// other changes without a source, then the changes whose local revert failed, then those whose source revert
-    /// failed, so a stuck property appears a second time.
+    /// other changes without a source whose local revert succeeded, then the changes whose local revert failed, then
+    /// those whose source revert failed and local revert did not. Only a failed apply whose source revert failed
+    /// appears a second time; every other change appears at most once.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetRolledBackFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,

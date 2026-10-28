@@ -29,10 +29,9 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
             }
             else
             {
-                // Dropped as unchanged, with or without a transaction. A Deferred transaction with FailOnConflict
-                // still records it for the commit check. Recording follows the async flow of
-                // SubjectTransaction.Current, so tasks started in the transaction's flow record too; it is not tied to
-                // the thread or sync context.
+                // A Deferred transaction with FailOnConflict records the unchanged write for the commit check.
+                // Recording follows the async flow of SubjectTransaction.Current, so tasks started in the
+                // transaction's flow record too; it is not tied to the thread or sync context.
                 SubjectTransactionInterceptor.RecordUnchangedWrite(transaction, ref context);
             }
         }
