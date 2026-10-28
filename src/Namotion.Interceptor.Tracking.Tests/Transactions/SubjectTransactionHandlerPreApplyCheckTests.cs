@@ -160,6 +160,30 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     }
 
     [Fact]
+    public async Task WhenEverySourceWriteFailsAndTransactionIsDisposedFromAnotherFlowDuringWrite_ThenFailedSourceWritesAreReported()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.FirstName) } };
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
+        person.FirstName = "Bob";
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal("One or more changes failed. Successful changes have been applied.", exception.Message);
+        Assert.Equal("source write failed", Assert.Single(exception.Errors).Message);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal("Ann", person.FirstName);
+        Assert.Empty(writer.Reverted);
+    }
+
+    [Fact]
     public async Task WhenDisposedFromAnotherFlowDuringSourceWrite_ThenSetIsRejectedAndSourceIsReverted()
     {
         // Arrange

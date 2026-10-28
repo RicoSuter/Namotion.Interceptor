@@ -1215,13 +1215,6 @@ public sealed class SubjectTransaction : IDisposable
             return null;
         }
 
-        // A dispose from another flow mid-commit drops the pending values this check reads, so the set is rejected
-        // instead of landing unchecked.
-        if (IsDisposed)
-        {
-            return [new ObjectDisposedException(nameof(SubjectTransaction))];
-        }
-
         // The snapshot slots carry the origin each change is applied with: the writer marked the source-accepted ones
         // Confirmed. Changes whose source write failed do not land, so the handlers neither receive them nor read
         // their values.
@@ -1237,11 +1230,19 @@ public sealed class SubjectTransaction : IDisposable
                 landingChanges = new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, count);
             }
 
-            if (!landingChanges.IsEmpty)
+            if (landingChanges.IsEmpty)
             {
-                RunHandlerCheck(landingChanges, failedProperties, TransactionCheckStage.PreApply);
+                return null;
             }
 
+            // A dispose from another flow mid-commit drops the pending values this check reads, so the set is
+            // rejected instead of landing unchecked.
+            if (IsDisposed)
+            {
+                return [new ObjectDisposedException(nameof(SubjectTransaction))];
+            }
+
+            RunHandlerCheck(landingChanges, failedProperties, TransactionCheckStage.PreApply);
             return IsDisposed ? [new ObjectDisposedException(nameof(SubjectTransaction))] : null;
         }
         catch (Exception exception)
