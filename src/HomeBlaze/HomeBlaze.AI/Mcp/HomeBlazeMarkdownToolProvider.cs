@@ -34,8 +34,7 @@ public class HomeBlazeMarkdownToolProvider : IMcpToolProvider
         "styled sections, must stay exactly as they are and in the same order, including their content up to their " +
         "closing line; text directly after a block without a closing line belongs to that block. Keep blocks and old " +
         "subject(name) code blocks with a hidden secret value (***) exactly as ReadRawContent shows them; the page keeps " +
-        "the real value. Expressions, the first text and text between two blocks cannot be added or removed before a " +
-        "block without a #name.";
+        "the real value.";
 
     private static readonly string MaxContentSizeText = $"at most {MarkdownFile.MaxContentSize / 1024} KB";
 

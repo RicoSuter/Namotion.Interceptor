@@ -106,6 +106,23 @@ public class WidgetSelectionTests
     }
 
     [Fact]
+    public async Task WhenAWidgetIsDoubleClicked_ThenItsEditDialogOpens()
+    {
+        // Arrange: the title, because a double click on the text of the body opens the dialog of that text.
+        var page = await OpenPageInInlineModeAsync();
+        var title = page.GetCard("Selection Card").GetByTestId("card-title");
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+        // Act
+        await title.DblClickAsync(new() { Force = true });
+
+        // Assert
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit Selection Card", Exact = true });
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(dialog.GetByTestId("subject-edit-dialog-type")).ToHaveTextAsync("HomeBlaze.Components.Card");
+    }
+
+    [Fact]
     public async Task WhenEscapeIsPressedInTheEditDialog_ThenTheWidgetStaysSelected()
     {
         // Arrange
@@ -156,7 +173,7 @@ public class WidgetSelectionTests
     }
 
     [Fact]
-    public async Task WhenATopLevelWidgetWithoutConfigurationIsSelected_ThenItHasNoBar()
+    public async Task WhenATopLevelWidgetWithoutConfigurationIsSelected_ThenItsBarHasNoEditOrParentAction()
     {
         // Arrange
         var page = await OpenPageInInlineModeAsync();
@@ -166,13 +183,16 @@ public class WidgetSelectionTests
         // Act
         await wrapper.ClickAsync(new() { Force = true });
 
-        // Assert
+        // Assert: the bar holds only the actions on the block of the page.
         await Assertions.Expect(wrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
+        var actionBar = page.GetWidgetActionBar();
+        await Assertions.Expect(actionBar.GetByTestId("delete-block-button")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(actionBar.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(actionBar.GetByTestId("select-parent-button")).ToHaveCountAsync(0);
     }
 
     [Fact]
-    public async Task WhenAWidgetShowsNothing_ThenItIsHiddenInEditMode()
+    public async Task WhenAWidgetShowsNothingOnAViewedPage_ThenItIsASelectableChipInEditMode()
     {
         // Arrange
         var page = await OpenPageAsync();
@@ -181,9 +201,9 @@ public class WidgetSelectionTests
         // Act
         await page.SwitchToInlineModeAsync();
 
-        // Assert: a hidden element is no tab stop.
+        // Assert
         await Assertions.Expect(wrapper).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await Assertions.Expect(wrapper).ToHaveCSSAsync("display", "none");
+        await Assertions.Expect(wrapper.GetByTestId("invisible-widget-chip")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -243,6 +263,8 @@ public class WidgetSelectionTests
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selectable").First).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act: a click as a user makes it, at the middle of the control, which would toggle, set or invoke on a viewed page.
+        // The insert lines of the edited page push the lower controls below the window, where a click at a point is lost.
+        await control.ScrollIntoViewIfNeededAsync();
         var box = (await control.BoundingBoxAsync())!;
         await page.Mouse.ClickAsync(box.X + box.Width / 2, box.Y + box.Height / 2);
 
@@ -269,14 +291,14 @@ public class WidgetSelectionTests
         await Assertions.Expect(wrapper).ToBeVisibleAsync(new() { Timeout = Timeout });
         await wrapper.FocusAsync();
         await page.Keyboard.PressAsync("Enter");
-        var editButton = page.GetWidgetActionBar().GetByTestId("edit-subject-button");
-        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = Timeout });
+        var firstButton = page.GetWidgetActionBar().GetByRole(AriaRole.Button).First;
+        await Assertions.Expect(firstButton).ToBeVisibleAsync(new() { Timeout = Timeout });
 
         // Act
         await page.Keyboard.PressAsync("Tab");
 
         // Assert
-        await Assertions.Expect(editButton).ToBeFocusedAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(firstButton).ToBeFocusedAsync(new() { Timeout = Timeout });
 
         // Act
         await page.Keyboard.PressAsync("Escape");

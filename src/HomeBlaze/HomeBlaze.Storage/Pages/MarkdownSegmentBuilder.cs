@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -33,9 +34,13 @@ public sealed record HtmlMarkdownSegment(string Html, ImmutableArray<int> BlockS
     private static ImmutableArray<int> Normalize(ImmutableArray<int> blockStarts) =>
         blockStarts.IsDefaultOrEmpty ? default : blockStarts;
 
+    /// <summary>The text block that this HTML starts, when the page was built with its text blocks marked, or null.</summary>
+    internal MarkdownTextBlock? TextBlock { get; init; }
+
     // By content, because the equality of an immutable array compares the array it wraps.
     public bool Equals(HtmlMarkdownSegment? other) =>
-        other is not null && Html == other.Html && BlockStarts.AsSpan().SequenceEqual(other.BlockStarts.AsSpan());
+        other is not null && Html == other.Html && BlockStarts.AsSpan().SequenceEqual(other.BlockStarts.AsSpan()) &&
+        Equals(TextBlock, other.TextBlock);
 
     public override int GetHashCode() => HashCode.Combine(Html, BlockStarts.IsDefault ? 0 : BlockStarts.Length);
 }
@@ -65,7 +70,7 @@ public static partial class MarkdownSegmentBuilder
     [GeneratedRegex(@"\{\{\s*([^{}]+?)\s*\}\}")]
     private static partial Regex SourceExpressionRegex();
 
-    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern + @"|<!--BREAK:([0-9a-f]{32})-->")]
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|<!--EXPR:([0-9a-f]{32}):(\d+)-->|<!--TEXT:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern + @"|<!--BREAK:([0-9a-f]{32})-->")]
     private static partial Regex MarkerRegex();
 
     private static readonly char[] Braces = ['{', '}'];
@@ -94,7 +99,7 @@ public static partial class MarkdownSegmentBuilder
     /// </summary>
     /// <remarks>
     /// The search reads the text and not the rendered page, so it also returns an expression that
-    /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
+    /// <see cref="Build(MarkdownPage, Func{string, string})"/> does not turn into a segment: one in the front matter, in the content of an invalid
     /// block, and one whose braces enclose markdown markup or the border of a block.
     /// An expression with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, except one
     /// in HTML that the page writes: its text has the character, like its segment, and one whose character
@@ -164,7 +169,15 @@ public static partial class MarkdownSegmentBuilder
     internal static bool IsOldSubjectFence(Block block) =>
         block is FencedCodeBlock { Info: { } info } && info.StartsWith("subject(", StringComparison.Ordinal);
 
-    public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null)
+    public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null) =>
+        Build(page, linkRewriter, markTextBlocks: false);
+
+    /// <summary>
+    /// Renders the page and cuts it into segments per block. With <paramref name="markTextBlocks"/>, every text block of the
+    /// page (see <see cref="MarkdownTextBlocks"/>) starts an <see cref="HtmlMarkdownSegment"/> of its own that carries it,
+    /// and the HTML of all segments together is the same as without.
+    /// </summary>
+    internal static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter, bool markTextBlocks)
     {
         // Page text may contain marker-shaped comments, so only markers carrying this token count.
         var token = Guid.NewGuid().ToString("N");
@@ -212,10 +225,33 @@ public static partial class MarkdownSegmentBuilder
         }
 
         WriteBreaksBetweenBlocks(renderer, page, writer, token);
+
+        IReadOnlyList<MarkdownTextBlock>? textBlocks = null;
+        if (markTextBlocks)
+        {
+            textBlocks = MarkdownTextBlocks.Find(page);
+            var markers = new Dictionary<Block, int>(textBlocks.Count, ReferenceEqualityComparer.Instance);
+            for (var index = 0; index < textBlocks.Count; index++)
+            {
+                markers[textBlocks[index].FirstBlock] = index;
+            }
+
+            // Straight to the writer and not through the renderer, which would take the marker for text on the line and write
+            // other line breaks around the block, so that the HTML would differ once Split takes the markers out. Added after
+            // the breaks, so that a block that starts both has its break first and its segment starts with the block.
+            renderer.ObjectWriteBefore += (_, markdownObject) =>
+            {
+                if (markdownObject is Block block && markers.TryGetValue(block, out var markerIndex))
+                {
+                    writer.Write($"<!--TEXT:{token}:{markerIndex.ToString(CultureInfo.InvariantCulture)}-->");
+                }
+            };
+        }
+
         renderer.Render(page.Document);
         writer.Flush();
 
-        return Split(writer.ToString(), page, token, expressions);
+        return Split(writer.ToString(), page, token, expressions, textBlocks);
     }
 
     /// <summary>Writes a break marker before each top-level block of the page that may start a markup string of its own.</summary>
@@ -268,7 +304,8 @@ public static partial class MarkdownSegmentBuilder
         return false;
     }
 
-    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token, IReadOnlyList<string> expressions)
+    internal static List<MarkdownSegment> Split(
+        string html, MarkdownPage page, string token, IReadOnlyList<string> expressions, IReadOnlyList<MarkdownTextBlock>? textBlocks = null)
     {
         var root = new List<MarkdownSegment>();
         var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
@@ -280,12 +317,16 @@ public static partial class MarkdownSegmentBuilder
         var blockStarts = new List<int>();
         var hasBreak = false;
 
+        // The text block whose marker came last, which the next segment starts.
+        MarkdownTextBlock? pendingTextBlock = null;
+
         foreach (Match match in MarkerRegex().Matches(html))
         {
             var isForgedMarker =
                 (match.Groups[2].Success && match.Groups[2].Value != token) ||
                 (match.Groups[4].Success && match.Groups[4].Value != token) ||
-                (match.Groups[7].Success && match.Groups[7].Value != token);
+                (match.Groups[6].Success && (match.Groups[6].Value != token || textBlocks is null)) ||
+                (match.Groups[9].Success && match.Groups[9].Value != token);
             if (isForgedMarker)
             {
                 continue;
@@ -293,10 +334,10 @@ public static partial class MarkdownSegmentBuilder
 
             // An expression in HTML that the page writes is HTML, so a quote or an ampersand in it is a character reference.
             var expression = match.Groups[4].Success
-                ? expressions[int.Parse(match.Groups[5].Value)]
-                : match.Groups[6].Success ? WebUtility.HtmlDecode(match.Groups[6].Value) : null;
+                ? expressions[int.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture)]
+                : match.Groups[8].Success ? WebUtility.HtmlDecode(match.Groups[8].Value) : null;
 
-            if (match.Groups[6].Success && expression!.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
+            if (match.Groups[8].Success && expression!.AsSpan().IndexOfAny(ExcludedFromText) >= 0)
             {
                 continue;
             }
@@ -304,21 +345,29 @@ public static partial class MarkdownSegmentBuilder
             AppendToRun(html, lastIndex, match.Index, root, current, run, blockStarts, ref hasBreak);
             lastIndex = match.Index + match.Length;
 
-            if (match.Groups[7].Success)
+            if (match.Groups[9].Success)
             {
                 hasBreak = true;
                 continue;
             }
 
             // A widget on the page ends the markup string in any case.
-            var opensWidget = expression is null && match.Groups[1].Length == 0;
+            var isTextMarker = match.Groups[6].Success;
+            var opensWidget = expression is null && !isTextMarker && match.Groups[1].Length == 0;
             if ((hasBreak || (opensWidget && ReferenceEquals(current, root))) && run.Length > 0)
             {
                 blockStarts.Add(run.Length);
             }
 
-            hasBreak = false;
-            EndRun(current, run, blockStarts);
+            // A text block starts a segment of its own, which still starts with the block that a break before it started.
+            hasBreak = isTextMarker && hasBreak;
+            EndRun(current, run, blockStarts, ref pendingTextBlock);
+
+            if (isTextMarker)
+            {
+                pendingTextBlock = textBlocks![int.Parse(match.Groups[7].Value, CultureInfo.InvariantCulture)];
+                continue;
+            }
 
             if (expression is not null)
             {
@@ -326,7 +375,7 @@ public static partial class MarkdownSegmentBuilder
             }
             else if (match.Groups[1].Length == 0)
             {
-                stack.Push((page.AllBlocks[int.Parse(match.Groups[3].Value)], current));
+                stack.Push((page.AllBlocks[int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)], current));
                 current = [];
             }
             else if (stack.Count > 0)
@@ -343,7 +392,7 @@ public static partial class MarkdownSegmentBuilder
             blockStarts.Add(run.Length);
         }
 
-        EndRun(current, run, blockStarts);
+        EndRun(current, run, blockStarts, ref pendingTextBlock);
 
         // A closing marker that was not found must not take the content of its block out of the result.
         while (stack.Count > 0)
@@ -382,14 +431,17 @@ public static partial class MarkdownSegmentBuilder
         run.Append(html, start, end - start);
     }
 
-    private static void EndRun(List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts)
+    private static void EndRun(
+        List<MarkdownSegment> current, StringBuilder run, List<int> blockStarts, ref MarkdownTextBlock? pendingTextBlock)
     {
-        if (run.Length == 0)
+        // A text block that starts without HTML of its own still starts a segment, so that its content can tell it.
+        if (run.Length == 0 && pendingTextBlock is null)
         {
             return;
         }
 
-        current.Add(new HtmlMarkdownSegment(run.ToString(), blockStarts.Count > 0 ? [.. blockStarts] : default));
+        current.Add(new HtmlMarkdownSegment(run.ToString(), blockStarts.Count > 0 ? [.. blockStarts] : default) { TextBlock = pendingTextBlock });
+        pendingTextBlock = null;
         run.Clear();
         blockStarts.Clear();
     }
