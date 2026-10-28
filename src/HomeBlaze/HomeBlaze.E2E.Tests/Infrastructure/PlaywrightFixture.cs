@@ -361,22 +361,16 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Waits until the app has navigated the page to <paramref name="url"/>. A timeout fails with what the page and the server
-    /// show, so that a failure on a build server tells why the app did not navigate.
+    /// Waits until the app has navigated the page to a URL that <paramref name="isUrl"/> accepts. A timeout fails with what the
+    /// page and the server show, so that a failure on a build server tells why the app did not navigate.
     /// </summary>
-    public Task WaitForUrlAsync(IPage page, string url, float timeout = 30000) =>
-        WaitForUrlAsync(page, timeout, options => page.WaitForURLAsync(url, options));
-
-    /// <inheritdoc cref="WaitForUrlAsync(IPage, string, float)"/>
-    public Task WaitForUrlAsync(IPage page, Func<string, bool> url, float timeout = 30000) =>
-        WaitForUrlAsync(page, timeout, options => page.WaitForURLAsync(url, options));
-
-    private async Task WaitForUrlAsync(IPage page, float timeout, Func<PageWaitForURLOptions, Task> waitForUrl)
+    public async Task WaitForUrlAsync(IPage page, Func<string, bool> isUrl, float timeout = 30000)
     {
         try
         {
-            // A navigation of the app changes the URL of the document and loads no other, so no load event follows it.
-            await waitForUrl(new() { Timeout = timeout, WaitUntil = WaitUntilState.Commit });
+            // Polls the URL of the page, which follows every navigation. WaitForURLAsync misses a navigation of the app that
+            // lands between its check of the URL and its subscription to the navigation events.
+            await AsyncTestHelpers.WaitUntilAsync(() => isUrl(page.Url), TimeSpan.FromMilliseconds(timeout));
         }
         catch (TimeoutException exception)
         {

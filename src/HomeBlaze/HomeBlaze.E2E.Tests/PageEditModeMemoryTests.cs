@@ -42,7 +42,7 @@ public class PageEditModeMemoryTests
         var page = await _fixture.OpenPageInEditModeAsync("Dashboard.md", "Source");
         await Assertions.Expect(page.Locator(".monaco-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/browser");
-        await _fixture.WaitForUrlAsync(page, "**/browser", Timeout);
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
         await Assertions.Expect(page.Locator(".monaco-editor")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
         // Act
