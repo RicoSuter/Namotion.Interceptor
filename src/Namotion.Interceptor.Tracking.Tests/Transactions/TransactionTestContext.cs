@@ -31,6 +31,14 @@ internal static class TransactionTestContext
     }
 
     /// <summary>
+    /// Begins a BestEffort transaction without leaking it into the caller's flow, as an async method does not.
+    /// </summary>
+    public static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
+    {
+        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+    }
+
+    /// <summary>
     /// Runs <paramref name="action"/> synchronously on this thread in a flow without the current transaction, like
     /// code that does not carry it, for example an inbound source update or a dispose from another flow.
     /// </summary>

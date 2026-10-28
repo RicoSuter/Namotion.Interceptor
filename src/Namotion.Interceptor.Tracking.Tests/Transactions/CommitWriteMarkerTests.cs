@@ -216,12 +216,6 @@ public class CommitWriteMarkerTests
         Assert.True(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
     }
 
-    private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
-    {
-        // An async method does not leak the transaction it begins into the caller's flow.
-        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-    }
-
     /// <summary>
     /// Disposes <see cref="Transaction"/>, from a flow that does not carry it, on the first write that reaches the model.
     /// </summary>

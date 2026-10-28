@@ -73,6 +73,8 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Assert
         Assert.Equal(["Ann", "Eve"], firstNamesSeen);
+        Assert.Equal("Eve", person.FirstName);
+        Assert.Empty(writer.Reverted);
     }
 
     [Fact]

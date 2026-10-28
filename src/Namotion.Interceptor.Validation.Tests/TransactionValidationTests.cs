@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.Reactive.Concurrency;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
@@ -24,24 +23,6 @@ public class TransactionValidationTests
             .WithTransactions()
             .WithPropertyValidation()
             .WithService<IPropertyValidator>(() => validator);
-    }
-
-    /// <summary>
-    /// Creates a motor whose own context registers the validation and reaches the transaction interceptor through a
-    /// fallback context without validation, and returns that fallback context to begin transactions on.
-    /// </summary>
-    private static (IInterceptorSubjectContext TransactionContext, Motor Motor) CreateSubjectValidatedThroughFallback()
-    {
-        var transactionContext = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-        var subjectContext = InterceptorSubjectContext
-            .Create()
-            .WithPropertyValidation()
-            .WithService<IPropertyValidator>(() => new MotorSpeedValidator());
-        subjectContext.AddFallbackContext(transactionContext);
-        return (transactionContext, new Motor(subjectContext));
     }
 
     [Fact]
@@ -106,6 +87,7 @@ public class TransactionValidationTests
         var failed = Assert.Single(exception.FailedChanges);
         Assert.Equal(nameof(Motor.MotorSpeed), failed.Property.Name);
         Assert.IsType<PropertyValidationException>(Assert.Single(exception.Errors));
+        Assert.Same(exception.Errors[0], exception.InnerException);
         Assert.Empty(exception.AppliedChanges);
         Assert.Equal(0, writer.WriteCount);
         Assert.Equal(0, motor.MotorSpeed);
@@ -147,24 +129,6 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenOneValueIsInvalid_ThenItsErrorIsTheInnerException()
-    {
-        // Arrange
-        var context = CreateContext();
-        var motor = new Motor(context);
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        motor.MotorSpeed = 150;
-
-        // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Same(Assert.Single(exception.Errors), exception.InnerException);
-    }
-
-    [Fact]
     public async Task WhenImmediateAndWriteIsInvalid_ThenSetterThrows()
     {
         // Arrange
@@ -175,30 +139,6 @@ public class TransactionValidationTests
         // Act & Assert
         Assert.Throws<PropertyValidationException>(() => motor.MotorSpeed = 150);
         Assert.Empty(transaction.GetPendingChanges());
-    }
-
-    [Fact]
-    public async Task WhenDeferredAndSubjectContextValidatesThroughFallback_ThenCommitThrowsBeforeAnythingIsWritten()
-    {
-        // Arrange
-        var (transactionContext, motor) = CreateSubjectValidatedThroughFallback();
-        var writer = new TestTransactionWriter();
-        transactionContext.AddService<ITransactionWriter>(writer);
-
-        // Act
-        SubjectTransactionValidationException exception;
-        using (var transaction = await transactionContext.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred))
-        {
-            motor.MotorSpeed = 150;
-            exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
-                () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        }
-
-        // Assert
-        Assert.Equal(nameof(Motor.MotorSpeed), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.Equal(0, writer.WriteCount);
-        Assert.Equal(0, motor.MotorSpeed);
     }
 
     [Fact]
@@ -406,28 +346,6 @@ public class TransactionValidationTests
         Assert.Equal(100, motor.MaxAllowedSpeed);
         Assert.Equal(99, motor.MotorSpeed);
         Assert.Equal(nameof(Motor.MaxAllowedSpeed), Assert.Single(writer.Reverted).Property.Name);
-    }
-
-    [Fact]
-    public async Task WhenUnchangedValueChangesButStaysValidWhileSourcesAreWritten_ThenSetLandsWithoutRevert()
-    {
-        // Arrange
-        var context = CreateContext();
-        var motor = new Motor(context) { MotorSpeed = 90 };
-        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MotorSpeed = 80);
-        context.AddService<ITransactionWriter>(writer);
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        motor.MaxAllowedSpeed = 95;
-        motor.MotorSpeed = 90;
-
-        // Act
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(95, motor.MaxAllowedSpeed);
-        Assert.Equal(80, motor.MotorSpeed);
-        Assert.Empty(writer.Reverted);
     }
 
     public enum OriginRule
@@ -664,39 +582,6 @@ public class TransactionValidationTests
         Assert.Equal(50, failedChange.GetOldValue<int>());
         Assert.Equal(50, failedChange.GetNewValue<int>());
         Assert.Equal([nameof(Motor.MaxAllowedSpeed)], transaction.GetPendingChanges().Select(change => change.Property.Name));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenDeferredAndUnchangedValueIsValid_ThenItIsNeitherWrittenNorPublished(bool withWriter)
-    {
-        // Arrange
-        var context = CreateContext();
-        var writer = new TestTransactionWriter();
-        if (withWriter)
-        {
-            context.AddService<ITransactionWriter>(writer);
-        }
-
-        var motor = new Motor(context) { MotorSpeed = 50 };
-        var published = new List<string>();
-        using var subscription = context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change => published.Add(change.Property.Name));
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        motor.MotorSpeed = 50;
-        motor.MaxAllowedSpeed = 80;
-
-        // Act
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(50, motor.MotorSpeed);
-        Assert.Equal(80, motor.MaxAllowedSpeed);
-        Assert.Equal([nameof(Motor.MaxAllowedSpeed)], published);
-        Assert.Equal(withWriter ? [nameof(Motor.MaxAllowedSpeed)] : [], writer.Written.Select(change => change.Property.Name));
     }
 
     [Theory]

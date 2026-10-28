@@ -716,12 +716,6 @@ public class SubjectTransactionHandlerTests
         Assert.Equal(withWriter ? 1 : 0, writer.WriteCalls);
     }
 
-    private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
-    {
-        // An async method does not leak the transaction it begins into the caller's flow.
-        return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-    }
-
     private static async Task CommitInOwnFlowAsync(IInterceptorSubjectContext context, Person person)
     {
         using var transaction = await context.BeginTransactionAsync(
