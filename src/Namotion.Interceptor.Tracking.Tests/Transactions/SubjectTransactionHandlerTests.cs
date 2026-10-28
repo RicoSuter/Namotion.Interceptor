@@ -542,6 +542,28 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenDisposedFromAnotherFlowDuringCommitCheckAndHandlerRejects_ThenCommitThrowsObjectDisposed()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        handler.OnCommittingAction = (committingTransaction, _) =>
+        {
+            RunOutsideTransactionFlow(committingTransaction.Dispose);
+            throw new InvalidOperationException("rejected");
+        };
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.IsType<ObjectDisposedException>(exception);
+        Assert.Equal("Ann", person.FirstName);
+    }
+
+    [Fact]
     public async Task WhenDisposedDuringOnCommittingAndAgainAfterCommit_ThenLockIsReleasedOnce()
     {
         // Arrange

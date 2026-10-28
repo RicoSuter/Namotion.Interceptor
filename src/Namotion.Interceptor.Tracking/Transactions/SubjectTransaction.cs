@@ -1152,11 +1152,12 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Calls the handlers with the snapshot before anything is written. A handler exception propagates unchanged; the
-    /// caller's <see cref="EndCommit"/> then keeps the pending changes for a retry.
+    /// Calls the handlers with the snapshot before anything is written. A handler exception propagates unchanged unless
+    /// the transaction was disposed meanwhile; the caller's <see cref="EndCommit"/> then keeps the pending changes for
+    /// a retry.
     /// </summary>
     /// <exception cref="ObjectDisposedException">
-    /// Thrown when the transaction was disposed while the handlers ran.
+    /// Thrown when the transaction was disposed while the handlers ran, also in place of a handler exception.
     /// </exception>
     private void RunCommitCheck(ReadOnlySpan<SubjectPropertyChange> changes)
     {
@@ -1165,7 +1166,15 @@ public sealed class SubjectTransaction : IDisposable
             return;
         }
 
-        RunHandlerCheck(changes, excludedProperties: null, TransactionCheckStage.Commit);
+        try
+        {
+            RunHandlerCheck(changes, excludedProperties: null, TransactionCheckStage.Commit);
+        }
+        catch when (IsDisposed)
+        {
+            // A dispose from another flow drops the pending values the handlers read, so their verdict is void.
+            throw new ObjectDisposedException(nameof(SubjectTransaction));
+        }
 
         if (IsDisposed)
         {
