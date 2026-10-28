@@ -638,7 +638,8 @@ public class SubjectTransactionConcurrencyTests
         {
             if (property.Name == nameof(Person.FirstName) && Equals(value, "Ann"))
             {
-                barrier.SignalAndWait();
+                // A timeout fails the write, and with it the test, instead of hanging it.
+                Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(30)));
             }
 
             return null;

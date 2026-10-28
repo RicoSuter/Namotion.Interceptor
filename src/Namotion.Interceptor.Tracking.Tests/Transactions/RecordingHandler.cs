@@ -5,6 +5,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 internal sealed class RecordingHandler : ITransactionHandler
 {
+    private readonly Lock _captureLock = new();
+
     public List<(PropertyReference Property, object? Value, ChangeOrigin Origin)> Captured { get; } = [];
 
     public Func<PropertyReference, object?, Exception?>? RejectCapture { get; set; }
@@ -62,8 +64,12 @@ internal sealed class RecordingHandler : ITransactionHandler
             throw exception;
         }
 
-        Captured.Add((context.Property, context.NewValue, context.Origin));
-        CaptureLog?.Add((this, context.NewValue));
+        // Writes from concurrent flows can capture at the same time.
+        lock (_captureLock)
+        {
+            Captured.Add((context.Property, context.NewValue, context.Origin));
+            CaptureLog?.Add((this, context.NewValue));
+        }
     }
 
     public void OnCommitting(in TransactionCheckContext context)
