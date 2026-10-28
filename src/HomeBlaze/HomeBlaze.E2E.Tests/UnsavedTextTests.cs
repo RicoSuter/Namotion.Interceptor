@@ -49,7 +49,7 @@ public class UnsavedTextTests
         // Assert
         Assert.Contains(Typed, editorTextAfterKeep);
         Assert.EndsWith($"pages/Demo/{PageName}", urlAfterKeep);
-        await _fixture.WaitForUrlAsync(page, "**/browser", Timeout);
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
         Assert.DoesNotContain(Typed, await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName)));
     }
 
@@ -67,7 +67,7 @@ public class UnsavedTextTests
         await page.GetByRole(AriaRole.Link, new() { Name = "Browser" }).ClickAsync();
 
         // Assert
-        await _fixture.WaitForUrlAsync(page, "**/browser", Timeout);
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0);
         Assert.Contains(Typed, await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName)));
     }
@@ -113,7 +113,7 @@ public class UnsavedTextTests
 
         // Assert
         Assert.Contains(Typed, editorTextAfterKeep);
-        await _fixture.WaitForUrlAsync(page, "**/browser", Timeout);
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 

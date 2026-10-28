@@ -414,7 +414,7 @@ public class SubjectBrowserLayoutTests
             await link.ClickAsync();
 
             // Assert
-            await _fixture.WaitForUrlAsync(page, "**/browser/Demo/Motor", PageLoadTimeout);
+            await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser/Demo/Motor", StringComparison.Ordinal), PageLoadTimeout);
             await WaitUntilSettledAsync(page, paneCount: 3);
         }
         finally
