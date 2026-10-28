@@ -188,10 +188,8 @@ public static class ParentsHandlerExtensions
         {
             lock (_lock)
             {
-                if (_indices.TryAdd(parent, index))
-                {
-                    _cache = null; // Invalidate cache
-                }
+                _indices[parent] = index;
+                _cache = null; // Invalidate cache
             }
         }
 
