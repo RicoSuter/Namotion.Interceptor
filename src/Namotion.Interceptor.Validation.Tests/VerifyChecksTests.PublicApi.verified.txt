@@ -1,0 +1,33 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Interceptor.Validation
+{
+    public class DataAnnotationsValidator : Namotion.Interceptor.Validation.IPropertyValidator
+    {
+        public DataAnnotationsValidator() { }
+        public System.Collections.Generic.IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> Validate<TProperty>(in Namotion.Interceptor.Validation.PropertyValidationContext<TProperty> context) { }
+    }
+    public interface IPropertyValidator
+    {
+        System.Collections.Generic.IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> Validate<TProperty>(in Namotion.Interceptor.Validation.PropertyValidationContext<TProperty> context);
+    }
+    public static class InterceptorSubjectContextExtensions
+    {
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithDataAnnotationValidation(this Namotion.Interceptor.IInterceptorSubjectContext builder) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithPropertyValidation(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+    }
+    public readonly struct PropertyValidationContext<TProperty>
+    {
+        public PropertyValidationContext(Namotion.Interceptor.PropertyReference property, TProperty value, Namotion.Interceptor.ChangeOrigin origin) { }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public TProperty Value { get; }
+    }
+    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
+    public class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor
+    {
+        public ValidationInterceptor() { }
+        public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
+    }
+}

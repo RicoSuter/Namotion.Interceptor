@@ -1,0 +1,296 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Philips.Hue.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Philips.Hue
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Hub")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Lighting")]
+    [System.ComponentModel.Description("Philips Hue Bridge for controlling lights, sensors, and buttons")]
+    [System.ComponentModel.DisplayName("Philips Hue bridge")]
+    public class HueBridge : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IHubDevice, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Sensors.IPowerSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const int DefaultPollingIntervalSeconds = 60;
+        public const int DefaultRetryIntervalSeconds = 30;
+        public const int MaximumIntervalSeconds = 3600;
+        public const int MinimumIntervalSeconds = 5;
+        public HueBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Philips.Hue.HueBridge> logger) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? AppKey { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? BridgeId { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueButtonDevice> ButtonDevices { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? CombinedPower { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueLightbulb> Lights { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueMotionDevice> MotionSensors { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueDevice> OtherDevices { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Power { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueGroup> Rooms { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? TotalConsumedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueGroup> Zones { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, int defaultSeconds) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HueButton : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Inputs.IButtonDevice, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>
+    {
+        public HueButton(string name, HueApi.Models.ButtonResource buttonResource, Namotion.Devices.Philips.Hue.HueButtonDevice buttonDevice, bool initialization) { }
+        public System.DateTimeOffset? ButtonChangeDate { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Abstractions.Inputs.ButtonState? ButtonState { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconName { get; }
+        public string Id { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        public Namotion.Devices.Philips.Hue.HueButtonDevice ParentDevice { get; }
+        public System.Guid ResourceId { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public void Dispose() { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public void RefreshButtonState() { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.IDisposable Subscribe(System.IObserver<HomeBlaze.Abstractions.Inputs.ButtonEvent> observer) { }
+        public static HomeBlaze.Abstractions.Inputs.ButtonState GetButtonState(HueApi.Models.ButtonEvent eventType) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HueButtonDevice : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, Namotion.Interceptor.IInterceptorSubject, System.IDisposable
+    {
+        public HueButtonDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, HueApi.Models.DevicePower? devicePower, HueApi.Models.ButtonResource[] buttons, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? BatteryLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Philips.Hue.HueButton[] Buttons { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public void Dispose() { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HueDevice : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.IUnknownDevice, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HueDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public Namotion.Devices.Philips.Hue.HueBridge Bridge { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public string? HardwarePlatformType { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? HardwareRevision { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public bool? IsCertified { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public string? ProductName { get; }
+        public System.Guid ResourceId { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SerialNumber { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public string? SoftwareVersion { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HueGroup : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.Devices.Light.IBrightnessController, HomeBlaze.Abstractions.Devices.Light.IBrightnessState, HomeBlaze.Abstractions.Devices.Light.IColorController, HomeBlaze.Abstractions.Devices.Light.IColorState, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureController, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureState, HomeBlaze.Abstractions.Devices.Light.ILightbulb, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.IVirtualSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HueGroup(HueApi.Models.HueResource group, HueApi.Models.GroupedLight? groupedLight, Namotion.Devices.Philips.Hue.HueLightbulb[] lights, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public Namotion.Devices.Philips.Hue.HueBridge Bridge { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Brightness { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Color { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? ColorTemperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Philips.Hue.HueLightbulb> Lights { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Lumen { get; }
+        public System.Guid ResourceId { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetBrightnessAsync(decimal brightness, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetColorAsync(string color, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetColorTemperatureAsync(decimal colorTemperature, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HueLightbulb : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.Devices.Light.IBrightnessController, HomeBlaze.Abstractions.Devices.Light.IBrightnessState, HomeBlaze.Abstractions.Devices.Light.IColorController, HomeBlaze.Abstractions.Devices.Light.IColorState, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureController, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureState, HomeBlaze.Abstractions.Devices.Light.ILightbulb, HomeBlaze.Abstractions.Sensors.IPowerSensor, Namotion.Interceptor.IInterceptorSubject
+    {
+        public HueLightbulb(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, HueApi.Models.Light light, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Brightness { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Color { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? ColorTemperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsOn { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsOnOffLight { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Lumen { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Power { get; }
+        public System.Guid ReferenceId { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public string? Socket { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? TotalConsumedEnergy { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetBrightnessAsync(decimal brightness, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetColorAsync(string color, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetColorTemperatureAsync(decimal colorTemperature, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class HueMotionDevice : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Sensors.ILightSensor, HomeBlaze.Abstractions.Sensors.IPresenceSensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject
+    {
+        public HueMotionDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, HueApi.Models.DevicePower? devicePower, HueApi.Models.Sensors.TemperatureResource? temperature, HueApi.Models.Sensors.LightLevelResource? lightLevel, HueApi.Models.Sensors.MotionResource motion, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? BatteryLevel { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Illuminance { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsPresent { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Temperature { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+    }
+    public static class HueServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPhilipsHue(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Philips.Hue.HueBridge>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+}

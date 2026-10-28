@@ -1,0 +1,138 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Plugins.Models
+{
+    public class PluginEntry
+    {
+        public PluginEntry() { }
+        [System.Text.Json.Serialization.JsonPropertyName("packageName")]
+        public string PackageName { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        public string? Version { get; set; }
+    }
+    public class PluginFeedEntry
+    {
+        public PluginFeedEntry() { }
+        [System.Text.Json.Serialization.JsonPropertyName("apiKey")]
+        public string? ApiKey { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("url")]
+        public string Url { get; set; }
+    }
+}
+namespace HomeBlaze.Plugins
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class Plugin : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public Plugin(HomeBlaze.Plugins.PluginManager manager) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Assemblies")]
+        public string[] Assemblies { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string Authors { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string Description { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Assemblies")]
+        public string[] HostDependencies { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? IconUrl { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string Name { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Assemblies")]
+        public string[] PrivateDependencies { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string[] Tags { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string Version { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Remove Plugin")]
+        public void RemovePlugin() { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public class PluginConfiguration
+    {
+        public PluginConfiguration() { }
+        [System.Text.Json.Serialization.JsonPropertyName("cacheDirectory")]
+        public string? CacheDirectory { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("feeds")]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Plugins.Models.PluginFeedEntry> Feeds { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("hostIdentifier")]
+        public string? HostIdentifier { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("hostPackages")]
+        public System.Collections.Generic.IReadOnlyList<string> HostPackages { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Configuration.NuGetFeed> NuGetFeeds { get; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Configuration.NuGetPluginReference> PluginReferences { get; }
+        [System.Text.Json.Serialization.JsonPropertyName("plugins")]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Plugins.Models.PluginEntry> Plugins { get; set; }
+        public Namotion.NuGet.Plugins.Configuration.NuGetPluginLoaderOptions ToLoaderOptions(Namotion.NuGet.Plugins.Configuration.HostDependencyResolver? hostDependencies = null) { }
+        public static HomeBlaze.Plugins.PluginConfiguration LoadFrom(System.IO.Stream stream) { }
+        public static HomeBlaze.Plugins.PluginConfiguration LoadFrom(string jsonPath, string baseDirectory) { }
+    }
+    public class PluginLoader : System.IDisposable
+    {
+        public PluginLoader(HomeBlaze.Plugins.PluginConfiguration? config, Microsoft.Extensions.Logging.ILoggerFactory loggerFactory) { }
+        public Namotion.NuGet.Plugins.NuGetPluginLoadResult? LoadResult { get; }
+        public Namotion.NuGet.Plugins.Loading.NuGetPluginLoader? Loader { get; }
+        public void Dispose() { }
+        public System.Threading.Tasks.Task<Namotion.NuGet.Plugins.NuGetPluginLoadResult?> LoadPluginsAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SingleInstance]
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Extension")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("System")]
+    [System.ComponentModel.Description("Loads plugins from NuGet feeds")]
+    [System.ComponentModel.DisplayName("Plugin manager")]
+    public class PluginManager : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public PluginManager(HomeBlaze.Plugins.PluginLoader pluginLoader) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Plugins.Models.PluginFeedEntry[] Feeds { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostIdentifier { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] HostPackages { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, HomeBlaze.Plugins.Plugin> LoadedPlugins { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.Plugins.Models.PluginEntry[] Plugins { get; set; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Add Plugin")]
+        public void AddPlugin(string packageName, string version) { }
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class PluginsServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazePlugins(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string? pluginConfigPath = null) { }
+    }
+}
