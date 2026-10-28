@@ -422,7 +422,7 @@ public class RegisteredSubjectProperty
     }
 
     // Searches backwards because a reconciled write detaches in reverse order, which finds each
-    // child at the end of the list.
+    // child removed from the end of the value at the end of the list.
     private int IndexOfChild(IInterceptorSubject subject)
     {
         for (var i = _children.Count - 1; i >= 0; i--)
