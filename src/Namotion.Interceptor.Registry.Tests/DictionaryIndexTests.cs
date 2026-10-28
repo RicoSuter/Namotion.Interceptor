@@ -17,6 +17,69 @@ public class DictionaryIndexTests
         => subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 
     [Fact]
+    public void WhenDictionaryEntryIsReKeyed_ThenParentIndexIsTheNewKey()
+    {
+        // Arrange
+        var child = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Motor"] = child }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Engine"] = child };
+
+        // Assert
+        var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal("Engine", parent.Index);
+    }
+
+    [Fact]
+    public void WhenDictionaryEntryIsReKeyed_ThenChildIsListedUnderTheNewKey()
+    {
+        // Arrange
+        var child = new TestItem();
+        var container = new TestContainer(CreateContext())
+        {
+            Items = new Dictionary<string, TestItem> { ["Motor"] = child }
+        };
+
+        // Act
+        container.Items = new Dictionary<string, TestItem> { ["Engine"] = child };
+
+        // Assert
+        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
+        Assert.Same(child, registeredChild.Subject);
+        Assert.Equal("Engine", registeredChild.Index);
+    }
+
+    [Fact]
+    public void WhenCollectionPropertyHoldsAStringKeyedDictionaryWithoutDictionaryInterface_ThenIndexIsTheNewKey()
+    {
+        // Arrange: a collection refresh first, so that this thread holds a reusable position map,
+        // which is what used to let a refresh read string keys as positions.
+        var context = CreateContext();
+        var warmFirst = new TestItem();
+        var warmSecond = new TestItem();
+        var warm = new TestKeyedContainer(context) { Items = [warmFirst, warmSecond] };
+        warm.Items = [warmSecond, warmFirst];
+
+        var first = new TestItem();
+        var second = new TestItem();
+        var holder = new BroadlyDeclaredHolder(context)
+        {
+            Sequence = new PairEnumeratingDictionary<string>(new Dictionary<string, TestItem> { ["First"] = first, ["Second"] = second })
+        };
+
+        // Act
+        holder.Sequence = new PairEnumeratingDictionary<string>(new Dictionary<string, TestItem> { ["Second"] = first, ["First"] = second });
+
+        // Assert
+        Assert.Equal("Second", Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal("First", Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
     public void WhenDictionaryEntryIsReKeyed_ThenPathUsesTheNewKey()
     {
         // Arrange
