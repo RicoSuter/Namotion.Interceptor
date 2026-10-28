@@ -10,73 +10,19 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 /// </summary>
 public class SubjectTransactionHandlerResolutionTests
 {
-    [Fact]
-    public async Task WhenHandlerIsRegisteredOnlyOnSubjectContextReachingTransactionsThroughFallback_ThenItTakesPart()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenEqualHandlersAreRegisteredOnTwoContexts_ThenOnlyTheFirstTakesPartOncePerEvent(bool firstOnTransactionContext)
     {
         // Arrange
-        var handler = new RecordingHandler();
-        var probe = new CommitWriteProbe(handler);
+        var firstHandler = new TypeEqualHandler();
+        var secondHandler = new TypeEqualHandler();
         var transactionContext = CreateContext();
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(handler);
-        subjectContext.AddService(probe);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
-        probe.Writes.Clear();
-
-        SubjectPropertyChange[]? changesSeenByHandler = null;
-        handler.OnCommittingAction = (_, changes) => changesSeenByHandler = changes;
-
-        // Act
-        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal("Bob", Assert.Single(handler.Captured).Value);
-        Assert.Equal(1, handler.CommittingCalls);
-        var change = Assert.Single(changesSeenByHandler!);
-        Assert.Equal(nameof(Person.FirstName), change.Property.Name);
-        Assert.Equal("Bob", change.GetNewValue<string>());
-        Assert.True(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenHandlerIsRegisteredOnSubjectContextAndTransactionContext_ThenItIsCalledOncePerEvent()
-    {
-        // Arrange
-        var transactionContext = CreateContext(out var handler);
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(handler);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
-
-        // Act
-        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Single(handler.Captured);
-        Assert.Equal(1, handler.CommittingCalls);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenHandlerIsRegisteredOnTwoSubjectContexts_ThenItIsCalledOncePerEvent()
-    {
-        // Arrange
-        var handler = new RecordingHandler();
-        var transactionContext = CreateContext();
-        var firstContext = InterceptorSubjectContext.Create();
-        firstContext.AddService<ITransactionHandler>(handler);
-        firstContext.AddFallbackContext(transactionContext);
-        var secondContext = InterceptorSubjectContext.Create();
-        secondContext.AddService<ITransactionHandler>(handler);
-        secondContext.AddFallbackContext(transactionContext);
+        var firstContext = firstOnTransactionContext ? transactionContext : CreateSubjectContext(transactionContext);
+        firstContext.AddService<ITransactionHandler>(firstHandler);
         var first = new Person(firstContext);
-        var second = new Person(secondContext);
+        var second = new Person(CreateSubjectContext(transactionContext, secondHandler));
 
         // Act
         using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -85,45 +31,25 @@ public class SubjectTransactionHandlerResolutionTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(2, handler.Captured.Count);
-        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal(2, firstHandler.CapturingCalls);
+        Assert.Equal(1, firstHandler.CommittingCalls);
+        Assert.Equal(0, secondHandler.CapturingCalls);
+        Assert.Equal(0, secondHandler.CommittingCalls);
+        Assert.Equal("Bob", second.FirstName);
     }
 
     [Fact]
-    public async Task WhenEqualHandlersAreRegisteredOnSubjectContextAndTransactionContext_ThenOnlyTheFirstTakesPart()
-    {
-        // Arrange
-        var transactionContextHandler = new TypeEqualHandler();
-        var subjectContextHandler = new TypeEqualHandler();
-        var transactionContext = CreateContext();
-        transactionContext.AddService<ITransactionHandler>(transactionContextHandler);
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(subjectContextHandler);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
-
-        // Act
-        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(1, transactionContextHandler.CommittingCalls);
-        Assert.Equal(0, subjectContextHandler.CommittingCalls);
-        Assert.Equal("Bob", person.FirstName);
-    }
-
-    [Fact]
-    public async Task WhenHandlerIsIncludedFromSubjectContext_ThenItSeesLaterWritesToOtherSubjects()
+    public async Task WhenHandlerIsRegisteredOnlyOnSubjectContext_ThenItTakesPartFromTheFirstWriteToItsSubjects()
     {
         // Arrange
         var handler = new RecordingHandler();
+        var probe = new CommitWriteProbe(handler);
         var transactionContext = CreateContext();
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(handler);
-        subjectContext.AddFallbackContext(transactionContext);
+        var subjectContext = CreateSubjectContext(transactionContext, handler);
+        subjectContext.AddService(probe);
         var person = new Person(subjectContext);
         var otherPerson = new Person(transactionContext);
+        probe.Writes.Clear();
 
         SubjectPropertyChange[]? changesSeenByHandler = null;
         handler.OnCommittingAction = (_, changes) => changesSeenByHandler = changes;
@@ -137,7 +63,10 @@ public class SubjectTransactionHandlerResolutionTests
 
         // Assert
         Assert.Equal(new object?[] { "Bob", "Lee" }, handler.Captured.Select(captured => captured.Value));
-        Assert.Equal(3, changesSeenByHandler!.Length);
+        Assert.Equal(1, handler.CommittingCalls);
+        Assert.Equal(["Ann", "Bob", "Lee"], changesSeenByHandler!.Select(change => change.GetNewValue<string>()));
+        Assert.True(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+        Assert.Equal("Bob", person.FirstName);
     }
 
     [Fact]
@@ -174,10 +103,7 @@ public class SubjectTransactionHandlerResolutionTests
         var transactionContext = CreateContext(out var rejectingHandler);
         rejectingHandler.RejectCommit = true;
         var includedHandler = new RecordingHandler();
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(includedHandler);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
+        var person = new Person(CreateSubjectContext(transactionContext, includedHandler));
         var otherPerson = new Person(transactionContext);
 
         SubjectPropertyChange[]? changesSeenByIncludedHandler = null;
@@ -205,10 +131,7 @@ public class SubjectTransactionHandlerResolutionTests
         // Arrange
         var transactionContext = CreateContext(out var checkingHandler);
         var subjectHandler = new RecordingHandler();
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(subjectHandler);
-        subjectContext.AddFallbackContext(transactionContext);
-        var person = new Person(subjectContext);
+        var person = new Person(CreateSubjectContext(transactionContext, subjectHandler));
         var otherPerson = new Person(transactionContext);
 
         Exception? concurrentWriteException = null;
@@ -236,10 +159,13 @@ public class SubjectTransactionHandlerResolutionTests
 
     private sealed class TypeEqualHandler : ITransactionHandler
     {
+        public int CapturingCalls { get; private set; }
+
         public int CommittingCalls { get; private set; }
 
         public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
         {
+            CapturingCalls++;
         }
 
         public void OnCommitting(in TransactionCheckContext context)

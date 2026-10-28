@@ -14,43 +14,25 @@ public class CommitWriteMarkerTests
         return (context, handler, new Person(context));
     }
 
-    [Fact]
-    public async Task WhenValueDiffers_ThenMarkDoesNotMatchAndStaysSet()
-    {
-        // Arrange
-        var (context, handler, person) = CreateContextWithPerson();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-
-        using (CommitWriteMarker.Set(transaction, property, "Bob"))
-        {
-            // Act
-            var changedValue = SubjectTransaction.TryConsumeCommitWrite(handler, property, "Changed");
-            var checkedValue = SubjectTransaction.TryConsumeCommitWrite(handler, property, "Bob");
-
-            // Assert
-            Assert.False(changedValue);
-            Assert.True(checkedValue);
-        }
-    }
-
-    [Fact]
-    public async Task WhenPropertyDiffers_ThenMarkDoesNotMatchAndStaysSet()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenValueOrPropertyDiffers_ThenMarkDoesNotMatchAndStaysSet(bool propertyDiffers)
     {
         // Arrange
         var (context, handler, person) = CreateContextWithPerson();
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var markedProperty = new PropertyReference(person, nameof(Person.FirstName));
-        var otherProperty = new PropertyReference(person, nameof(Person.LastName));
+        var writtenProperty = propertyDiffers ? new PropertyReference(person, nameof(Person.LastName)) : markedProperty;
 
         using (CommitWriteMarker.Set(transaction, markedProperty, "Bob"))
         {
             // Act
-            var otherMatches = SubjectTransaction.TryConsumeCommitWrite(handler, otherProperty, "Bob");
+            var differingMatches = SubjectTransaction.TryConsumeCommitWrite(handler, writtenProperty, propertyDiffers ? "Bob" : "Changed");
             var markedMatches = SubjectTransaction.TryConsumeCommitWrite(handler, markedProperty, "Bob");
 
             // Assert
-            Assert.False(otherMatches);
+            Assert.False(differingMatches);
             Assert.True(markedMatches);
         }
     }

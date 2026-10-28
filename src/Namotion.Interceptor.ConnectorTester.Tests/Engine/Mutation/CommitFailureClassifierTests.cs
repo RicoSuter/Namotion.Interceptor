@@ -5,6 +5,7 @@ using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -32,24 +33,6 @@ public class CommitFailureClassifierTests
 
         // Assert
         Assert.Equal(CommitFailureKind.Conflict, kind);
-    }
-
-    [Fact]
-    public void WhenOnlySourceWritesFailed_ThenFailureIsSourceWriteFailure()
-    {
-        // Arrange
-        var intChange = CreateChange(nameof(TestNode.IntValue));
-        var longChange = CreateChange(nameof(TestNode.LongValue));
-        var exception = CreateException(
-            [intChange, longChange],
-            CreateSourceWriteError(intChange),
-            CreateSourceWriteError(longChange));
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.SourceWriteFailure, kind);
     }
 
     [Fact]
@@ -85,58 +68,36 @@ public class CommitFailureClassifierTests
         Assert.Equal("local", node.StringValue);
     }
 
-    [Fact]
-    public void WhenTransactionWriterThrew_ThenFailureIsUnexpected()
+    public enum UnexpectedFailure
     {
-        // Arrange
-        var change = CreateChange(nameof(TestNode.IntValue));
-        var exception = CreateException([change], new NullReferenceException());
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.Unexpected, kind);
+        TransactionWriterThrew,
+        LocalApplyFailedBesideSourceWrite,
+        MoreChangesFailedThanTheSourceWritesReport,
+        NoErrorsOrFailedChanges
     }
 
-    [Fact]
-    public void WhenLocalApplyFailedBesideSourceWrite_ThenFailureIsUnexpected()
-    {
-        // Arrange
-        var sourceChange = CreateChange(nameof(TestNode.IntValue));
-        var localChange = CreateChange(nameof(TestNode.LongValue));
-        var exception = CreateException(
-            [sourceChange, localChange],
-            CreateSourceWriteError(sourceChange),
-            new InvalidOperationException("Setter failed."));
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.Unexpected, kind);
-    }
-
-    [Fact]
-    public void WhenMoreChangesFailedThanTheSourceWritesReport_ThenFailureIsUnexpected()
+    [Theory]
+    [InlineData(UnexpectedFailure.TransactionWriterThrew)]
+    [InlineData(UnexpectedFailure.LocalApplyFailedBesideSourceWrite)]
+    [InlineData(UnexpectedFailure.MoreChangesFailedThanTheSourceWritesReport)]
+    [InlineData(UnexpectedFailure.NoErrorsOrFailedChanges)]
+    public void WhenFailureIsNotOnlySourceWriteFailures_ThenFailureIsUnexpected(UnexpectedFailure failure)
     {
         // Arrange
         var sourceChange = CreateChange(nameof(TestNode.IntValue));
         var otherChange = CreateChange(nameof(TestNode.LongValue));
-        var exception = CreateException([sourceChange, otherChange], CreateSourceWriteError(sourceChange));
-
-        // Act
-        var kind = CommitFailureClassifier.Classify(exception);
-
-        // Assert
-        Assert.Equal(CommitFailureKind.Unexpected, kind);
-    }
-
-    [Fact]
-    public void WhenCommitFailedWithoutErrorsOrFailedChanges_ThenFailureIsUnexpected()
-    {
-        // Arrange
-        var exception = CreateException([]);
+        var exception = failure switch
+        {
+            UnexpectedFailure.TransactionWriterThrew => CreateException([sourceChange], new NullReferenceException()),
+            UnexpectedFailure.LocalApplyFailedBesideSourceWrite => CreateException(
+                [sourceChange, otherChange],
+                CreateSourceWriteError(sourceChange),
+                new InvalidOperationException("Setter failed.")),
+            UnexpectedFailure.MoreChangesFailedThanTheSourceWritesReport => CreateException(
+                [sourceChange, otherChange],
+                CreateSourceWriteError(sourceChange)),
+            _ => CreateException([])
+        };
 
         // Act
         var kind = CommitFailureClassifier.Classify(exception);
@@ -161,7 +122,7 @@ public class CommitFailureClassifierTests
         // Assert
         Assert.Equal(2, counters.SourceWriteFailedCommitCount);
         Assert.Equal(1, counters.UnexpectedFailedCommitCount);
-        Assert.Equal([LogLevel.Warning, LogLevel.Error], logger.Levels);
+        Assert.Equal([LogLevel.Warning, LogLevel.Error], logger.Entries.Select(entry => entry.Level));
     }
 
     [Fact]
@@ -179,7 +140,7 @@ public class CommitFailureClassifierTests
 
         // Assert
         Assert.Equal(1, counters.SourceWriteFailedCommitCount);
-        Assert.Equal(2, logger.Levels.Count);
+        Assert.Equal(2, logger.Entries.Count);
     }
 
     private static IInterceptorSubjectContext CreateTransactionContext()
@@ -205,19 +166,5 @@ public class CommitFailureClassifierTests
     private static SubjectTransactionException CreateException(IReadOnlyList<SubjectPropertyChange> failedChanges, params Exception[] errors)
     {
         return new SubjectTransactionException("One or more changes failed.", [], failedChanges, errors);
-    }
-
-    private sealed class RecordingLogger : ILogger
-    {
-        public List<LogLevel> Levels { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            Levels.Add(logLevel);
-        }
     }
 }

@@ -31,6 +31,23 @@ internal static class TransactionTestContext
     }
 
     /// <summary>
+    /// Creates a subject context that reaches the transactions of <paramref name="transactionContext"/> through a
+    /// fallback, with <paramref name="handler"/> registered on it when given.
+    /// </summary>
+    public static IInterceptorSubjectContext CreateSubjectContext(
+        IInterceptorSubjectContext transactionContext, ITransactionHandler? handler = null)
+    {
+        var context = InterceptorSubjectContext.Create();
+        if (handler is not null)
+        {
+            context.AddService(handler);
+        }
+
+        context.AddFallbackContext(transactionContext);
+        return context;
+    }
+
+    /// <summary>
     /// Begins a BestEffort transaction without leaking it into the caller's flow, as an async method does not.
     /// </summary>
     public static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)

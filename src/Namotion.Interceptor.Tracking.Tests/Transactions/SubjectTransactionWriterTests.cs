@@ -268,49 +268,24 @@ public class SubjectTransactionWriterTests
     }
 
     [Theory]
-    [InlineData(TransactionFailureHandling.BestEffort)]
-    [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenCommitTimesOutWhileRevertingAfterLocalApply_ThenCommitFailsTerminally(
-        TransactionFailureHandling failureHandling)
+    [InlineData(false, TransactionFailureHandling.BestEffort)]
+    [InlineData(false, TransactionFailureHandling.Rollback)]
+    [InlineData(true, TransactionFailureHandling.BestEffort)]
+    [InlineData(true, TransactionFailureHandling.Rollback)]
+    public async Task WhenCommitTimesOutWhileRevertingCheckedSet_ThenCommitFailsTerminallyAndModelIsUntouched(
+        bool preApplyCheckRejects, TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var context = CreateContext(out var handler, new RevertUntilCanceledTransactionWriter());
-        var probe = new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) };
-        context.AddService(probe);
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        using var transaction = await context.BeginTransactionAsync(
-            failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
-        person.FirstName = "Bob";
-        person.LastName = "Kim";
+        var context = CreateContext(out var handler, new CountingTransactionWriter { RevertsUntilCanceled = true });
+        if (preApplyCheckRejects)
+        {
+            handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
+        }
+        else
+        {
+            context.AddService(new CommitWriteProbe(handler) { ThrowOnConsumedProperty = nameof(Person.LastName) });
+        }
 
-        // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await transaction.CommitAsync(CancellationToken.None));
-
-        // Assert
-        // Every change fails, and each source revert that timed out lists its change again as stuck.
-        Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
-            exception.FailedChanges.Select(change => change.Property.Name));
-        Assert.Equal(2, exception.Errors.Count);
-        Assert.Equal("apply failed", exception.Errors[0].Message);
-        Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Equal("Lee", person.LastName);
-        Assert.Contains("already been committed", retryException.Message);
-    }
-
-    [Theory]
-    [InlineData(TransactionFailureHandling.BestEffort)]
-    [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenCommitTimesOutWhileRevertingRejectedSet_ThenCommitFailsTerminallyAndModelIsUntouched(
-        TransactionFailureHandling failureHandling)
-    {
-        // Arrange
-        var context = CreateContext(out var handler, new RevertUntilCanceledTransactionWriter());
-        handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         using var transaction = await context.BeginTransactionAsync(
             failureHandling, commitTimeout: TimeSpan.FromMilliseconds(50));
@@ -331,12 +306,12 @@ public class SubjectTransactionWriterTests
             async () => await transaction.CommitAsync(CancellationToken.None));
 
         // Assert
-        // Every checked change fails, and each source revert that timed out lists its change again as stuck.
+        // Every change fails, and each source revert that timed out lists its change again as stuck.
         Assert.Equal(
             [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name));
         Assert.Equal(2, exception.Errors.Count);
-        Assert.Equal("rejected", exception.Errors[0].Message);
+        Assert.Equal(preApplyCheckRejects ? "rejected" : "apply failed", exception.Errors[0].Message);
         Assert.IsAssignableFrom<OperationCanceledException>(exception.Errors[1]);
         Assert.Equal("Ann", landedFirstName);
         Assert.Equal("Lee", landedLastName);
@@ -349,7 +324,7 @@ public class SubjectTransactionWriterTests
     {
         // Arrange
         var context = CreateContext();
-        var writer = new RevertUntilCanceledTransactionWriter(failFirstWriteOf: nameof(Person.LastName));
+        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.LastName) }, RevertsUntilCanceled = true };
         context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         using var transaction = await context.BeginTransactionAsync(
@@ -362,47 +337,17 @@ public class SubjectTransactionWriterTests
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
         string? landedFirstName = null;
         RunOutsideTransactionFlow(() => landedFirstName = person.FirstName);
+        writer.FailedPropertyNames.Clear();
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal("Ann", landedFirstName);
         Assert.Equal("Bob", person.FirstName);
         Assert.Equal("Kim", person.LastName);
-        Assert.Equal(2, writer.WrittenPropertyNames.Count);
-        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], writer.WrittenPropertyNames[1]);
-    }
-
-    /// <summary>
-    /// Accepts every write, except the first write of <c>failFirstWriteOf</c>, and completes a revert only when the
-    /// commit timeout cancels it.
-    /// </summary>
-    private sealed class RevertUntilCanceledTransactionWriter(string? failFirstWriteOf = null) : ITransactionWriter
-    {
-        /// <summary>Gets the property names passed to each write call, in call order.</summary>
-        public List<string[]> WrittenPropertyNames { get; } = [];
-
-        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            Memory<SubjectPropertyChange> changes,
-            TransactionRequirement requirement,
-            CancellationToken cancellationToken)
-        {
-            var failedPropertyName = WrittenPropertyNames.Count == 0 ? failFirstWriteOf : null;
-            var all = changes.ToArray();
-            WrittenPropertyNames.Add(all.Select(change => change.Property.Name).ToArray());
-            var failed = all.Where(change => change.Property.Name == failedPropertyName).ToArray();
-            var written = all.Where(change => change.Property.Name != failedPropertyName).ToArray();
-            Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
-            return new(new SourceWriteResult(written, failed, errors, RevertState: null));
-        }
-
-        public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(
-            IReadOnlyList<SubjectPropertyChange> written,
-            object? revertState,
-            CancellationToken cancellationToken)
-        {
-            await Task.Delay(Timeout.Infinite, cancellationToken);
-            return new SourceRevertResult([], []);
-        }
+        Assert.Equal(2, writer.WriteCalls);
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
+            writer.ReceivedPropertyNames);
     }
 
     [Fact]
@@ -410,14 +355,15 @@ public class SubjectTransactionWriterTests
     {
         // Arrange
         var context = CreateContext();
-        context.AddService<ITransactionWriter>(new FailingRevertTransactionWriter(nameof(FailingApplyDevice.PropertyB)));
-        var device = new FailingApplyDevice(context);
-        device.FailingProperties.Add(nameof(FailingApplyDevice.PropertyA));
-        device.FailingProperties.Add(nameof(FailingApplyDevice.PropertyB));
+        context.AddService<ITransactionWriter>(new CountingTransactionWriter { FailedRevertPropertyNames = { nameof(Person.LastName) } });
+        context.AddService(new ValueRejectingWriteInterceptor
+        {
+            Rejected = { (nameof(Person.FirstName), "Bob"), (nameof(Person.LastName), "Kim") }
+        });
+        var person = new Person(context);
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        device.PropertyA = "a";
-        device.PropertyB = "b";
-        device.ThrowingEnabled = true;
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
 
         // Act
         var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
@@ -425,7 +371,7 @@ public class SubjectTransactionWriterTests
 
         // Assert
         Assert.Equal(
-            [nameof(FailingApplyDevice.PropertyA), nameof(FailingApplyDevice.PropertyB), nameof(FailingApplyDevice.PropertyB)],
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name));
     }
 
@@ -435,14 +381,12 @@ public class SubjectTransactionWriterTests
         // Arrange
         var context = CreateContext();
         context.AddService<ITransactionWriter>(
-            new FailingRevertTransactionWriter(nameof(Person.FirstName), nameof(FailingApplyDevice.PropertyB)));
+            new CountingTransactionWriter { FailedRevertPropertyNames = { nameof(Person.FirstName), nameof(Person.LastName) } });
+        context.AddService(new ValueRejectingWriteInterceptor { Rejected = { (nameof(Person.LastName), "Kim") } });
         var person = new Person(context);
-        var device = new FailingApplyDevice(context);
-        device.FailingProperties.Add(nameof(FailingApplyDevice.PropertyB));
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
         person.FirstName = "Bob";
-        device.PropertyB = "b";
-        device.ThrowingEnabled = true;
+        person.LastName = "Kim";
 
         // Act
         var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
@@ -450,7 +394,7 @@ public class SubjectTransactionWriterTests
 
         // Assert
         Assert.Equal(
-            [nameof(FailingApplyDevice.PropertyB), nameof(Person.FirstName), nameof(FailingApplyDevice.PropertyB)],
+            [nameof(Person.LastName), nameof(Person.FirstName), nameof(Person.LastName)],
             exception.FailedChanges.Select(change => change.Property.Name));
     }
 

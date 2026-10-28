@@ -13,10 +13,16 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 public class SubjectTransactionHandlerUnchangedWriteTests
 {
     [Theory]
-    [InlineData(false, 1)]
-    [InlineData(true, 2)]
-    public async Task WhenDeferredAndUnchangedValueIsWritten_ThenEveryCheckReceivesItAfterPendingChanges(
-        bool withWriter, int expectedChecks)
+    [InlineData(TransactionCheckMode.Immediate, false, false)]
+    [InlineData(TransactionCheckMode.Immediate, false, true)]
+    [InlineData(TransactionCheckMode.Immediate, true, false)]
+    [InlineData(TransactionCheckMode.Immediate, true, true)]
+    [InlineData(TransactionCheckMode.Deferred, false, false)]
+    [InlineData(TransactionCheckMode.Deferred, false, true)]
+    [InlineData(TransactionCheckMode.Deferred, true, false)]
+    [InlineData(TransactionCheckMode.Deferred, true, true)]
+    public async Task WhenPropertyIsWrittenWithItsLandedValue_ThenOnlyDeferredChecksReceiveItAfterPendingChanges(
+        TransactionCheckMode checkMode, bool writtenBack, bool withWriter)
     {
         // Arrange
         var changesSeen = new List<SubjectPropertyChange[]>();
@@ -31,25 +37,39 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         };
 
         // Act
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort, checkMode: checkMode);
+        if (writtenBack)
+        {
+            person.FirstName = "Bob";
+        }
+
         person.FirstName = "Ann";
         person.LastName = "Kim";
         var pendingChanges = transaction.GetPendingChanges();
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
+        // A write back is captured in both modes, a write of the unchanged value only in Deferred mode.
+        var deferred = checkMode == TransactionCheckMode.Deferred;
+        object?[] expectedCaptures = writtenBack || deferred ? ["Ann", "Kim"] : ["Kim"];
+        Assert.Equal(writtenBack ? ["Bob", .. expectedCaptures] : expectedCaptures, handler.Captured.Select(capture => capture.Value));
         Assert.Equal([nameof(Person.LastName)], pendingChanges.Select(change => change.Property.Name));
-        Assert.Equal([nameof(Person.FirstName), nameof(Person.LastName)], handler.Captured.Select(capture => capture.Property.Name));
-        Assert.Equal(expectedChecks, changesSeen.Count);
+        Assert.Equal(withWriter ? 2 : 1, changesSeen.Count);
         Assert.All(changesSeen, changes =>
         {
-            Assert.Equal([nameof(Person.LastName), nameof(Person.FirstName)], changes.Select(change => change.Property.Name));
-            Assert.Equal("Ann", changes[1].GetOldValue<string>());
-            Assert.Equal("Ann", changes[1].GetNewValue<string>());
+            Assert.Equal(
+                deferred ? [nameof(Person.LastName), nameof(Person.FirstName)] : [nameof(Person.LastName)],
+                changes.Select(change => change.Property.Name));
+            Assert.Equal("Kim", changes[0].GetNewValue<string>());
+            if (deferred)
+            {
+                Assert.Equal("Ann", changes[1].GetOldValue<string>());
+                Assert.Equal("Ann", changes[1].GetNewValue<string>());
+            }
         });
-        Assert.Equal(Enumerable.Repeat<string?>("Ann", expectedChecks), firstNamesSeen);
+        Assert.All(firstNamesSeen, firstName => Assert.Equal("Ann", firstName));
         Assert.Equal(withWriter ? [nameof(Person.LastName)] : [], writer.ReceivedPropertyNames);
+        Assert.Equal("Ann", person.FirstName);
         Assert.Equal("Kim", person.LastName);
     }
 
@@ -163,32 +183,6 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         Assert.Equal("Lee", person.LastName);
     }
 
-    [Fact]
-    public async Task WhenDeferredAndPendingChangeIsWrittenBack_ThenCommitCheckReceivesLandedValue()
-    {
-        // Arrange
-        var changesSeen = new List<SubjectPropertyChange[]>();
-        var context = CreateContext(out var handler);
-        var person = new Person(context) { FirstName = "Ann" };
-        handler.OnCommittingAction = (_, changes) => changesSeen.Add(changes);
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
-        person.FirstName = "Bob";
-        person.FirstName = "Ann";
-        var pendingChanges = transaction.GetPendingChanges();
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Empty(pendingChanges);
-        var change = Assert.Single(Assert.Single(changesSeen));
-        Assert.Equal(nameof(Person.FirstName), change.Property.Name);
-        Assert.Equal("Ann", change.GetOldValue<string>());
-        Assert.Equal("Ann", change.GetNewValue<string>());
-        Assert.Equal("Ann", person.FirstName);
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -221,11 +215,8 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         // Arrange
         var handler = new RecordingHandler();
         var transactionContext = CreateContext();
-        var subjectContext = InterceptorSubjectContext.Create();
-        subjectContext.AddService<ITransactionHandler>(handler);
-        subjectContext.AddFallbackContext(transactionContext);
         var first = new Person(transactionContext) { FirstName = "Ann" };
-        var second = new Person(subjectContext);
+        var second = new Person(CreateSubjectContext(transactionContext, handler));
         SubjectPropertyChange[]? changesSeen = null;
         handler.OnCommittingAction = (_, changes) => changesSeen = changes;
 
@@ -340,23 +331,6 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         Assert.Equal(0, handler.CommittingCalls);
         Assert.Equal("Carl", person.FirstName);
         Assert.Equal("Lee", person.LastName);
-    }
-
-    [Fact]
-    public async Task WhenImmediateAndUnchangedValueIsWritten_ThenHandlersAreNotCalled()
-    {
-        // Arrange
-        var context = CreateContext(out var handler);
-        var person = new Person(context) { FirstName = "Ann" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Ann";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Empty(handler.Captured);
-        Assert.Equal(0, handler.CommittingCalls);
     }
 
     [Fact]

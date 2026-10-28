@@ -66,10 +66,12 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     [Theory]
     [InlineData(TransactionFailureHandling.BestEffort)]
     [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenPreApplyCheckRejectsChange_ThenNoApplyRunsAndTransactionIsTerminal(TransactionFailureHandling failureHandling)
+    public async Task WhenPreApplyCheckRejectsChange_ThenNoApplyRunsWriterMarkedSlotsAreReportedAndTransactionIsTerminal(
+        TransactionFailureHandling failureHandling)
     {
         // Arrange
-        var writer = new CountingTransactionWriter { UnwrittenPropertyNames = { nameof(Person.FirstName) } };
+        var source = new object();
+        var writer = new CountingTransactionWriter { ConfirmingSource = source, UnwrittenPropertyNames = { nameof(Person.FirstName) } };
         var context = CreateContext(out var handler, writer);
         handler.RejectPreApplyCheck(nameof(Person.LastName), "invalid last name");
         var probe = new CommitWriteProbe(handler);
@@ -89,10 +91,13 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         Assert.Empty(probe.Writes);
         Assert.Empty(exception.AppliedChanges);
         Assert.Equal(
-            [nameof(Person.FirstName), nameof(Person.LastName)],
-            exception.FailedChanges.Select(change => change.Property.Name));
+            [(nameof(Person.FirstName), ChangeOriginKind.Local), (nameof(Person.LastName), ChangeOriginKind.Confirmed)],
+            exception.FailedChanges.Select(change => (change.Property.Name, change.Origin.Kind)));
+        Assert.Same(source, exception.FailedChanges[1].Origin.Source);
         Assert.Equal("invalid last name", Assert.Single(exception.Errors).Message);
-        Assert.Equal(nameof(Person.LastName), Assert.Single(writer.Reverted).Property.Name);
+        var reverted = Assert.Single(writer.Reverted);
+        Assert.Equal(nameof(Person.LastName), reverted.Property.Name);
+        Assert.Equal(ChangeOriginKind.Confirmed, reverted.Origin.Kind);
 
         var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await transaction.CommitAsync(CancellationToken.None));
@@ -137,8 +142,10 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         Assert.Equal(nameof(Person.FirstName), Assert.Single(writer.Reverted).Property.Name);
     }
 
-    [Fact]
-    public async Task WhenEverySourceWriteFails_ThenOnCommittingIsNotCalledAgainAndNothingIsApplied()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenEverySourceWriteFails_ThenOnCommittingIsNotCalledAgainAndFailedSourceWritesAreReported(bool disposedDuringWrite)
     {
         // Arrange
         var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.FirstName) } };
@@ -147,29 +154,11 @@ public class SubjectTransactionHandlerPreApplyCheckTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+        if (disposedDuringWrite)
+        {
+            writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
+        }
 
-        // Assert
-        Assert.Equal(1, handler.CommittingCalls);
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Empty(exception.AppliedChanges);
-        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.Equal("source write failed", Assert.Single(exception.Errors).Message);
-        Assert.Empty(writer.Reverted);
-    }
-
-    [Fact]
-    public async Task WhenEverySourceWriteFailsAndTransactionIsDisposedFromAnotherFlowDuringWrite_ThenFailedSourceWritesAreReported()
-    {
-        // Arrange
-        var writer = new CountingTransactionWriter { FailedPropertyNames = { nameof(Person.FirstName) } };
-        var context = CreateContext(out var handler, writer);
-        var person = new Person(context) { FirstName = "Ann" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        writer.DuringWrite = () => RunOutsideTransactionFlow(transaction.Dispose);
         person.FirstName = "Bob";
         var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
@@ -301,125 +290,35 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     }
 
     [Fact]
-    public async Task WhenWriterMarksAcceptedSlotsAsConfirmed_ThenCommitCheckSeesCapturedAndPreApplyCheckConfirmedOrigin()
+    public async Task WhenWriterMarksAcceptedSlotsAsConfirmed_ThenOnlyThePreApplyCheckSeesTheirConfirmedOrigin()
     {
         // Arrange
         var source = new object();
-        var originsSeen = new List<ChangeOrigin[]>();
-        var context = CreateContext(out var handler, new CountingTransactionWriter { ConfirmingSource = source });
-        handler.OnCommittingAction = (_, changes) => originsSeen.Add(changes.Select(change => change.Origin).ToArray());
+        var originsSeen = new List<(string Property, ChangeOrigin Origin)[]>();
+        var writer = new CountingTransactionWriter { ConfirmingSource = source, UnwrittenPropertyNames = { nameof(Person.LastName) } };
+        var context = CreateContext(out var handler, writer);
+        handler.OnCommittingAction = (_, changes) =>
+            originsSeen.Add(changes.Select(change => (change.Property.Name, change.Origin)).ToArray());
         var notifications = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
-        var person = new Person(context) { FirstName = "Ann" };
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
         notifications.Clear();
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "Bob";
+        person.LastName = "Kim";
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(2, originsSeen.Count);
-        Assert.Equal(ChangeOriginKind.Local, Assert.Single(originsSeen[0]).Kind);
-        var preApplyOrigin = Assert.Single(originsSeen[1]);
-        Assert.Equal(ChangeOriginKind.Confirmed, preApplyOrigin.Kind);
-        Assert.Same(source, preApplyOrigin.Source);
+        Assert.All(originsSeen[0], seen => Assert.Equal(ChangeOriginKind.Local, seen.Origin.Kind));
+        Assert.Equal(
+            [(nameof(Person.FirstName), ChangeOriginKind.Confirmed), (nameof(Person.LastName), ChangeOriginKind.Local)],
+            originsSeen[1].Select(seen => (seen.Property, seen.Origin.Kind)));
+        Assert.Same(source, originsSeen[1][0].Origin.Source);
         var applied = Assert.Single(notifications, change => change.Property.Name == nameof(Person.FirstName));
         Assert.Equal(ChangeOriginKind.Confirmed, applied.Origin.Kind);
         Assert.Same(source, applied.Origin.Source);
-    }
-
-    [Fact]
-    public async Task WhenOneChangeHasNoSource_ThenPreApplyCheckKeepsItsCapturedOrigin()
-    {
-        // Arrange
-        var source = new object();
-        var writer = new CountingTransactionWriter { ConfirmingSource = source };
-        writer.UnwrittenPropertyNames.Add(nameof(Person.LastName));
-        var context = CreateContext(out var handler, writer);
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        var preApplyOrigins = new Dictionary<string, ChangeOrigin>();
-        handler.OnCommittingAction = (_, changes) =>
-        {
-            if (handler.CommittingCalls == 2)
-            {
-                foreach (var change in changes)
-                {
-                    preApplyOrigins[change.Property.Name] = change.Origin;
-                }
-            }
-        };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        person.LastName = "Kim";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(ChangeOriginKind.Confirmed, preApplyOrigins[nameof(Person.FirstName)].Kind);
-        Assert.Same(source, preApplyOrigins[nameof(Person.FirstName)].Source);
-        Assert.Equal(ChangeOriginKind.Local, preApplyOrigins[nameof(Person.LastName)].Kind);
-    }
-
-    [Fact]
-    public async Task WhenPreApplyCheckRejectsChangeOfMarkingWriter_ThenWriterMarkedSlotIsReported()
-    {
-        // Arrange
-        var source = new object();
-        var writer = new CountingTransactionWriter { ConfirmingSource = source };
-        var context = CreateContext(out var handler, writer);
-        handler.RejectPreApplyCheck(new InvalidOperationException("rejected"));
-        var person = new Person(context) { FirstName = "Ann" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        Assert.Equal("Ann", person.FirstName);
-        var failed = Assert.Single(exception.FailedChanges);
-        Assert.Equal(ChangeOriginKind.Confirmed, failed.Origin.Kind);
-        Assert.Same(source, failed.Origin.Source);
-        Assert.Equal(ChangeOriginKind.Confirmed, Assert.Single(writer.Reverted).Origin.Kind);
-    }
-
-    [Theory]
-    [InlineData(false, 1)]
-    [InlineData(true, 2)]
-    public async Task WhenChangeIsCanceledByWriteBack_ThenNoCheckReceivesItAndEachReadsLandedValue(bool withWriter, int expectedChecks)
-    {
-        // Arrange
-        var changesSeen = new List<SubjectPropertyChange[]>();
-        var firstNamesSeen = new List<string?>();
-        var writer = new CountingTransactionWriter();
-        var context = CreateContext(out var handler, withWriter ? writer : null);
-        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
-        handler.OnCommittingAction = (_, changes) =>
-        {
-            changesSeen.Add(changes);
-            firstNamesSeen.Add(person.FirstName);
-        };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        person.FirstName = "Ann";
-        person.LastName = "Kim";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(expectedChecks, changesSeen.Count);
-        Assert.All(changesSeen, changes =>
-        {
-            var change = Assert.Single(changes);
-            Assert.Equal(nameof(Person.LastName), change.Property.Name);
-            Assert.Equal("Kim", change.GetNewValue<string>());
-        });
-        Assert.Equal(Enumerable.Repeat<string?>("Ann", expectedChecks), firstNamesSeen);
-        Assert.Equal(withWriter ? 1 : 0, writer.WriteCalls);
-        Assert.Equal("Ann", person.FirstName);
-        Assert.Equal("Kim", person.LastName);
     }
 }
