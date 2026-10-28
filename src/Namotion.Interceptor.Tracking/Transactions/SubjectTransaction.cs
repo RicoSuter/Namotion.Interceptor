@@ -203,31 +203,25 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             var result = new SubjectPropertyChange[changeCount];
-            CopyPendingChanges(result, excluded: null);
+            CopyPendingChanges(result);
             return result;
         }
     }
 
     /// <summary>
-    /// Copies the pending changes whose property is not in <paramref name="excluded"/> to
-    /// <paramref name="destination"/> in insertion order, and returns their number. Must be called under
+    /// Copies the pending changes to <paramref name="destination"/> in insertion order. Must be called under
     /// <see cref="_pendingChangesLock"/>.
     /// </summary>
-    private int CopyPendingChanges(Span<SubjectPropertyChange> destination, HashSet<PropertyReference>? excluded)
+    private void CopyPendingChanges(Span<SubjectPropertyChange> destination)
     {
-        var count = 0;
         if (_pendingChanges is not null)
         {
+            var index = 0;
             foreach (var change in _pendingChanges.Values)
             {
-                if (excluded is null || !excluded.Contains(change.Property))
-                {
-                    destination[count++] = change;
-                }
+                destination[index++] = change;
             }
         }
-
-        return count;
     }
 
     /// <summary>
@@ -822,7 +816,7 @@ public sealed class SubjectTransaction : IDisposable
         // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
         // final set is checked again right before it lands. Its reads return the pending values of every checked
         // change, so a rejection invalidates the whole checked set in both failure handling modes.
-        var rejectionErrors = RunPreApplyCheck(failedSource);
+        var rejectionErrors = RunPreApplyCheck(changes.Span, failedSource);
         if (rejectionErrors is not null)
         {
             // Timeout not propagated here: a retry would lose the rejection, and once the local model changed
@@ -1141,7 +1135,7 @@ public sealed class SubjectTransaction : IDisposable
             // and the end of the commit.
             _isCommitting = true;
 
-            CopyPendingChanges(rentedArray, excluded: null);
+            CopyPendingChanges(rentedArray);
             if (checkOnlyCount > 0)
             {
                 _checkOnlyChanges!.Values.CopyTo(rentedArray, changeCount);
@@ -1191,29 +1185,46 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Calls the handlers again right before the local apply with the changes that will be applied. Returns null when
-    /// they accept the set, or otherwise the errors of a thrown <see cref="SubjectTransactionException"/> that has
-    /// any, or the thrown exception itself.
+    /// Calls the handlers again right before the local apply with the snapshot slots of the changes that will be
+    /// applied. Returns null when they accept the set, or otherwise the errors of a thrown
+    /// <see cref="SubjectTransactionException"/> that has any, or the thrown exception itself.
     /// </summary>
-    private IReadOnlyList<Exception>? RunPreApplyCheck(IReadOnlyList<SubjectPropertyChange> failedSource)
+    private IReadOnlyList<Exception>? RunPreApplyCheck(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange> failedSource)
     {
         if (_handlerSet.Handlers.Length == 0)
         {
             return null;
         }
 
-        // The writer marks accepted snapshot slots as Confirmed, but handlers must see the captured origin, which the
-        // pending changes still hold. Changes whose source write failed do not land, so the handlers neither receive
-        // them nor read their values.
+        // A dispose from another flow mid-commit drops the pending values this check reads, so the set is rejected
+        // instead of landing unchecked.
+        if (IsDisposed)
+        {
+            return [new ObjectDisposedException(nameof(SubjectTransaction))];
+        }
+
+        // The snapshot slots carry the origin each change is applied with: the writer marked the source-accepted ones
+        // Confirmed. Changes whose source write failed do not land, so the handlers neither receive them nor read
+        // their values.
         var failedProperties = SubjectPropertyChangeOperations.CreatePropertySet(failedSource);
-        var (rentedArray, checkedCount) = RentLandingPendingChanges(failedProperties);
+        SubjectPropertyChange[]? rentedArray = null;
         try
         {
-            if (checkedCount > 0)
+            var landingChanges = changes;
+            if (failedProperties is not null)
+            {
+                rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length);
+                var count = SubjectPropertyChangeOperations.CopyExcludingProperties(changes, failedProperties, rentedArray);
+                landingChanges = new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, count);
+            }
+
+            if (!landingChanges.IsEmpty)
             {
                 try
                 {
-                    RunHandlerCheck(new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, checkedCount), failedProperties, TransactionCheckStage.PreApply);
+                    RunHandlerCheck(landingChanges, failedProperties, TransactionCheckStage.PreApply);
                 }
                 catch (Exception exception)
                 {
@@ -1223,27 +1234,14 @@ public sealed class SubjectTransaction : IDisposable
                 }
             }
 
-            // A dispose from another flow mid-commit drops the pending values this check reads, so the set is rejected
-            // instead of landing unchecked.
             return IsDisposed ? [new ObjectDisposedException(nameof(SubjectTransaction))] : null;
         }
         finally
         {
-            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
-        }
-    }
-
-    /// <summary>
-    /// Copies the pending changes whose property is not in <paramref name="failedProperties"/> into a rented array, in
-    /// insertion order. The caller returns the array to <see cref="ArrayPool{T}.Shared"/>.
-    /// </summary>
-    private (SubjectPropertyChange[] RentedArray, int Count) RentLandingPendingChanges(
-        HashSet<PropertyReference>? failedProperties)
-    {
-        lock (_pendingChangesLock)
-        {
-            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(_pendingChanges?.Count ?? 0);
-            return (rentedArray, CopyPendingChanges(rentedArray, failedProperties));
+            if (rentedArray is not null)
+            {
+                ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
+            }
         }
     }
 

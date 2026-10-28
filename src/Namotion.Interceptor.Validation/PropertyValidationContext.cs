@@ -1,9 +1,10 @@
 namespace Namotion.Interceptor.Validation;
 
 /// <summary>
-/// Validation input for a single property value. Origin is the attempted origin of the write (validation runs
-/// before the terminal write): Local for user writes, FromSource for inbound source applies. In the transaction
-/// handler checks (the commit check and the pre-apply check), Origin is the captured origin of the change.
+/// Validation input for a single property value. Origin is the attempted origin of the write: Local for user writes,
+/// FromSource for inbound source applies, and Confirmed with the accepting source for a commit's apply of a value a
+/// source accepted. In the commit check it is the captured origin of the change; in the pre-apply check it is the
+/// origin the change is applied with, Confirmed for a change a source accepted.
 /// </summary>
 public readonly struct PropertyValidationContext<TProperty>(
     PropertyReference property, TProperty value, ChangeOrigin origin)

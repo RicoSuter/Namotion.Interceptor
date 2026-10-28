@@ -370,9 +370,11 @@ An `ITransactionHandler` is called for each write a transaction captures and che
 | | Commit check | Pre-apply check |
 |-|--------------|-----------------|
 | Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
-| Receives | The final set, in commit order, followed in `Deferred` mode with `FailOnConflict` by an entry for each value written unchanged, whose old and new value are equal | Only the changes that will be applied, with their captured origins |
+| Receives | The final set, in commit order, followed in `Deferred` mode with `FailOnConflict` by an entry for each value written unchanged, whose old and new value are equal | Only the changes that will be applied, each with the origin it is applied with: `Confirmed` with the accepting source for a change a source accepted, the captured origin otherwise |
 | Skipped | When nothing is pending and, in `Deferred` mode with `FailOnConflict`, no value was written unchanged | When nothing will be applied, and in `Rollback` mode after a source write failure or writer error, which reverts every source anyway |
 | Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: written sources are reverted, nothing from the set lands, and the transaction is terminal, see the [Failure Table](#failure-table). A transaction disposed from another flow during the commit is rejected the same way, with an `ObjectDisposedException`. |
+
+To treat a source's acceptance as final, skip changes with a `Confirmed` origin. To ignore only inbound data, skip `FromSource`, which keeps the pre-apply check.
 
 The pre-apply check exists because writes outside transactions, such as inbound updates, are not blocked by a commit and can change what a handler reads while the sources are written; it narrows that window to the synchronous apply itself. It rejects the whole set because the other changes were checked against the rejected values. The exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the thrown exception itself, after any source write errors and before any revert errors.
 

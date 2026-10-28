@@ -253,6 +253,27 @@ internal static class SubjectPropertyChangeOperations
         return result ?? (IReadOnlyList<SubjectPropertyChange>)[];
     }
 
+    /// <summary>
+    /// Copies the changes in <paramref name="changes"/> whose property is not in <paramref name="excludedProperties"/>
+    /// to <paramref name="destination"/> in order, and returns their number.
+    /// </summary>
+    internal static int CopyExcludingProperties(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        HashSet<PropertyReference> excludedProperties,
+        Span<SubjectPropertyChange> destination)
+    {
+        var count = 0;
+        foreach (var change in changes)
+        {
+            if (!excludedProperties.Contains(change.Property))
+            {
+                destination[count++] = change;
+            }
+        }
+
+        return count;
+    }
+
     internal static IReadOnlyList<T> Concat<T>(params ReadOnlySpan<IReadOnlyList<T>> lists)
     {
         var total = 0;

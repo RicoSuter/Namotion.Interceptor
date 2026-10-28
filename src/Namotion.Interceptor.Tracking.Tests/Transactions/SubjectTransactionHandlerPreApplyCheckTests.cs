@@ -278,13 +278,13 @@ public class SubjectTransactionHandlerPreApplyCheckTests
     }
 
     [Fact]
-    public async Task WhenWriterMarksAcceptedSlotsAsConfirmed_ThenBothChecksSeeTheCapturedOrigin()
+    public async Task WhenWriterMarksAcceptedSlotsAsConfirmed_ThenCommitCheckSeesCapturedAndPreApplyCheckConfirmedOrigin()
     {
         // Arrange
         var source = new object();
-        var originsSeen = new List<ChangeOriginKind[]>();
+        var originsSeen = new List<ChangeOrigin[]>();
         var context = CreateContext(out var handler, new CountingTransactionWriter { ConfirmingSource = source });
-        handler.OnCommittingAction = (_, changes) => originsSeen.Add(changes.Select(change => change.Origin.Kind).ToArray());
+        handler.OnCommittingAction = (_, changes) => originsSeen.Add(changes.Select(change => change.Origin).ToArray());
         var notifications = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
         var person = new Person(context) { FirstName = "Ann" };
@@ -297,10 +297,46 @@ public class SubjectTransactionHandlerPreApplyCheckTests
 
         // Assert
         Assert.Equal(2, originsSeen.Count);
-        Assert.All(originsSeen, origins => Assert.Equal([ChangeOriginKind.Local], origins));
+        Assert.Equal(ChangeOriginKind.Local, Assert.Single(originsSeen[0]).Kind);
+        var preApplyOrigin = Assert.Single(originsSeen[1]);
+        Assert.Equal(ChangeOriginKind.Confirmed, preApplyOrigin.Kind);
+        Assert.Same(source, preApplyOrigin.Source);
         var applied = Assert.Single(notifications, change => change.Property.Name == nameof(Person.FirstName));
         Assert.Equal(ChangeOriginKind.Confirmed, applied.Origin.Kind);
         Assert.Same(source, applied.Origin.Source);
+    }
+
+    [Fact]
+    public async Task WhenOneChangeHasNoSource_ThenPreApplyCheckKeepsItsCapturedOrigin()
+    {
+        // Arrange
+        var source = new object();
+        var writer = new CountingTransactionWriter { ConfirmingSource = source };
+        writer.UnwrittenPropertyNames.Add(nameof(Person.LastName));
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        var preApplyOrigins = new Dictionary<string, ChangeOrigin>();
+        handler.OnCommittingAction = (_, changes) =>
+        {
+            if (handler.CommittingCalls == 2)
+            {
+                foreach (var change in changes)
+                {
+                    preApplyOrigins[change.Property.Name] = change.Origin;
+                }
+            }
+        };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ChangeOriginKind.Confirmed, preApplyOrigins[nameof(Person.FirstName)].Kind);
+        Assert.Same(source, preApplyOrigins[nameof(Person.FirstName)].Source);
+        Assert.Equal(ChangeOriginKind.Local, preApplyOrigins[nameof(Person.LastName)].Kind);
     }
 
     [Fact]

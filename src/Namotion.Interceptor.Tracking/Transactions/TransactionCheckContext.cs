@@ -23,7 +23,8 @@ public readonly ref struct TransactionCheckContext
     /// <see cref="TransactionConflictBehavior.FailOnConflict"/> followed by an entry for each property written with its
     /// unchanged value, whose old and new value are equal, which conflict detection checks and the commit neither
     /// writes, applies nor publishes. In the <see cref="TransactionCheckStage.PreApply"/> stage: only the changes that
-    /// will be applied.
+    /// will be applied, each with the origin it is applied with: <see cref="ChangeOriginKind.Confirmed"/> with the
+    /// accepting source for a change a source accepted, the captured origin otherwise.
     /// </summary>
     public ReadOnlySpan<SubjectPropertyChange> Changes { get; }
 

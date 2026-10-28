@@ -311,6 +311,59 @@ public class TransactionValidationTests
         Assert.Single(writer.Reverted);
     }
 
+    public enum OriginRule
+    {
+        IgnoresOrigin,
+        SkipsNonConfirmed,
+        SkipsNonLocal
+    }
+
+    [Theory]
+    [InlineData(OriginRule.IgnoresOrigin, true)]
+    [InlineData(OriginRule.SkipsNonConfirmed, true)]
+    [InlineData(OriginRule.SkipsNonLocal, false)]
+    public async Task WhenSourceAcceptedTheValueAndTheLimitDropsMeanwhile_ThenPreApplyCheckGetsConfirmedAndFollowsTheValidator(
+        OriginRule rule, bool rejects)
+    {
+        // Arrange
+        Func<ChangeOrigin, bool> skips = rule switch
+        {
+            OriginRule.SkipsNonConfirmed => origin => origin.Kind != ChangeOriginKind.Confirmed,
+            OriginRule.SkipsNonLocal => origin => origin.Kind != ChangeOriginKind.Local,
+            _ => _ => false
+        };
+        var validator = new OriginAwareMotorSpeedValidator(skips);
+        var context = CreateContext(validator);
+        var motor = new Motor(context) { MaxAllowedSpeed = 200 };
+        var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MaxAllowedSpeed = 100, confirmWrites: true);
+        context.AddService<ITransactionWriter>(writer);
+        validator.Origins.Clear();
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        motor.MotorSpeed = 150;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal([ChangeOriginKind.Local, ChangeOriginKind.Confirmed], validator.Origins.Select(origin => origin.Kind));
+        Assert.Same(writer, validator.Origins[1].Source);
+        if (rejects)
+        {
+            var failure = Assert.IsType<SubjectTransactionException>(exception);
+            Assert.Equal(nameof(Motor.MotorSpeed), Assert.Single(failure.FailedChanges).Property.Name);
+            Assert.Equal(0, motor.MotorSpeed);
+            Assert.Single(writer.Reverted);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+        else
+        {
+            Assert.Null(exception);
+            Assert.Equal(150, motor.MotorSpeed);
+            Assert.Empty(writer.Reverted);
+        }
+    }
+
     [Fact]
     public void WhenValidationExceptionIsCreatedWithoutErrors_ThenItThrows()
     {
@@ -651,6 +704,28 @@ public class TransactionValidationTests
     }
 
     /// <summary>
+    /// Checks MotorSpeed against MaxAllowedSpeed like <see cref="MotorSpeedValidator"/>, records the origin of every
+    /// MotorSpeed value it receives, and skips the values whose origin <paramref name="skips"/> accepts.
+    /// </summary>
+    private sealed class OriginAwareMotorSpeedValidator(Func<ChangeOrigin, bool> skips) : IPropertyValidator
+    {
+        private readonly MotorSpeedValidator _inner = new();
+
+        public List<ChangeOrigin> Origins { get; } = [];
+
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            if (context.Property.Name != nameof(Motor.MotorSpeed))
+            {
+                return [];
+            }
+
+            Origins.Add(context.Origin);
+            return skips(context.Origin) ? [] : _inner.Validate(in context);
+        }
+    }
+
+    /// <summary>
     /// Records the property, type argument and value of every call and delegates the validation to
     /// <paramref name="inner"/>, or accepts every value without one.
     /// </summary>
@@ -684,9 +759,10 @@ public class TransactionValidationTests
 
     /// <summary>
     /// Accepts every change and records its calls. Optionally runs an update from a flow without the transaction while
-    /// the source write is in flight, like an inbound source update.
+    /// the source write is in flight, like an inbound source update, and optionally marks the accepted snapshot slots
+    /// as confirmed by this writer in place, as the writer contract requires.
     /// </summary>
-    private sealed class TestTransactionWriter(Action? updateDuringWrite = null) : ITransactionWriter
+    private sealed class TestTransactionWriter(Action? updateDuringWrite = null, bool confirmWrites = false) : ITransactionWriter
     {
         public int WriteCount { get; private set; }
 
@@ -703,6 +779,15 @@ public class TransactionValidationTests
             if (updateDuringWrite is { } update)
             {
                 await RunWithoutAsyncLocalFlowAsync(update, cancellationToken);
+            }
+
+            if (confirmWrites)
+            {
+                var span = changes.Span;
+                for (var index = 0; index < span.Length; index++)
+                {
+                    span[index] = span[index].WithOrigin(ChangeOrigin.Confirmed(this));
+                }
             }
 
             Written.AddRange(changes.ToArray());
