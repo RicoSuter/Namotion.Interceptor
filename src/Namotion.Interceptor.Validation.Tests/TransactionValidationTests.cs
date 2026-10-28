@@ -193,6 +193,38 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenValidationIsRegisteredOnTransactionContextAfterBegin_ThenSubjectContextValidationStillChecksTheSet()
+    {
+        // Arrange
+        var transactionContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subjectContext = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => new MotorSpeedValidator());
+        subjectContext.AddFallbackContext(transactionContext);
+        var good = new Motor(subjectContext);
+        var bad = new Motor(subjectContext);
+        using var transaction = await transactionContext.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
+        transactionContext.WithPropertyValidation();
+        good.MotorSpeed = 10;
+        bad.MotorSpeed = 150;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        transaction.Dispose();
+
+        // Assert
+        Assert.Same(bad, Assert.Single(exception.FailedChanges).Property.Subject);
+        Assert.Equal(0, good.MotorSpeed);
+        Assert.Equal(0, bad.MotorSpeed);
+    }
+
+    [Fact]
     public async Task WhenImmediateAndLimitIsLoweredLater_ThenCommitRejectsFinalSet()
     {
         // Arrange

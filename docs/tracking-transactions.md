@@ -359,7 +359,7 @@ An `ITransactionHandler` is called for each write a transaction captures and che
 **Resolution.**
 - A handler takes part when it is registered on the transaction's context, or on the context of a subject written in the transaction, for example a subject's own context that reaches the transaction's context through a fallback.
 - Handlers of the transaction's context are resolved when the transaction begins. Those of a subject's context are resolved when a subject of it is first written, and again on its next write after the context's services or fallback contexts change, for example when the subject is attached under another parent.
-- Whether a handler registered while a transaction is open takes part in it is undefined. A handler registered on the transaction's context can even keep an equal handler of a subject context out, so register handlers before beginning transactions.
+- Whether a handler registered while a transaction is open takes part in it is undefined, but a registration never removes a handler that takes part otherwise. Register handlers before beginning transactions.
 - A resolved handler takes part for the rest of the transaction: `OnCapturing` is called for later writes to any subject, and `OnCommitting` receives the whole final set. To handle only some subjects, filter by `property.Subject` (`change.Property.Subject` for each of `context.Changes` in `OnCommitting`).
 - Handlers are called in the order they were resolved, each context's in its service order. A handler that `Equals` one already taking part is not added again. `ValidationInterceptor` equals any instance of its type, so validation registered on several contexts of a fallback chain runs once.
 

@@ -40,7 +40,7 @@ internal struct TransactionHandlerSet
     internal ITransactionHandler[] Handlers => Volatile.Read(ref _handlers);
 
     /// <summary>
-    /// Adds the handlers of <paramref name="subjectContext"/> that are not registered on the transaction's context.
+    /// Adds the handlers of <paramref name="subjectContext"/> that the set does not hold yet.
     /// Returns false when handlers had to be added but were not, because the transaction no longer captures or, with
     /// <paramref name="skipWhileCommitting"/>, a commit is in progress.
     /// </summary>
@@ -82,7 +82,7 @@ internal struct TransactionHandlerSet
             var subjectHandlers = ImmutableCollectionsMarshal.AsArray(subjectContext.GetServices<ITransactionHandler>()) ?? [];
             if (!ReferenceEquals(subjectHandlers, Volatile.Read(ref _lastIncludedHandlers)))
             {
-                if (!TryInclude(subjectHandlers, transactionContext.GetServices<ITransactionHandler>().AsSpan(), transaction, skipWhileCommitting))
+                if (!TryInclude(subjectHandlers, transaction, skipWhileCommitting))
                 {
                     return false;
                 }
@@ -96,14 +96,13 @@ internal struct TransactionHandlerSet
     }
 
     /// <summary>
-    /// Adds the handlers of <paramref name="subjectHandlers"/> that are in neither the set nor
-    /// <paramref name="transactionContextHandlers"/>, so a handler registered on the transaction's context after it
-    /// began stays out. Returns false when there are additions and the transaction no longer captures, or a commit is
-    /// in progress and <paramref name="skipWhileCommitting"/> is true.
+    /// Adds the handlers of <paramref name="subjectHandlers"/> that are not in the set. A handler registered on the
+    /// transaction's context after it began can join this way, through a subject context that reaches it, but a
+    /// registration never removes a handler from the set. Returns false when there are additions and the transaction
+    /// no longer captures, or a commit is in progress and <paramref name="skipWhileCommitting"/> is true.
     /// </summary>
     private bool TryInclude(
         ReadOnlySpan<ITransactionHandler> subjectHandlers,
-        ReadOnlySpan<ITransactionHandler> transactionContextHandlers,
         SubjectTransaction transaction,
         bool skipWhileCommitting)
     {
@@ -112,7 +111,7 @@ internal struct TransactionHandlerSet
             // Handler equality can run user code, so the union is built before taking the transaction lock and
             // published only when no concurrent inclusion replaced the handlers in between.
             var handlers = Volatile.Read(ref _handlers);
-            var union = CreateUnion(handlers, subjectHandlers, transactionContextHandlers);
+            var union = CreateUnion(handlers, subjectHandlers);
             if (union is null)
             {
                 // Inclusions only append, so every later set holds these handlers too.
@@ -141,13 +140,12 @@ internal struct TransactionHandlerSet
     /// </summary>
     private static ITransactionHandler[]? CreateUnion(
         ITransactionHandler[] handlers,
-        ReadOnlySpan<ITransactionHandler> subjectHandlers,
-        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+        ReadOnlySpan<ITransactionHandler> subjectHandlers)
     {
         var additionCount = 0;
         for (var index = 0; index < subjectHandlers.Length; index++)
         {
-            if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+            if (IsAddition(subjectHandlers, index, handlers))
             {
                 additionCount++;
             }
@@ -163,7 +161,7 @@ internal struct TransactionHandlerSet
         var count = handlers.Length;
         for (var index = 0; index < subjectHandlers.Length; index++)
         {
-            if (IsAddition(subjectHandlers, index, handlers, transactionContextHandlers))
+            if (IsAddition(subjectHandlers, index, handlers))
             {
                 union[count++] = subjectHandlers[index];
             }
@@ -175,13 +173,10 @@ internal struct TransactionHandlerSet
     private static bool IsAddition(
         ReadOnlySpan<ITransactionHandler> subjectHandlers,
         int index,
-        ReadOnlySpan<ITransactionHandler> handlers,
-        ReadOnlySpan<ITransactionHandler> transactionContextHandlers)
+        ReadOnlySpan<ITransactionHandler> handlers)
     {
         var handler = subjectHandlers[index];
-        return !Contains(handlers, handler) &&
-            !Contains(transactionContextHandlers, handler) &&
-            !Contains(subjectHandlers[..index], handler);
+        return !Contains(handlers, handler) && !Contains(subjectHandlers[..index], handler);
     }
 
     private static bool Contains(ReadOnlySpan<ITransactionHandler> handlers, ITransactionHandler handler)
