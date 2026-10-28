@@ -239,6 +239,27 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("Lee", person.LastName);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenCommitHasConflictAndHandlerRejects_ThenRejectionIsThrown(bool withWriter)
+    {
+        // Arrange
+        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
+        handler.RejectCommit = true;
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        RunOutsideTransactionFlow(() => person.FirstName = "Eve");
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal("rejected", exception.Message);
+    }
+
     [Fact]
     public async Task WhenHandlerWritesDuringOnCommitting_ThenWritesThrowAndAreNotCaptured()
     {
@@ -435,6 +456,30 @@ public class SubjectTransactionHandlerTests
         Assert.Equal(
             withWriter ? [nameof(Person.FirstName), nameof(Person.LastName)] : [],
             writer.Reverted.Select(change => change.Property.Name));
+    }
+
+    [Fact]
+    public async Task WhenLocalAndSourceRevertFailForOnePropertyAfterHandlersCheckedTheSet_ThenItIsListedTwice()
+    {
+        // Arrange
+        var context = CreateContext(out _, new FailingRevertTransactionWriter(nameof(Person.FirstName)));
+        var rejectingInterceptor = new ValueRejectingWriteInterceptor();
+        context.AddService(rejectingInterceptor);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        rejectingInterceptor.Rejected.Add((nameof(Person.LastName), "Kim"));
+        rejectingInterceptor.Rejected.Add((nameof(Person.FirstName), "Ann"));
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(
+            [nameof(Person.FirstName), nameof(Person.LastName), nameof(Person.FirstName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
     }
 
     [Fact]

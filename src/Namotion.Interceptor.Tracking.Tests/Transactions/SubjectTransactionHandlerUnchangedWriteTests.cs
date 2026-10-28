@@ -54,6 +54,28 @@ public class SubjectTransactionHandlerUnchangedWriteTests
     }
 
     [Fact]
+    public async Task WhenUnchangedValueChangesDuringSourceWrite_ThenPreApplyCheckReadsLandedValue()
+    {
+        // Arrange
+        var firstNamesSeen = new List<string?>();
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        handler.OnCommittingAction = (_, _) => firstNamesSeen.Add(person.FirstName);
+        writer.DuringWrite = () => RunOutsideTransactionFlow(() => person.FirstName = "Eve");
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
+        person.FirstName = "Ann";
+        person.LastName = "Kim";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Ann", "Eve"], firstNamesSeen);
+    }
+
+    [Fact]
     public async Task WhenLandedValueReadOfUnchangedValueThrowsInPreApplyCheck_ThenSetIsRejectedAndTransactionIsTerminal()
     {
         // Arrange

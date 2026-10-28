@@ -64,6 +64,32 @@ public class SubjectTransactionHandlerResolutionTests
     }
 
     [Fact]
+    public async Task WhenHandlerIsRegisteredOnTwoSubjectContexts_ThenItIsCalledOncePerEvent()
+    {
+        // Arrange
+        var handler = new RecordingHandler();
+        var transactionContext = CreateContext();
+        var firstContext = InterceptorSubjectContext.Create();
+        firstContext.AddService<ITransactionHandler>(handler);
+        firstContext.AddFallbackContext(transactionContext);
+        var secondContext = InterceptorSubjectContext.Create();
+        secondContext.AddService<ITransactionHandler>(handler);
+        secondContext.AddFallbackContext(transactionContext);
+        var first = new Person(firstContext);
+        var second = new Person(secondContext);
+
+        // Act
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        first.FirstName = "Ann";
+        second.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, handler.Captured.Count);
+        Assert.Equal(1, handler.CommittingCalls);
+    }
+
+    [Fact]
     public async Task WhenEqualHandlersAreRegisteredOnSubjectContextAndTransactionContext_ThenOnlyTheFirstTakesPart()
     {
         // Arrange

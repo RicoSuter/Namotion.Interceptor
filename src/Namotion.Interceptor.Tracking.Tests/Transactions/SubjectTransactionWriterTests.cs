@@ -429,27 +429,29 @@ public class SubjectTransactionWriterTests
             exception.FailedChanges.Select(change => change.Property.Name));
     }
 
-    /// <summary>
-    /// Accepts every write and reports the revert of the named property as failed.
-    /// </summary>
-    private sealed class FailingRevertTransactionWriter(string failedRevertPropertyName) : ITransactionWriter
+    [Fact]
+    public async Task WhenApplyAndSourceRevertFailForOnePropertyInRollbackWithoutHandlers_ThenItIsListedOnce()
     {
-        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
-            Memory<SubjectPropertyChange> changes,
-            TransactionRequirement requirement,
-            CancellationToken cancellationToken)
-        {
-            return new(new SourceWriteResult(changes.ToArray(), [], [], RevertState: null));
-        }
+        // Arrange
+        var context = CreateContext();
+        context.AddService<ITransactionWriter>(
+            new FailingRevertTransactionWriter(nameof(Person.FirstName), nameof(FailingApplyDevice.PropertyB)));
+        var person = new Person(context);
+        var device = new FailingApplyDevice(context);
+        device.FailingProperties.Add(nameof(FailingApplyDevice.PropertyB));
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "Bob";
+        device.PropertyB = "b";
+        device.ThrowingEnabled = true;
 
-        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
-            IReadOnlyList<SubjectPropertyChange> written,
-            object? revertState,
-            CancellationToken cancellationToken)
-        {
-            var failed = written.Where(change => change.Property.Name == failedRevertPropertyName).ToArray();
-            return new(new SourceRevertResult(failed, [new InvalidOperationException("revert failed")]));
-        }
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(
+            [nameof(FailingApplyDevice.PropertyB), nameof(Person.FirstName)],
+            exception.FailedChanges.Select(change => change.Property.Name));
     }
 
     private static void AssertDerivedChange(

@@ -145,6 +145,24 @@ public class TransactionValidationTests
     }
 
     [Fact]
+    public async Task WhenOneValueIsInvalid_ThenItsErrorIsTheInnerException()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        motor.MotorSpeed = 150;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Same(Assert.Single(exception.Errors), exception.InnerException);
+    }
+
+    [Fact]
     public async Task WhenImmediateAndWriteIsInvalid_ThenSetterThrows()
     {
         // Arrange

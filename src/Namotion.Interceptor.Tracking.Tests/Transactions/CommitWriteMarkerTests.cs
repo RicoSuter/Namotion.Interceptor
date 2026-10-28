@@ -1,5 +1,8 @@
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
@@ -7,7 +10,7 @@ public class CommitWriteMarkerTests
 {
     private static (IInterceptorSubjectContext Context, ITransactionHandler Handler, Person Person) CreateContextWithPerson()
     {
-        var context = TransactionTestContext.CreateContext(out var handler);
+        var context = CreateContext(out var handler);
         return (context, handler, new Person(context));
     }
 
@@ -50,75 +53,6 @@ public class CommitWriteMarkerTests
             Assert.False(otherMatches);
             Assert.True(markedMatches);
         }
-    }
-
-    [Fact]
-    public async Task WhenHandlerIsNotPartOfTransaction_ThenMarkDoesNotMatchAndStaysSet()
-    {
-        // Arrange
-        var (context, handler, person) = CreateContextWithPerson();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-
-        using (CommitWriteMarker.Set(transaction, property, "Bob"))
-        {
-            // Act
-            var foreignMatches = CommitWriteMarker.TryConsume(new RecordingHandler(), property, "Bob");
-            var handlerMatches = CommitWriteMarker.TryConsume(handler, property, "Bob");
-
-            // Assert
-            Assert.False(foreignMatches);
-            Assert.True(handlerMatches);
-        }
-    }
-
-    [Fact]
-    public async Task WhenTransactionIsDisposed_ThenMarkDoesNotMatch()
-    {
-        // Arrange
-        var (context, handler, person) = CreateContextWithPerson();
-
-        // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
-        using var unrelatedTransaction = await BeginInOwnFlowAsync(TransactionTestContext.CreateContext(out _));
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-        transaction.Dispose();
-
-        using (CommitWriteMarker.Set(transaction, property, "Bob"))
-        {
-            // Act
-            var matches = CommitWriteMarker.TryConsume(handler, property, "Bob");
-
-            // Assert
-            Assert.False(matches);
-        }
-    }
-
-    [Fact]
-    public async Task WhenReferenceValueIsOnlyEqual_ThenMarkMatchesOnlyTheSameInstance()
-    {
-        // Arrange
-        var (context, handler, person) = CreateContextWithPerson();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var property = new PropertyReference(person, nameof(Person.FirstName));
-        var checkedValue = new AlwaysEqual();
-
-        // Act
-        bool equalInstanceMatches;
-        using (CommitWriteMarker.Set(transaction, property, checkedValue))
-        {
-            equalInstanceMatches = CommitWriteMarker.TryConsume(handler, property, new AlwaysEqual());
-        }
-
-        bool sameInstanceMatches;
-        using (CommitWriteMarker.Set(transaction, property, checkedValue))
-        {
-            sameInstanceMatches = CommitWriteMarker.TryConsume(handler, property, checkedValue);
-        }
-
-        // Assert
-        Assert.False(equalInstanceMatches);
-        Assert.True(sameInstanceMatches);
     }
 
     [Fact]
@@ -218,16 +152,114 @@ public class CommitWriteMarkerTests
         }
     }
 
-    private sealed class AlwaysEqual
+    [Fact]
+    public async Task WhenHandlerIsNotPartOfTransaction_ThenCommitWriteIsNotConsumedForIt()
     {
-        public override bool Equals(object? obj) => obj is AlwaysEqual;
+        // Arrange
+        var context = CreateContext(out _);
+        var probe = new CommitWriteProbe(new RecordingHandler());
+        context.AddService(probe);
+        var person = new Person(context);
+        probe.Writes.Clear();
 
-        public override int GetHashCode() => 0;
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+    }
+
+    [Fact]
+    public async Task WhenTransactionIsDisposedFromAnotherFlowDuringApply_ThenCommitWriteIsNotConsumed()
+    {
+        // Arrange
+        // Keeps a transaction active in the process after the dispose, so the result does not depend on other tests.
+        using var unrelatedTransaction = await BeginInOwnFlowAsync(CreateContext(out _));
+        var context = CreateContext(out var handler);
+        var disposer = new DisposingWriteInterceptor();
+        var probe = new CommitWriteProbe(handler);
+        context.AddService(disposer);
+        context.AddService(probe);
+        var person = new Person(context);
+        probe.Writes.Clear();
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        disposer.Transaction = transaction;
+
+        // Act
+        await Record.ExceptionAsync(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.True(disposer.Disposed);
+        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
+    }
+
+    [Fact]
+    public async Task WhenInterceptorReplacesAppliedValueWithEqualInstance_ThenCommitWriteIsNotConsumed()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var probe = new CommitWriteProbe(handler);
+        context.AddService(new CopyingWriteInterceptor());
+        context.AddService(probe);
+        var person = new Person(context);
+        probe.Writes.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(Assert.Single(probe.Writes, write => write.Property == nameof(Person.FirstName)).Consumed);
     }
 
     private static async Task<SubjectTransaction> BeginInOwnFlowAsync(IInterceptorSubjectContext context)
     {
         // An async method does not leak the transaction it begins into the caller's flow.
         return await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+    }
+
+    /// <summary>
+    /// Disposes <see cref="Transaction"/>, from a flow that does not carry it, on the first write that reaches the model.
+    /// </summary>
+    [RunsAfter(typeof(SubjectTransactionInterceptor))]
+    [RunsBefore(typeof(CommitWriteProbe))]
+    private sealed class DisposingWriteInterceptor : IWriteInterceptor
+    {
+        public SubjectTransaction? Transaction { get; set; }
+
+        public bool Disposed { get; private set; }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (Transaction is { } transaction && !Disposed)
+            {
+                Disposed = true;
+                RunOutsideTransactionFlow(transaction.Dispose);
+            }
+
+            next(ref context);
+        }
+    }
+
+    /// <summary>
+    /// Replaces every string written to the model with an equal, distinct instance.
+    /// </summary>
+    [RunsAfter(typeof(SubjectTransactionInterceptor))]
+    [RunsBefore(typeof(CommitWriteProbe))]
+    private sealed class CopyingWriteInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string text)
+            {
+                context.NewValue = (TProperty)(object)new string(text.AsSpan());
+            }
+
+            next(ref context);
+        }
     }
 }
