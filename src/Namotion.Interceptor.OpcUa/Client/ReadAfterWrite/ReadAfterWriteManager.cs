@@ -25,14 +25,14 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private readonly ReadAfterWriteMetrics _metrics;
     private readonly Action<Exception> _reportError;
 
-    // NodeId -> (RevisedInterval, Property) for properties that need read-after-writes
-    private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property)> _trackedProperties = new();
+    // NodeId -> (RevisedInterval, Property, ApplyLock) for properties that need read-after-writes
+    private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property, Lock ApplyLock)> _trackedProperties = new();
 
-    // NodeId -> (ReadAt, Property) for pending scheduled reads
-    private readonly Dictionary<NodeId, (DateTime ReadAt, RegisteredSubjectProperty Property)> _pendingReads = new();
+    // NodeId -> (ReadAt, Property, ApplyLock) for pending scheduled reads
+    private readonly Dictionary<NodeId, (DateTime ReadAt, RegisteredSubjectProperty Property, Lock ApplyLock)> _pendingReads = new();
 
     // Reusable list for due reads (avoids allocation per timer tick)
-    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property)> _dueReadsList = new();
+    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property, Lock ApplyLock)> _dueReadsList = new();
 
     private DateTime _earliestReadTime = DateTime.MaxValue;
     private ISession? _lastKnownSession;
@@ -82,11 +82,15 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     /// <param name="property">The property.</param>
     /// <param name="requestedSamplingInterval">The requested sampling interval (0 = exception-based).</param>
     /// <param name="revisedSamplingInterval">The server's revised sampling interval.</param>
+    /// <param name="applyLock">The lock under which notifications for this property are applied. A read
+    /// value is checked for staleness and applied under it, so a notification cannot land in between.
+    /// Register again with the new lock when the property moves to another subscription.</param>
     public void RegisterProperty(
         NodeId nodeId,
         RegisteredSubjectProperty property,
         int? requestedSamplingInterval,
-        TimeSpan revisedSamplingInterval)
+        TimeSpan revisedSamplingInterval,
+        Lock applyLock)
     {
         // Only track if: requested 0 (exception-based) but server revised to > 0
         if (requestedSamplingInterval != 0 || revisedSamplingInterval <= TimeSpan.Zero)
@@ -101,7 +105,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         lock (_lock)
         {
-            _trackedProperties[nodeId] = (revisedSamplingInterval, property);
+            _trackedProperties[nodeId] = (revisedSamplingInterval, property, applyLock);
 
             _logger.LogDebug(
                 "Property {PropertyName} registered for read-after-writes: " +
@@ -176,7 +180,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 _metrics.RecordScheduled();
             }
 
-            _pendingReads[nodeId] = (readAt, tracked.Property);
+            _pendingReads[nodeId] = (readAt, tracked.Property, tracked.ApplyLock);
             UpdatePendingReadCountLocked();
 
             // Only reschedule timer if this is earlier than current earliest
@@ -273,11 +277,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             {
                 if (kvp.Value.ReadAt <= utcNow)
                 {
-                    _dueReadsList.Add((kvp.Key, kvp.Value.Property));
+                    _dueReadsList.Add((kvp.Key, kvp.Value.Property, kvp.Value.ApplyLock));
                 }
             }
 
-            foreach (var (nodeId, _) in _dueReadsList)
+            foreach (var (nodeId, _, _) in _dueReadsList)
             {
                 _pendingReads.Remove(nodeId);
             }
@@ -345,19 +349,26 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                         continue;
                     }
 
-                    var (_, property) = _dueReadsList[i];
+                    var (_, property, applyLock) = _dueReadsList[i];
                     var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
 
-                    // Skip if property already has a newer value from subscription notification
-                    var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
-                    if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                    // Check and apply under the notifications' lock: a notification landing between a
+                    // separate check and apply would be overwritten by this older value, and the server
+                    // does not send it again until the value changes.
+                    lock (applyLock)
                     {
-                        skippedCount++;
-                        continue;
+                        // Skip if property already has a newer value from subscription notification
+                        var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
+                        if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                        {
+                            skippedCount++;
+                            continue;
+                        }
+
+                        property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
                     }
 
-                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
-                    property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
                     successCount++;
                 }
             }

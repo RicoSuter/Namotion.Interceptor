@@ -355,6 +355,7 @@ var config = new OpcUaClientConfiguration
 - Only triggers for properties where `SamplingInterval = 0` was revised to > 0
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
+- A read value is skipped when the property already holds a value with the same or a newer source timestamp, checked and applied atomically with the property's subscription notifications, so a newer notification is never overwritten by an older read
 - Circuit breaker prevents repeated failures from overwhelming the server
 - Logged when activated so you can verify which properties need this fallback
 

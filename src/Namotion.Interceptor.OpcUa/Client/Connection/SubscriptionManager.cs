@@ -235,7 +235,7 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _source.IncomingThroughput.Add(changes.Count);
 
-            var applyState = _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
+            var applyState = GetApplyState(subscription);
 
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
@@ -303,6 +303,9 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
+    private SubscriptionApplyState GetApplyState(Subscription subscription) =>
+        _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
+
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
     {
         if (!_shuttingDown && !cancellationToken.IsCancellationRequested)
@@ -329,6 +332,9 @@ internal class SubscriptionManager : IAsyncDisposable
                 FastDataChangeNotificationEventHandler handler = OnFastDataChange;
                 subscription.FastDataChangeCallback = (FastDataChangeNotificationEventHandler?)Delegate.Combine(
                     Delegate.Remove(subscription.FastDataChangeCallback, handler), handler);
+
+                // Its notifications now apply under its own lock, so read-after-write has to take that one.
+                RegisterPropertiesWithReadAfterWriteManager(subscription);
             }
         }
 
@@ -595,13 +601,14 @@ internal class SubscriptionManager : IAsyncDisposable
             return;
         }
 
+        var applyLock = GetApplyState(subscription).Lock;
         foreach (var item in subscription.MonitoredItems)
         {
             if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
-                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval, applyLock);
             }
         }
     }
