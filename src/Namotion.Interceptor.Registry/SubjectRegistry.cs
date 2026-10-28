@@ -188,13 +188,10 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                         if (property is not null)
                         {
-                            registeredSubject.RemoveParent(property, change.Index);
-                         
-                            property.RemoveChild(new SubjectPropertyChild
-                            {
-                                Subject = change.Subject,
-                                Index = change.Index
-                            });
+                            // Not matched by change.Index: for a subject listed more than once in
+                            // the property it is the last of its indices, not the registered one.
+                            registeredSubject.RemoveParentsByProperty(property);
+                            property.RemoveChild(change.Subject);
                         }
                     }
                     

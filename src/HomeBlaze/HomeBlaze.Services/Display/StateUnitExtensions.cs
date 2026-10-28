@@ -101,9 +101,18 @@ public static class StateUnitExtensions
             }
         }
 
-        // Default formatting for common types
+        return FormatDisplayValue(value, timeZone);
+    }
+
+    /// <summary>
+    /// Formats a value as <see cref="GetPropertyDisplayValue"/> does for a property without a unit: Yes or No for a boolean,
+    /// at most two decimals for a number, and a date in the time zone of the viewer, or of the server when it is null.
+    /// </summary>
+    public static string FormatDisplayValue(object value, ITimeZoneDisplay? timeZone = null)
+    {
         return value switch
         {
+            TimeSpan timeSpan => FormatTimeSpan(timeSpan),
             bool b => b ? "Yes" : "No",
             double d => d.ToString("0.##", CultureInfo.InvariantCulture),
             float f => f.ToString("0.##", CultureInfo.InvariantCulture),
@@ -170,7 +179,8 @@ public static class StateUnitExtensions
 
     /// <summary>
     /// Gets the unit of its family that <see cref="FormatWithUnit"/> shows a value of <paramref name="magnitude"/> in: the
-    /// largest unit in which the value is at least 1, such as kWh for 1500 Wh. Returns false for a unit of no family.
+    /// largest unit in which the value is at least 1, such as kWh for 1500 Wh. A value of 0 stays in <paramref name="unit"/>,
+    /// as it is 0 in every unit and the one the property declares is the one a reader expects. Returns false for a unit of no family.
     /// </summary>
     /// <param name="unit">The unit of the value.</param>
     /// <param name="magnitude">The value in <paramref name="unit"/>; its sign is ignored.</param>
@@ -187,6 +197,13 @@ public static class StateUnitExtensions
 
         var family = UnitFamilies[lookup.FamilyIndex];
         var inputFactor = family[lookup.UnitIndex].Factor;
+
+        if (magnitude == 0m)
+        {
+            suffix = family[lookup.UnitIndex].Suffix;
+            factor = 1m;
+            return true;
+        }
 
         // Saturated rather than overflowing, which only picks the largest unit.
         var absolute = Math.Abs(magnitude);
@@ -256,6 +273,7 @@ public static class StateUnitExtensions
         StateUnit.VoltAmpereReactiveHour => ("varh", true),
         StateUnit.AmpereHour => ("Ah", true),
         StateUnit.WattPerSquareMeter => ("W/m²", true),
+        StateUnit.DecibelMilliwatt => ("dBm", true),
         _ => null
     };
 

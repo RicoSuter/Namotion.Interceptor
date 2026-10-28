@@ -22,6 +22,7 @@ public class AgentStreamingMarkdownTests
     [Theory]
     [InlineData("First paragraph.\n\nSecond paragraph.\n\nThird is still", "First paragraph.\n\nSecond paragraph.\n\n")]
     [InlineData("Intro.\n\n```json\n{\n\n  \"a\": 1\n\n", "Intro.\n\n")]
+    [InlineData("Intro.\n\n```mermaid\ngraph TD\n\n  A --> B\n", "Intro.\n\n")]
     [InlineData("- one\n- two\n- three\n\nNext para", "- one\n- two\n- three\n\n")]
     [InlineData("Values:\n\n| A | B |\n|---|---|\n| 1 | 2 |\n| 3 |", "Values:\n\n")]
     [InlineData("One.\r\n\r\nTwo", "One.\r\n\r\n")]

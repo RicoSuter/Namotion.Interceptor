@@ -16,6 +16,27 @@ internal struct PropertyReferenceSet
         get => First.Subject is null;
     }
 
+    public readonly bool ContainsSubject(IInterceptorSubject subject)
+    {
+        if (ReferenceEquals(First.Subject, subject))
+        {
+            return true;
+        }
+
+        if (Additional is not null)
+        {
+            foreach (var propertyRef in Additional)
+            {
+                if (ReferenceEquals(propertyRef.Subject, subject))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public bool Add(PropertyReference propertyRef)
     {
         if (First.Subject is null)

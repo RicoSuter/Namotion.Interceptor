@@ -161,6 +161,9 @@ public static class MetadataNotes
         var builder = MarkdownPageParser.CreatePipelineBuilder();
         builder.Extensions.TryRemove<AutoIdentifierExtension>();
         builder.Extensions.TryRemove<FootnoteExtension>();
+
+        // Notes are not evaluated, so the braces of an expression are text in them.
+        builder.Extensions.TryRemove<MarkdownExpressionExtension>();
         if (!withAttributes)
         {
             builder.Extensions.TryRemove<GenericAttributesExtension>();

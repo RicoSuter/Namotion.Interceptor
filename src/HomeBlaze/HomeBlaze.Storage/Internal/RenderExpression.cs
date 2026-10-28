@@ -2,27 +2,26 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Display;
+using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Resolves and displays a property value from a path expression.
-/// A path with a / prefix resolves from the root. Every other path resolves from the page, and its
-/// first segment can be the name of a block on that page.
+/// Shows the value of an expression in the text of a page. A path with a / prefix resolves from the root. Every other path
+/// resolves from the page, and its first segment can be the name of a block on that page.
 /// </summary>
 [InterceptorSubject]
 [ExcludeFrom(ExclusionTarget.All)]
 public partial class RenderExpression : ITitleProvider
 {
     private readonly SubjectPathResolver _pathResolver;
+    private readonly ParsedExpression? _expression;
 
-    public string Path { get; }
-    public ExpressionFormat Format { get; }
+    /// <summary>The text between the braces, as the page has it.</summary>
+    public string Text { get; }
 
     /// <summary>What is wrong with the expression as written, or null. It is shown in place of the value.</summary>
     public string? Error { get; }
@@ -31,61 +30,45 @@ public partial class RenderExpression : ITitleProvider
 
     public string? Title => null;
 
-    // No production code reads this: a render reads the value through GetText, which also reads the version of the paths,
+    // No production code reads this: a render reads the text through GetText, which also reads the version of the paths,
     // so it renders again when the target of an absolute path appears. Its change notification tells other observers when
-    // the value of a resolved target changes, but not when a target appears.
+    // the value changes, but not when a target appears. It is the value before the pipes format it.
     [Derived]
-    public object? Value => ResolveProperty()?.GetValue();
-
-    public RenderExpression(
-        string path,
-        ExpressionFormat format,
-        string? error,
-        MarkdownFile parent,
-        SubjectPathResolver pathResolver)
+    public object? Value
     {
-        Path = path;
-        Format = format;
-        Error = error;
-        Parent = parent;
-        _pathResolver = pathResolver;
+        get
+        {
+            if (_expression is null)
+            {
+                return null;
+            }
+
+            var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null);
+            return _expression.EvaluateWithoutPipes(ref context).Value;
+        }
     }
 
-    private RegisteredSubjectProperty? ResolveProperty()
+    public RenderExpression(string text, MarkdownFile parent, SubjectPathResolver pathResolver)
     {
-        try
-        {
-            return _pathResolver.ResolveScopedDisplayableProperty(Path, PathStyle.Canonical, Parent);
-        }
-        catch
-        {
-            return null;
-        }
+        Text = text;
+        Parent = parent;
+        _pathResolver = pathResolver;
+        _expression = MarkdownExpressions.Parse(text, out var error);
+        Error = error;
     }
 
     /// <summary>
     /// Gets the value as the page shows it. A missing value gives an empty text.
     /// </summary>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
-    public string GetText(ITimeZoneDisplay? timeZone) =>
-        // The property is read here and not through Value, which would resolve the path a second time.
-        // The render that reads it records this read like it records one of Value.
-        GetText(ResolveProperty(), Format, timeZone);
-
-    /// <summary>
-    /// Gets the value of a property as a page shows it in the format, with dates in the time zone or,
-    /// when it is null, in that of the server. A missing property or value gives an empty text.
-    /// </summary>
-    internal static string GetText(RegisteredSubjectProperty? property, ExpressionFormat format, ITimeZoneDisplay? timeZone)
+    public string GetText(ITimeZoneDisplay? timeZone)
     {
-        var value = property?.GetValue();
-        if (property is null || value is null)
+        if (_expression is null)
         {
             return string.Empty;
         }
 
-        return format == ExpressionFormat.Raw
-            ? RawValueFormatter.Format(value)
-            : property.GetPropertyDisplayValue(value, timeZone);
+        var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone);
+        return context.ToText(_expression.Evaluate(ref context));
     }
 }

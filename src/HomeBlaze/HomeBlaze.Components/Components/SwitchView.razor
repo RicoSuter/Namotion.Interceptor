@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject IServiceProvider ServiceProvider
 @inject ITimeZoneDisplay TimeZone
+@inject SubjectPathResolver PathResolver
 
 @{
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
@@ -16,7 +17,9 @@
     var isOn = value as bool? ?? false;
     // A pending toggle shows the state it goes to, boxed only then, and is read back from the property when it ends.
     var shown = _pending is { } target ? target : value;
-    var matched = shown is not null ? ValueMap?.FindCase(RawValueFormatter.Format(shown)) : null;
+    var binding = new ValueBinding(property, shown, property?.Subject);
+    // A path that leads nowhere tries no case, as in ValueReader.Read, so that a default case does not hide a mistake in the path.
+    var matched = binding.IsEmpty ? null : ValueMap?.FindCase(binding, PathResolver);
     var canToggle = false;
     if (property is not null && (property.Type == typeof(bool) || property.Type == typeof(bool?)))
     {
@@ -41,18 +44,26 @@
     // The case itself decides the fill: a case without a color is drawn on the surface, while a value without a case
     // is filled with the primary color when true.
     var fill = matched?.GetColor() ?? (shown is true ? Color.Primary : Color.Default);
-    var subtitle = !string.IsNullOrEmpty(Subtitle)
+    // An empty subtitle hides the line, while a missing one leaves it to the text of the value.
+    var subtitle = Subtitle is not null
         ? Subtitle
-        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(property, shown, matched, TimeZone) : null;
+        : ValueMap is not null && property is not null && shown is not null ? ValueReader.GetText(binding, matched, PathResolver, TimeZone) : null;
     var icon = shown is null
         ? Icons.Material.Filled.QuestionMark
         : MudBlazorIconResolver.ResolveOrNull(string.IsNullOrEmpty(matched?.Icon) ? Icon : matched.Icon);
+    // An empty label leaves the tile to its icon, which a place too low for the icon and a label then keeps. The tile is
+    // then named by the operation that a click invokes, else by the label of the property.
+    var hidesLabel = Label is "";
+    var accessibleName = hidesLabel && UsesOperations && (isOn ? OffProperty : OnProperty)?.GetValue() is MethodMetadata clickMethod
+        ? clickMethod.Title
+        : label;
     @* The label alone is the accessible name, as for the toggle switch: the subtitle is the state, which aria-checked gives. *@
     <TileView TestId="switch-tile"
               Checked="@(_pending ?? isOn)"
-              AccessibleName="@label"
-              Label="@label"
+              AccessibleName="@accessibleName"
+              Label="@(hidesLabel ? null : label)"
               Subtitle="@subtitle"
+              Outlined="@Outlined"
               Icon="@icon"
               Color="@fill"
               TextColor="@(matched?.GetTextColor() ?? ValueColor.Default)"
@@ -98,7 +109,8 @@ else
     public string? Path { get; set; }
 
     /// <summary>
-    /// The label next to the switch, the title that the property declares when it is not set.
+    /// The label next to the switch, the title that the property declares when it is not set. An empty label hides the
+    /// label of a tile.
     /// </summary>
     [Parameter]
     public string? Label { get; set; }
@@ -132,6 +144,10 @@ else
     /// <summary>The second line of a tile. Without it, a tile with a map shows the text of the value.</summary>
     [Parameter]
     public string? Subtitle { get; set; }
+
+    /// <summary>Whether a tile has a thin border like an outlined card.</summary>
+    [Parameter]
+    public bool Outlined { get; set; }
 
     /// <summary>The name of the icon of a tile, which the icon of the matched case of the map replaces.</summary>
     [Parameter]

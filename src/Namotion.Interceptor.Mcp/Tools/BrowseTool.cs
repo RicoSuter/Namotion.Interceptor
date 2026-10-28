@@ -108,21 +108,22 @@ internal class BrowseTool
         }
 
         var subjectCount = 0;
-        var truncated = false;
+        var omittedCount = 0;
         var visited = new HashSet<IInterceptorSubject>();
         var unseenPropertyNames = UnseenPropertyNames.TryCreate(null, propertyNames);
         var options = new NodeOptions(
             includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes);
         var result = BuildSubjectNode(startSubject, rootSubject, pathProvider, depth, in options,
-            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref omittedCount);
 
         var browseResult = new BrowseResult
         {
             Result = result,
             SubjectCount = subjectCount,
-            Truncated = truncated,
+            Truncated = omittedCount > 0,
+            OmittedCount = omittedCount,
             // A truncated tree skipped subjects that may have the property.
-            Warnings = truncated ? null : unseenPropertyNames?.CreateWarnings()
+            Warnings = omittedCount > 0 ? null : unseenPropertyNames?.CreateWarnings()
         };
 
         if (format == "json")
@@ -143,7 +144,7 @@ internal class BrowseTool
         int maxSubjects,
         UnseenPropertyNames? unseenPropertyNames,
         ref int subjectCount,
-        ref bool truncated)
+        ref int omittedCount)
     {
         unseenPropertyNames?.Observe(subject, pathProvider);
         var node = McpToolHelper.BuildSubjectNodeDto(
@@ -153,7 +154,7 @@ internal class BrowseTool
 
         // Add subject-containing properties via tree traversal
         BuildSubjectTree(node, subject, rootSubject, pathProvider, remainingDepth, in options,
-            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref omittedCount);
 
         return node;
     }
@@ -169,7 +170,7 @@ internal class BrowseTool
         int maxSubjects,
         UnseenPropertyNames? unseenPropertyNames,
         ref int subjectCount,
-        ref bool truncated)
+        ref int omittedCount)
     {
         node.Properties ??= new Dictionary<string, SubjectNodeProperty>();
 
@@ -200,14 +201,14 @@ internal class BrowseTool
                     {
                         if (subjectCount >= maxSubjects)
                         {
-                            truncated = true;
+                            omittedCount++;
                             continue;
                         }
 
                         subjectCount++;
                         var childNode = BuildSubjectNode(childSubject, rootSubject, pathProvider,
                             remainingDepth - 1, in options,
-                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref omittedCount);
                         node.Properties[segment] = new SubjectObjectProperty(childNode);
                     }
                 }
@@ -228,15 +229,15 @@ internal class BrowseTool
 
                         if (subjectCount >= maxSubjects)
                         {
-                            truncated = true;
-                            break;
+                            omittedCount++;
+                            continue;
                         }
 
                         var key = PathExtensions.FormatPathIndex(child.Index);
                         subjectCount++;
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, in options,
-                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated);
+                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref omittedCount);
                     }
 
                     if (children.Count > 0)
@@ -260,14 +261,14 @@ internal class BrowseTool
 
                         if (subjectCount >= maxSubjects)
                         {
-                            truncated = true;
-                            break;
+                            omittedCount++;
+                            continue;
                         }
 
                         subjectCount++;
                         children.Add(BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, in options,
-                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref truncated));
+                            visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref omittedCount));
                     }
 
                     if (children.Count > 0)

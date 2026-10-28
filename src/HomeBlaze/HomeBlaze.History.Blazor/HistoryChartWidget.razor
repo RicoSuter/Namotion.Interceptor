@@ -40,7 +40,7 @@
                 @* The view shows the legend of the lines below them and each band series in the header of its band. Until
                    the data arrives it reserves the room of the lines and bands the query will return, also while prerendering. *@
                 var linesTarget = CanShowHistory(_firstLine) ? _firstLine : -1;
-                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" ShowAxes="!chart.Compact"
+                <HistoryChartView Data="_data" Placeholder="_placeholder" MaxHeight="_resolvedHeight" MinHeight="chart.MinHeight" ShowAxes="!chart.Compact"
                                   LineLegend="_lineLegend" BandHeader="_bandHeader"
                                   LinesClicked="@(linesTarget >= 0 ? _showHistory[linesTarget] : default)"
                                   SeriesClicked="@(linesTarget >= 0 ? _seriesClicked : default)"
@@ -69,13 +69,14 @@
     private const string ButtonEntryStyle = EntryStyle +
         " margin:0; padding:0; border:0; background:none; color:inherit; font:inherit; text-align:inherit; cursor:pointer;";
 
-    // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend.
+    // The legend of the lines ends where the plot does, see HistoryChartView.LineLegend. Wrapped rows of entries stand
+    // close together, as lines of text, and the entries of a row apart.
     private const string LegendStyle =
-        "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; justify-content:flex-end; " +
+        "align-self:stretch; display:flex; gap:4px 16px; flex-wrap:wrap; justify-content:flex-end; " +
         "margin-right:var(--history-chart-plot-end, 0px);";
 
     // The legend of every series below the widget, while there is no chart view to hold it.
-    private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;";
+    private const string OwnLegendStyle = "align-self:stretch; display:flex; gap:4px 16px; flex-wrap:wrap; margin-top:8px;";
 
     private HistoryChartRefresh? _refresh;
     private CancellationTokenSource? _queryCancellation;

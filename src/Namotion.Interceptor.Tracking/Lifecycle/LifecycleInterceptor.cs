@@ -63,6 +63,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    /// <summary>
+    /// The property references that hold the subject now. Read only while this interceptor dispatches a lifecycle
+    /// change, which holds its lock.
+    /// </summary>
+    internal PropertyReferenceSet GetPropertyReferences(IInterceptorSubject subject)
+    {
+        return _attachedSubjects.TryGetValue(subject, out var set) ? set : default;
+    }
+
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
@@ -260,7 +269,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
+            IsContextDetach = isLastDetach,
+            Interceptor = this
         };
 
         if (isLastDetach)

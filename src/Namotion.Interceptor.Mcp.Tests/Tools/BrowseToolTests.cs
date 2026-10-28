@@ -272,6 +272,7 @@ public class BrowseToolTests
         // Assert
         Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
         Assert.True(json.GetProperty("truncated").GetBoolean());
+        Assert.Equal(2, json.GetProperty("omittedCount").GetInt32());
     }
 
     [Fact]

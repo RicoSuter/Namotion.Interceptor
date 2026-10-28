@@ -147,11 +147,12 @@ public enum StateUnit
     VoltAmpereHour,         // 2.5 kVAh (apparent energy)
     VoltAmpereReactiveHour, // 2.5 kvarh (reactive energy)
     AmpereHour,             // 50 Ah (charge, battery capacity)
-    WattPerSquareMeter      // 850 W/m² (irradiance)
+    WattPerSquareMeter,     // 850 W/m² (irradiance)
+    DecibelMilliwatt        // -75 dBm (received signal strength)
 }
 ```
 
-Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and the MCP tools `invoke_query` and `invoke_operation` pass the fraction unchanged.
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"), and a value of 0 keeps the unit of the property (0 km displays as "0 km"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and the MCP tools `invoke_query` and `invoke_operation` pass the fraction unchanged.
 
 ### Naming Cumulative Properties
 
@@ -1220,14 +1221,77 @@ public bool IsEditing { get; set; }
 | Ignore | Read-only widget, no editing support | Status displays |
 | Hybrid | Simple fields inline, complex via dialog | Basic fields inline, advanced via dialog |
 
+The page next to the text editor of the Split mode gets `IsEditing` false. Its content is `inert`, so that neither the pointer nor the keyboard reaches a control, and a widget needs nothing to keep the preview from writing the page under the unsaved text of the editor.
+
 ### Auto Edit Button
 
-In the Inline and Split modes of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget. Every widget block of a page that shows something can be selected. A block that shows nothing, such as a `ValueMap`, is hidden while the page is edited inline and is edited in the [page editor](../administration/pages.md#editing-in-the-page-editor). When the widget has an Edit component or configuration properties, the bar has an edit button. A widget without either, such as a `ValueList`, gets only the outline, and the bar when it has a parent to select:
+In the Inline mode of a page, a click on a widget selects it, and the host shows a bar with its actions above the top right corner of the widget: select the parent, move up and down, add to its slots with "+", edit and delete. Edit is there when the widget has an Edit component or configuration properties, so a widget without either, such as a `ValueList`, gets no edit button. A double click opens the same edit dialog. The blocks of text of a markdown page are selectable as well and are edited in a Markdown dialog. In the Split mode, the page next to the editor cannot be operated.
 
 - Clicking it opens the `SubjectEditDialog` with the Edit component, or with the generated properties editor without one
 - A widget inside another one has an arrow up button that selects the widget around it, and Escape or a click on the page clears the selection
 - The content of a widget takes no mouse input while the page is edited, so that a click selects the widget instead of operating it. A part that is meant to be used while the page is edited takes it back with the class `edit-mode-interactive`, as the slider above does, or with `edit-mode-selected-interactive` once its widget is selected
 - No boilerplate needed in widget components
+
+### Editor Support
+
+Most widgets need nothing for the editing of a page. The host selects them, shows their bar, moves, adds and deletes their blocks, and opens their edit dialog. Each `[Slot]` gets its entries in the "+" menu, and content that a widget renders with `SubjectComponent`, as [Rendering Slots](#rendering-slots) shows, gets insert lines and selectable blocks of text. The Split preview is `inert` and needs no handling either.
+
+Three cases ask for a few lines:
+
+| Case | What to do | Example |
+|------|------------|---------|
+| The widget shows nothing on a viewed page | Render a `WidgetChip` while the page is edited inline, so that the widget has an area to click | `ValueMapWidget`, a `Responsive` whose content the screen hides |
+| Parts of the widget become blocks of their own once it is selected | Derive from `SelectionContainingWidgetBase` and render those parts only while `ContainsSelection` is true | The rows of a `ValueList`, the cases of a `ValueMap` |
+| The widget has controls that act, such as a button or a switch | Disable them while `IsEditing` is true. The host takes the pointer from the content of a widget while the page is edited, but the keyboard still reaches a control | `DoorLockWidget` |
+
+A widget that shows nothing, with a chip while it is edited inline. `Selection` is only set while the page is edited inline, never in the Split preview:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Schedule))]
+@implements ISubjectComponent
+
+@if (IsEditing && Selection is not null)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.Schedule" Text="Schedule" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+}
+```
+
+`SelectionContainingWidgetBase` provides `IsEditing`, `Selection` and `ContainsSelection`, and renders the widget again only when the selection enters or leaves it. A widget that overrides `OnParametersSet` calls the base first:
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Schedule))]
+@implements ISubjectComponent
+@inherits SelectionContainingWidgetBase
+
+@if (IsEditing && Selection is not null)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.Schedule" Text="Schedule" />
+
+    @if (ContainsSelection && Subject is Schedule schedule)
+    {
+        @foreach (var entry in schedule.Entries)
+        {
+            <SubjectComponent Subject="@entry" Type="SubjectComponentType.Widget" />
+        }
+    }
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}
+```
 
 ### Content Slots
 

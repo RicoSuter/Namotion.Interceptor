@@ -106,13 +106,27 @@ A `Widget` that is not on a page, for example one in a JSON file of its own, res
 
 ---
 
+## Routes
+
+Every subject opens in the browser of the application, and a subject with a page of its own also opens as that page. The address is built from its path:
+
+| Subject | Address | Example |
+|---------|---------|---------|
+| A page, such as a markdown page or an agent | `/pages` and its canonical path | `/pages/Demo/Setup.md`, `/pages/Agents/Claude` |
+| Any subject in the browser | `/browser` and its path with every index as a segment of its own | `/browser/Demo/WaterPump`, `/browser/Items/0/Name` |
+| A property in the browser | the address of its subject and `?property=` with its name | `/browser/Demo/WaterPump?property=CurrentSpeed` |
+
+- **Which subjects have a page**: a markdown page and the types that bring a page of their own, such as an agent. The tools `browse` and `search` give such a subject a `$url` with its address; a subject without one opens only in the browser.
+- **Indices**: in the browser an index is a segment, `Items/0` where the canonical path writes `Items[0]`.
+- **Special characters**: each segment of a browser address is percent-encoded, so a colon is `%3A`, a space `%20`, a `#` `%23` and a `?` `%3F`, as in `/browser/Network/Clients/AA%3ABB%3ACC%3A00%3A11%3A22`. In a link on a page, write a space in a page address as `%20`.
+
 ## Limitations
 
 - **Parent navigation with multiple parents**: If a subject has multiple parents (rare), `../` returns null (ambiguous path).
 - **Detached subjects**: Subjects not attached to the graph have no path.
 - **A property of the page**: On a markdown page, a property of the page itself is written without a prefix, like `Title`. With `./` before it, as in `./Title`, an expression shows nothing.
 - **Names are local to their page**: A name declared with `#name` is known on its own page only. Another page reaches a block that is directly on a page through that page, for example `/Demo/Inline.md/mymotor`.
-- **Braces and `<` in an expression**: The path of an expression on a markdown page cannot contain `{`, `}` or `<` literally. A file name or a key that contains one of them is written percent-encoded, as `%7B`, `%7D` or `%3C`, because every segment of a path is decoded before it is looked up.
+- **Special characters in a name**: A name in the path of an expression on a markdown page that contains a space, `(`, `)`, `'`, `"`, `&`, `!`, `<`, `>`, `=`, `|`, `{` or `}` is written percent-encoded, such as `Notes%20%281%29.md` for `Notes (1).md`, because these characters are operators, quotes or braces in an expression. Every segment of a path is decoded before it is looked up. A path with only spaces, as pages wrote before expressions had operators, still works without encoding.
 
 ---
 

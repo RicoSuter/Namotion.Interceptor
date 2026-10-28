@@ -103,6 +103,13 @@ Check the [installation guide](../administration/installation.md) for examples.
 
 A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
 
+### Link Targets
+
+- **Links on a page open in the same tab**: a relative link to a page, an address of the application such as `/browser/Demo`, and a web address alike. So does the `Href` of a [Card](widgets/card.md).
+- **A new tab**: write the link as an HTML element with a target, `<a href="https://example.com" target="_blank" rel="noopener">Example</a>`. The page keeps the attribute as written.
+- **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
+- **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
+
 ---
 
 ## Pictures
@@ -119,6 +126,24 @@ A picture is shown in a size that fits the page, and it always keeps its proport
 - **Height**: at most four fifths of the height of the browser window.
 - **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height.
 - **Not available**: a picture that cannot be loaded is replaced by a placeholder with its text. The address of the picture is the tooltip of the placeholder.
+
+---
+
+## Diagrams
+
+A fenced code block with the language `mermaid` is shown as a [Mermaid](https://mermaid.js.org) diagram, as on GitHub:
+
+~~~~markdown
+```mermaid
+graph LR
+    Pump --> Tank --> Heater
+```
+~~~~
+
+- **Size**: a diagram is never wider than its place.
+- **Theme**: a diagram takes the dark or light theme that is active when it is shown. After a switch, it changes on the next visit of the page.
+- **Not shown**: a diagram with an error, or one on a browser that cannot load Mermaid, appears as its source in a code block.
+- **No interaction**: `click` lines, links and HTML in labels are ignored, and an `init` directive or frontmatter of a diagram cannot change these settings.
 
 ---
 
@@ -160,28 +185,46 @@ The last segment of the path is the name of a property. Everything before it lea
 
 [Paths](paths.md) describes the path syntax in full. Its section "Paths on Markdown Pages" explains where a relative path starts and when a name is used.
 
-### Expression Formats
+### Pipes
 
-An expression shows the formatted value by default. A format after a `|` at the end of the expression chooses the form:
+An expression shows the formatted value by default. A pipe after a `|` at the end of the expression chooses the form:
 
 | Written | Shows | A temperature of 21.5 degrees Celsius |
 |---------|-------|---------------------------------------|
 | `{{ mymotor/Temperature }}` | The formatted value | `21.5°C` |
-| `{{ mymotor/Temperature \| display }}` | The formatted value, with the format written out | `21.5°C` |
+| `{{ mymotor/Temperature \| display }}` | The formatted value, with the pipe written out | `21.5°C` |
 | `{{ mymotor/Temperature \| raw }}` | The raw value | `21.5` |
 
-Inside a markdown table the `|` of an expression is written `\|`, as in the table above, because a cell of a table ends at every `|` that is not escaped.
+Inside a markdown table an expression needs no escaping: its `|` belongs to the expression. A `\|` still works, as older pages write it, and the table above uses it.
 
 - **Formatted value**: The text that the property panel shows for the property. It has the unit of the property, scaled where the unit allows it: 1234 W shows as `1.23 kW`. A number has at most two decimals, a boolean shows `Yes` or `No`, and a date is written in the time zone of the viewer.
 - **Raw value**: The plain value with a dot as the decimal separator on every system, and a date as ISO 8601. It has no unit, no scaling and no rounding, which makes it the form for an HTML attribute and for CSS, where a unit or a `Yes` would be wrong.
-- **Missing value**: A value that is not set shows nothing in both forms.
-- **Unknown format**: A format other than `display` and `raw` shows `Unknown format 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
+- **Missing value**: A value that is not set shows nothing in both forms. With the pipe `map` it shows the text of a case that matches without the value, and otherwise nothing.
+- **Map**: `map:name` gives the text of the first case of the value map with the name that matches the value, such as `{{ mymotor/Status | map:motorstate }}`, which shows `Running` for a motor that runs. It gives the formatted value when no case matches or the case has no text. The name resolves like the `Map` of a widget. In the text of a page and in the text of a widget, a path that leads nowhere is matched like a missing value, so a default case shows for it, such as for `{{ subject | map:x }}` in a widget whose `Path` leads nowhere. A path to a subject, such as the name of a block, gives no value in the text of a page, so write the path of a property: `{{ wallbox/IsCharging | map:x }}`. The pipe `map` must be the first pipe, so `{{ wallbox/IsCharging | raw | map:x }}` shows `The pipe 'map' must be the first pipe`. A name that leads to no map shows `Cannot resolve map: name`.
+- **Unknown pipe**: A pipe other than `display`, `raw` and `map` shows `Unknown pipe 'name'` in place of the value. [Page Errors](page-errors.md#expression-errors) has the message.
 
 A `style` attribute needs the raw value. In this sample the width of the bar is the speed of the conveyor in RPM divided by ten, in pixels:
 
 ~~~~markdown
 <div style="height: 8px; background: var(--mud-palette-primary); width: calc({{ /Demo/Conveyor/CurrentSpeed | raw }} * 0.1px)"></div>
 ~~~~
+
+### Conditions
+
+An expression can compare values and combine the results. In the text of a page a condition shows only `Yes` or `No`, and nothing while a value it needs is missing. The language is the same as that of the `where` filter of the `search` tool that AI agents use. For example:
+
+~~~~markdown
+The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
+~~~~
+
+With the pipe `map` a condition shows the text of a case instead, such as `{{ /Demo/Conveyor/CurrentSpeed > 500 | map:fastslow }}` with a map whose cases have `Value=True` and `Value=False`.
+
+- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`.
+- **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
+- **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
+- **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
+- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
+- **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
 
@@ -198,18 +241,20 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Where an Expression Is Not Evaluated
 
 - **In markdown code**: An expression in inline code, in an indented code block or in a fenced code block is shown as written, with its braces. A fenced code block is markdown's way to show code: a line of three or more backticks or tildes, the lines of code, and a line of the same characters. This page shows all its samples that way.
-- **On the head line of a block and in its `json` block**: The value of an argument is taken as written. `Title="{{ mymotor/Name }}"` gives a title with braces in it.
+- **On the head line of a block and in its `json` block**: The value of an argument is taken as written. The exceptions are the arguments that are text with values, such as the `Label` of a `ValueTile` and the `Title` of a `Card`, see [Text with Values](widgets/basics.md#text-with-values), and the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions). The page itself does not evaluate them: the widget does, when it renders.
 - **In the frontmatter**.
 - **In the address of a markdown link**: `[text](https://example.com/{{ path }})` gives a broken link. Write the link as an HTML `<a>` element, where an expression works inside the `href` attribute.
 
 ### Expression Limits
 
-- **Two formats**: An expression has the formatted value and the raw value. Another unit, another number of decimals and conditions are not supported.
+- **Length and depth**: An expression is at most 1000 characters long and nests at most 32 levels. Each parenthesis counts as a level, and so does each `not` or `!`, so a chain of them reaches the limit. A longer or deeper expression shows an error in place of the value.
+- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit, another number of decimals and arithmetic are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
-- **No braces and no `<` in a path**: The path cannot contain `{`, `}` or `<`. [Paths](paths.md) says how to write a file name that contains one of them.
+- **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
 - **Single braces in text can disappear**: The markdown renderer reads single braces anywhere in the text of a page as attributes, and removes them from the text, when they are empty or when everything between them reads as attributes: a word like `{id}`, a class like `{.wide}`, an id like `{#top}` or a pair like `{key=value}`, also several of them with spaces between. `Use /api/{id}` is then shown as "Use /api/". To show such braces, put the text in inline code, or write a backslash before the opening brace, as in `/api/\{id}`. A heading that starts with `#` is the exception: such braces cut the heading off, so that everything from the opening brace to the end of the line is lost, also inside inline code and after a backslash. `## Path {id} syntax` is shown as "Path". Keep such braces out of these headings.
 - **No live value in markdown code**: Markdown code keeps an expression as written, so a live value cannot stand inside it. Use a `<code>` element when a live value should look like code.
+- **The names `value` and `subject`**: A block cannot be named `#value` or `#subject`, because these names are reserved for the values that widgets give their expressions.
 
 ---
 
@@ -915,12 +960,12 @@ When the text of a page changes, the page is read again. A subject that is still
 ::
 ~~~~
 
-Add a sentence above both motors and save the page: the named motor keeps its speed, and the unnamed motor starts again at zero, because its position on the page changed.
+Add a block above both motors and save the page: the named motor keeps its speed, and the unnamed motor starts again at zero, because its position among the blocks changed. Text and expressions above it change nothing.
 
 The page knows a block by its key. The key is the `#name` of the block. A block without a name has its type and its position as key. The rule: a block keeps its subject when its key and its type are unchanged, no argument was removed, and the block around it kept its subject.
 
 - **With a name**: A subject with a `#name` is kept as long as its block keeps its name and its type and stays directly inside the same block, or directly on the page. Changing or adding an argument updates it.
-- **Without a name**: The position counts the pieces of content before the block at the same level, which is the page or the block around it: every block, every expression and every stretch of text between them is one piece. Adding or removing a block or an expression before the block creates its subject again. So does a first line of text before a block that had none.
+- **Without a name**: The position counts the blocks before the block at the same level, which is the page or the block around it. Adding or removing a block before it creates its subject again. Text and expressions do not count. A block that is moved, inserted or deleted in Inline mode leaves every other subject in place, see [Editing the blocks of a page inline](#editing-the-blocks-of-a-page-inline).
 - **Removed arguments**: When an argument, or a name at the top level of the `json` block, is removed, the subject is created again, so that the property gets its default value like after a restart.
 - **Nested blocks**: A subject inside another block is kept only when the block around it is kept. A named motor inside a card without a name is created again when the card is.
 - **Subjects in the `json` block**: A subject nested in a value of the `json` block is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.
@@ -936,7 +981,9 @@ The Markdown tools of [AI agents](ai-agents.md#changing-pages) refuse a change t
 
 ## Editing in the Page Editor
 
-The page editor shows the text of the page. It marks the head line of every widget block and of every slot block that creates a subject, together with its `json` block, and it marks every expression.
+The page editor shows the text of the page. It marks the head line of every widget block and of every slot block that creates a subject, together with its `json` block, and it marks every expression. On a phone or tablet the editor is a plain text field without these marks, so only "Create" of the actions below is there.
+
+The page editor saves with "Save" or Ctrl+S (Cmd+S on a Mac), and it asks before unsaved text is discarded. The mode chosen in the menu at the top right of a page stays for the next pages of the browser tab.
 
 - **Edit a block**: With the cursor on a marked head line, the toolbar shows a button "Edit" followed by the name of the block, or by its type when it has no name. It opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` block change, the content of the block stays as it is, and a block without a closing line gets none.
 - **Edit an expression**: With the cursor in an expression, the toolbar shows the button "Edit Expression". It opens a dialog to choose another path, writes the path into the expression and saves the page.
@@ -959,23 +1006,46 @@ What the editor writes:
 - **Values**: A configuration property is written when its value differs from the default of its type, which is the value that a new block of that type without the argument gets. A value that equals the default is left out, unless the block already had that argument, which then stays. Values that are not set are left out too. A block without an argument follows the default of its type, so when a later version of the type changes that default, such pages change with it. A default that the type computes from the host, such as from its culture, machine name or time zone, can differ from one host to another, and so can the value of a block without the argument.
 - **Colons**: The head line keeps its number of colons and its `#name` and gets one space after the colons. The arguments are written anew, so arguments that you wrote by hand can change their order.
 
-Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline or Split mode of the page, writes its block in the same way.
+Editing a subject elsewhere in the UI, for example through "Edit" in the bar of its selected widget in the Inline mode of the page, writes its block in the same way. When the file cannot be written, the save fails and the page is read again, so the subject takes the values of its block in the file again.
 
-While the page is in edit mode, which is with "Split" or "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
+While the page is in edit mode, which is with "Inline" in the menu at the top right of the page, a `GridLayout` shows a plus in every free place, and once the grid itself is selected, a click on it adds a cell there. A `CanvasLayout` adds a node with a click on a free place of the canvas, a click on a node selects the widget in it, or the canvas when the node has no widget, and a node can be moved with the mouse. Each cell and each node has buttons to edit and remove it, which show while its layout or a widget in the layout is selected, so a click on a cell without a widget selects the grid and shows the buttons of all its cells. Each of these writes the `Cell` and `Node` blocks of the page and saves the page:
 
 - **Add**: The click opens the dialog "Create subject". The new cell or node is a `Cell` or `Node` block after the last one of its layout, with the widget that you chose as a block inside it. It is written like the block before it: with as many colons, and with a closing line only when that block has one. In a layout without a cell or a node, the new block has one colon more than the layout. It then gets a closing line when every widget block and slot block of the page has one, and none otherwise.
 - **Edit and move**: Editing a cell or a node, or moving a node, writes the head line of its block again, by the rules of the editor above. A node that had only `X` and `Y` gets `Width` and `Height` only when they differ from their defaults. The content of the block stays as it is.
 - **Remove**: Removing a cell or a node removes its block with everything in it. Where the text before the block and the text after it would then stand directly below each other, one empty line stays between them.
 - **A change that the page cannot keep**: When the page cannot keep a change, nothing is written, and the notification "Configuration applied but not saved. It will be lost on restart." appears. When adding or removing the block would change another block or other text of the page, or the cells or nodes were put into another order outside of the page, for example by a method or another tool, the page is read again at once, and the layout shows what the page holds. When the page is being read again at that moment, or the page text was saved elsewhere while this change was written, the layout shows the change until the page is read again, which every save of its text and a restart do, so save it again. The order of cells and nodes is the order of their blocks, so change it in the text of the page.
 
-Use these buttons with "Inline". In "Split", the editor next to the page does not show what the buttons wrote until the page is opened again, so do not save the text of the editor after using them, because it would write its older text over theirs.
+Use these buttons in "Inline" mode. The page next to the editor in "Split" mode does not edit.
+
+### Editing the blocks of a page inline
+
+In "Inline" mode a page is edited on the page itself:
+
+- **Widgets**: A click selects a widget. Its bar moves it up or down, deletes it, opens its edit dialog, which a double click also opens, and adds widgets, text or items to its slots with "+". The rows of a `ValueList` and the cases of a `ValueMap` are blocks of their own once the list or map is selected. A widget that shows nothing, such as a `ValueMap`, or a `Responsive` block hidden at the current width, is a chip where its block stands.
+- **Text**: Every paragraph, heading, list, table, quote and code block is a block of its own, with a green outline. It moves and deletes like a widget, and "Edit" opens its Markdown in a dialog, where "Create" also adds new widgets to the text.
+- **Insert**: The plus lines between blocks insert a new widget or new text there.
+- **Content edited in the page editor**: Raw HTML and the text inside an element that it opens, style blocks, errors, the footnotes, a list or a quote with a block in it, and the text in a cell of a `GridLayout` or a node of a `CanvasLayout`. Its bar has "Edit in Source", which opens its lines in "Split" mode.
+
+What a change in this mode does:
+
+- **Only the text of the page**: Every change writes only the text of the page. A change that would alter any other block or the text around it is refused with a message, and so is a change when the file changed since the page read it, for example in another editor. The page then shows the file.
+- **Subjects stay**: Every block that a move, an insert or a delete leaves keeps its subject, so a running device keeps running. A widget without a name gets the key of its new position, see [What an Edit of the Page Keeps](#what-an-edit-of-the-page-keeps), so its path changes. Name a widget whose path must stay stable.
+- **Widgets in text**: A widget in the text of the dialog must be a complete widget block with a name that is new to the page. A widget with too few colons for its place gets the colons it needs when the dialog is saved.
+- **Comments**: An HTML comment moves with the block after it, so a comment that names a block stays with it.
+
+In "Split" mode the page next to the editor only shows the saved page and cannot be operated. A click on a block in it shows the block's lines in the editor.
+
+Known limits:
+
+- **HTML left open**: Removing or moving a widget can put the text after it into an element that raw HTML before the widget leaves open. The viewed page then shows that text inside the element, and it can be edited only in the page editor.
+- **The bar at the top**: The bar of a block right below the title can cover the mode menu of the page. Escape clears the selection.
 
 ---
 
 ## Not Supported
 
-- More formats for expressions than `display` and `raw`, like another unit, another number of decimals or conditions.
-- Expressions in arguments. The value of an argument is fixed text.
+- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals, and arithmetic in expressions.
+- Expressions in arguments. The value of an argument is fixed text, except the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions).
 - Short names for types. A block always has the full type name.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.
 - A check of the names below the top level of a `json` block.

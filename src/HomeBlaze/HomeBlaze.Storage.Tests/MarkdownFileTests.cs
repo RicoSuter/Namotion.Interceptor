@@ -397,7 +397,7 @@ public class MarkdownFileTests
             new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
 
         // Act
-        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.Null(expressions["/Devices/motor/Password"].Value);
@@ -592,7 +592,7 @@ public class MarkdownFileTests
         // Assert
         Assert.StartsWith("Raw: , display: , public: visible.", evaluated);
         Assert.StartsWith("Raw: , display: , public: visible (/Devices/motor/Host).", withSourcePaths);
-        Assert.All(expressions.Where(expression => expression.Path == path), expression =>
+        Assert.All(expressions.Where(expression => expression.Text == path), expression =>
         {
             Assert.Null(expression.Value);
             Assert.Equal(string.Empty, expression.GetText(timeZone: null));
@@ -614,7 +614,7 @@ public class MarkdownFileTests
 
         // Act
         var evaluated = markdown.ReadEvaluatedContent();
-        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Path);
+        var expressions = markdown.Children.Values.OfType<RenderExpression>().ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.EndsWith("Own: , relative: , absolute: , title: Page.", evaluated);
@@ -675,11 +675,83 @@ public class MarkdownFileTests
         // Act
         var expressions = Assert.IsType<MarkdownFragment>(card.Content).Children.Values
             .OfType<RenderExpression>()
-            .ToDictionary(expression => expression.Path);
+            .ToDictionary(expression => expression.Text);
 
         // Assert
         Assert.Null(expressions["/Devices/motor/Password"].Value);
         Assert.Equal("visible", expressions["/Devices/motor/Host"].Value);
+    }
+
+    [Fact]
+    public async Task WhenAWidgetBetweenParagraphsFails_ThenItsErrorBoxIsBetweenTwoBlockStarts()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\n:: Demo.Unknown\n::\n\nAfter.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Collection(markdown.Children.Values.OfType<HtmlSegment>(),
+            first => Assert.True(first.EndsWithBlock),
+            error => Assert.Contains("markdown-block-error", error.Html),
+            after => Assert.True(after.StartsWithBlock));
+        var markup = MarkdownMarkup.GetRenderSegments(markdown.Children.Values, timeZone: null).Select(segment => segment.Html).ToArray();
+        Assert.Equal(3, markup.Length);
+        Assert.Contains("markdown-block-error", markup[1]);
+    }
+
+    [Fact]
+    public async Task WhenAPageHasTwoParagraphs_ThenEachIsAnHtmlSegmentThatIsABlock()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+
+        // Act
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Collection(
+            markdown.Children,
+            first => AssertBlock(first, "^Html_0_[0-9a-f]{16}$", "<p>First.</p>\n"),
+            second => AssertBlock(second, "^Html_1_[0-9a-f]{16}$", "<p>Second.</p>\n"));
+
+        static void AssertBlock(KeyValuePair<string, IInterceptorSubject> child, string keyPattern, string html)
+        {
+            var segment = Assert.IsType<HtmlSegment>(child.Value);
+            Assert.Equal([html], segment.Blocks.ToArray());
+            Assert.True(segment.StartsWithBlock);
+            Assert.True(segment.EndsWithBlock);
+            Assert.Matches(keyPattern, child.Key);
+        }
+    }
+
+    [Fact]
+    public async Task WhenOnlyTheBlockStartsOfTheHtmlChange_ThenTheHtmlSegmentIsReplaced()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+        var before = markdown.Children.First();
+
+        // Act
+        // Raw HTML after the paragraph is joined with it, so the paragraph no longer ends a block.
+        await WriteFileAsync(storage, "blocks.md", "First.\n<p>Second.</p>");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        var after = markdown.Children.First();
+        var html = Assert.IsType<HtmlSegment>(after.Value);
+        Assert.Equal(((HtmlSegment)before.Value).Html, html.Html);
+        Assert.False(html.EndsWithBlock);
+        Assert.NotEqual(before.Key, after.Key);
+        Assert.NotSame(before.Value, html);
     }
 
     [Fact]

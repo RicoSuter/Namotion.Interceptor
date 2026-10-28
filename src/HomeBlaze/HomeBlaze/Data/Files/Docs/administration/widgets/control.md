@@ -12,7 +12,7 @@ Shows the control that fits its target: a button, a switch, an indicator, a sele
 | Argument | Kind of value | Default | Meaning |
 |----------|---------------|---------|---------|
 | `Path` | Path (Value or Operation) | None | The [path](basics.md#paths) of the property or the operation that the control is for |
-| `Label` | Text | From the property or the method, see [Labels](basics.md#labels) | The label of the control |
+| `Label` | Text with values | From the property or the method, see [Labels](basics.md#labels) | The label of the control, see [Text with Values](basics.md#text-with-values) |
 | `Minimum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at the left end of a slider |
 | `Maximum` | Number with a fraction | From the property, see [Ranges](basics.md#ranges) | The value at the right end of a slider |
 | `Step` | Number with a fraction | See [Slider](slider.md) | The distance between two positions of a slider |

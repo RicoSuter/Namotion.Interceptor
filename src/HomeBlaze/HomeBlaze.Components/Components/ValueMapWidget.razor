@@ -1,9 +1,28 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueMap))]
 @implements ISubjectComponent
+@inherits SelectionContainingWidgetBase
 
-@* A map shows nothing. The component exists so that the page does not report a missing one. *@
+@* A map shows nothing on a viewed page. Edited inline, it is a chip, and while it or one of its cases is selected,
+   the list of its cases. *@
+@if (IsEditing && Selection is not null && Subject is ValueMap map)
+{
+    <WidgetChip Icon="@Icons.Material.Filled.SwapHoriz" Text="@(StructureEditor?.GetBlockName(map) ?? nameof(ValueMap))" TestId="invisible-widget-chip" />
+
+    @if (ContainsSelection)
+    {
+        <div class="value-map-cases" data-testid="value-map-cases">
+            @foreach (var mapCase in map.Cases)
+            {
+                <SubjectComponent @key="mapCase" Subject="@mapCase" Type="SubjectComponentType.Widget" />
+            }
+        </div>
+    }
+}
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter]
+    public PageStructureEditor? StructureEditor { get; set; }
 }

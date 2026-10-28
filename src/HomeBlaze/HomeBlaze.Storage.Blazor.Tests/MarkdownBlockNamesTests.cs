@@ -94,4 +94,44 @@ public class MarkdownBlockNamesTests
         Assert.Equal("MarkdownBlockNamesTests2", name);
         Assert.Null(options.Validate(name));
     }
+
+    [Theory]
+    [InlineData("inner")]
+    [InlineData("card")]
+    public void WhenNameIsUsedByThePartOfThePageOrReservedByTheRest_ThenTheErrorSaysSo(string name)
+    {
+        // Arrange
+        var options = MarkdownBlockNames.CreateNameOptions(":: Demo.Motor#inner\n::\n", ["card"]);
+
+        // Act
+        var error = options.Validate(name);
+
+        // Assert
+        Assert.Equal("This block name is already used", error);
+    }
+
+    [Fact]
+    public void WhenNameIsUsedNeitherByThePartNorByTheRest_ThenThereIsNoError()
+    {
+        // Arrange
+        var options = MarkdownBlockNames.CreateNameOptions(":: Demo.Motor#inner\n::\n", ["card"]);
+
+        // Act
+        var error = options.Validate("other");
+
+        // Assert
+        Assert.Null(error);
+    }
+
+    [Theory]
+    [InlineData("value")]
+    [InlineData("subject")]
+    public void WhenNameIsReserved_ThenItHasAnError(string name)
+    {
+        // Act
+        var error = MarkdownBlockNames.GetError(name);
+
+        // Assert
+        Assert.Equal($"'{name}' is reserved for expressions and cannot be the name of a block.", error);
+    }
 }

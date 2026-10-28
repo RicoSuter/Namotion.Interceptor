@@ -119,6 +119,7 @@ public static class HomeBlazeWebApplication
 
         builder.Services.AddHomeBlazePlugins(pluginConfigPath);
         builder.Services.AddHotKeys2();
+        builder.Services.AddScoped<HomeBlaze.Components.Pages.PageEditModeChoice>();
 
         // The history package contributes its own tool; the AI package knows nothing about it. Registered once so
         // both the external MCP server and the built-in agents get it.
