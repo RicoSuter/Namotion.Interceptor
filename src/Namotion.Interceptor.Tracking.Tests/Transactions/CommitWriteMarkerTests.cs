@@ -25,8 +25,8 @@ public class CommitWriteMarkerTests
         using (CommitWriteMarker.Set(transaction, property, "Bob"))
         {
             // Act
-            var changedValue = CommitWriteMarker.TryConsume(handler, property, "Changed");
-            var checkedValue = CommitWriteMarker.TryConsume(handler, property, "Bob");
+            var changedValue = SubjectTransaction.TryConsumeCommitWrite(handler, property, "Changed");
+            var checkedValue = SubjectTransaction.TryConsumeCommitWrite(handler, property, "Bob");
 
             // Assert
             Assert.False(changedValue);
@@ -46,8 +46,8 @@ public class CommitWriteMarkerTests
         using (CommitWriteMarker.Set(transaction, markedProperty, "Bob"))
         {
             // Act
-            var otherMatches = CommitWriteMarker.TryConsume(handler, otherProperty, "Bob");
-            var markedMatches = CommitWriteMarker.TryConsume(handler, markedProperty, "Bob");
+            var otherMatches = SubjectTransaction.TryConsumeCommitWrite(handler, otherProperty, "Bob");
+            var markedMatches = SubjectTransaction.TryConsumeCommitWrite(handler, markedProperty, "Bob");
 
             // Assert
             Assert.False(otherMatches);
@@ -67,37 +67,37 @@ public class CommitWriteMarkerTests
         bool equalValueMatches;
         using (CommitWriteMarker.Set(transaction, property, (int?)5))
         {
-            equalValueMatches = CommitWriteMarker.TryConsume<int?>(handler, property, 5);
+            equalValueMatches = SubjectTransaction.TryConsumeCommitWrite<int?>(handler, property, 5);
         }
 
         bool otherValueMatches;
         using (CommitWriteMarker.Set(transaction, property, (int?)5))
         {
-            otherValueMatches = CommitWriteMarker.TryConsume<int?>(handler, property, 6);
+            otherValueMatches = SubjectTransaction.TryConsumeCommitWrite<int?>(handler, property, 6);
         }
 
         bool nullMatches;
         using (CommitWriteMarker.Set(transaction, property, null))
         {
-            nullMatches = CommitWriteMarker.TryConsume<int?>(handler, property, null);
+            nullMatches = SubjectTransaction.TryConsumeCommitWrite<int?>(handler, property, null);
         }
 
         bool valueMatchesNullMark;
         using (CommitWriteMarker.Set(transaction, property, null))
         {
-            valueMatchesNullMark = CommitWriteMarker.TryConsume<int?>(handler, property, 5);
+            valueMatchesNullMark = SubjectTransaction.TryConsumeCommitWrite<int?>(handler, property, 5);
         }
 
         bool nullReferenceMatches;
         using (CommitWriteMarker.Set(transaction, property, null))
         {
-            nullReferenceMatches = CommitWriteMarker.TryConsume<string?>(handler, property, null);
+            nullReferenceMatches = SubjectTransaction.TryConsumeCommitWrite<string?>(handler, property, null);
         }
 
         bool referenceMatchesNullMark;
         using (CommitWriteMarker.Set(transaction, property, null))
         {
-            referenceMatchesNullMark = CommitWriteMarker.TryConsume(handler, property, "Bob");
+            referenceMatchesNullMark = SubjectTransaction.TryConsumeCommitWrite(handler, property, "Bob");
         }
 
         // Assert
@@ -122,7 +122,7 @@ public class CommitWriteMarkerTests
         }
 
         // Act
-        var matches = CommitWriteMarker.TryConsume(handler, property, "Bob");
+        var matches = SubjectTransaction.TryConsumeCommitWrite(handler, property, "Bob");
 
         // Assert
         Assert.False(matches);
@@ -141,11 +141,11 @@ public class CommitWriteMarkerTests
         {
             using (CommitWriteMarker.Set(transaction, innerProperty, "inner"))
             {
-                CommitWriteMarker.TryConsume(handler, innerProperty, "inner");
+                SubjectTransaction.TryConsumeCommitWrite(handler, innerProperty, "inner");
             }
 
             // Act
-            var matches = CommitWriteMarker.TryConsume(handler, outerProperty, "outer");
+            var matches = SubjectTransaction.TryConsumeCommitWrite(handler, outerProperty, "outer");
 
             // Assert
             Assert.True(matches);

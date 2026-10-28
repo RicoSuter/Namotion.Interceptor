@@ -259,9 +259,15 @@ internal static class SubjectPropertyChangeOperations
     /// </summary>
     internal static int CopyExcludingProperties(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        HashSet<PropertyReference> excludedProperties,
+        HashSet<PropertyReference>? excludedProperties,
         Span<SubjectPropertyChange> destination)
     {
+        if (excludedProperties is null)
+        {
+            changes.CopyTo(destination);
+            return changes.Length;
+        }
+
         var count = 0;
         foreach (var change in changes)
         {

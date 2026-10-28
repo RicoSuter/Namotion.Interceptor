@@ -33,17 +33,11 @@ internal static class CommitWriteMarker
         return scope;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     internal static bool TryConsume<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
-        // A dispose mid-commit from another flow can clear this gate while a mark is set; the slow path rejects the
-        // mark of a disposed transaction too, so the handler checks the write either way.
-        return SubjectTransaction.HasActiveTransaction && TryConsumeMarked(handler, property, value);
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool TryConsumeMarked<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
-    {
+        // A dispose mid-commit from another flow can clear the HasActiveTransaction gate of the caller while a mark is
+        // set; this rejects the mark of a disposed transaction too, so the handler checks the write either way.
         var frame = _frame;
         if (frame.Transaction is null ||
             !frame.Target.Equals(property) ||

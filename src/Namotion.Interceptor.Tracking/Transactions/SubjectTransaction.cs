@@ -65,10 +65,9 @@ public sealed class SubjectTransaction : IDisposable
     private bool _disposeRequestedDuringCommit;
 
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
-    // IsInCommitScope matched on that same thread, so they need no synchronization. The excluded properties are those
-    // whose source write failed, set only during the pre-apply check.
-    private bool _isInHandlerCheck;
-    private bool _isInCommitCheck;
+    // IsInCommitScope matched on that same thread, so they need no synchronization. The stage is null outside a
+    // handler check. The excluded properties are those whose source write failed, set only during the pre-apply check.
+    private TransactionCheckStage? _checkStage;
     private HashSet<PropertyReference>? _checkExcludedProperties;
 
     /// <summary>
@@ -103,7 +102,7 @@ public sealed class SubjectTransaction : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryConsumeCommitWrite<TProperty>(ITransactionHandler handler, PropertyReference property, TProperty value)
     {
-        return CommitWriteMarker.TryConsume(handler, property, value);
+        return HasActiveTransaction && CommitWriteMarker.TryConsume(handler, property, value);
     }
 
     /// <summary>
@@ -140,7 +139,7 @@ public sealed class SubjectTransaction : IDisposable
     /// Gets a value indicating whether the commit scope runs a handler check, where reads return the checked values
     /// and writes throw. Only meaningful when <see cref="IsInCommitScope"/> is true.
     /// </summary>
-    internal bool IsInHandlerCheck => _isInHandlerCheck;
+    internal bool IsInHandlerCheck => _checkStage.HasValue;
 
     /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
@@ -198,31 +197,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            var changeCount = _pendingChanges?.Count ?? 0;
-            if (changeCount == 0)
-            {
-                return [];
-            }
-
-            var result = new SubjectPropertyChange[changeCount];
-            CopyPendingChanges(result);
-            return result;
-        }
-    }
-
-    /// <summary>
-    /// Copies the pending changes to <paramref name="destination"/> in insertion order. Must be called under
-    /// <see cref="_pendingChangesLock"/>.
-    /// </summary>
-    private void CopyPendingChanges(Span<SubjectPropertyChange> destination)
-    {
-        if (_pendingChanges is not null)
-        {
-            var index = 0;
-            foreach (var change in _pendingChanges.Values)
-            {
-                destination[index++] = change;
-            }
+            return _pendingChanges is { Count: > 0 } pendingChanges ? pendingChanges.Values.ToArray() : [];
         }
     }
 
@@ -286,7 +261,7 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         change = default;
-        return _isInCommitCheck && _checkOnlyChanges is not null && _checkOnlyChanges.TryGetValue(property, out change);
+        return _checkStage == TransactionCheckStage.Commit && _checkOnlyChanges is not null && _checkOnlyChanges.TryGetValue(property, out change);
     }
 
     /// <summary>
@@ -351,10 +326,9 @@ public sealed class SubjectTransaction : IDisposable
     /// Records a write of the landed value of <paramref name="property"/>, which the equality check drops, as a
     /// check-only entry (see <see cref="_checkOnlyChanges"/>) whose old and new value are
     /// <paramref name="value"/>. Does nothing when the property has a pending change, which the commit check already
-    /// validates, and returns false, dropping the write as unchanged, when the transaction no longer captures or a
-    /// commit has started.
+    /// validates, or when the transaction no longer captures or a commit has started.
     /// </summary>
-    internal bool TryRecordCheckOnly<TProperty>(
+    internal void RecordCheckOnly<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
@@ -364,18 +338,11 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             // A commit that started after the caller's lock-free check owns the snapshot; the write stays dropped.
-            if (_isCommitting || !CanCaptureUnderLock())
-            {
-                return false;
-            }
-
-            if (!_pendingChanges.ContainsKey(property))
+            if (!_isCommitting && CanCaptureUnderLock() && !_pendingChanges.ContainsKey(property))
             {
                 (_checkOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
                     property, origin, changedTimestamp, receivedTimestamp, value, value);
             }
-
-            return true;
         }
     }
 
@@ -1141,7 +1108,7 @@ public sealed class SubjectTransaction : IDisposable
             // and the end of the commit.
             _isCommitting = true;
 
-            CopyPendingChanges(rentedArray);
+            _pendingChanges?.Values.CopyTo(rentedArray, 0);
             if (checkOnlyCount > 0)
             {
                 _checkOnlyChanges!.Values.CopyTo(rentedArray, changeCount);
@@ -1191,7 +1158,7 @@ public sealed class SubjectTransaction : IDisposable
         HashSet<PropertyReference>? excludedProperties,
         TransactionCheckStage stage)
     {
-        using var scope = EnterHandlerCheck(excludedProperties, isCommitCheck: stage == TransactionCheckStage.Commit);
+        using var scope = new CommitScope(this, stage, excludedProperties);
         var context = new TransactionCheckContext(this, changes, stage);
         foreach (var handler in _handlerSet.Handlers)
         {
@@ -1226,7 +1193,15 @@ public sealed class SubjectTransaction : IDisposable
             if (failedProperties is not null || !checkOnlyChanges.IsEmpty)
             {
                 rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length + checkOnlyChanges.Length);
-                var count = CopyLandingChanges(changes, checkOnlyChanges, failedProperties, rentedArray);
+                var count = SubjectPropertyChangeOperations.CopyExcludingProperties(changes, failedProperties, rentedArray);
+
+                // Nothing lands without a landing change, so the entries are checked only alongside one.
+                if (count > 0)
+                {
+                    CopyCheckOnlyChangesWithLandedValues(checkOnlyChanges, rentedArray.AsSpan(count));
+                    count += checkOnlyChanges.Length;
+                }
+
                 landingChanges = new ReadOnlySpan<SubjectPropertyChange>(rentedArray, 0, count);
             }
 
@@ -1262,35 +1237,10 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Copies the changes that will be applied into <paramref name="destination"/>, followed by the check-only entries
-    /// when at least one change is applied, and returns the number of copied changes.
-    /// </summary>
-    private int CopyLandingChanges(
-        ReadOnlySpan<SubjectPropertyChange> changes,
-        ReadOnlySpan<SubjectPropertyChange> checkOnlyChanges,
-        HashSet<PropertyReference>? failedProperties,
-        Span<SubjectPropertyChange> destination)
-    {
-        int count;
-        if (failedProperties is null)
-        {
-            changes.CopyTo(destination);
-            count = changes.Length;
-        }
-        else
-        {
-            count = SubjectPropertyChangeOperations.CopyExcludingProperties(changes, failedProperties, destination);
-        }
-
-        // Nothing lands without a landing change, so the entries are checked only alongside one.
-        return count == 0 ? 0 : count + CopyCheckOnlyChangesWithLandedValues(checkOnlyChanges, destination[count..]);
-    }
-
-    /// <summary>
     /// Copies the check-only entries into <paramref name="destination"/> with their captured origin and timestamps and
-    /// their current landed value as old and new value, and returns the number of copied entries.
+    /// their current landed value as old and new value.
     /// </summary>
-    private int CopyCheckOnlyChangesWithLandedValues(
+    private void CopyCheckOnlyChangesWithLandedValues(
         ReadOnlySpan<SubjectPropertyChange> checkOnlyChanges,
         Span<SubjectPropertyChange> destination)
     {
@@ -1306,8 +1256,6 @@ public sealed class SubjectTransaction : IDisposable
                     entry.Property, entry.Origin, entry.ChangedTimestamp, entry.ReceivedTimestamp, landedValue, landedValue);
             }
         }
-
-        return checkOnlyChanges.Length;
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -1329,14 +1277,11 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private CommitScope EnterCommitModelAccess() => new(this, isHandlerCheck: false, isCommitCheck: false, checkExcludedProperties: null);
-
-    private CommitScope EnterHandlerCheck(HashSet<PropertyReference>? excludedProperties, bool isCommitCheck)
-        => new(this, isHandlerCheck: true, isCommitCheck, excludedProperties);
+    private CommitScope EnterCommitModelAccess() => new(this, checkStage: null, checkExcludedProperties: null);
 
     /// <summary>
     /// Authorizes synchronous commit-owned work of the transaction on this thread: a handler check when
-    /// <c>isHandlerCheck</c> is true (see <see cref="TryGetCheckedValue{TProperty}"/>), and model access otherwise. The
+    /// <c>checkStage</c> is set (see <see cref="TryGetCheckedValue{TProperty}"/>), and model access otherwise. The
     /// previous identity is restored on disposal, so a scope of another transaction can nest. Callers must dispose the
     /// scope before awaiting external code.
     /// </summary>
@@ -1348,8 +1293,7 @@ public sealed class SubjectTransaction : IDisposable
         [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit identity and restores the previous identity on disposal, including nested scopes.")]
         public CommitScope(
             SubjectTransaction transaction,
-            bool isHandlerCheck,
-            bool isCommitCheck,
+            TransactionCheckStage? checkStage,
             HashSet<PropertyReference>? checkExcludedProperties)
         {
             // Dispose resets the check state instead of restoring it, which holds only while the scopes of one
@@ -1357,8 +1301,7 @@ public sealed class SubjectTransaction : IDisposable
             Debug.Assert(!ReferenceEquals(_commitScopeTransaction, transaction), "Commit scopes of one transaction must not nest.");
             _transaction = transaction;
             _previousTransaction = _commitScopeTransaction;
-            transaction._isInHandlerCheck = isHandlerCheck;
-            transaction._isInCommitCheck = isCommitCheck;
+            transaction._checkStage = checkStage;
             transaction._checkExcludedProperties = checkExcludedProperties;
             _commitScopeTransaction = transaction;
         }
@@ -1366,8 +1309,7 @@ public sealed class SubjectTransaction : IDisposable
         public void Dispose()
         {
             _commitScopeTransaction = _previousTransaction;
-            _transaction._isInHandlerCheck = false;
-            _transaction._isInCommitCheck = false;
+            _transaction._checkStage = null;
             _transaction._checkExcludedProperties = null;
         }
     }

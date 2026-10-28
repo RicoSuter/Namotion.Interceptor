@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.Text;
 
 namespace Namotion.Interceptor.Validation;
 
@@ -43,22 +42,6 @@ public sealed class PropertyValidationException : ValidationException
             throw new ArgumentException("At least one validation result is required.", nameof(validationResults));
         }
 
-        if (validationResults.Count == 1)
-        {
-            return validationResults[0].ErrorMessage ?? string.Empty;
-        }
-
-        var message = new StringBuilder();
-        for (var index = 0; index < validationResults.Count; index++)
-        {
-            if (index > 0)
-            {
-                message.Append('\n');
-            }
-
-            message.Append(validationResults[index].ErrorMessage);
-        }
-
-        return message.ToString();
+        return string.Join('\n', validationResults.Select(result => result.ErrorMessage));
     }
 }
