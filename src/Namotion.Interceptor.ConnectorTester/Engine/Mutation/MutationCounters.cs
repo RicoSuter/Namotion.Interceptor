@@ -32,7 +32,8 @@ public sealed class MutationCounters
 
     /// <summary>
     /// Gets how many commits failed with a <see cref="CommitFailureKind.SourceWriteFailure"/>. Expected under chaos:
-    /// the mutations already counted via <see cref="IncrementValue"/> are applied locally but not on the failed source.
+    /// the mutations already counted via <see cref="IncrementValue"/> whose source write failed are applied neither
+    /// locally nor on the source.
     /// </summary>
     public long SourceWriteFailedCommitCount => Interlocked.Read(ref _sourceWriteFailedCommits);
 
