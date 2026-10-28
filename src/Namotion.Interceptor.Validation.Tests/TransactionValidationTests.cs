@@ -51,7 +51,7 @@ public class TransactionValidationTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MotorSpeed = 150;
         motor.MaxAllowedSpeed = 200;
         await transaction.CommitAsync(CancellationToken.None);
@@ -73,7 +73,7 @@ public class TransactionValidationTests
         // Act
         SubjectTransactionValidationException exception;
         using (var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred))
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred))
         {
             motor.MotorSpeed = 150;
             exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
@@ -97,7 +97,7 @@ public class TransactionValidationTests
         var firstMotor = new Motor(context);
         var secondMotor = new Motor(context);
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         firstMotor.MotorSpeed = 150;
         secondMotor.MotorSpeed = 160;
 
@@ -148,7 +148,7 @@ public class TransactionValidationTests
         // Act
         SubjectTransactionValidationException exception;
         using (var transaction = await transactionContext.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred))
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred))
         {
             motor.MotorSpeed = 150;
             exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
@@ -181,7 +181,7 @@ public class TransactionValidationTests
 
         // Act
         using var transaction = await transactionContext.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MotorSpeed = 150;
         motor.MaxAllowedSpeed = 200;
         await transaction.CommitAsync(CancellationToken.None);
@@ -259,7 +259,7 @@ public class TransactionValidationTests
         var context = CreateContext();
         var motor = new Motor(context) { SpeedToWriteOnLimitChange = 1000 };
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         motor.MaxAllowedSpeed = 200;
 
         // Act & Assert
@@ -280,7 +280,7 @@ public class TransactionValidationTests
             .WithService<IPropertyValidator>(() => new MotorSpeedValidator());
         var motor = new Motor(context);
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MotorSpeed = 150;
 
         // Act & Assert
@@ -297,7 +297,7 @@ public class TransactionValidationTests
         var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MaxAllowedSpeed = 100);
         context.AddService<ITransactionWriter>(writer);
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MotorSpeed = 150;
 
         // Act
@@ -320,12 +320,12 @@ public class TransactionValidationTests
     }
 
     [Theory]
-    [InlineData(TransactionValidationMode.Immediate, true, 3)]
-    [InlineData(TransactionValidationMode.Deferred, true, 2)]
-    [InlineData(TransactionValidationMode.Immediate, false, 2)]
-    [InlineData(TransactionValidationMode.Deferred, false, 1)]
+    [InlineData(TransactionCheckMode.Immediate, true, 3)]
+    [InlineData(TransactionCheckMode.Deferred, true, 2)]
+    [InlineData(TransactionCheckMode.Immediate, false, 2)]
+    [InlineData(TransactionCheckMode.Deferred, false, 1)]
     public async Task WhenValidValueIsCommitted_ThenValidatorIsCalledOncePerCaptureAndCheck(
-        TransactionValidationMode validationMode, bool withWriter, int expectedCallCount)
+        TransactionCheckMode checkMode, bool withWriter, int expectedCallCount)
     {
         // Arrange
         var validator = new RecordingValidator();
@@ -340,7 +340,7 @@ public class TransactionValidationTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: validationMode);
+            TransactionFailureHandling.Rollback, checkMode: checkMode);
         motor.MotorSpeed = 50;
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -368,7 +368,7 @@ public class TransactionValidationTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         new PropertyReference(motor, nameof(Motor.MotorSpeed)).SetPropertyValueWithInterception(
             value, motor.MotorSpeed, static (_, _) => { });
         // Applying null or a value of another type to the int property fails; only the commit check's call matters here.
@@ -392,7 +392,7 @@ public class TransactionValidationTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         gearbox.Gear = 3;
         gearbox.Label = "Sport";
         await transaction.CommitAsync(CancellationToken.None);
@@ -478,7 +478,7 @@ public class TransactionValidationTests
         var context = CreateContext();
         var motor = new Motor(context) { MotorSpeed = 50 };
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MaxAllowedSpeed = 40;
         motor.MotorSpeed = 50;
 
@@ -513,7 +513,7 @@ public class TransactionValidationTests
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change => published.Add(change.Property.Name));
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MotorSpeed = 50;
         motor.MaxAllowedSpeed = 80;
 
@@ -545,7 +545,7 @@ public class TransactionValidationTests
             TransactionFailureHandling.Rollback,
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict,
-            validationMode: TransactionValidationMode.Deferred);
+            checkMode: TransactionCheckMode.Deferred);
         motor.MaxAllowedSpeed = 100;
         motor.MotorSpeed = 90;
         await RunWithoutAsyncLocalFlowAsync(() => motor.MaxAllowedSpeed = 60);
@@ -572,7 +572,7 @@ public class TransactionValidationTests
             TransactionFailureHandling.Rollback,
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.Ignore,
-            validationMode: TransactionValidationMode.Deferred);
+            checkMode: TransactionCheckMode.Deferred);
         motor.MaxAllowedSpeed = 100;
         motor.MotorSpeed = 90;
         await RunWithoutAsyncLocalFlowAsync(() => motor.MaxAllowedSpeed = 60);
@@ -592,7 +592,7 @@ public class TransactionValidationTests
         var context = CreateContext();
         var motor = new Motor(context) { MotorSpeed = 50 };
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
         motor.MaxAllowedSpeed = 40;
         motor.MotorSpeed = 50;
         await Assert.ThrowsAsync<SubjectTransactionValidationException>(

@@ -24,7 +24,7 @@ public static class SubjectTransactionExtensions
     /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>
     /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
-    /// <param name="validationMode">When transaction handlers validate the written values. Defaults to <see cref="TransactionValidationMode.Immediate"/>.</param>
+    /// <param name="checkMode">When transaction handlers validate the written values. Defaults to <see cref="TransactionCheckMode.Immediate"/>.</param>
     /// <param name="commitTimeout">
     /// Timeout for commit operations. Defaults to 30 seconds. User cancellation is ignored during commit;
     /// only the timeout can cancel the commit operation. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.
@@ -38,12 +38,12 @@ public static class SubjectTransactionExtensions
         TransactionLocking locking = TransactionLocking.Exclusive,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
-        TransactionValidationMode validationMode = TransactionValidationMode.Immediate,
+        TransactionCheckMode checkMode = TransactionCheckMode.Immediate,
         TimeSpan? commitTimeout = null,
         CancellationToken cancellationToken = default)
     {
         var effectiveTimeout = commitTimeout ?? DefaultCommitTimeout;
-        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, validationMode, effectiveTimeout, cancellationToken);
+        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, checkMode, effectiveTimeout, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }

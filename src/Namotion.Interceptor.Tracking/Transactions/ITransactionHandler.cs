@@ -24,12 +24,12 @@ public interface ITransactionHandler
 {
     /// <summary>
     /// Called, without holding the transaction's capture lock, for a write the transaction is about to capture,
-    /// including a write back that removes a pending change, and in <see cref="TransactionValidationMode.Deferred"/>
+    /// including a write back that removes a pending change, and in <see cref="TransactionCheckMode.Deferred"/>
     /// mode with <see cref="TransactionConflictBehavior.FailOnConflict"/> a write of an unchanged value that the commit
     /// check receives (see <see cref="OnCommitting"/>). Throwing
     /// rejects the write: nothing is captured and the exception propagates to the setter. Handlers must not write
-    /// properties. A validating handler skips its write-time check in <see cref="TransactionValidationMode.Deferred"/>
-    /// mode (<see cref="SubjectTransaction.ValidationMode"/>).
+    /// properties. A validating handler skips its write-time check in <see cref="TransactionCheckMode.Deferred"/>
+    /// mode (<see cref="SubjectTransaction.CheckMode"/>).
     /// </summary>
     /// <typeparam name="TProperty">The property type.</typeparam>
     /// <param name="transaction">The capturing transaction.</param>
@@ -56,7 +56,7 @@ public interface ITransactionHandler
     /// <param name="transaction">The committing transaction.</param>
     /// <param name="changes">
     /// The final set of changes in insertion order; in the pre-apply check only the changes that will be applied. In
-    /// <see cref="TransactionValidationMode.Deferred"/> mode with
+    /// <see cref="TransactionCheckMode.Deferred"/> mode with
     /// <see cref="TransactionConflictBehavior.FailOnConflict"/>, the commit check's set is followed by an entry for
     /// each property written with its unchanged value: its old and new value are equal, conflict detection checks it,
     /// and the commit neither writes, applies nor publishes it.

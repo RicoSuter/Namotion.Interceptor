@@ -12,29 +12,29 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 public class SubjectTransactionHandlerTests
 {
     [Fact]
-    public async Task WhenValidationModeIsOmittedOrPassed_ThenTransactionUsesImmediateOrThePassedMode()
+    public async Task WhenCheckModeIsOmittedOrPassed_ThenTransactionUsesImmediateOrThePassedMode()
     {
         // Arrange
         var context = CreateContext();
 
         // Act
-        TransactionValidationMode omittedMode;
+        TransactionCheckMode omittedMode;
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            omittedMode = transaction.ValidationMode;
+            omittedMode = transaction.CheckMode;
         }
 
-        TransactionValidationMode passedMode;
+        TransactionCheckMode passedMode;
         using (var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
-            validationMode: TransactionValidationMode.Deferred))
+            checkMode: TransactionCheckMode.Deferred))
         {
-            passedMode = transaction.ValidationMode;
+            passedMode = transaction.CheckMode;
         }
 
         // Assert
-        Assert.Equal(TransactionValidationMode.Immediate, omittedMode);
-        Assert.Equal(TransactionValidationMode.Deferred, passedMode);
+        Assert.Equal(TransactionCheckMode.Immediate, omittedMode);
+        Assert.Equal(TransactionCheckMode.Deferred, passedMode);
     }
 
     [Fact]

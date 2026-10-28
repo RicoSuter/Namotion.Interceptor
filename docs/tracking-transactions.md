@@ -174,7 +174,7 @@ Controls when transaction handlers, such as property validation, validate the wr
 ```csharp
 using var tx = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
-    validationMode: TransactionValidationMode.Deferred);
+    checkMode: TransactionCheckMode.Deferred);
 ```
 
 ### Requirements
@@ -477,7 +477,7 @@ TransactionAwaitable BeginTransactionAsync(
     TransactionLocking locking = TransactionLocking.Exclusive,
     TransactionRequirement requirement = TransactionRequirement.None,
     TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
-    TransactionValidationMode validationMode = TransactionValidationMode.Immediate,
+    TransactionCheckMode checkMode = TransactionCheckMode.Immediate,
     TimeSpan? commitTimeout = null, // default: 30 seconds
     CancellationToken cancellationToken = default)
 ```
@@ -492,7 +492,7 @@ TransactionAwaitable BeginTransactionAsync(
 | `Context` | The context this transaction is bound to |
 | `Locking` | The locking mode |
 | `ConflictBehavior` | The conflict detection behavior |
-| `ValidationMode` | When transaction handlers validate the written values |
+| `CheckMode` | When transaction handlers validate the written values |
 | `Current` (static) | The transaction of the current async flow, or null |
 | `TryConsumeCommitWrite(...)` (static) | Lets a handler recognize a value it already checked, see [Transaction Handlers](#transaction-handlers) |
 | `ValidateWriterContract` (static) | Enables the writer contract check, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer) |
@@ -515,7 +515,7 @@ TransactionAwaitable BeginTransactionAsync(
 - `FailOnConflict` - Throw on concurrent changes
 - `Ignore` - Overwrite without checking
 
-**TransactionValidationMode:**
+**TransactionCheckMode:**
 - `Immediate` - Validate each write and the final set at commit
 - `Deferred` - Validate only the final set at commit
 

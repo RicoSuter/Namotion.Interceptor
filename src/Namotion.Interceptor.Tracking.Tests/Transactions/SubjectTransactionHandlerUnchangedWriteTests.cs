@@ -31,7 +31,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Ann";
         person.LastName = "Kim";
         var pendingChanges = transaction.GetPendingChanges();
@@ -63,7 +63,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Bob";
         person.FirstName = "Ann";
         var pendingChanges = transaction.GetPendingChanges();
@@ -94,7 +94,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Ann";
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -120,7 +120,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await transactionContext.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         first.FirstName = "Ann";
         second.FirstName = "Bob";
         await transaction.CommitAsync(CancellationToken.None);
@@ -141,7 +141,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict,
-            validationMode: TransactionValidationMode.Deferred);
+            checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Bob";
         person.FirstName = "Ann";
         await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Carl");
@@ -167,7 +167,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict,
-            validationMode: TransactionValidationMode.Deferred);
+            checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Ann";
         await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Carl");
 
@@ -188,7 +188,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.Ignore,
-            validationMode: TransactionValidationMode.Deferred);
+            checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Ann";
         person.LastName = "Kim";
         person.LastName = "Lee";
@@ -231,7 +231,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         var exception = Assert.Throws<InvalidOperationException>(() => person.FirstName = "Ann");
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -253,7 +253,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         person.Nickname = "Al";
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -273,7 +273,7 @@ public class SubjectTransactionHandlerUnchangedWriteTests
 
         // Act
         using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, validationMode: TransactionValidationMode.Deferred);
+            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
         person.FirstName = "Ann";
         await transaction.CommitAsync(CancellationToken.None);
 

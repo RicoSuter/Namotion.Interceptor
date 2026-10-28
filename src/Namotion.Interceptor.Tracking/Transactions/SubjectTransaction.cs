@@ -47,13 +47,13 @@ public sealed class SubjectTransaction : IDisposable
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Deferred mode with FailOnConflict only (see RecordsValidateOnlyEntries): validate-only entries, writes of the
+    // Deferred mode with FailOnConflict only (see RecordsCheckOnlyEntries): check-only entries, writes of the
     // landed value of a property without a pending change.
     // The commit check validates them and conflict detection checks them, so the check never validates a value that
     // moved meanwhile, but the commit neither writes, applies nor publishes them, and GetPendingChanges does not list
     // them. A later write of another value replaces the entry with a pending change, so the keys stay disjoint from
     // _pendingChanges. Allocated on the first such write; accessed only under _pendingChangesLock.
-    private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _validateOnlyChanges;
+    private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _checkOnlyChanges;
 
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
@@ -159,15 +159,15 @@ public sealed class SubjectTransaction : IDisposable
     private SubjectTransaction? MarkingTransaction => _handlerSet.Handlers.Length == 0 ? null : this;
 
     /// <summary>
-    /// Gets whether writes of an unchanged value are recorded as validate-only entries. Conflict detection is what
+    /// Gets whether writes of an unchanged value are recorded as check-only entries. Conflict detection is what
     /// keeps an entry sound, since the check reads its value from write time, so with
     /// <see cref="TransactionConflictBehavior.Ignore"/> such writes stay dropped.
     /// </summary>
-    internal bool RecordsValidateOnlyEntries =>
-        ValidationMode == TransactionValidationMode.Deferred && ConflictBehavior == TransactionConflictBehavior.FailOnConflict;
+    internal bool RecordsCheckOnlyEntries =>
+        CheckMode == TransactionCheckMode.Deferred && ConflictBehavior == TransactionConflictBehavior.FailOnConflict;
 
     // Without handlers nothing validates the entries, so the commit leaves them out, conflict detection included.
-    private int CheckedValidateOnlyCount => _handlerSet.Handlers.Length == 0 ? 0 : _validateOnlyChanges?.Count ?? 0;
+    private int CheckedCheckOnlyCount => _handlerSet.Handlers.Length == 0 ? 0 : _checkOnlyChanges?.Count ?? 0;
 
     // Handlers checked the changes as a set, so once one fails to apply the rest no longer land as checked.
     private bool RollsBackOnApplyFailure => _failureHandling == TransactionFailureHandling.Rollback || MarkingTransaction is not null;
@@ -257,7 +257,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Reads a pending value for the handlers during the commit check or the pre-apply check, and in the commit check
-    /// also a validate-only value. Returns false when the property is not part of the transaction or its source write
+    /// also a check-only value. Returns false when the property is not part of the transaction or its source write
     /// failed (the check's excluded properties).
     /// </summary>
     internal bool TryGetCheckedValue<TProperty>(PropertyReference property, out TProperty value)
@@ -279,7 +279,7 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Returns the pending change of <paramref name="property"/>, or in the commit check its validate-only entry. Must
+    /// Returns the pending change of <paramref name="property"/>, or in the commit check its check-only entry. Must
     /// be called under <see cref="_pendingChangesLock"/>.
     /// </summary>
     private bool TryGetCheckedChange(PropertyReference property, out SubjectPropertyChange change)
@@ -290,7 +290,7 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         change = default;
-        return _isInCommitCheck && _validateOnlyChanges is not null && _validateOnlyChanges.TryGetValue(property, out change);
+        return _isInCommitCheck && _checkOnlyChanges is not null && _checkOnlyChanges.TryGetValue(property, out change);
     }
 
     /// <summary>
@@ -299,7 +299,7 @@ public sealed class SubjectTransaction : IDisposable
     /// preserve the original old value (last write wins). <paramref name="restoresLandedValue"/> is true when the write
     /// restores the landed value and the subject's context has the equality check: a pending change is then removed,
     /// the same as never writing the property (without one the write is captured as usual), and replaced by a
-    /// validate-only entry for the landed value when <see cref="RecordsValidateOnlyEntries"/>.
+    /// check-only entry for the landed value when <see cref="RecordsCheckOnlyEntries"/>.
     /// Returns false when disposal wins the race, allowing the caller to continue the normal write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -324,16 +324,16 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             if (restoresLandedValue && pendingChanges.Remove(property))
             {
-                if (RecordsValidateOnlyEntries)
+                if (RecordsCheckOnlyEntries)
                 {
-                    (_validateOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
+                    (_checkOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
                         property, origin, changedTimestamp, receivedTimestamp, newValue, newValue);
                 }
 
                 return true;
             }
 
-            _validateOnlyChanges?.Remove(property);
+            _checkOnlyChanges?.Remove(property);
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
 
             pendingChanges[property] = SubjectPropertyChange.Create(
@@ -349,12 +349,12 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Records a write of the landed value of <paramref name="property"/>, which the equality check drops, as a
-    /// validate-only entry (see <see cref="_validateOnlyChanges"/>) whose old and new value are
+    /// check-only entry (see <see cref="_checkOnlyChanges"/>) whose old and new value are
     /// <paramref name="value"/>. Does nothing when the property has a pending change, which the commit check already
     /// validates, and returns false, dropping the write as unchanged, when the transaction no longer captures or a
     /// commit has started.
     /// </summary>
-    internal bool TryRecordValidateOnly<TProperty>(
+    internal bool TryRecordCheckOnly<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
@@ -371,7 +371,7 @@ public sealed class SubjectTransaction : IDisposable
 
             if (!_pendingChanges.ContainsKey(property))
             {
-                (_validateOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
+                (_checkOnlyChanges ??= new(PropertyReference.Comparer))[property] = SubjectPropertyChange.Create(
                     property, origin, changedTimestamp, receivedTimestamp, value, value);
             }
 
@@ -476,9 +476,9 @@ public sealed class SubjectTransaction : IDisposable
     public TransactionLocking Locking { get; }
 
     /// <summary>
-    /// Gets the validation mode for this transaction.
+    /// Gets the check mode for this transaction.
     /// </summary>
-    public TransactionValidationMode ValidationMode { get; }
+    public TransactionCheckMode CheckMode { get; }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and handlers as one coherent state.")]
     private SubjectTransaction(
@@ -488,7 +488,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
-        TransactionValidationMode validationMode,
+        TransactionCheckMode checkMode,
         TimeSpan commitTimeout,
         ImmutableArray<ITransactionHandler> handlers)
     {
@@ -498,7 +498,7 @@ public sealed class SubjectTransaction : IDisposable
         Locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
-        ValidationMode = validationMode;
+        CheckMode = checkMode;
         _commitTimeout = commitTimeout;
         _handlerSet = new TransactionHandlerSet(handlers);
 
@@ -515,7 +515,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="locking">The locking mode controlling transaction synchronization.</param>
     /// <param name="requirement">The transaction requirement for validation.</param>
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
-    /// <param name="validationMode">The validation mode.</param>
+    /// <param name="checkMode">The check mode.</param>
     /// <param name="commitTimeout">Timeout for commit operations. User cancellation is ignored during commit and only timeout-based cancellation is used. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.</param>
     /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
     /// <returns>A new SubjectTransaction instance.</returns>
@@ -527,7 +527,7 @@ public sealed class SubjectTransaction : IDisposable
         TransactionLocking locking,
         TransactionRequirement requirement,
         TransactionConflictBehavior conflictBehavior,
-        TransactionValidationMode validationMode,
+        TransactionCheckMode checkMode,
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
@@ -556,7 +556,7 @@ public sealed class SubjectTransaction : IDisposable
                 locking,
                 requirement,
                 conflictBehavior,
-                validationMode,
+                checkMode,
                 commitTimeout,
                 context.GetServices<ITransactionHandler>());
         }
@@ -616,7 +616,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
-            if ((_pendingChanges?.Count ?? 0) == 0 && CheckedValidateOnlyCount == 0)
+            if ((_pendingChanges?.Count ?? 0) == 0 && CheckedCheckOnlyCount == 0)
             {
                 _isCommitted = true;
                 return default;
@@ -742,7 +742,7 @@ public sealed class SubjectTransaction : IDisposable
 
             if (changes.IsEmpty)
             {
-                // Only validate-only entries, accepted by the check and conflict detection: nothing to write or apply.
+                // Only check-only entries, accepted by the check and conflict detection: nothing to write or apply.
                 FinishCommit();
                 return;
             }
@@ -1022,7 +1022,7 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             _pendingChanges?.Clear();
-            _validateOnlyChanges = null;
+            _checkOnlyChanges = null;
             _isCommitted = true;
         }
     }
@@ -1123,8 +1123,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Snapshots the pending changes, followed by the validate-only entries. <c>Changes</c> holds the pending changes
-    /// the commit writes and applies, <c>CheckedChanges</c> also the validate-only entries, for the commit check and
+    /// Snapshots the pending changes, followed by the check-only entries. <c>Changes</c> holds the pending changes
+    /// the commit writes and applies, <c>CheckedChanges</c> also the check-only entries, for the commit check and
     /// conflict detection.
     /// </summary>
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, Memory<SubjectPropertyChange> CheckedChanges) SnapshotChanges()
@@ -1133,8 +1133,8 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Rent before changing state so an allocation failure leaves the transaction reusable.
             var changeCount = _pendingChanges?.Count ?? 0;
-            var validateOnlyCount = CheckedValidateOnlyCount;
-            var checkedCount = changeCount + validateOnlyCount;
+            var checkOnlyCount = CheckedCheckOnlyCount;
+            var checkedCount = changeCount + checkOnlyCount;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(checkedCount);
 
             // Set while holding the lock so no write can be captured, and no handler included, between the snapshot
@@ -1142,9 +1142,9 @@ public sealed class SubjectTransaction : IDisposable
             _isCommitting = true;
 
             CopyPendingChanges(rentedArray, excluded: null);
-            if (validateOnlyCount > 0)
+            if (checkOnlyCount > 0)
             {
-                _validateOnlyChanges!.Values.CopyTo(rentedArray, changeCount);
+                _checkOnlyChanges!.Values.CopyTo(rentedArray, changeCount);
             }
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount), rentedArray.AsMemory(0, checkedCount));
@@ -1348,7 +1348,7 @@ public sealed class SubjectTransaction : IDisposable
             lock (_pendingChangesLock)
             {
                 _pendingChanges?.Clear();
-                _validateOnlyChanges = null;
+                _checkOnlyChanges = null;
                 committing = _isCommitting;
                 if (committing)
                 {

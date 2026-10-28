@@ -143,7 +143,7 @@ Data Annotations and custom validators all run on each property write. If any va
 
 ## Transactions
 
-Inside a [transaction](tracking-transactions.md), writes are buffered until commit. Both validation modes validate the final set at commit; the transaction's `validationMode` decides whether writes are also validated when written:
+Inside a [transaction](tracking-transactions.md), writes are buffered until commit. Both validation modes validate the final set at commit; the transaction's `checkMode` decides whether writes are also validated when written:
 
 | Mode | When a value is written |
 |------|-------------------------|
@@ -153,7 +153,7 @@ Inside a [transaction](tracking-transactions.md), writes are buffered until comm
 ```csharp
 using var transaction = await context.BeginTransactionAsync(
     TransactionFailureHandling.Rollback,
-    validationMode: TransactionValidationMode.Deferred);
+    checkMode: TransactionCheckMode.Deferred);
 
 motor.MotorSpeed = 150;      // not validated yet
 motor.MaxAllowedSpeed = 200; // the order does not matter

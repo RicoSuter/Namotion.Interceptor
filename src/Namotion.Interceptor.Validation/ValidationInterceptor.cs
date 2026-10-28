@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Validation;
 /// Validates property values with the registered <see cref="IPropertyValidator"/> services. Writes that reach the
 /// model are validated before any derived recalculation, change notification or lifecycle handling. Writes captured
 /// by a transaction are validated as an <see cref="ITransactionHandler"/>, according to the transaction's
-/// <see cref="TransactionValidationMode"/>; a write recognized by
+/// <see cref="TransactionCheckMode"/>; a write recognized by
 /// <see cref="SubjectTransaction.TryConsumeCommitWrite"/> is not validated again.
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
@@ -33,7 +33,7 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     /// <inheritdoc />
     public void OnCapturing<TProperty>(SubjectTransaction transaction, PropertyReference property, TProperty newValue, ChangeOrigin origin)
     {
-        if (transaction.ValidationMode == TransactionValidationMode.Immediate)
+        if (transaction.CheckMode == TransactionCheckMode.Immediate)
         {
             ThrowIfInvalid(property, newValue, origin);
         }
