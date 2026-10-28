@@ -266,8 +266,8 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Atomically captures a property change into the pending dictionary. The first write preserves
-    /// <paramref name="currentValue"/>, the landed model value, as old value for conflict detection; subsequent writes
-    /// preserve the original old value (last write wins). <paramref name="restoresLandedValue"/> is true when the write
+    /// <paramref name="currentValue"/>, the landed model value, or the value of the property's check-only entry as old
+    /// value for conflict detection; subsequent writes preserve the original old value (last write wins). <paramref name="restoresLandedValue"/> is true when the write
     /// restores the landed value and the subject's context has the equality check: a pending change is then removed,
     /// the same as never writing the property, and without one the write is dropped the same way; either way a
     /// check-only entry for the landed value is recorded when <see cref="RecordsCheckOnlyEntries"/>.
@@ -308,15 +308,17 @@ public sealed class SubjectTransaction : IDisposable
                 return true;
             }
 
-            _checkOnlyChanges?.Remove(property);
-            var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
+            // A property has a pending change or a check-only entry, not both. The entry's value is the one that had
+            // landed when it was written unchanged, so it stays the old value and a change landed since still conflicts.
+            var hasEarlierWrite = pendingChanges.TryGetValue(property, out var earlierWrite) ||
+                (_checkOnlyChanges is not null && _checkOnlyChanges.Remove(property, out earlierWrite));
 
             pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
                 origin: origin,
                 changedTimestamp: changedTimestamp,
                 receivedTimestamp: receivedTimestamp,
-                isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
+                hasEarlierWrite ? earlierWrite.GetOldValue<TProperty>() : currentValue,
                 newValue);
             return true;
         }

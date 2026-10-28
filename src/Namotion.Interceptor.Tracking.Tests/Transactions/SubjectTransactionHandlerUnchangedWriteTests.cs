@@ -269,6 +269,30 @@ public class SubjectTransactionHandlerUnchangedWriteTests
     }
 
     [Fact]
+    public async Task WhenUnchangedValueIsWrittenWithAnotherValueAfterAConcurrentChange_ThenCommitConflicts()
+    {
+        // Arrange
+        var context = CreateContext(out _);
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict,
+            checkMode: TransactionCheckMode.Deferred);
+        person.FirstName = "Ann";
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "Bob");
+        person.FirstName = "Carl";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(nameof(Person.FirstName), Assert.Single(exception.ConflictingProperties).Name);
+        Assert.Equal("Ann", Assert.Single(transaction.GetPendingChanges()).GetOldValue<string>());
+    }
+
+    [Fact]
     public async Task WhenDeferredWithoutHandlersAndUnchangedValueChangesBeforeCommit_ThenCommitSucceeds()
     {
         // Arrange
