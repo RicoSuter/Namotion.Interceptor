@@ -119,7 +119,7 @@ public class CanvasLayoutTests
         await title.ClickAsync();
 
         // Assert
-        await page.WaitForURLAsync(new Regex("/pages/Demo/Blocks\\.md$"), new() { Timeout = Timeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/pages/Demo/Blocks.md", StringComparison.Ordinal), Timeout);
     }
 
     [Fact]
@@ -229,10 +229,25 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenCanvasIsShownInTheSplitPreview_ThenItIsNotEdited()
+    {
+        // Arrange
+        var page = await OpenCanvasPageAsync();
+
+        // Act
+        await page.SelectEditModeAsync("Split", Timeout);
+
+        // Assert: the editor is the round trip after which the preview shows the canvas of the split mode.
+        await Assertions.Expect(page.Locator(".monaco-editor").First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator(".page-split-preview .canvas-layout-container.editing")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
     public async Task WhenCanvasIsEdited_ThenAWidgetInANodeCannotBeOperated()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split", withOperableWidgets: true);
+        var page = await OpenCanvasPageAsync(editMode: "Inline", withOperableWidgets: true);
         var titleBox = await GetBoxAsync(GetNodes(page).First.GetByTestId("card-title"));
         var urlBefore = page.Url;
 
@@ -248,13 +263,13 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsEdited_ThenDraggingFromANodeBorderDrawsNoLink()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var node = GetNodes(page).First;
         var positionsBefore = await GetNodePositionsAsync(page);
 
         // Act: the border moves the node like the rest of it does, so a moved node is what the drag causes.
         await node.DragNodeAsync(80, 60, fromLeftEdge: true, timeout: Timeout);
-        await WaitForServerAsync(page, "Split");
+        await WaitForServerAsync(page, "Inline");
         var movedPosition = await WaitForNodeToBeMovedAsync(page, positionsBefore);
         await WaitForPositionToBeWrittenAsync(movedPosition);
 
@@ -266,7 +281,7 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsEdited_ThenANodeCanStillBeMoved()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var node = GetNodes(page).First;
         var positionsBefore = await GetNodePositionsAsync(page);
 
@@ -274,7 +289,7 @@ public class CanvasLayoutTests
         await node.DragNodeAsync(80, 60, timeout: Timeout);
 
         // Assert: the move writes the page, and the next test writes the same page, so this test ends with the write.
-        await WaitForServerAsync(page, "Split");
+        await WaitForServerAsync(page, "Inline");
         var movedPosition = await WaitForNodeToBeMovedAsync(page, positionsBefore);
         await WaitForPositionToBeWrittenAsync(movedPosition);
     }
@@ -283,7 +298,7 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsEdited_ThenTheCanvasCanStillBePanned()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
         var canvasBox = await GetBoxAsync(GetCanvas(page));
         var startX = canvasBox.Right - 40;
@@ -300,7 +315,7 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsEdited_ThenTheWheelStillZoomsTheCanvas()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var widthBefore = (await GetBoxAsync(GetNodes(page).First)).Width;
         var canvasBox = await GetBoxAsync(GetCanvas(page));
         await page.Mouse.MoveAsync((float)(canvasBox.Right - 40), (float)(canvasBox.Bottom - 40));
@@ -316,7 +331,7 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsEdited_ThenAClickOnTheEmptyCanvasOffersToAddANode()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var canvasBox = await GetBoxAsync(GetCanvas(page));
 
         // Act
@@ -334,7 +349,7 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsPannedInEditMode_ThenNoDialogOpens()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
         var canvasBox = await GetBoxAsync(GetCanvas(page));
         var startX = canvasBox.Right - 40;
@@ -343,7 +358,7 @@ public class CanvasLayoutTests
         // Act: the release of the drag counts as a click on the empty canvas.
         await DragAsync(page, startX, startY, startX - 150, startY - 100);
         await WaitForNodeToMoveAsync(page, boxBefore);
-        await WaitForServerAsync(page, "Split");
+        await WaitForServerAsync(page, "Inline");
 
         // Assert
         await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
@@ -353,14 +368,14 @@ public class CanvasLayoutTests
     public async Task WhenCanvasWasPannedInEditMode_ThenALaterClickOnTheEmptyCanvasOffersToAddANode()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
         var canvasBox = await GetBoxAsync(GetCanvas(page));
         var x = canvasBox.Right - 40;
         var y = canvasBox.Bottom - 40;
         await DragAsync(page, x, y, x - 150, y - 100);
         await WaitForNodeToMoveAsync(page, boxBefore);
-        await WaitForServerAsync(page, "Split");
+        await WaitForServerAsync(page, "Inline");
 
         // Act
         await page.Mouse.ClickAsync((float)x, (float)y);
@@ -373,7 +388,7 @@ public class CanvasLayoutTests
     public async Task WhenAPanOfTheCanvasEndedOutsideOfIt_ThenALaterClickOnTheEmptyCanvasOffersToAddANode()
     {
         // Arrange: the release is outside of the container, so no click reaches it and the pan is never followed by one.
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var boxBefore = await GetBoxInCanvasAsync(GetNodes(page).First);
         var canvasBox = await GetBoxAsync(GetCanvas(page));
         var x = canvasBox.Right - 40;
@@ -384,7 +399,7 @@ public class CanvasLayoutTests
         await page.Mouse.MoveAsync((float)(canvasBox.Right + 100), (float)(y - 100), new() { Steps = 5 });
         await page.Mouse.UpAsync();
         await WaitForNodeToMoveAsync(page, boxBefore);
-        await WaitForServerAsync(page, "Split");
+        await WaitForServerAsync(page, "Inline");
         await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
 
         // Act
@@ -398,7 +413,7 @@ public class CanvasLayoutTests
     public async Task WhenCanvasIsEdited_ThenTheButtonsOfANodeStillWork()
     {
         // Arrange
-        var page = await OpenCanvasPageAsync(editMode: "Split");
+        var page = await OpenCanvasPageAsync(editMode: "Inline");
         var node = GetNodes(page).First;
 
         // A click on the node selects the widget in it, which shows the buttons of the nodes.

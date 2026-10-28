@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.Registry;
 /// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler
 {
     private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
         ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
@@ -188,13 +188,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                         if (property is not null)
                         {
-                            registeredSubject.RemoveParent(property, change.Index);
-                         
-                            property.RemoveChild(new SubjectPropertyChild
-                            {
-                                Subject = change.Subject,
-                                Index = change.Index
-                            });
+                            registeredSubject.RemoveParent(property);
+                            property.RemoveChild(change.Subject);
                         }
                     }
                     
@@ -210,7 +205,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             foreach (var child in property.Children)
                             {
                                 var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
-                                childRegistered?.RemoveParentsByProperty(property);
+                                childRegistered?.RemoveParent(property);
                             }
 
                             property.ClearChildren();
@@ -265,19 +260,15 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        RegisteredSubjectProperty? registeredProperty;
         lock (_knownSubjects)
         {
-            registeredProperty = _knownSubjects
+            _knownSubjects
                 .GetValueOrDefault(property.Subject)?
-                .TryGetProperty(property.Name);
+                .TryGetProperty(property.Name)?
+                .UpdateChildIndices(children, _knownSubjects);
         }
-
-        // Call outside lock — RefreshCollectionIndices updates parent entries;
-        // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshCollectionIndices(value, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

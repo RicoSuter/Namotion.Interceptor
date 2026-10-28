@@ -227,7 +227,10 @@ public sealed partial class MarkdownContentParser
             var values = new List<IInterceptorSubject>(blocks.Count);
             for (var index = 0; index < blocks.Count; index++)
             {
-                var existing = FindExistingSlotValue(existingValues, blocks[index].Block.Head!.Id, ref unnamedPosition);
+                // The fragments of an open slot have no block subject, so they keep being found by their position.
+                var existing = state.ReusableSubjects is { } reusableSubjects && !slot.IsOpen
+                    ? reusableSubjects.GetValueOrDefault(blocks[index].Block.Index)
+                    : FindExistingSlotValue(existingValues, blocks[index].Block.Head!.Id, ref unnamedPosition);
                 var (value, error) = await CreateSlotValueAsync(slot, blocks[index], existing, state, cancellationToken);
                 if (value is null)
                 {

@@ -6,7 +6,12 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>One markup string or one widget of a page or of a fragment.</summary>
-public readonly record struct MarkdownRenderSegment(string? Html, IInterceptorSubject? Widget);
+/// <param name="Html">The markup, or null for a widget.</param>
+/// <param name="Widget">The widget, or null for markup.</param>
+/// <param name="Start">
+/// The segment that starts the markup as a text block or as other content, when the text is grouped, or null.
+/// </param>
+public readonly record struct MarkdownRenderSegment(string? Html, IInterceptorSubject? Widget, HtmlSegment? Start = null);
 
 /// <summary>Joins the children of a page or of a fragment into the markup strings and widgets that render them.</summary>
 public static class MarkdownMarkup
@@ -18,16 +23,35 @@ public static class MarkdownMarkup
     /// </summary>
     /// <param name="children">The children of the page or of the fragment.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
-    public static List<MarkdownRenderSegment> GetRenderSegments(IEnumerable<IInterceptorSubject> children, ITimeZoneDisplay? timeZone)
+    /// <param name="groupsText">
+    /// Whether each segment that starts a text block or other content (see <see cref="HtmlSegment.Start"/>) starts markup of
+    /// its own, which carries that segment and holds the HTML and the values up to the next one or the next widget. The
+    /// markup of a segment that starts a block is there even when it is empty.
+    /// </param>
+    public static List<MarkdownRenderSegment> GetRenderSegments(
+        IEnumerable<IInterceptorSubject> children, ITimeZoneDisplay? timeZone, bool groupsText = false)
     {
         var result = new List<MarkdownRenderSegment>();
         StringBuilder? builder = null;
+        HtmlSegment? start = null;
 
         foreach (var child in children)
         {
             if (child is HtmlSegment html)
             {
-                AppendHtml(html, builder ??= new StringBuilder(), result);
+                if (!groupsText)
+                {
+                    AppendHtml(html, builder ??= new StringBuilder(), result);
+                    continue;
+                }
+
+                if (html.Start != HtmlSegmentStart.None)
+                {
+                    Flush(builder, result, start);
+                    start = html;
+                }
+
+                (builder ??= new StringBuilder()).Append(html.Html);
             }
             else if (child is RenderExpression expression)
             {
@@ -47,17 +71,19 @@ public static class MarkdownMarkup
             {
                 // HTML and expressions are joined into one markup string so that an
                 // expression can sit inside an HTML attribute.
-                Flush(builder, result);
+                Flush(builder, result, start);
+                start = null;
                 result.Add(new MarkdownRenderSegment(null, child));
             }
         }
 
-        Flush(builder, result);
+        Flush(builder, result, start);
         return result;
     }
 
     // Each top-level block is a markup string of its own, so a value change replaces only the block that shows it. Only
-    // the parts at both ends can join an expression, so the parts between are added as they are.
+    // the parts at both ends can join an expression, so the parts between are added as they are, and so is a block that
+    // the segments before started without an expression in it.
     private static void AppendHtml(HtmlSegment html, StringBuilder builder, List<MarkdownRenderSegment> result)
     {
         var blocks = html.Blocks;
@@ -70,7 +96,12 @@ public static class MarkdownMarkup
                 Flush(builder, result);
             }
 
-            if (joinsBefore || joinsAfter)
+            if (joinsBefore && !joinsAfter && html.JoinedBlock is not null)
+            {
+                builder.Clear();
+                result.Add(new MarkdownRenderSegment(html.JoinedBlock, null));
+            }
+            else if (joinsBefore || joinsAfter)
             {
                 builder.Append(blocks[index]);
             }
@@ -86,12 +117,12 @@ public static class MarkdownMarkup
         }
     }
 
-    private static void Flush(StringBuilder? builder, List<MarkdownRenderSegment> result)
+    private static void Flush(StringBuilder? builder, List<MarkdownRenderSegment> result, HtmlSegment? start = null)
     {
-        if (builder is { Length: > 0 })
+        if (builder is { Length: > 0 } || start is not null)
         {
-            result.Add(new MarkdownRenderSegment(builder.ToString(), null));
-            builder.Clear();
+            result.Add(new MarkdownRenderSegment(builder?.ToString() ?? string.Empty, null, start));
+            builder?.Clear();
         }
     }
 }
