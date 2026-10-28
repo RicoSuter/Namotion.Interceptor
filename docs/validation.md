@@ -139,16 +139,16 @@ var context = InterceptorSubjectContext
     .WithService<IPropertyValidator>(() => new MyCustomValidator());
 ```
 
-Data Annotations and custom validators all run on each property write. If any validator returns errors, the write is rejected. Inside a transaction, the transaction's validation mode decides when they run, see [Transactions](#transactions).
+Data Annotations and custom validators all run on each property write. If any validator returns errors, the write is rejected. Inside a transaction, the transaction's check mode decides when they run, see [Transactions](#transactions).
 
 ## Transactions
 
-Inside a [transaction](tracking-transactions.md), writes are buffered until commit. Both validation modes validate the final set at commit; the transaction's `checkMode` decides whether writes are also validated when written:
+Inside a [transaction](tracking-transactions.md), writes are buffered until commit. Both check modes validate the final set at commit; the transaction's `checkMode` decides whether writes are also validated when written:
 
 | Mode | When a value is written |
 |------|-------------------------|
 | `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `PropertyValidationException` at the setter, so write order matters there. This includes a write back to the landed value: if it is invalid against the transaction's other values, undoing a change throws and the change stays pending. A write of the landed value without a pending change is dropped by the equality check and not validated. |
-| `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. With `FailOnConflict` (the default), values written unchanged are validated at commit too, see [Validation Mode](tracking-transactions.md#validation-mode). Writes to settable derived properties are not captured: they land and are validated immediately in both modes. |
+| `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. With `FailOnConflict` (the default), values written unchanged are validated at commit too, see [Check Mode](tracking-transactions.md#check-mode). Writes to settable derived properties are not captured: they land and are validated immediately in both modes. |
 
 The samples use this model and validator:
 
@@ -194,14 +194,14 @@ At commit:
 - An invalid value makes `CommitAsync` throw `SubjectTransactionValidationException`. Its `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order. The pending changes stay intact: fix the values and commit again, see [Retrying](tracking-transactions.md#retrying).
 - With source transactions, the [pre-apply check](tracking-transactions.md#transaction-handlers) validates the changes again right before the local apply. A failure there is terminal and lands no value of the set: `CommitAsync` throws a `SubjectTransactionException`, not a `SubjectTransactionValidationException`, whose `FailedChanges` lists every change and whose `Errors` hold the validation errors.
 - The values the commit applies and the values a rollback restores are not validated again. Writes made during the apply, for example from change handlers or a hook that changes the value, and recalculated derived properties are validated as usual, after any source write.
-- If applying one value fails, for example because a hook throws, no value of the set lands in either failure handling mode, except the value whose apply failed after it was written, see [Commit Failures](tracking-transactions.md#commit-failures). The local apply stops at the first failed change, so the remaining values are not applied and their hooks and notifications do not run.
+- If applying one value fails, for example because a hook throws, see the [Failure Table](tracking-transactions.md#failure-table) for what lands.
 
 ### Writing Validators for Transactions
 
 - **Arguments**: the type parameter is unspecified, so test the value (`context.Value is int speed`), not `typeof(TProperty)`. `Origin` is the captured origin in the commit check, and in the pre-apply check `Confirmed` with the accepting source for a value a source accepted. The captured origin can be `Local` where the `Immediate` write-time check saw `FromSource`, when an interceptor before the transaction interceptor changed the value. To treat a source's acceptance as final or ignore only inbound data, see [Writing a Transaction Handler](tracking-transactions.md#writing-a-transaction-handler).
 - **Call count**: with source transactions, a value can be validated up to three times: when written in `Immediate` mode, in the commit check, and in the pre-apply check. Validators must be free of side effects.
 - **Errors**: each invalid property is reported as one `PropertyValidationException` (see [Custom Validators](#custom-validators)), the exception that writes outside transactions and `Immediate` writes throw.
-- **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property. In `Deferred` mode with `FailOnConflict` (the default), write every value a rule depends on, changed or not, to have the rule checked against the final set, see [Validation Mode](tracking-transactions.md#validation-mode).
+- **Reads**: properties without a pending change are read from the landed model, and writes outside transactions can still change them before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it to a property. In `Deferred` mode with `FailOnConflict` (the default), write every value a rule depends on, changed or not, to have the rule checked against the final set, see [Check Mode](tracking-transactions.md#check-mode).
 - **Object graph and timestamps**: during the checks, registry and lifecycle state, such as parents and children, reflect the landed graph, and `SubjectChangeContext.Current` does not carry the timestamps of the checked changes. Only property reads return the transaction's values.
 - **Derived properties**: a derived property is validated only when the commit applies a value it depends on and recalculates it, after any source write, so it cannot reject the commit before the sources are written. The values are applied one at a time, so the recalculation sees intermediate values and write order matters: with `Free => Capacity - Level` validated as non-negative, writing `Level` before `Capacity` can fail the apply although the final set is valid. The value whose apply triggered the failed recalculation (here `Level`) stays in the local model, because a failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
 - **New subjects**: only writes the transaction captures are validated, so the written subject must already use the context. A subject created without the context and attached in the transaction is not validated.

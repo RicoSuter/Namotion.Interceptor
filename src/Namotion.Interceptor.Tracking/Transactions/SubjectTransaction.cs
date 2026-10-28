@@ -543,24 +543,8 @@ public sealed class SubjectTransaction : IDisposable
     /// The behavior on partial failure depends on the <see cref="_failureHandling"/> specified at transaction creation.
     /// </summary>
     /// <remarks>
-    /// The commit runs these stages in order:
-    /// <list type="number">
-    /// <item><description>
-    /// Commit check: the transaction's <see cref="ITransactionHandler"/>s check the final set.
-    /// </description></item>
-    /// <item><description>
-    /// Conflict detection: with <see cref="TransactionConflictBehavior.FailOnConflict"/>, the captured old values are
-    /// compared with the current values, which catches changes from other transactions and external sources since
-    /// the transaction started.
-    /// </description></item>
-    /// <item><description>Source writes, when an <see cref="ITransactionWriter"/> is registered.</description></item>
-    /// <item><description>
-    /// Pre-apply check, when an <see cref="ITransactionWriter"/> is registered: the handlers check again the changes
-    /// that will be applied.
-    /// </description></item>
-    /// <item><description>Apply: the changes are applied to the local model in insertion order.</description></item>
-    /// </list>
-    /// For Optimistic locking, the lock is acquired at the start of commit and released after completion.
+    /// For Optimistic locking, the lock is acquired at the start of commit and released after completion. For the
+    /// stages of a commit, see Commit Flow in docs/tracking-transactions.md.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">

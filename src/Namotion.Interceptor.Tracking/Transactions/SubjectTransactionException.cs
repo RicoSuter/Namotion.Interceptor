@@ -50,12 +50,10 @@ public class SubjectTransactionException : Exception
     public IReadOnlyList<SubjectPropertyChange> AppliedChanges { get; }
 
     /// <summary>
-    /// Gets the changes that did not commit: source-write failures, changes that threw while being applied
-    /// to or reverted from the local model, and, under <see cref="TransactionFailureHandling.Rollback"/>,
-    /// local (no-source) changes that were not kept (never applied, or applied and reverted). When <see cref="ITransactionHandler"/>s checked the changes
-    /// and a pre-apply check rejects them or a local apply fails, every change, followed again by each change whose
-    /// revert failed. A change can appear more than once if it failed at more than one stage. The
-    /// <see cref="SubjectPropertyChange.Origin"/> of an entry carries no guarantee here: terminal writer failures
+    /// Gets the changes that did not commit. Which changes are listed depends on the failure handling, the failed
+    /// stage and whether <see cref="ITransactionHandler"/>s checked the changes, see the Failure Table in
+    /// docs/tracking-transactions.md. A change can appear more than once, for example a property whose revert failed.
+    /// The <see cref="SubjectPropertyChange.Origin"/> of an entry carries no guarantee here: terminal writer failures
     /// may leave the snapshot partially marked. Use <see cref="AppliedChanges"/> to see what landed.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> FailedChanges { get; }
