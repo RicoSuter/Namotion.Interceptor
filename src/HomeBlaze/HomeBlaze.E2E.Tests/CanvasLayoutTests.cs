@@ -119,7 +119,7 @@ public class CanvasLayoutTests
         await title.ClickAsync();
 
         // Assert
-        await page.WaitForURLAsync(new Regex("/pages/Demo/Blocks\\.md$"), new() { Timeout = Timeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/pages/Demo/Blocks.md", StringComparison.Ordinal), Timeout);
     }
 
     [Fact]
