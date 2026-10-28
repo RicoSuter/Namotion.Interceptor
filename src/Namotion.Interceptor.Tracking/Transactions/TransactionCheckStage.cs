@@ -16,9 +16,8 @@ public enum TransactionCheckStage
     /// The pre-apply check, with a registered <see cref="ITransactionWriter"/> only: after the source writes, right
     /// before the local apply. Skipped when nothing will be applied, after a writer throws (any mode), and in
     /// <see cref="TransactionFailureHandling.Rollback"/> mode after a source write failure or reported writer errors.
-    /// A rejection
-    /// reverts the source writes, lands nothing in either failure handling mode, reports every change of the
-    /// transaction as failed and ends the transaction.
+    /// A rejection reverts the source writes, lands nothing in either failure handling mode, reports every change of
+    /// the transaction as failed and ends the transaction.
     /// </summary>
     PreApply
 }
