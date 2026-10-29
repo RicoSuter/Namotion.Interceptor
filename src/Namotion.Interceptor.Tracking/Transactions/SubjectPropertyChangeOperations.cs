@@ -22,34 +22,6 @@ internal static class SubjectPropertyChangeOperations
         return ApplyLocalChanges(changes, exclude is null ? null : CreatePropertySet(exclude), markingTransaction);
     }
 
-    /// <summary>
-    /// Returns the properties of the changes in <paramref name="lists"/>, or null when there are none.
-    /// </summary>
-    internal static HashSet<PropertyReference>? CreatePropertySet(params ReadOnlySpan<IReadOnlyList<SubjectPropertyChange>> lists)
-    {
-        var capacity = 0;
-        foreach (var changes in lists)
-        {
-            capacity += changes.Count;
-        }
-
-        if (capacity == 0)
-        {
-            return null;
-        }
-
-        var properties = new HashSet<PropertyReference>(capacity, PropertyReference.Comparer);
-        foreach (var changes in lists)
-        {
-            foreach (var change in changes)
-            {
-                properties.Add(change.Property);
-            }
-        }
-
-        return properties;
-    }
-
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, SubjectTransaction? markingTransaction)
@@ -97,6 +69,34 @@ internal static class SubjectPropertyChangeOperations
         return failed is null
             ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
             : (successful!, failed, errors ?? []);
+    }
+
+    /// <summary>
+    /// Returns the properties of the changes in <paramref name="lists"/>, or null when there are none.
+    /// </summary>
+    internal static HashSet<PropertyReference>? CreatePropertySet(params ReadOnlySpan<IReadOnlyList<SubjectPropertyChange>> lists)
+    {
+        var capacity = 0;
+        foreach (var changes in lists)
+        {
+            capacity += changes.Count;
+        }
+
+        if (capacity == 0)
+        {
+            return null;
+        }
+
+        var properties = new HashSet<PropertyReference>(capacity, PropertyReference.Comparer);
+        foreach (var changes in lists)
+        {
+            foreach (var change in changes)
+            {
+                properties.Add(change.Property);
+            }
+        }
+
+        return properties;
     }
 
     private static List<SubjectPropertyChange> CopyAppliedChanges(ReadOnlySpan<SubjectPropertyChange> changes)
