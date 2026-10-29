@@ -84,7 +84,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
     /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
-    /// the property's value from before the transaction, which no handler checked. Values match by
+    /// the property's value from before the transaction (with <see cref="TransactionConflictBehavior.Ignore"/>, the landed
+    /// value at conflict detection), which no handler checked. Values match by
     /// <see cref="EqualityComparer{T}.Default"/>, so a value whose <c>Equals</c> is looser than what the handler checks
     /// can pass an equal, unchecked value as the checked one.
     /// </summary>
@@ -627,6 +628,7 @@ public sealed class SubjectTransaction : IDisposable
             using (EnterCommitModelAccess())
             {
                 ThrowIfConflictsDetected(checkedChanges.Span);
+                RebaseOldValuesIfIgnoringConflicts(changes.Span);
 
                 var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, MarkingTransaction);
 
@@ -679,6 +681,7 @@ public sealed class SubjectTransaction : IDisposable
             using (EnterCommitModelAccess())
             {
                 ThrowIfConflictsDetected(checkedChanges.Span);
+                RebaseOldValuesIfIgnoringConflicts(changes.Span);
             }
 
             if (changes.IsEmpty)
@@ -1246,6 +1249,35 @@ public sealed class SubjectTransaction : IDisposable
         if (conflictingProperties is not null)
         {
             throw new SubjectTransactionConflictException(conflictingProperties);
+        }
+    }
+
+    /// <summary>
+    /// With <see cref="TransactionConflictBehavior.Ignore"/>, replaces the old value of each snapshot slot whose landed
+    /// value changed since the capturing write by that landed value, so a revert restores the value this commit overwrites.
+    /// </summary>
+    private void RebaseOldValuesIfIgnoringConflicts(Span<SubjectPropertyChange> changes)
+    {
+        if (ConflictBehavior != TransactionConflictBehavior.Ignore)
+        {
+            return;
+        }
+
+        for (var index = 0; index < changes.Length; index++)
+        {
+            var change = changes[index];
+            if (change.Property.Metadata.GetValue is not { } getValue)
+            {
+                continue;
+            }
+
+            var landedValue = getValue(change.Property.Subject);
+            if (!Equals(landedValue, change.GetOldValue<object?>()))
+            {
+                changes[index] = SubjectPropertyChange
+                    .Create(change.Property, change.Origin, change.ChangedTimestamp, change.ReceivedTimestamp, landedValue, landedValue)
+                    .MergeWithNewer(change);
+            }
         }
     }
 

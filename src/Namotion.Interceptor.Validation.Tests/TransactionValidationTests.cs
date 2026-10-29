@@ -699,6 +699,34 @@ public class TransactionValidationTests
         Assert.Equal(withWriter ? 1 : 0, writer.WriteCount);
     }
 
+    [Fact]
+    public async Task WhenIgnoreCommitRollsBackAfterAConcurrentWrite_ThenTheRestoredValueIsTheValidLandedValue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var motor = new Motor(context) { MotorSpeed = 80 };
+        var failingMotor = new Motor(context) { IncrementSpeedOnWrite = true };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, TransactionLocking.Optimistic, conflictBehavior: TransactionConflictBehavior.Ignore);
+        motor.MotorSpeed = 40;
+        failingMotor.MotorSpeed = 99;
+        await RunWithoutAsyncLocalFlowAsync(() =>
+        {
+            motor.MaxAllowedSpeed = 60;
+            motor.MotorSpeed = 50;
+        });
+
+        // Act
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        // The restore is part of the checked set, so it is not validated; restoring the speed of 80 captured at the
+        // first write would exceed the limit of 60.
+        transaction.Dispose();
+        Assert.Equal(60, motor.MaxAllowedSpeed);
+        Assert.Equal(50, motor.MotorSpeed);
+    }
+
     private static async Task RunWithoutAsyncLocalFlowAsync(Action action, CancellationToken cancellationToken = default)
     {
         Task task;

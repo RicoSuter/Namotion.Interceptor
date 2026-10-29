@@ -159,7 +159,7 @@ Controls value-based conflict detection in both locking modes; `BestEffort` fail
 | Value | Description |
 |-------|-------------|
 | `FailOnConflict` | Throw `SubjectTransactionConflictException` if the landed value of a written property changed since the write that captured its pending change, or, for a value it wrote unchanged in [`Deferred` mode](#check-mode) with handlers, since it last wrote it. (default) |
-| `Ignore` | Overwrite any concurrent changes without checking. |
+| `Ignore` | Overwrite any concurrent changes without checking. A revert of a failed commit restores the landed value at conflict detection, not the value before the first write, so it does not discard a value another write landed meanwhile. |
 
 In both behaviors, a written property whose subject left the transaction's context since the write, detached or moved to a context that does not resolve the transaction's interceptor, conflicts too, because its value would land without the handlers and interceptors of the transaction's context. The retry conflicts again until the subject is attached to the transaction's context again outside the transaction, because a write inside it is only captured as a pending change, or until the transaction is disposed.
 
@@ -221,7 +221,7 @@ using var tx = await context.BeginTransactionAsync(
 3. **Source writes** (with source transactions, that is `WithSourceTransactions()` or a custom `ITransactionWriter`): source-bound changes are written to their sources, in parallel when there are several. Nothing is applied to the local model yet.
 4. **Pre-apply check** (with source transactions): the handlers check the changes that will be applied again.
 5. **Local apply**: source-bound and local changes are applied in a single pass, in commit order, except those whose source write failed. Applying calls the property setters, so `OnChanging`/`OnChanged` hooks run and notifications fire.
-6. **Compensation** on failure: the reverts described in [Commit Failures](#commit-failures). A local revert writes the old value through the setter, so hooks run again.
+6. **Compensation** on failure: the reverts described in [Commit Failures](#commit-failures). A local revert writes the old value through the setter, so hooks run again. A source revert writes it to the source. With `Ignore`, the old value is the landed value at conflict detection, see [Conflict Behavior](#conflict-behavior).
 
 Nothing is written before stage 3, so a failure in stages 1 and 2 leaves the transaction retryable.
 
@@ -301,7 +301,7 @@ catch (SubjectTransactionException exception)
 
 ### Failure Table
 
-"Old" is the value before the transaction, "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
+"Old" is the value before the transaction (with `Ignore`, the landed value at conflict detection), "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
 
 | Failure | End state | `FailedChanges` | Retry |
 |---------|-----------|-----------------|-------|
@@ -446,7 +446,7 @@ To treat a source's acceptance as final, skip changes with a `Confirmed` origin.
 - Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
 - A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
 
-**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction, which no handler checked, and skip checking it. Its limits:
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction (with `Ignore`, the landed value at conflict detection), which no handler checked, and skip checking it. Its limits:
 - Values match by equality (`EqualityComparer<T>.Default`), so an equal new instance, for example from an interceptor that runs before `SubjectTransactionInterceptor`, is recognized as checked. A value whose `Equals` is looser than what the handler checks can pass an equal, unchecked value as the checked one.
 - Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again.
 - It does not recognize any apply after the transaction was disposed during the commit.

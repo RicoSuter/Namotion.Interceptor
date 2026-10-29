@@ -398,6 +398,63 @@ public class SubjectTransactionWriterTests
             exception.FailedChanges.Select(change => change.Property.Name));
     }
 
+    [Theory]
+    [InlineData(true, TransactionFailureHandling.Rollback, true)]
+    [InlineData(true, TransactionFailureHandling.Rollback, false)]
+    [InlineData(true, TransactionFailureHandling.BestEffort, false)]
+    [InlineData(false, TransactionFailureHandling.Rollback, false)]
+    public async Task WhenIgnoreCommitRevertsAfterAConcurrentWrite_ThenRevertRestoresTheValueLandedAtTheCommit(
+        bool withWriter, TransactionFailureHandling failureHandling, bool sourceWriteFails)
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new CountingTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        if (sourceWriteFails)
+        {
+            writer.FailedPropertyNames.Add(nameof(Person.LastName));
+        }
+        else
+        {
+            // BestEffort without handlers reverts only the source write of the failed apply, so FirstName fails there.
+            context.AddService(new ValueRejectingWriteInterceptor
+            {
+                Rejected = { failureHandling == TransactionFailureHandling.BestEffort ? (nameof(Person.FirstName), "Bob") : (nameof(Person.LastName), "Kim") }
+            });
+        }
+
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(
+            failureHandling, TransactionLocking.Optimistic, conflictBehavior: TransactionConflictBehavior.Ignore);
+        var source = new object();
+        var changedTimestamp = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var receivedTimestamp = changedTimestamp.AddSeconds(1);
+        new PropertyReference(person, nameof(Person.FirstName))
+            .SetValueFromSource(source, changedTimestamp, receivedTimestamp, "Bob");
+        person.LastName = "Kim";
+        RunOutsideTransactionFlow(() => person.FirstName = "External");
+
+        // Act
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        transaction.Dispose();
+        Assert.Equal("External", person.FirstName);
+        if (withWriter)
+        {
+            var revertedFirstName = Assert.Single(writer.Reverted, change => change.Property.Name == nameof(Person.FirstName));
+            Assert.Equal("External", revertedFirstName.GetOldValue<string>());
+            Assert.Equal(ChangeOriginKind.FromSource, revertedFirstName.Origin.Kind);
+            Assert.Same(source, revertedFirstName.Origin.Source);
+            Assert.Equal(changedTimestamp, revertedFirstName.ChangedTimestamp);
+            Assert.Equal(receivedTimestamp, revertedFirstName.ReceivedTimestamp);
+        }
+    }
+
     private static void AssertDerivedChange(
         SubjectPropertyChange change,
         string propertyName,
