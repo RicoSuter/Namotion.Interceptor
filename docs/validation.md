@@ -150,7 +150,7 @@ Inside a [transaction](tracking-transactions.md), writes are buffered until comm
 | `Immediate` (default) | Validated against the transaction's values so far. An invalid write throws `PropertyValidationException` at the setter, so write order matters there. |
 | `Deferred` | Not validated. Invalid intermediate values are accepted, and code in the transaction's flow reads them until a later write replaces them. |
 
-In `Immediate` mode a write back to the landed value is validated too: if it is invalid against the transaction's other values, undoing a change throws and the change stays pending. A write of the landed value without a pending change is dropped by the equality check and not validated. In `Deferred` mode with `FailOnConflict` (the default), values written unchanged are validated at commit, see [Check Mode](tracking-transactions.md#check-mode). Writes to settable derived properties are not captured: they land and are validated immediately in both modes.
+In `Immediate` mode a write back to the landed value is validated too: if it is invalid against the transaction's other values, undoing a change throws and the change stays pending. A write of the landed value without a pending change is dropped by the equality check and not validated. Writes to settable derived properties are not captured: they land and are validated immediately in both modes.
 
 The samples use this model and validator:
 
