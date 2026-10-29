@@ -1,0 +1,98 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Storage.Abstractions.Attributes
+{
+    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=true, Inherited=false)]
+    public class FileExtensionAttribute : System.Attribute
+    {
+        public FileExtensionAttribute(string extension) { }
+        public string Extension { get; }
+    }
+}
+namespace HomeBlaze.Storage.Abstractions
+{
+    public class BlobMetadata : System.IEquatable<HomeBlaze.Storage.Abstractions.BlobMetadata>
+    {
+        public BlobMetadata(long Size, System.DateTime? LastModifiedUtc) { }
+        public System.DateTime? LastModifiedUtc { get; init; }
+        public long Size { get; init; }
+    }
+    public class CreateSubjectResult : System.IEquatable<HomeBlaze.Storage.Abstractions.CreateSubjectResult>
+    {
+        public CreateSubjectResult(Namotion.Interceptor.IInterceptorSubject Subject, string? Name) { }
+        public string? Name { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
+    }
+    public static class FileExtensions
+    {
+        public const string Json = ".json";
+        public const string Markdown = ".md";
+    }
+    public interface IConfigurationWriter
+    {
+        System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IStorageContainer
+    {
+        System.Collections.Generic.IReadOnlyCollection<string> ChildNames { get; }
+        HomeBlaze.Storage.Abstractions.StorageStatus Status { get; }
+        System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.BlobMetadata?> GetBlobMetadataAsync(string path, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<System.IO.Stream> ReadBlobAsync(string path, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task WriteBlobAsync(string path, System.IO.Stream content, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task WriteBlobAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IStorageFile
+    {
+        long FileSize { get; set; }
+        string FullPath { get; }
+        System.DateTime LastModified { get; set; }
+        string Name { get; }
+        HomeBlaze.Storage.Abstractions.IStorageContainer Storage { get; }
+        System.Threading.Tasks.Task OnFileChangedAsync(System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISubjectSetupService
+    {
+        System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.CreateSubjectResult?> CreateSubjectAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Threading.CancellationToken cancellationToken);
+    }
+    public enum StorageStatus
+    {
+        Disconnected = 0,
+        Initializing = 1,
+        Connected = 2,
+        Error = 3,
+    }
+    public static class SubjectCreatorExtensions
+    {
+        public static System.Threading.Tasks.Task CreateSubjectAndAddToStorageAsync(this HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, HomeBlaze.Storage.Abstractions.IStorageContainer storage, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace HomeBlaze.Storage.Abstractions.Metadata
+{
+    public interface IMetadataContainer
+    {
+        System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
+    }
+    public interface IMetadataStore
+    {
+        void ApplyStoredMetadata(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName);
+        bool CanStoreMetadata(Namotion.Interceptor.IInterceptorSubject subject);
+        System.Threading.Tasks.Task SetMetadataAsync(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, System.Text.Json.JsonElement values, System.Threading.CancellationToken cancellationToken);
+    }
+    public static class MetadataKeys
+    {
+        public const string Alignment = "alignment";
+        public const string Icon = "icon";
+        public const string Links = "links";
+        public const string Location = "location";
+        public const string NavigationTitle = "navTitle";
+        public const string Notes = "notes";
+        public const string Order = "order";
+        public const string Tags = "tags";
+        public const string Title = "title";
+    }
+}
