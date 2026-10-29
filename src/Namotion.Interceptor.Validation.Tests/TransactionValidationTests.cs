@@ -399,7 +399,30 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenPropertyTypeIsNotACommonValueType_ThenChecksValidateTheValueAsObject()
+    public async Task WhenUntypedWriteStoresValueOfCommonValueType_ThenCommitCheckValidatesItAsThePropertyType()
+    {
+        // Arrange
+        // No test captures a typed Guid write, so only the up-front registration of Guid makes this check typed.
+        var validator = new RecordingValidator();
+        var context = CreateContext(validator);
+        var gearbox = new Gearbox(context);
+        var serialNumber = Guid.NewGuid();
+        validator.Calls.Clear();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        new PropertyReference(gearbox, nameof(Gearbox.SerialNumber)).SetPropertyValueWithInterception(
+            serialNumber, gearbox.SerialNumber, static (_, _) => { });
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal((nameof(Gearbox.SerialNumber), typeof(Guid), (object?)serialNumber), Assert.Single(validator.Calls));
+        Assert.Equal(serialNumber, gearbox.SerialNumber);
+    }
+
+    [Fact]
+    public async Task WhenNullableAndReferenceTypePropertiesAreWritten_ThenCommitCheckValidatesTheValuesAsThePropertyType()
     {
         // Arrange
         var validator = new RecordingValidator();
@@ -417,12 +440,95 @@ public class TransactionValidationTests
         // Assert
         (string, Type, object?)[] checkCalls =
         [
-            (nameof(Gearbox.Gear), typeof(object), 3),
-            (nameof(Gearbox.Label), typeof(object), "Sport")
+            (nameof(Gearbox.Gear), typeof(int?), 3),
+            (nameof(Gearbox.Label), typeof(string), "Sport")
         ];
         Assert.Equal(checkCalls, validator.Calls);
         Assert.Equal(3, gearbox.Gear);
         Assert.Equal("Sport", gearbox.Label);
+    }
+
+    [Theory]
+    [InlineData(nameof(Gearbox.Mode))]
+    [InlineData(nameof(Gearbox.Gear))]
+    [InlineData(nameof(Gearbox.Label))]
+    public async Task WhenValidatorRejectsThePropertyType_ThenDeferredCommitCheckRejectsTheChange(string propertyName)
+    {
+        // Arrange
+        var context = CreateContext(new PropertyTypeValidator(GetPropertyType(propertyName)));
+        var gearbox = new Gearbox(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        WriteNonDefaultValue(gearbox, propertyName);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal(propertyName, Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Empty(exception.AppliedChanges);
+    }
+
+    [Theory]
+    [InlineData(nameof(Gearbox.Mode), false)]
+    [InlineData(nameof(Gearbox.Gear), false)]
+    [InlineData(nameof(Gearbox.Label), false)]
+    [InlineData(nameof(Gearbox.Mode), true)]
+    [InlineData(nameof(Gearbox.Gear), true)]
+    [InlineData(nameof(Gearbox.Label), true)]
+    public async Task WhenValidatorStartsRejectingThePropertyTypeWhileSourcesAreWritten_ThenPreApplyCheckRejectsTheChange(
+        string propertyName, bool writesLandedValue)
+    {
+        // Arrange
+        var validator = new PropertyTypeValidator(GetPropertyType(propertyName)) { IsRejecting = false };
+        var context = CreateContext(validator);
+        var motor = new Motor(context);
+        var gearbox = new Gearbox(context);
+        if (writesLandedValue)
+        {
+            WriteNonDefaultValue(gearbox, propertyName);
+        }
+
+        var writer = new TestTransactionWriter(updateDuringWrite: () => validator.IsRejecting = true);
+        context.AddService<ITransactionWriter>(writer);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
+        motor.MaxAllowedSpeed = 95;
+        WriteNonDefaultValue(gearbox, propertyName);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        var error = Assert.IsType<PropertyValidationException>(Assert.Single(exception.Errors));
+        Assert.Equal(propertyName, error.Property.Name);
+        Assert.Equal(100, motor.MaxAllowedSpeed);
+        Assert.NotEmpty(writer.Reverted);
+    }
+
+    private static Type GetPropertyType(string propertyName)
+    {
+        return new PropertyReference(new Gearbox(), propertyName).Metadata.Type;
+    }
+
+    private static void WriteNonDefaultValue(Gearbox gearbox, string propertyName)
+    {
+        switch (propertyName)
+        {
+            case nameof(Gearbox.Mode):
+                gearbox.Mode = GearboxMode.Automatic;
+                break;
+            case nameof(Gearbox.Gear):
+                gearbox.Gear = 3;
+                break;
+            case nameof(Gearbox.Label):
+                gearbox.Label = "Sport";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(propertyName), propertyName, null);
+        }
     }
 
     [Theory]
@@ -882,6 +988,22 @@ public class TransactionValidationTests
         {
             Calls.Add((context.Property.Name, typeof(TProperty), context.Value));
             return inner?.Validate(in context) ?? [];
+        }
+    }
+
+    /// <summary>
+    /// Rejects every value whose type argument is <paramref name="rejectedType"/> while <see cref="IsRejecting"/> is set,
+    /// like a validator that dispatches on <c>typeof(TProperty)</c>.
+    /// </summary>
+    private sealed class PropertyTypeValidator(Type rejectedType) : IPropertyValidator
+    {
+        public bool IsRejecting { get; set; } = true;
+
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            return IsRejecting && typeof(TProperty) == rejectedType
+                ? [new ValidationResult($"{context.Property.Name} rejects {rejectedType.Name}.")]
+                : [];
         }
     }
 

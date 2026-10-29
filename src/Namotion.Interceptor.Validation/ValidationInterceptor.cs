@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
 using Namotion.Interceptor.Attributes;
@@ -19,6 +20,24 @@ namespace Namotion.Interceptor.Validation;
 [RunsBefore(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
 public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 {
+    private static readonly ConcurrentDictionary<Type, ITypedValidation> TypedValidations = new();
+
+    static ValidationInterceptor()
+    {
+        // An untyped write registers only object, so the common value types are registered up front: their commit
+        // checks then use the property type whichever writes ran before.
+        TypedValidation<int>.Register();
+        TypedValidation<long>.Register();
+        TypedValidation<double>.Register();
+        TypedValidation<float>.Register();
+        TypedValidation<decimal>.Register();
+        TypedValidation<bool>.Register();
+        TypedValidation<DateTime>.Register();
+        TypedValidation<DateTimeOffset>.Register();
+        TypedValidation<TimeSpan>.Register();
+        TypedValidation<Guid>.Register();
+    }
+
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
@@ -33,6 +52,9 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
     /// <inheritdoc />
     public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
     {
+        // Registers the typed commit check for TProperty, in both modes, before the change reaches OnCommitting.
+        TypedValidation<TProperty>.Register();
+
         if (context.Transaction.CheckMode == TransactionCheckMode.Immediate)
         {
             ThrowIfInvalid(context.Property, context.NewValue, context.Origin);
@@ -46,6 +68,8 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
         List<Exception>? errors = null;
         IInterceptorSubjectContext? validatorsContext = null;
         var validators = ImmutableArray<IPropertyValidator>.Empty;
+        Type? validationType = null;
+        ITypedValidation? typedValidation = null;
         foreach (ref readonly var change in context.Changes)
         {
             var subjectContext = change.Property.Subject.Context;
@@ -60,7 +84,16 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
                 continue;
             }
 
-            var validationResults = ValidateNewValue(validators, change);
+            var propertyType = change.Property.Metadata.Type;
+            if (!ReferenceEquals(propertyType, validationType))
+            {
+                validationType = propertyType;
+                typedValidation = TypedValidations.TryGetValue(propertyType, out var registered) ? registered : null;
+            }
+
+            var validationResults = typedValidation is not null && typedValidation.TryValidate(validators, change, out var typedResults)
+                ? typedResults
+                : Validate(validators, change.Property, change.GetNewValue<object?>(), change.Origin);
             if (validationResults is not null)
             {
                 (failedChanges ??= []).Add(change);
@@ -86,54 +119,6 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
 
     /// <inheritdoc />
     public override int GetHashCode() => typeof(ValidationInterceptor).GetHashCode();
-
-    /// <summary>
-    /// Validates the new value of <paramref name="change"/> with the property type as the type argument for common
-    /// value types, so the value is not boxed, and as <c>object</c> otherwise.
-    /// </summary>
-    private static List<ValidationResult>? ValidateNewValue(ImmutableArray<IPropertyValidator> validators, in SubjectPropertyChange change)
-    {
-        var type = change.Property.Metadata.Type;
-        if (type.IsValueType)
-        {
-            List<ValidationResult>? validationResults;
-            if ((type == typeof(int) && TryValidateAs<int>(validators, change, out validationResults)) ||
-                (type == typeof(long) && TryValidateAs<long>(validators, change, out validationResults)) ||
-                (type == typeof(double) && TryValidateAs<double>(validators, change, out validationResults)) ||
-                (type == typeof(float) && TryValidateAs<float>(validators, change, out validationResults)) ||
-                (type == typeof(decimal) && TryValidateAs<decimal>(validators, change, out validationResults)) ||
-                (type == typeof(bool) && TryValidateAs<bool>(validators, change, out validationResults)) ||
-                (type == typeof(DateTime) && TryValidateAs<DateTime>(validators, change, out validationResults)) ||
-                (type == typeof(DateTimeOffset) && TryValidateAs<DateTimeOffset>(validators, change, out validationResults)) ||
-                (type == typeof(TimeSpan) && TryValidateAs<TimeSpan>(validators, change, out validationResults)) ||
-                (type == typeof(Guid) && TryValidateAs<Guid>(validators, change, out validationResults)))
-            {
-                return validationResults;
-            }
-        }
-
-        return Validate(validators, change.Property, change.GetNewValue<object?>(), change.Origin);
-    }
-
-    /// <summary>
-    /// Validates the new value of <paramref name="change"/> as <typeparamref name="TProperty"/>. Returns false without
-    /// validating when the new value is not a <typeparamref name="TProperty"/>: null, or a value of another type, which
-    /// only an untyped write can store.
-    /// </summary>
-    private static bool TryValidateAs<TProperty>(
-        ImmutableArray<IPropertyValidator> validators,
-        in SubjectPropertyChange change,
-        out List<ValidationResult>? validationResults)
-    {
-        if (change.TryGetNewValue(out TProperty value))
-        {
-            validationResults = Validate(validators, change.Property, value, change.Origin);
-            return true;
-        }
-
-        validationResults = null;
-        return false;
-    }
 
     private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
@@ -165,5 +150,49 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
         }
 
         return validationResults;
+    }
+
+    /// <summary>
+    /// Validates the new value of a change as the type it is registered for. Returns false without validating when the
+    /// new value is not of that type: null for a value type, or a value of another type, which only an untyped write
+    /// can store.
+    /// </summary>
+    private interface ITypedValidation
+    {
+        bool TryValidate(
+            ImmutableArray<IPropertyValidator> validators,
+            in SubjectPropertyChange change,
+            out List<ValidationResult>? validationResults);
+    }
+
+    private sealed class TypedValidation<TProperty> : ITypedValidation
+    {
+        // An explicit static constructor runs before the first Register call returns, while a field initializer alone
+        // only guarantees running before a field is read.
+        static TypedValidation()
+        {
+            TypedValidations.TryAdd(typeof(TProperty), new TypedValidation<TProperty>());
+        }
+
+        /// <summary>Registers the typed commit check for <typeparamref name="TProperty"/>, once per type.</summary>
+        public static void Register()
+        {
+            // Empty: calling it runs the static constructor, which registers the type.
+        }
+
+        public bool TryValidate(
+            ImmutableArray<IPropertyValidator> validators,
+            in SubjectPropertyChange change,
+            out List<ValidationResult>? validationResults)
+        {
+            if (change.TryGetNewValue(out TProperty value))
+            {
+                validationResults = Validate(validators, change.Property, value, change.Origin);
+                return true;
+            }
+
+            validationResults = null;
+            return false;
+        }
     }
 }
