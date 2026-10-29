@@ -552,6 +552,77 @@ public class SubjectUpdateCollectionTests
         Assert.Equal("D", target.Items[2].Name);
     }
 
+    [Theory]
+    [InlineData("a,b", "b,x,a")]
+    [InlineData("a,b", "x,b,a")]
+    [InlineData("a,b,c", "c,a")]
+    [InlineData("a,b,c", "b,y,a,c")]
+    [InlineData("a,b,c", "c,b,a")]
+    [InlineData("a,b", "a,x,b")]
+    [InlineData("a,b,c,d", "d,x,b")]
+    [InlineData("a,b", "b,a,x")]
+    [InlineData("a,a,b", "b,a,a")]
+    [InlineData("a,b,b", "a,a,b")]
+    [InlineData("a,a,b", "b,x,a,a")]
+    public void WhenStructuralOperationsAreCombined_ThenApplyProducesSourceCollection(string oldOrder, string newOrder)
+    {
+        // Arrange
+        var oldNames = oldOrder.Split(',');
+        var newNames = newOrder.Split(',');
+
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
+        var sourceItems = oldNames.Distinct().ToDictionary(name => name, name => new CycleTestNode { Name = name });
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = oldNames.Select(name => sourceItems[name]).ToList() };
+
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var targetItems = oldNames.Distinct().ToDictionary(name => name, name => new CycleTestNode { Name = name });
+        var target = new CycleTestNode(targetContext) { Name = "Root", Items = oldNames.Select(name => targetItems[name]).ToList() };
+
+        var changes = new List<SubjectPropertyChange>();
+        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        source.Items = newNames
+            .Select(name => sourceItems.TryGetValue(name, out var item) ? item : new CycleTestNode { Name = name })
+            .ToList();
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal(newOrder, string.Join(",", target.Items.Select(item => item.Name)));
+        for (var i = 0; i < newNames.Length; i++)
+        {
+            if (targetItems.TryGetValue(newNames[i], out var retainedItem))
+            {
+                Assert.Same(retainedItem, target.Items[i]);
+            }
+        }
+    }
+
+    [Fact]
+    public void WhenRepeatedSubjectIsListedFewerTimes_ThenPartialUpdateIsCreated()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
+        var child = new CycleTestNode { Name = "Child" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child, child] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        node.Items = [child];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(1, itemsUpdate!.Count);
+    }
+
     [Fact]
     public async Task WhenCollectionSetToNull_ThenCompleteUpdateHasValueKindWithNull()
     {

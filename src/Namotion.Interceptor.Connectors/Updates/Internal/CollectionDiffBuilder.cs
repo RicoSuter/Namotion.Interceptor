@@ -14,6 +14,7 @@ internal sealed class CollectionDiffBuilder
     private readonly Dictionary<IInterceptorSubject, int> _oldRetainedIndexMap = new(ReferenceEqualityComparer.Instance);
     private readonly List<IInterceptorSubject> _oldRetainedOrder = [];
     private readonly List<IInterceptorSubject> _newRetainedOrder = [];
+    private readonly List<int> _newRetainedIndices = [];
     private readonly List<(object key, IInterceptorSubject item)> _retainedDictionaryItems = [];
 
     /// <summary>
@@ -29,7 +30,7 @@ internal sealed class CollectionDiffBuilder
         IReadOnlyList<IInterceptorSubject> newItems,
         out List<SubjectCollectionOperation>? operations,
         out List<(int index, IInterceptorSubject item)>? newItemsToProcess,
-        out List<(int oldIndex, int newIndex, IInterceptorSubject item)>? reorderedItems)
+        out List<(int fromIndex, int newIndex, IInterceptorSubject item)>? reorderedItems)
     {
         operations = null;
         newItemsToProcess = null;
@@ -75,6 +76,7 @@ internal sealed class CollectionDiffBuilder
         // Build common order lists to detect reordering
         _oldRetainedOrder.Clear();
         _newRetainedOrder.Clear();
+        _newRetainedIndices.Clear();
         for (var i = 0; i < oldItems.Count; i++)
         {
             if (_newIndexMap.ContainsKey(oldItems[i]))
@@ -83,7 +85,10 @@ internal sealed class CollectionDiffBuilder
         for (var i = 0; i < newItems.Count; i++)
         {
             if (_oldIndexMap.ContainsKey(newItems[i]))
+            {
                 _newRetainedOrder.Add(newItems[i]);
+                _newRetainedIndices.Add(i);
+            }
         }
 
         // Detect reordering and compute intermediate indices for moves
@@ -93,56 +98,26 @@ internal sealed class CollectionDiffBuilder
             for (var i = 0; i < _oldRetainedOrder.Count; i++)
                 _oldRetainedIndexMap[_oldRetainedOrder[i]] = i;
 
-            // Build set of removed indices to compute index shifts for moves
-            HashSet<int>? removedIndices = null;
-            if (operations is not null)
-            {
-                foreach (var op in operations)
-                {
-                    if (op.Action == SubjectCollectionOperationType.Remove)
-                    {
-                        removedIndices ??= [];
-                        removedIndices.Add((int)op.Index);
-                    }
-                }
-            }
-
             for (var i = 0; i < _newRetainedOrder.Count; i++)
             {
                 var item = _newRetainedOrder[i];
                 var oldCommonIndex = _oldRetainedIndexMap[item];
                 if (oldCommonIndex != i)
                 {
-                    var originalOldIndex = _oldIndexMap[item];
-                    var originalNewIndex = _newIndexMap[item];
-
-                    // Compute intermediate fromIndex: original index minus removes before it
-                    // This accounts for index shifts after removes are applied
-                    var removesBeforeOldIndex = CountRemovesBefore(removedIndices, originalOldIndex);
-                    var intermediateFromIndex = originalOldIndex - removesBeforeOldIndex;
+                    // Moves read their fromIndex from the list after all removes and inserts, where
+                    // the n-th old retained item sits in the n-th non-inserted slot. Look the slot up
+                    // by position, not by subject, because a subject can be listed more than once.
+                    // A subject listed more often in the old list than in the new one can have no
+                    // such slot, which the bounds check guards.
+                    var fromIndex = oldCommonIndex < _newRetainedIndices.Count
+                        ? _newRetainedIndices[oldCommonIndex]
+                        : oldCommonIndex;
 
                     reorderedItems ??= [];
-                    reorderedItems.Add((intermediateFromIndex, originalNewIndex, item));
+                    reorderedItems.Add((fromIndex, _newIndexMap[item], item));
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Counts how many removed indices are less than the given index.
-    /// </summary>
-    private static int CountRemovesBefore(HashSet<int>? removedIndices, int index)
-    {
-        if (removedIndices is null)
-            return 0;
-
-        var count = 0;
-        foreach (var removedIndex in removedIndices)
-        {
-            if (removedIndex < index)
-                count++;
-        }
-        return count;
     }
 
     /// <summary>
@@ -261,6 +236,7 @@ internal sealed class CollectionDiffBuilder
         _oldRetainedIndexMap.Clear();
         _oldRetainedOrder.Clear();
         _newRetainedOrder.Clear();
+        _newRetainedIndices.Clear();
         _retainedDictionaryItems.Clear();
     }
 }
