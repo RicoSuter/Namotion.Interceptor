@@ -1086,10 +1086,13 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         var changes = checkedChanges[..changeCount];
-        using (EnterCommitModelAccess())
+        ThrowIfConflicting(SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(checkedChanges.Span, Interceptor));
+        if (ConflictBehavior == TransactionConflictBehavior.Ignore)
         {
-            ThrowIfConflicting(SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(checkedChanges.Span, Interceptor));
-            RebaseOldValuesIfIgnoringConflicts(changes.Span);
+            using (EnterCommitModelAccess())
+            {
+                RebaseOldValuesOnLandedValues(changes.Span);
+            }
         }
 
         RunCommitCheck(checkedChanges.Span);
@@ -1253,17 +1256,11 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// With <see cref="TransactionConflictBehavior.Ignore"/>, replaces the old value of each snapshot slot whose landed
-    /// value changed since the capturing write by that landed value, so the commit check receives, and a revert restores,
-    /// the value this commit overwrites.
+    /// Replaces the old value of each snapshot slot whose landed value changed since the capturing write by that landed
+    /// value, so the commit check receives, and a revert restores, the value this commit overwrites.
     /// </summary>
-    private void RebaseOldValuesIfIgnoringConflicts(Span<SubjectPropertyChange> changes)
+    private static void RebaseOldValuesOnLandedValues(Span<SubjectPropertyChange> changes)
     {
-        if (ConflictBehavior != TransactionConflictBehavior.Ignore)
-        {
-            return;
-        }
-
         for (var index = 0; index < changes.Length; index++)
         {
             var change = changes[index];

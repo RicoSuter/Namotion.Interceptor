@@ -342,7 +342,7 @@ internal static class SubjectPropertyChangeOperations
                 continue;
             }
 
-            if (SubjectTransactionInterceptor.ContainsByReference(subjectContext.GetServices<SubjectTransactionInterceptor>(), interceptor))
+            if (SubjectTransactionInterceptor.ResolvesInterceptor(subjectContext.GetServices<SubjectTransactionInterceptor>(), interceptor))
             {
                 resolvingContext = subjectContext;
             }

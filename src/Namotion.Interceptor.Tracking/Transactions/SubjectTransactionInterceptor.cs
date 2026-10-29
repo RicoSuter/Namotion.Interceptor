@@ -247,11 +247,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         SubjectTransaction transaction)
     {
         var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
-        var isBoundToThisContext = subjectInterceptors.Length == 1
-            ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
-            : ContainsByReference(subjectInterceptors, transaction.Interceptor);
-
-        if (!isBoundToThisContext)
+        if (!ResolvesInterceptor(subjectInterceptors, transaction.Interceptor))
         {
             ThrowTransactionContextMismatch(property);
         }
@@ -294,6 +290,19 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     {
         throw new InvalidOperationException(
             $"Cannot modify property '{property.Metadata.Name}': Transaction is bound to a different context.");
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="interceptors"/> contains <paramref name="target"/> by reference.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool ResolvesInterceptor(
+        ImmutableArray<SubjectTransactionInterceptor> interceptors,
+        SubjectTransactionInterceptor target)
+    {
+        return interceptors.Length == 1
+            ? ReferenceEquals(interceptors[0], target)
+            : ContainsByReference(interceptors, target);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
