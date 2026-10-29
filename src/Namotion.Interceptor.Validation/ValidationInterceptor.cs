@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Validation;
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
 [RunsBefore(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
-public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
+public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 {
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
@@ -75,17 +75,17 @@ public class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
     }
 
     /// <summary>
-    /// Returns true when <paramref name="obj"/> is a validation interceptor of the same type. All instances validate
+    /// Returns true when <paramref name="obj"/> is a validation interceptor. All instances validate
     /// alike, so a context that reaches several registrations, for example its own and its fallback's, uses one.
     /// </summary>
     /// <param name="obj">The object to compare with.</param>
     public override bool Equals(object? obj)
     {
-        return obj is not null && obj.GetType() == GetType();
+        return obj is ValidationInterceptor;
     }
 
     /// <inheritdoc />
-    public override int GetHashCode() => GetType().GetHashCode();
+    public override int GetHashCode() => typeof(ValidationInterceptor).GetHashCode();
 
     /// <summary>
     /// Validates the new value of <paramref name="change"/> with the property type as the type argument for common

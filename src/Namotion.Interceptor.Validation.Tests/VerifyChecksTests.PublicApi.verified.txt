@@ -39,7 +39,7 @@ namespace Namotion.Interceptor.Validation
             typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler),
             typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor),
             typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
-    public class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
+    public sealed class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
     {
         public ValidationInterceptor() { }
         public override bool Equals(object? obj) { }
