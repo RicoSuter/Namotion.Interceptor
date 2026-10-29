@@ -13,9 +13,7 @@ public sealed class MutationCounters
     private long _value;
     private long _structural;
     private long _commits;
-    private long _conflictCommits;
-    private long _sourceWriteFailedCommits;
-    private long _unexpectedFailedCommits;
+    private readonly long[] _failedCommits = new long[(int)CommitFailureKind.Unexpected + 1];
 
     public long ValueMutationCount => Interlocked.Read(ref _value);
     public long StructuralMutationCount => Interlocked.Read(ref _structural);
@@ -26,41 +24,26 @@ public sealed class MutationCounters
     public long CommitCount => Interlocked.Read(ref _commits);
 
     /// <summary>
-    /// Gets how many commits failed with a <see cref="CommitFailureKind.Conflict"/>. Expected under chaos.
+    /// Gets how many commits failed with a <see cref="CommitFailureKind.Conflict"/>.
     /// </summary>
-    public long ConflictCommitCount => Interlocked.Read(ref _conflictCommits);
+    public long ConflictCommitCount => Interlocked.Read(ref _failedCommits[(int)CommitFailureKind.Conflict]);
 
     /// <summary>
-    /// Gets how many commits failed with a <see cref="CommitFailureKind.SourceWriteFailure"/>. Expected under chaos:
-    /// the mutations already counted via <see cref="IncrementValue"/> whose source write failed are applied neither
-    /// locally nor on the source.
+    /// Gets how many commits failed with a <see cref="CommitFailureKind.SourceWriteFailure"/>. The mutations already
+    /// counted via <see cref="IncrementValue"/> whose source write failed are applied neither locally nor on the source.
     /// </summary>
-    public long SourceWriteFailedCommitCount => Interlocked.Read(ref _sourceWriteFailedCommits);
+    public long SourceWriteFailedCommitCount => Interlocked.Read(ref _failedCommits[(int)CommitFailureKind.SourceWriteFailure]);
 
     /// <summary>
-    /// Gets how many commits failed with a <see cref="CommitFailureKind.Unexpected"/> failure. Any fails the cycle.
+    /// Gets how many commits failed with a <see cref="CommitFailureKind.Unexpected"/> failure.
     /// </summary>
-    public long UnexpectedFailedCommitCount => Interlocked.Read(ref _unexpectedFailedCommits);
+    public long UnexpectedFailedCommitCount => Interlocked.Read(ref _failedCommits[(int)CommitFailureKind.Unexpected]);
 
     public void IncrementValue() => Interlocked.Increment(ref _value);
     public void IncrementStructural() => Interlocked.Increment(ref _structural);
     public void IncrementCommit() => Interlocked.Increment(ref _commits);
 
-    public void IncrementFailedCommit(CommitFailureKind kind)
-    {
-        switch (kind)
-        {
-            case CommitFailureKind.Conflict:
-                Interlocked.Increment(ref _conflictCommits);
-                break;
-            case CommitFailureKind.SourceWriteFailure:
-                Interlocked.Increment(ref _sourceWriteFailedCommits);
-                break;
-            default:
-                Interlocked.Increment(ref _unexpectedFailedCommits);
-                break;
-        }
-    }
+    public void IncrementFailedCommit(CommitFailureKind kind) => Interlocked.Increment(ref _failedCommits[(int)kind]);
 
     /// <summary>
     /// Returns true the first time <paramref name="signature"/> is passed since the last <see cref="Reset"/>.
@@ -72,9 +55,11 @@ public sealed class MutationCounters
         Interlocked.Exchange(ref _value, 0);
         Interlocked.Exchange(ref _structural, 0);
         Interlocked.Exchange(ref _commits, 0);
-        Interlocked.Exchange(ref _conflictCommits, 0);
-        Interlocked.Exchange(ref _sourceWriteFailedCommits, 0);
-        Interlocked.Exchange(ref _unexpectedFailedCommits, 0);
+        for (var index = 0; index < _failedCommits.Length; index++)
+        {
+            Interlocked.Exchange(ref _failedCommits[index], 0);
+        }
+
         _loggedCommitFailures.Clear();
     }
 }

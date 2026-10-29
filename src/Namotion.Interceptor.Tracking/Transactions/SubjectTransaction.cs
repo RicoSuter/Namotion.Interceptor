@@ -129,8 +129,8 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
 
     /// <summary>
-    /// Gets a value indicating whether this thread runs this transaction's synchronous commit work: a handler check,
-    /// conflict detection, or the local apply and its rollback.
+    /// Gets a value indicating whether this thread runs this transaction's synchronous commit work: a handler check, the
+    /// model reads before the source writes, or the local apply and its rollback.
     /// </summary>
     internal bool IsInCommitScope => ReferenceEquals(_commitScopeTransaction, this);
 
@@ -174,12 +174,8 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Adds the handlers of <paramref name="subjectContext"/> before the transaction captures a write to one of its
-    /// subjects, see <see cref="TransactionHandlerSet.Include"/>, which also states when this returns false.
+    /// subjects, see <see cref="TransactionHandlerSet.Include"/>, which also states when this returns false or throws.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown, like the capture, while a commit is in progress and <paramref name="subjectContext"/> adds handlers,
-    /// unless <paramref name="skipWhileCommitting"/> is true.
-    /// </exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool IncludeHandlersOf(
         IInterceptorSubjectContext subjectContext,
@@ -620,21 +616,11 @@ public sealed class SubjectTransaction : IDisposable
         SubjectPropertyChange[]? rentedArray = null;
         try
         {
-            var (rented, changes, checkedChanges) = SnapshotChanges();
-            rentedArray = rented;
-            using (EnterCommitModelAccess())
-            {
-                ThrowIfSubjectsLeftContext(checkedChanges.Span);
-                RebaseOldValuesIfIgnoringConflicts(changes.Span);
-            }
-
-            RunCommitCheck(checkedChanges.Span);
+            var (changes, _) = SnapshotAndCheckChanges(out rentedArray);
 
             SubjectTransactionException? failure = null;
             using (EnterCommitModelAccess())
             {
-                ThrowIfConflictsDetected(checkedChanges.Span);
-
                 var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, MarkingTransaction);
 
                 if (applyFailed.Count > 0)
@@ -679,21 +665,7 @@ public sealed class SubjectTransaction : IDisposable
         try
         {
             commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
-            var (rented, changes, checkedChanges) = SnapshotChanges();
-            rentedArray = rented;
-            using (EnterCommitModelAccess())
-            {
-                ThrowIfSubjectsLeftContext(checkedChanges.Span);
-                RebaseOldValuesIfIgnoringConflicts(changes.Span);
-            }
-
-            RunCommitCheck(checkedChanges.Span);
-
-            using (EnterCommitModelAccess())
-            {
-                ThrowIfConflictsDetected(checkedChanges.Span);
-            }
-
+            var (changes, checkOnlyChanges) = SnapshotAndCheckChanges(out rentedArray);
             if (changes.IsEmpty)
             {
                 // Only check-only entries, accepted by the check and conflict detection: nothing to write or apply.
@@ -704,7 +676,7 @@ public sealed class SubjectTransaction : IDisposable
             using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            var failure = await ReconcileWithWriterAsync(writer, changes, checkedChanges[changes.Length..], commitToken).ConfigureAwait(false);
+            var failure = await ReconcileWithWriterAsync(writer, changes, checkOnlyChanges, commitToken).ConfigureAwait(false);
 
             FinishCommit();
 
@@ -1078,12 +1050,15 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Snapshots the pending changes, followed by the check-only entries. <c>Changes</c> holds the pending changes
-    /// the commit writes and applies, <c>CheckedChanges</c> also the check-only entries, for the commit check and
-    /// conflict detection.
+    /// Snapshots the pending changes, followed by the check-only entries, into <paramref name="rentedArray"/>, which the
+    /// caller returns also when this throws, and runs the context check, the Ignore rebase, the commit check and conflict
+    /// detection on them. Returns the pending changes the commit writes and applies, and the check-only entries.
     /// </summary>
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes, Memory<SubjectPropertyChange> CheckedChanges) SnapshotChanges()
+    private (Memory<SubjectPropertyChange> Changes, Memory<SubjectPropertyChange> CheckOnlyChanges) SnapshotAndCheckChanges(
+        out SubjectPropertyChange[] rentedArray)
     {
+        Memory<SubjectPropertyChange> checkedChanges;
+        int changeCount;
         lock (_pendingChangesLock)
         {
             // A dispose while the commit waited for the optimistic lock detached the pending changes.
@@ -1093,10 +1068,9 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             // Rent before changing state so an allocation failure leaves the transaction reusable.
-            var changeCount = _pendingChanges?.Count ?? 0;
+            changeCount = _pendingChanges?.Count ?? 0;
             var checkOnlyCount = CheckedCheckOnlyCount;
-            var checkedCount = changeCount + checkOnlyCount;
-            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(checkedCount);
+            rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount + checkOnlyCount);
 
             // Set while holding the lock so no write can be captured, and no handler included, between the snapshot
             // and the end of the commit.
@@ -1108,8 +1082,27 @@ public sealed class SubjectTransaction : IDisposable
                 _checkOnlyChanges!.Values.CopyTo(rentedArray, changeCount);
             }
 
-            return (rentedArray, rentedArray.AsMemory(0, changeCount), rentedArray.AsMemory(0, checkedCount));
+            checkedChanges = rentedArray.AsMemory(0, changeCount + checkOnlyCount);
         }
+
+        var changes = checkedChanges[..changeCount];
+        using (EnterCommitModelAccess())
+        {
+            ThrowIfConflicting(SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(checkedChanges.Span, Interceptor));
+            RebaseOldValuesIfIgnoringConflicts(changes.Span);
+        }
+
+        RunCommitCheck(checkedChanges.Span);
+
+        if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
+        {
+            using (EnterCommitModelAccess())
+            {
+                ThrowIfConflicting(SubjectPropertyChangeOperations.DetectChangeConflicts(checkedChanges.Span));
+            }
+        }
+
+        return (changes, checkedChanges[changeCount..]);
     }
 
     /// <summary>
@@ -1134,7 +1127,6 @@ public sealed class SubjectTransaction : IDisposable
         catch when (IsDisposed)
         {
             // A dispose from another flow drops the pending values the handlers read, so their verdict is void.
-            throw new ObjectDisposedException(nameof(SubjectTransaction));
         }
 
         if (IsDisposed)
@@ -1252,24 +1244,11 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private void ThrowIfSubjectsLeftContext(ReadOnlySpan<SubjectPropertyChange> changes)
+    private static void ThrowIfConflicting(List<PropertyReference>? conflictingProperties)
     {
-        var conflictingProperties = SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(changes, Interceptor);
         if (conflictingProperties is not null)
         {
             throw new SubjectTransactionConflictException(conflictingProperties);
-        }
-    }
-
-    private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
-        {
-            var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
-            if (conflictingProperties is not null)
-            {
-                throw new SubjectTransactionConflictException(conflictingProperties);
-            }
         }
     }
 

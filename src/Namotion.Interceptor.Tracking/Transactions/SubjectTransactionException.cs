@@ -15,25 +15,7 @@ public class SubjectTransactionException : Exception
         IReadOnlyList<SubjectPropertyChange> appliedChanges,
         IReadOnlyList<SubjectPropertyChange> failedChanges,
         IReadOnlyList<Exception> errors)
-        : this(message, appliedChanges, failedChanges, errors, CreateInnerException(errors))
-    {
-    }
-
-    /// <summary>
-    /// Initializes a new instance with an explicit inner exception, for subclasses.
-    /// </summary>
-    /// <param name="message">The exception message.</param>
-    /// <param name="appliedChanges">The changes that were applied.</param>
-    /// <param name="failedChanges">The changes that did not commit.</param>
-    /// <param name="errors">The errors that occurred.</param>
-    /// <param name="innerException">The inner exception, or null.</param>
-    protected SubjectTransactionException(
-        string message,
-        IReadOnlyList<SubjectPropertyChange> appliedChanges,
-        IReadOnlyList<SubjectPropertyChange> failedChanges,
-        IReadOnlyList<Exception> errors,
-        Exception? innerException)
-        : base(message, innerException)
+        : base(message, CreateInnerException(errors))
     {
         AppliedChanges = appliedChanges;
         FailedChanges = failedChanges;
@@ -74,7 +56,7 @@ public class SubjectTransactionException : Exception
         {
             0 => null,
             1 => errors[0],
-            _ => new AggregateException("Multiple source write failures occurred.", errors)
+            _ => new AggregateException("Multiple errors occurred during the commit.", errors)
         };
     }
 }

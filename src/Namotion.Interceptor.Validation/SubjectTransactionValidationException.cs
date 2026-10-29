@@ -25,18 +25,7 @@ public sealed class SubjectTransactionValidationException : SubjectTransactionEx
             "One or more transaction values are invalid. No changes have been written.",
             [],
             failedChanges,
-            errors,
-            CreateInnerException(errors))
+            errors.Count > 0 ? errors : throw new ArgumentException("At least one validation error is required.", nameof(errors)))
     {
-    }
-
-    private static Exception CreateInnerException(IReadOnlyList<Exception> errors)
-    {
-        return errors.Count switch
-        {
-            0 => throw new ArgumentException("At least one validation error is required.", nameof(errors)),
-            1 => errors[0],
-            _ => new AggregateException("Multiple transaction values are invalid.", errors)
-        };
     }
 }
