@@ -26,10 +26,10 @@ public static class SubjectTransactionExtensions
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
     /// <param name="checkMode">When transaction handlers validate the written values. Defaults to <see cref="TransactionCheckMode.Immediate"/>.</param>
     /// <param name="commitTimeout">
-    /// Timeout for commit operations. Defaults to 30 seconds. User cancellation is ignored during commit;
-    /// only the timeout can cancel the commit operation. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.
+    /// The commit timeout, 30 seconds by default, or <see cref="Timeout.InfiniteTimeSpan"/> for none. Once a commit
+    /// runs, only the timeout can cancel it.
     /// </param>
-    /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
+    /// <param name="cancellationToken">Cancels waiting for the exclusive lock when the transaction begins.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The transaction policies are independent optional parameters with defaults, so callers name only the ones they change.")]
     public static TransactionAwaitable BeginTransactionAsync(
@@ -49,8 +49,7 @@ public static class SubjectTransactionExtensions
 }
 
 /// <summary>
-/// Custom awaitable that sets AsyncLocal after the underlying task completes.
-/// This ensures the transaction is visible in the caller's execution context.
+/// Awaitable that makes the begun transaction current in the caller's execution context.
 /// </summary>
 public readonly struct TransactionAwaitable
 {
@@ -70,7 +69,7 @@ public readonly struct TransactionAwaitable
 }
 
 /// <summary>
-/// Custom awaiter that sets AsyncLocal in the caller's context after GetResult.
+/// Awaiter that makes the begun transaction current in the caller's execution context in GetResult.
 /// </summary>
 public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
 {
@@ -90,15 +89,13 @@ public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
         try
         {
             transaction = _awaiter.GetResult();
-            // Set the AsyncLocal in the caller's execution context
-            // This happens when the awaiter resumes the caller, in the caller's context
+            // GetResult runs in the caller's execution context, so the AsyncLocal value flows to the caller.
             SubjectTransaction.SetCurrent(transaction);
             return transaction;
         }
         catch
         {
-            // If GetResult throws, dispose the transaction to clean up resources
-            // and prevent counter/lock leaks
+            // Prevents leaking the active transaction count and the exclusive lock.
             transaction?.Dispose();
             throw;
         }

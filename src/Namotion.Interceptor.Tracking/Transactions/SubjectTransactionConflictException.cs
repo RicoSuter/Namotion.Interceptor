@@ -6,9 +6,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Exception thrown when a transaction detects a concurrent modification conflict.
 /// </summary>
 /// <remarks>
-/// Inherits from <see cref="SubjectTransactionException"/> for unified exception handling.
 /// <see cref="SubjectTransactionException.AppliedChanges"/> and <see cref="SubjectTransactionException.FailedChanges"/>
-/// are always empty since no writes are attempted when conflicts are detected at commit time.
+/// are always empty: conflicts are detected before anything is written.
 /// </remarks>
 public sealed class SubjectTransactionConflictException : SubjectTransactionException
 {
@@ -24,12 +23,12 @@ public sealed class SubjectTransactionConflictException : SubjectTransactionExce
     }
 
     /// <summary>
-    /// Gets the properties that were modified by another source during the transaction, which can include properties
-    /// the transaction wrote with their unchanged value (see <see cref="TransactionCheckMode.Deferred"/>), and the
-    /// written properties whose subject no longer belongs to the transaction's context (detached or moved to a context
-    /// that does not resolve the transaction's interceptor), with either <see cref="TransactionConflictBehavior"/>. Such a
-    /// property conflicts again on retry until its subject is attached to the context again outside the transaction (a
-    /// write inside it is only captured) or the transaction is disposed.
+    /// Gets the properties whose landed value changed since the transaction wrote them, including properties it wrote
+    /// with their unchanged value (see <see cref="TransactionCheckMode.Deferred"/>), and, with either
+    /// <see cref="TransactionConflictBehavior"/>, the written properties whose subject left the transaction's context
+    /// (detached or moved to a context that does not resolve the transaction's interceptor). Such a property conflicts
+    /// again on retry until its subject is attached to the context again outside the transaction (a write inside it is
+    /// only captured), or the transaction is disposed.
     /// </summary>
     public IReadOnlyList<PropertyReference> ConflictingProperties { get; }
 }

@@ -6,21 +6,19 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public enum TransactionFailureHandling
 {
     /// <summary>
-    /// Best-effort mode: Apply successful changes to the local model, rollback failed ones.
-    /// For each property, if the source write succeeds but local apply fails, the source is rolled back
-    /// to maintain per-property consistency. A <see cref="SubjectTransactionException"/> is thrown containing all failures.
-    /// This maximizes successful writes but may result in partial updates across properties.
-    /// When <see cref="ITransactionHandler"/>s checked the changes, a failed local apply instead reverts every change,
-    /// as in <see cref="Rollback"/> mode, and reports every change as failed.
+    /// Keeps the changes that succeeded, so properties can be partially updated. A property whose source write
+    /// succeeded but whose local apply failed has its source write reverted, unless that revert fails or the failed
+    /// apply already wrote its value. A <see cref="SubjectTransactionException"/> reports all failures. When
+    /// <see cref="ITransactionHandler"/>s checked the changes, a failed local apply instead reverts every change, as in
+    /// <see cref="Rollback"/> mode, and reports every change as failed.
     /// </summary>
     BestEffort,
 
     /// <summary>
-    /// Rollback mode: Attempt to revert successful source writes on failure.
-    /// If any source write fails, attempts to write the original values back to sources that succeeded.
-    /// If revert also fails, both the original failure and revert failures are reported.
-    /// No changes are applied to the local model on failure.
-    /// This mode provides the strongest consistency guarantee between in-memory state and external sources.
+    /// On any failure, reverts every source write and every local apply, so the commit lands all changes or none.
+    /// Failed reverts are reported along with the original failures. A failed revert, a throwing writer, a commit
+    /// timeout or a failed apply that already wrote its value can still leave a property changed, see When a Revert
+    /// Fails in docs/tracking-transactions.md.
     /// </summary>
     Rollback
 }

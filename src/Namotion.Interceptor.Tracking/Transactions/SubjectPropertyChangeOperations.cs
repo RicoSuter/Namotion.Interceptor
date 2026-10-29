@@ -8,13 +8,10 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 internal static class SubjectPropertyChangeOperations
 {
     /// <summary>
-    /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
-    /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
-    /// properties). Inspect Failed.Count == 0 to detect full success. The Successful list is returned empty
-    /// only on the no-exclude full-success path, where the caller already holds the input span and does not
-    /// need the applied set; with exclusions, or on any failure, Successful is populated. When
-    /// <paramref name="markingTransaction"/> is set, each applied write carries the commit write mark of that
-    /// transaction, and applying stops at the first failure, after which that transaction reverts the set.
+    /// Applies the changes whose property is not in <paramref name="exclude"/>. Successful is empty on full success
+    /// without exclusions, where the caller already holds the applied set, and populated otherwise. With
+    /// <paramref name="markingTransaction"/>, each applied write carries that transaction's commit write mark, and
+    /// applying stops at the first failure, after which that transaction reverts the set.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, SubjectTransaction? markingTransaction = null)
@@ -26,9 +23,6 @@ internal static class SubjectPropertyChangeOperations
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, SubjectTransaction? markingTransaction)
     {
-        // When excluded is null the applied set equals the input on success, so Successful stays null
-        // (returned empty) until the first failure. When excluded is set the applied set differs from the
-        // input, so Successful is materialized up front.
         List<SubjectPropertyChange>? successful = excluded is null ? null : new List<SubjectPropertyChange>(changes.Length);
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
@@ -111,12 +105,9 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Reverts previously-applied local changes by applying their inverse values in reverse order.
-    /// On failure the reported change is the original forward change (not the inverted rollback record),
-    /// so <see cref="SubjectTransactionException.FailedChanges"/> always holds the change that was submitted,
-    /// consistent with the source-revert path. Returns any revert failures and errors so the caller can fold
-    /// them into the exception. When <paramref name="markingTransaction"/> is set, each restoring write carries the
-    /// commit write mark of that transaction.
+    /// Reverts applied changes in reverse order and returns the failed reverts. A failed revert reports the original
+    /// change, not its rollback record, as the source-revert path does. With <paramref name="markingTransaction"/>,
+    /// each restoring write carries that transaction's commit write mark.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
         IReadOnlyList<SubjectPropertyChange> applied, SubjectTransaction? markingTransaction)
@@ -124,7 +115,6 @@ internal static class SubjectPropertyChangeOperations
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
 
-        // Reverse order so dependent properties unwind in the opposite order they were applied.
         for (var i = applied.Count - 1; i >= 0; i--)
         {
             var original = applied[i];
@@ -175,10 +165,8 @@ internal static class SubjectPropertyChangeOperations
     private static void SetLocalValue(SubjectPropertyChange change, object? newValue)
     {
         var metadata = change.Property.Metadata;
-        // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
-        // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
-        // PendingOrigin.Set on the Local apply/revert hot path. Non-Local origins (FromSource,
-        // Confirmed) still arm so echo suppression sees the source.
+        // An absent stamp finalizes to Local like a Local one (FinalizeOrigin returns early on Local), so the hot
+        // Local apply and revert skip PendingOrigin.Set. Other origins arm it so echo suppression sees the source.
         if (change.Origin.Kind == ChangeOriginKind.Local)
         {
             metadata.SetValue?.Invoke(change.Property.Subject, newValue);
@@ -303,8 +291,7 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Detects conflicts by comparing captured OldValue with current actual value. Returns the conflicting properties,
-    /// or null when there are none.
+    /// Returns the properties whose landed value differs from the captured old value, or null when there are none.
     /// </summary>
     internal static List<PropertyReference>? DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
     {

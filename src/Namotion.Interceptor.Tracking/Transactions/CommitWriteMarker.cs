@@ -16,9 +16,8 @@ internal static class CommitWriteMarker
         public SubjectTransaction? Transaction;
     }
 
-    // Thread-static: the local apply and the rollback are synchronous, so the mark is set and consumed within one
-    // call frame, never across an await. A nested write of the same property with another value does not take the
-    // mark; one with the same value can, the same limitation as PendingOrigin.
+    // Thread-static: the local apply and the rollback are synchronous, so a mark never crosses an await. A nested
+    // write of the same property with the same value can take the mark, the same limitation as PendingOrigin.
     [ThreadStatic] private static Frame _frame;
 
     internal static Scope Set(SubjectTransaction transaction, PropertyReference target, object? value)

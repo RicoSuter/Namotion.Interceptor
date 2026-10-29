@@ -25,10 +25,8 @@ public sealed class SubjectTransaction : IDisposable
         = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
 
     /// <summary>
-    /// Gets a value indicating whether any transaction is currently active across all contexts.
-    /// This is a fast-path check using a volatile read; it may briefly return true after
-    /// all transactions have completed due to memory visibility delays. This is safe because
-    /// a false positive only results in an unnecessary AsyncLocal read.
+    /// Gets whether any transaction is active in any context. It can briefly stay true after the last one ended, which
+    /// only costs an unnecessary AsyncLocal read.
     /// </summary>
     internal static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
 
@@ -40,17 +38,15 @@ public sealed class SubjectTransaction : IDisposable
     private TransactionHandlerSet _handlerSet;
 
     /// <summary>
-    /// Last write wins if the same property is written multiple times.
-    /// Preserves insertion order so that the commit applies changes in the order they were written.
-    /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
+    /// One change per property (last write wins), in first-write order, which is the commit order. Guarded by
+    /// <see cref="_pendingChangesLock"/>.
     /// </summary>
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
-    // Check-only entries (see TransactionCheckMode.Deferred and RecordsCheckOnlyEntries): writes of the landed value
-    // of a property without a pending change. A later write of another value replaces the entry with a pending change,
-    // so the keys stay disjoint from _pendingChanges. Allocated on the first such write; accessed only under
-    // _pendingChangesLock.
+    // Check-only entries (see RecordsCheckOnlyEntries): writes of the landed value of a property without a pending
+    // change. A write of another value replaces the entry, so the keys stay disjoint from _pendingChanges. Allocated
+    // lazily; guarded by _pendingChangesLock.
     private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _checkOnlyChanges;
 
     private volatile bool _isCommitting;
@@ -58,8 +54,7 @@ public sealed class SubjectTransaction : IDisposable
     private int _commitStarted;
     private int _isDisposed;
 
-    // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
-    // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
+    // Set by a Dispose during the commit, so EndCommit releases the exclusive lock. Guarded by _pendingChangesLock.
     private bool _disposeRequestedDuringCommit;
 
     // Written only by the committing thread as it enters and leaves a commit scope, and read only after
@@ -105,27 +100,18 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Sets the current transaction in this execution context.
-    /// This is needed for async patterns where AsyncLocal must be set in the caller's context.
+    /// Sets the current transaction of the caller's execution context, see <see cref="TransactionAwaiter"/>.
     /// </summary>
     internal static void SetCurrent(SubjectTransaction? transaction)
     {
         CurrentTransaction.Value = transaction;
     }
 
-    /// <summary>
-    /// Gets a value indicating whether the transaction is currently committing changes.
-    /// </summary>
     internal bool IsCommitting => _isCommitting;
 
-    /// <summary>
-    /// Gets a value indicating whether the transaction has reached a terminal committed state.
-    /// </summary>
+    /// <summary>Gets whether the commit finished, successfully or terminally failed.</summary>
     internal bool IsCommitted => _isCommitted;
 
-    /// <summary>
-    /// Gets a value indicating whether the transaction has been disposed.
-    /// </summary>
     internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
 
     /// <summary>
@@ -140,19 +126,13 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     internal bool IsInHandlerCheck => _checkStage.HasValue;
 
-    /// <summary>
-    /// Gets the interceptor this transaction is bound to (for cross-context validation).
-    /// </summary>
+    /// <summary>Gets the interceptor of the context this transaction is bound to.</summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
 
-    /// <summary>
-    /// Gets the transaction handlers, see <see cref="TransactionHandlerSet"/>.
-    /// </summary>
+    /// <summary>Gets the transaction handlers, see <see cref="TransactionHandlerSet"/>.</summary>
     internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlerSet.Handlers);
 
-    /// <summary>
-    /// Gets the lock that guards the pending changes and the capture state.
-    /// </summary>
+    /// <summary>Gets the lock that guards the pending changes and the capture state.</summary>
     internal Lock PendingChangesLock => _pendingChangesLock;
 
     // Applies carry the commit write mark only when handlers checked the final set.
@@ -247,13 +227,11 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Atomically captures a property change into the pending dictionary. The first write preserves
-    /// <paramref name="currentValue"/>, the landed model value, as old value for conflict detection; subsequent writes
-    /// preserve the original old value (last write wins). <paramref name="restoresLandedValue"/> is true when the write
-    /// restores the landed value and the subject's context has the equality check: a pending change is then removed,
-    /// the same as never writing the property, and without one the write is dropped the same way; either way a
-    /// check-only entry for the landed value is recorded when <see cref="RecordsCheckOnlyEntries"/>.
-    /// Returns false when disposal wins the race, allowing the caller to continue the normal write chain.
+    /// Captures a change under the lock. The first write keeps <paramref name="currentValue"/>, the landed value, as
+    /// old value for conflict detection; later writes keep that old value. <paramref name="restoresLandedValue"/> (a
+    /// write of the landed value with the equality check) removes the pending change instead, if any, and records a
+    /// check-only entry when <see cref="RecordsCheckOnlyEntries"/>. Returns false when disposal won the race, so the
+    /// caller continues the write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// Thrown if a concurrent commit is in progress (TOCTOU race).
@@ -277,9 +255,8 @@ public sealed class SubjectTransaction : IDisposable
             var pendingChanges = _pendingChanges;
             if (restoresLandedValue)
             {
-                // Without a pending change left to remove, the write still ends at the landed value: another write
-                // back won the race, or an earlier interceptor normalized the written value to the landed value. It
-                // is unchanged either way, so it is not captured as a change to the landed value.
+                // Also without a pending change to remove (another write back won the race, or an earlier interceptor
+                // normalized the value to the landed value), the write is unchanged and must not be captured.
                 pendingChanges.Remove(property);
                 if (RecordsCheckOnlyEntries)
                 {
@@ -408,24 +385,16 @@ public sealed class SubjectTransaction : IDisposable
             "Transaction handlers must not write properties.");
     }
 
-    /// <summary>
-    /// Gets the context this transaction is bound to.
-    /// </summary>
+    /// <summary>Gets the context this transaction is bound to.</summary>
     public IInterceptorSubjectContext Context { get; }
 
-    /// <summary>
-    /// Gets the conflict behavior for this transaction.
-    /// </summary>
+    /// <summary>Gets the conflict behavior for this transaction.</summary>
     public TransactionConflictBehavior ConflictBehavior { get; }
 
-    /// <summary>
-    /// Gets the locking mode for this transaction.
-    /// </summary>
+    /// <summary>Gets the locking mode for this transaction.</summary>
     public TransactionLocking Locking { get; }
 
-    /// <summary>
-    /// Gets the check mode for this transaction.
-    /// </summary>
+    /// <summary>Gets the check mode for this transaction.</summary>
     public TransactionCheckMode CheckMode { get; }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and handlers as one coherent state.")]
@@ -454,19 +423,19 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Begins a new transaction bound to the specified context.
-    /// For Exclusive locking, waits if another transaction is active on this context.
-    /// For Optimistic locking, returns immediately and acquires lock only during commit.
+    /// Begins a new transaction bound to <paramref name="context"/>, see
+    /// <see cref="SubjectTransactionExtensions.BeginTransactionAsync"/>. Exclusive locking waits for the transaction
+    /// lock; optimistic locking returns immediately and takes the lock only during the commit.
     /// </summary>
     /// <param name="context">The context to bind the transaction to.</param>
-    /// <param name="failureHandling">The failure handling mode controlling what happens when writes fail.</param>
-    /// <param name="locking">The locking mode controlling transaction synchronization.</param>
-    /// <param name="requirement">The transaction requirement for validation.</param>
+    /// <param name="failureHandling">The failure handling mode.</param>
+    /// <param name="locking">The locking mode.</param>
+    /// <param name="requirement">The transaction requirement.</param>
     /// <param name="conflictBehavior">The conflict detection behavior.</param>
     /// <param name="checkMode">The check mode.</param>
-    /// <param name="commitTimeout">Timeout for commit operations. User cancellation is ignored during commit and only timeout-based cancellation is used. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.</param>
-    /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
-    /// <returns>A new SubjectTransaction instance.</returns>
+    /// <param name="commitTimeout">The commit timeout, or <see cref="Timeout.InfiniteTimeSpan"/> for none.</param>
+    /// <param name="cancellationToken">Cancels waiting for the exclusive lock.</param>
+    /// <returns>The new transaction.</returns>
     /// <exception cref="InvalidOperationException">Thrown when transactions are not enabled or when nested transaction is attempted.</exception>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The factory forwards the complete set of transaction policies to the private constructor as one coherent state.")]
     internal static async ValueTask<SubjectTransaction> BeginTransactionAsync(
@@ -517,9 +486,9 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Commits all pending changes. If external write handlers are configured on subjects' contexts,
-    /// changes are written to external sources first, then applied to the local model.
-    /// The behavior on partial failure depends on the <see cref="_failureHandling"/> specified at transaction creation.
+    /// Commits all pending changes. With an <see cref="ITransactionWriter"/>, they are written to their sources first,
+    /// then applied to the local model. Partial failures are handled per the <see cref="TransactionFailureHandling"/>
+    /// the transaction began with.
     /// </summary>
     /// <remarks>
     /// For Optimistic locking, the lock is acquired at the start of commit and released after completion. For the
@@ -575,10 +544,8 @@ public sealed class SubjectTransaction : IDisposable
 
         if (writer is null)
         {
-            // No source writer: the entire commit is local. For the default (Exclusive) locking
-            // mode the lock is already held, so the whole flow runs synchronously without a
-            // CancellationTokenSource or an async state machine. Optimistic locking needs an async lock
-            // acquisition, so only that case falls back to the async wrapper.
+            // Without a writer the commit is local and, with the exclusive lock already held, runs synchronously
+            // without a CancellationTokenSource or async state machine. Only an optimistic lock wait goes async.
             var lockTask = AcquireOptimisticLockIfNeededAsync(cancellationToken);
             if (lockTask.IsCompletedSuccessfully)
             {
@@ -608,9 +575,7 @@ public sealed class SubjectTransaction : IDisposable
         CommitWithoutWriter(commitLock);
     }
 
-    /// <summary>
-    /// Fully synchronous local commit when no <see cref="ITransactionWriter"/> is registered.
-    /// </summary>
+    /// <summary>Synchronous local commit when no <see cref="ITransactionWriter"/> is registered.</summary>
     private void CommitWithoutWriter(IDisposable? commitLock)
     {
         SubjectPropertyChange[]? rentedArray = null;
@@ -655,9 +620,7 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    /// <summary>
-    /// Commit when an <see cref="ITransactionWriter"/> is registered.
-    /// </summary>
+    /// <summary>Commit when an <see cref="ITransactionWriter"/> is registered.</summary>
     private async ValueTask CommitWithWriterAsync(ITransactionWriter writer, CancellationToken cancellationToken)
     {
         IDisposable? commitLock = null;
@@ -691,24 +654,18 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    /// <summary>
-    /// Implements the failure/rollback matrix for the writer path. Returns null on full success.
-    /// </summary>
+    /// <summary>Implements the failure and rollback matrix of the writer path. Returns null on full success.</summary>
     private async ValueTask<SubjectTransactionException?> ReconcileWithWriterAsync(
         ITransactionWriter writer,
         Memory<SubjectPropertyChange> changes,
         Memory<SubjectPropertyChange> checkOnlyChanges,
         CancellationToken cancellationToken)
     {
-        // The writer marks accepted snapshot slots with the confirming source so the local apply and
-        // revert notifications are echo-suppressed by the outbound connector queue (#343).
         var capturedProperties = ValidateWriterContract ? CaptureSnapshotProperties(changes.Span) : null;
 
-        // A throwing writer returns neither the written set nor the revert state, so sources cannot be
-        // reverted: report a full failure, which the caller makes terminal. A contract violation is
-        // terminal too (source writes already happened, a retry would repeat them). Only a commit-timeout
-        // OperationCanceledException propagates and stays retryable; the built-in writer throws it
-        // only from its revert phase (write-phase cancellation is reported as a failure).
+        // A throwing writer returns neither the written set nor the revert state, so its sources cannot be reverted,
+        // and a contract violation follows source writes a retry would repeat: both are terminal. Only the commit
+        // timeout propagates, which stays retryable (the built-in writer throws it only from its revert phase).
         SourceWriteResult writeResult;
         try
         {
@@ -730,8 +687,7 @@ public sealed class SubjectTransaction : IDisposable
 
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // Source failures leave local changes uncommitted, and written source changes must be reverted.
-        // Errors without failed changes from custom writers must still be reported.
+        // Rollback reverts the written sources on any source failure, also on errors reported without failed changes.
         if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, propagateTimeout: true, cancellationToken).ConfigureAwait(false);
@@ -746,10 +702,9 @@ public sealed class SubjectTransaction : IDisposable
                 localRevertFailed: false);
         }
 
-        // What the handlers read can change while the sources are written (inbound updates, raw writes), so the
-        // final set is checked again right before it lands. Its reads return the pending values of every checked
-        // change and the landed value of a property written with its unchanged value, so a rejection invalidates the
-        // whole checked set in both failure handling modes.
+        // Inbound updates and raw writes can change what the handlers read while the sources are written, so the set
+        // is checked again right before it lands. Each change was checked against the others, so a rejection
+        // invalidates the whole set in both failure handling modes.
         var rejectionErrors = RunPreApplyCheck(changes.Span, checkOnlyChanges.Span, failedSource);
         if (rejectionErrors is not null)
         {
@@ -941,8 +896,8 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Clears pending changes and marks the transaction committed BEFORE any exception is thrown so
-    /// later property reads do not return stale captured values via TryGetPendingValue.
+    /// Clears the pending changes and marks the transaction committed. Call it before throwing a commit failure, so
+    /// later reads do not return stale pending values.
     /// </summary>
     private void FinishCommit()
     {
@@ -964,10 +919,9 @@ public sealed class SubjectTransaction : IDisposable
         OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
         lock (_pendingChangesLock)
         {
-            // Clear under the lock so Dispose observes the in-flight commit consistently. A disposing caller
-            // defers exclusive-lock release until commit completion so another transaction cannot interleave
-            // with the apply pass. If it also owns the pending dictionary, detach it here and return it after
-            // the lock so ownership transfers exactly once.
+            // Under the lock so Dispose observes the commit end consistently. A Dispose during the commit deferred the
+            // exclusive lock release to here, so no other transaction interleaves with the apply, and left the pending
+            // dictionary, which is detached here and returned after the lock so ownership transfers exactly once.
             _isCommitting = false;
             releaseDeferredLock = _disposeRequestedDuringCommit;
             if (releaseDeferredLock)
@@ -985,9 +939,7 @@ public sealed class SubjectTransaction : IDisposable
 
         if (rentedArray != null)
         {
-            // clearArray: true because SubjectPropertyChange holds object references (subject, source,
-            // boxed value holders); leaving them in the pooled buffer would keep those graphs alive
-            // until the slot is next overwritten.
+            // Cleared, or the pool keeps the referenced subjects, sources and boxed values alive.
             ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
         }
 
@@ -1377,8 +1329,7 @@ public sealed class SubjectTransaction : IDisposable
                 }
             }
 
-            // Clear the slot only when it holds this transaction so a cross-flow Dispose cannot
-            // clobber an unrelated transaction.
+            // Only when it holds this transaction, so a cross-flow Dispose cannot clear an unrelated one.
             if (CurrentTransaction.Value == this)
             {
                 CurrentTransaction.Value = null;
