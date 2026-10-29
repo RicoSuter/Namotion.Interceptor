@@ -1241,13 +1241,11 @@ public sealed class SubjectTransaction : IDisposable
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
+        var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(
+            changes, Interceptor, detectValueConflicts: ConflictBehavior == TransactionConflictBehavior.FailOnConflict);
+        if (conflictingProperties is not null)
         {
-            var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
-            if (conflictingProperties is not null)
-            {
-                throw new SubjectTransactionConflictException(conflictingProperties);
-            }
+            throw new SubjectTransactionConflictException(conflictingProperties);
         }
     }
 

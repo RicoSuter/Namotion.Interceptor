@@ -15,6 +15,7 @@ public enum TransactionConflictBehavior
     /// <summary>
     /// Ignore conflicts, last write wins.
     /// Use for UI sync where latest user input should always apply.
+    /// A written subject that left the transaction's context still conflicts.
     /// </summary>
     Ignore
 }

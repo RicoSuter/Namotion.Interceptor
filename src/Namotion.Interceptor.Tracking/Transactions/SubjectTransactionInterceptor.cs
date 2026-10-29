@@ -297,7 +297,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool ContainsByReference(
+    internal static bool ContainsByReference(
         ImmutableArray<SubjectTransactionInterceptor> interceptors,
         SubjectTransactionInterceptor target)
     {

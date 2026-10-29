@@ -605,6 +605,100 @@ public class TransactionValidationTests
         Assert.Equal(10, field.MaxLength);
     }
 
+    [Theory]
+    [InlineData(false, false, TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(false, true, TransactionConflictBehavior.Ignore)]
+    [InlineData(true, false, TransactionConflictBehavior.Ignore)]
+    [InlineData(true, true, TransactionConflictBehavior.FailOnConflict)]
+    public async Task WhenWrittenSubjectLeavesTheTransactionContextBeforeDeferredCommit_ThenCommitConflictsAndWritesNothing(
+        bool movesToAnotherContext, bool withWriter, TransactionConflictBehavior conflictBehavior)
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new TestTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        var holder = new MotorHolder(context);
+        // Without validators, so the commit check passes and only the conflict detection rejects the move.
+        var otherHolder = new MotorHolder(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions());
+        var motor = new Motor();
+        holder.Motor = motor;
+
+        SubjectTransactionConflictException exception;
+        SubjectTransactionConflictException retryException;
+        using (var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, conflictBehavior: conflictBehavior, checkMode: TransactionCheckMode.Deferred))
+        {
+            motor.MaxAllowedSpeed = 100; // unchanged, a check-only entry with conflict detection
+            motor.MotorSpeed = 500;
+            await RunWithoutAsyncLocalFlowAsync(() =>
+            {
+                holder.Motor = null;
+                if (movesToAnotherContext)
+                {
+                    otherHolder.Motor = motor;
+                }
+            });
+
+            // Act
+            exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+            retryException = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        string[] expectedConflicts = conflictBehavior == TransactionConflictBehavior.FailOnConflict
+            ? [nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)]
+            : [nameof(Motor.MotorSpeed)];
+        Assert.Equal(expectedConflicts, exception.ConflictingProperties.Select(property => property.Name));
+        Assert.Equal(expectedConflicts, retryException.ConflictingProperties.Select(property => property.Name));
+        Assert.Equal(0, writer.WriteCount);
+        Assert.Equal(0, motor.MotorSpeed);
+    }
+
+    [Theory]
+    [InlineData(false, TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(false, TransactionConflictBehavior.Ignore)]
+    [InlineData(true, TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(true, TransactionConflictBehavior.Ignore)]
+    public async Task WhenWrittenSubjectMovesToAnotherHolderInTheContextBeforeDeferredCommit_ThenCommitSucceeds(
+        bool withWriter, TransactionConflictBehavior conflictBehavior)
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new TestTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        var holder = new MotorHolder(context);
+        var otherHolder = new MotorHolder(context);
+        var motor = new Motor();
+        holder.Motor = motor;
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, conflictBehavior: conflictBehavior, checkMode: TransactionCheckMode.Deferred);
+        motor.MaxAllowedSpeed = 100; // unchanged, a check-only entry with conflict detection
+        motor.MotorSpeed = 50;
+        await RunWithoutAsyncLocalFlowAsync(() =>
+        {
+            holder.Motor = null;
+            otherHolder.Motor = motor;
+        });
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(50, motor.MotorSpeed);
+        Assert.Equal(withWriter ? 1 : 0, writer.WriteCount);
+    }
+
     private static async Task RunWithoutAsyncLocalFlowAsync(Action action, CancellationToken cancellationToken = default)
     {
         Task task;

@@ -303,18 +303,41 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Detects conflicts by comparing captured OldValue with current actual value. Returns the conflicting properties,
-    /// or null when there are none.
+    /// Detects conflicts: a change whose subject's context no longer resolves <paramref name="interceptor"/>, and with
+    /// <paramref name="detectValueConflicts"/> a change whose captured OldValue differs from the current actual value.
+    /// Returns the conflicting properties, or null when there are none.
     /// </summary>
-    internal static List<PropertyReference>? DetectChangeConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
+    internal static List<PropertyReference>? DetectChangeConflicts(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        SubjectTransactionInterceptor interceptor,
+        bool detectValueConflicts)
     {
         List<PropertyReference>? conflictingProperties = null;
+        IInterceptorSubjectContext? resolvingContext = null;
         foreach (ref readonly var change in changes)
         {
-            var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-            var capturedOldValue = change.GetOldValue<object?>();
+            // A subject that left the context since the write would take the value without the context's handlers.
+            var subjectContext = change.Property.Subject.Context;
+            var isConflict = false;
+            if (!ReferenceEquals(subjectContext, resolvingContext))
+            {
+                if (SubjectTransactionInterceptor.ContainsByReference(subjectContext.GetServices<SubjectTransactionInterceptor>(), interceptor))
+                {
+                    resolvingContext = subjectContext;
+                }
+                else
+                {
+                    isConflict = true;
+                }
+            }
 
-            if (!Equals(currentValue, capturedOldValue))
+            if (!isConflict && detectValueConflicts)
+            {
+                var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
+                isConflict = !Equals(currentValue, change.GetOldValue<object?>());
+            }
+
+            if (isConflict)
             {
                 conflictingProperties ??= [];
                 conflictingProperties.Add(change.Property);
