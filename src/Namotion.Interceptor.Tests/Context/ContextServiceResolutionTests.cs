@@ -163,6 +163,54 @@ public class ContextServiceResolutionTests
         Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
     }
 
+    public enum ContextStateChange
+    {
+        OwnServiceAdded,
+        FallbackContextAdded,
+        FallbackContextRemoved
+    }
+
+    [Theory]
+    [InlineData(ContextStateChange.OwnServiceAdded)]
+    [InlineData(ContextStateChange.FallbackContextAdded)]
+    [InlineData(ContextStateChange.FallbackContextRemoved)]
+    public void WhenContextStateChanges_ThenGetServicesReturnsNewArrayInstance(ContextStateChange change)
+    {
+        // Arrange
+        var service = new MarkerService();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(service);
+        var fallback = InterceptorSubjectContext.Create();
+        fallback.AddService(new object());
+        if (change == ContextStateChange.FallbackContextRemoved)
+        {
+            context.AddFallbackContext(fallback);
+        }
+
+        var servicesBefore = context.GetServices<MarkerService>();
+
+        // Act
+        switch (change)
+        {
+            case ContextStateChange.OwnServiceAdded:
+                context.AddService(new object());
+                break;
+            case ContextStateChange.FallbackContextAdded:
+                context.AddFallbackContext(fallback);
+                break;
+            case ContextStateChange.FallbackContextRemoved:
+                context.RemoveFallbackContext(fallback);
+                break;
+        }
+
+        var servicesAfter = context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(service, Assert.Single(servicesBefore));
+        Assert.Same(service, Assert.Single(servicesAfter));
+        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
+    }
+
     [Fact]
     public void WhenFallbackContextIsRemoved_ThenTheOthersAreListedInOrderAndEarlierSnapshotIsUnchanged()
     {
