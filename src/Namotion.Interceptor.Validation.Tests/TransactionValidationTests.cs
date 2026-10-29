@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -660,6 +661,137 @@ public class TransactionValidationTests
         Assert.Equal(1, writer.WriteCount);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenOneOfTwoInterleavedWrittenSubjectsLeavesTheTransactionContext_ThenOnlyItsPropertiesConflict(
+        bool detachedMotorIsWrittenFirst)
+    {
+        // Arrange
+        var context = CreateContext();
+        var attachedHolder = new MotorHolder(context);
+        var detachedHolder = new MotorHolder(context);
+        var attachedMotor = new Motor();
+        var detachedMotor = new Motor();
+        attachedHolder.Motor = attachedMotor;
+        detachedHolder.Motor = detachedMotor;
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        var (firstMotor, secondMotor) = detachedMotorIsWrittenFirst ? (detachedMotor, attachedMotor) : (attachedMotor, detachedMotor);
+        firstMotor.MotorSpeed = 10;
+        secondMotor.MotorSpeed = 20;
+        firstMotor.MaxAllowedSpeed = 90;
+        await RunWithoutAsyncLocalFlowAsync(() => detachedHolder.Motor = null);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        string[] expectedConflicts = detachedMotorIsWrittenFirst
+            ? [nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)]
+            : [nameof(Motor.MotorSpeed)];
+        Assert.All(exception.ConflictingProperties, property => Assert.Same(detachedMotor, property.Subject));
+        Assert.Equal(expectedConflicts, exception.ConflictingProperties.Select(property => property.Name));
+    }
+
+    [Theory]
+    [InlineData(TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(TransactionConflictBehavior.Ignore)]
+    public async Task WhenWrittenSubjectLeavesTheContextWithOptimisticLocking_ThenCommitConflictsUntilItIsAttachedAgainOutsideTheTransaction(
+        TransactionConflictBehavior conflictBehavior)
+    {
+        // Arrange
+        var context = CreateContext();
+        var holder = new MotorHolder(context);
+        var motor = new Motor();
+        holder.Motor = motor;
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, TransactionLocking.Optimistic, conflictBehavior: conflictBehavior);
+        motor.MotorSpeed = 10;
+        await RunWithoutAsyncLocalFlowAsync(() => holder.Motor = null);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        await RunWithoutAsyncLocalFlowAsync(() => holder.Motor = motor);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal([nameof(Motor.MotorSpeed)], exception.ConflictingProperties.Select(property => property.Name));
+        Assert.Equal(10, motor.MotorSpeed);
+    }
+
+    [Theory]
+    [InlineData(true, TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(false, TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(true, TransactionConflictBehavior.Ignore)]
+    [InlineData(false, TransactionConflictBehavior.Ignore)]
+    public async Task WhenTheTransactionItselfDetachesAWrittenSubject_ThenCommitSucceeds(
+        bool detachesBeforeWrite, TransactionConflictBehavior conflictBehavior)
+    {
+        // Arrange
+        var context = CreateContext();
+        var holder = new MotorHolder(context);
+        var motor = new Motor();
+        holder.Motor = motor;
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, conflictBehavior: conflictBehavior);
+        if (detachesBeforeWrite)
+        {
+            holder.Motor = null;
+            motor.MotorSpeed = 10;
+        }
+        else
+        {
+            motor.MotorSpeed = 10;
+            holder.Motor = null;
+        }
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(holder.Motor);
+        Assert.Equal(10, motor.MotorSpeed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAGetterThrowsInTheIgnoreRebase_ThenTheExceptionPropagatesAndTheCommitStaysRetryable(bool withWriter)
+    {
+        // Arrange
+        var context = CreateContext();
+        var readInterceptor = new ThrowingMotorSpeedReadInterceptor();
+        context.AddService(readInterceptor);
+        var writer = new TestTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        var motor = new Motor(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, conflictBehavior: TransactionConflictBehavior.Ignore);
+        motor.MotorSpeed = 10;
+        readInterceptor.Throws = true;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        var writeCountAfterFailure = writer.WriteCount;
+        readInterceptor.Throws = false;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ThrowingMotorSpeedReadInterceptor.Message, exception.Message);
+        Assert.Equal(0, writeCountAfterFailure);
+        Assert.Equal(10, motor.MotorSpeed);
+    }
+
     private static async Task RunWithoutAsyncLocalFlowAsync(Action action, CancellationToken cancellationToken = default)
     {
         Task task;
@@ -674,6 +806,26 @@ public class TransactionValidationTests
         }
 
         await task;
+    }
+
+    /// <summary>
+    /// Throws on every MotorSpeed read while <see cref="Throws"/> is set.
+    /// </summary>
+    private sealed class ThrowingMotorSpeedReadInterceptor : IReadInterceptor
+    {
+        public const string Message = "MotorSpeed read failed.";
+
+        public bool Throws { get; set; }
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            if (Throws && context.Property.Name == nameof(Motor.MotorSpeed))
+            {
+                throw new InvalidOperationException(Message);
+            }
+
+            return next(ref context);
+        }
     }
 
     /// <summary>
