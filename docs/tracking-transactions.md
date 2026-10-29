@@ -436,6 +436,8 @@ Notification boundaries follow the evaluation nesting. A top-level derived recal
 | Skipped | When nothing is pending and no value was written unchanged | When nothing will be applied, after a writer throws (any mode), and in `Rollback` mode after a source write failure or reported writer errors, which reverts every source anyway |
 | Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: written sources are reverted, nothing from the set lands, and the transaction is terminal, see the [Failure Table](#failure-table). |
 
+To reject a set, throw an exception derived from `SubjectTransactionException`, as `SubjectTransactionValidationException` does, so callers that catch transaction failures also catch the rejection.
+
 A transaction disposed from another flow during the commit is rejected in the pre-apply check the same way, with an `ObjectDisposedException`, and so is a throwing read (a getter or read interceptor) of the landed value of a property written unchanged.
 
 To treat a source's acceptance as final, skip changes with a `Confirmed` origin. To ignore only inbound data, skip `FromSource`, which keeps the pre-apply check. After a pre-apply rejection, the exception's `Errors` hold the errors of a thrown `SubjectTransactionException` that has any, otherwise the exception the handler or the landed-value read threw, after any source write errors and before any revert errors.
