@@ -6,9 +6,10 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 public enum TransactionCheckStage
 {
     /// <summary>
-    /// The commit check, before conflict detection and any source write or local apply. A rejection aborts the commit
-    /// without writing anything, propagates unchanged and leaves the transaction retryable; when the transaction was
-    /// disposed during the check, <see cref="ObjectDisposedException"/> is thrown instead.
+    /// The commit check, after the check for written subjects that left the transaction's context, before value conflict
+    /// detection and any source write or local apply. A rejection aborts the commit without writing anything, propagates
+    /// unchanged and leaves the transaction retryable; when the transaction was disposed during the check,
+    /// <see cref="ObjectDisposedException"/> is thrown instead.
     /// </summary>
     Commit,
 

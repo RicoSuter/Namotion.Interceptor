@@ -255,6 +255,32 @@ public class SubjectTransactionHandlerTests
         Assert.Equal("rejected", exception.Message);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenIgnoreCommitFollowsAConcurrentWrite_ThenCommitCheckReceivesTheLandedValueAsOldValue(bool withWriter)
+    {
+        // Arrange
+        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
+        var person = new Person(context) { FirstName = "Ann" };
+        SubjectPropertyChange[]? commitCheckChanges = null;
+        handler.OnCommittingAction = (_, changes) => commitCheckChanges ??= changes;
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, conflictBehavior: TransactionConflictBehavior.Ignore);
+        person.FirstName = "Bob";
+        RunOutsideTransactionFlow(() => person.FirstName = "Eve");
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TransactionCheckStage.Commit, handler.Stages[0]);
+        var change = Assert.Single(commitCheckChanges!);
+        Assert.Equal("Eve", change.GetOldValue<string>());
+        Assert.Equal("Bob", change.GetNewValue<string>());
+        Assert.Equal("Bob", person.FirstName);
+    }
+
     [Fact]
     public async Task WhenHandlerWritesDuringOnCommitting_ThenWritesThrowAndAreNotCaptured()
     {

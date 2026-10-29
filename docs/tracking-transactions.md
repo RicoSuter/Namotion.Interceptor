@@ -159,9 +159,9 @@ Controls value-based conflict detection in both locking modes; `BestEffort` fail
 | Value | Description |
 |-------|-------------|
 | `FailOnConflict` | Throw `SubjectTransactionConflictException` if the landed value of a written property changed since the write that captured its pending change, or, for a value it wrote unchanged in [`Deferred` mode](#check-mode) with handlers, since it last wrote it. (default) |
-| `Ignore` | Overwrite any concurrent changes without checking. A revert of a failed commit restores the landed value at conflict detection, not the value before the first write, so it does not discard a value another write landed meanwhile. |
+| `Ignore` | Overwrite any concurrent changes without checking. Before the commit check, each pending change takes the landed value of its property as old value, so the commit check receives it and a revert of a failed commit restores it instead of the value before the first write, which does not discard a value another write landed meanwhile. |
 
-In both behaviors, a written property whose subject left the transaction's context since the write, detached or moved to a context that does not resolve the transaction's interceptor, conflicts too, because its value would land without the handlers and interceptors of the transaction's context. The retry conflicts again until the subject is attached to the transaction's context again outside the transaction, because a write inside it is only captured as a pending change, or until the transaction is disposed.
+In both behaviors, a written property whose subject left the transaction's context since the write, detached or moved to a context that does not resolve the transaction's interceptor, conflicts too, before the commit check, because its value would land without the handlers and interceptors of the transaction's context. The retry conflicts again until the subject is attached to the transaction's context again outside the transaction, because a write inside it is only captured as a pending change, or until the transaction is disposed.
 
 Only properties the transaction writes are checked. A property it only reads can change before the commit without a conflict, so a write based on that read is not protected (write skew): for example, writing `Speed = 150` after reading `MaxSpeed = 200` still commits when `MaxSpeed` was lowered to 100 meanwhile, unless a validator encodes that rule and rejects the final set. Such a validator rejects write skew only against transactions [serialized](#guarantees) with this one.
 
@@ -216,18 +216,19 @@ using var tx = await context.BeginTransactionAsync(
 
 `CommitAsync()` runs these stages in order:
 
-1. **Commit check**: the [transaction handlers](#transaction-handlers) check the final set of changes.
-2. **Conflict detection**: with `FailOnConflict`, a property whose landed value changed since the write that captured its pending change aborts the commit, and in both [conflict behaviors](#conflict-behavior) a property whose subject left the transaction's context does.
-3. **Source writes** (with source transactions, that is `WithSourceTransactions()` or a custom `ITransactionWriter`): source-bound changes are written to their sources, in parallel when there are several. Nothing is applied to the local model yet.
-4. **Pre-apply check** (with source transactions): the handlers check the changes that will be applied again.
-5. **Local apply**: source-bound and local changes are applied in a single pass, in commit order, except those whose source write failed. Applying calls the property setters, so `OnChanging`/`OnChanged` hooks run and notifications fire.
-6. **Compensation** on failure: the reverts described in [Commit Failures](#commit-failures). A local revert writes the old value through the setter, so hooks run again. A source revert writes it to the source. With `Ignore`, the old value is the landed value at conflict detection, see [Conflict Behavior](#conflict-behavior).
+1. **Context check**: in both [conflict behaviors](#conflict-behavior), a property whose subject left the transaction's context aborts the commit. With `Ignore`, each pending change then takes the landed value of its property as old value.
+2. **Commit check**: the [transaction handlers](#transaction-handlers) check the final set of changes.
+3. **Conflict detection**: with `FailOnConflict`, a property whose landed value changed since the write that captured its pending change aborts the commit.
+4. **Source writes** (with source transactions, that is `WithSourceTransactions()` or a custom `ITransactionWriter`): source-bound changes are written to their sources, in parallel when there are several. Nothing is applied to the local model yet.
+5. **Pre-apply check** (with source transactions): the handlers check the changes that will be applied again.
+6. **Local apply**: source-bound and local changes are applied in a single pass, in commit order, except those whose source write failed. Applying calls the property setters, so `OnChanging`/`OnChanged` hooks run and notifications fire.
+7. **Compensation** on failure: the reverts described in [Commit Failures](#commit-failures). A local revert writes the old value through the setter, so hooks run again. A source revert writes it to the source. With `Ignore`, the old value is the landed value before the commit check, see [Conflict Behavior](#conflict-behavior).
 
-Nothing is written before stage 3, so a failure in stages 1 and 2 leaves the transaction retryable.
+Nothing is written before stage 4, so a failure in stages 1 to 3 leaves the transaction retryable.
 
-Stage 5 applies source-bound changes marked with a `Confirmed` origin carrying the source that accepted them in stage 3, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior.
+Stage 6 applies source-bound changes marked with a `Confirmed` origin carrying the source that accepted them in stage 4, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior.
 
-Stage 3 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
+Stage 4 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
 ### Source Association
 
@@ -240,7 +241,7 @@ propertyReference.SetSource(this);
 // On commit, WriteChangesInBatchesAsync is called on the source
 ```
 
-Properties without an associated source are applied in stage 5 alongside source-bound properties.
+Properties without an associated source are applied in stage 6 alongside source-bound properties.
 
 ## Guarantees
 
@@ -301,7 +302,7 @@ catch (SubjectTransactionException exception)
 
 ### Failure Table
 
-"Old" is the value before the transaction (with `Ignore`, the landed value at conflict detection), "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
+"Old" is the value before the transaction (with `Ignore`, the landed value before the commit check), "new" the transaction's value. "Without a source" means changes of properties without a source. "With handlers" means the transaction has at least one [transaction handler](#transaction-handlers), for example validation. Unless noted, the exception is a `SubjectTransactionException`.
 
 | Failure | End state | `FailedChanges` | Retry |
 |---------|-----------|-----------------|-------|
@@ -430,7 +431,7 @@ Notification boundaries follow the evaluation nesting. A top-level derived recal
 
 | | Commit check | Pre-apply check |
 |-|--------------|-----------------|
-| Runs | Before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
+| Runs | After the [context check](#commit-flow), before conflict detection, any source write and the local apply | Only with source transactions, after the source writes and right before the local apply |
 | Receives | The final set, in commit order, followed by the entries for values written unchanged ([`Deferred` mode](#check-mode)) | The changes that will be applied, each with the origin it is applied with: `Confirmed` with the accepting source for a change a source accepted, the captured origin otherwise, followed by the entries for values written unchanged, each with its current landed value and its captured origin (normally `Local`, also for a value from an inbound update) |
 | Skipped | When nothing is pending and no value was written unchanged | When nothing will be applied, after a writer throws (any mode), and in `Rollback` mode after a source write failure or reported writer errors, which reverts every source anyway |
 | Throwing | Aborts the commit before anything is written. The exception propagates unchanged, and the transaction stays retryable with its pending changes unless it was disposed. | Rejects the whole set in both failure handling modes: written sources are reverted, nothing from the set lands, and the transaction is terminal, see the [Failure Table](#failure-table). |
@@ -446,14 +447,14 @@ To treat a source's acceptance as final, skip changes with a `Confirmed` origin.
 - Such a write from another thread, for example a child task, can still call `OnCapturing` while `OnCommitting` runs, before it is rejected, so handlers must tolerate concurrent calls.
 - A write to a subject whose context does not route through the transaction interceptor is not intercepted and lands immediately, even during a check.
 
-**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction (with `Ignore`, the landed value at conflict detection), which no handler checked, and skip checking it. Its limits:
+**Applies and rollbacks.** A handler that also intercepts writes can call `SubjectTransaction.TryConsumeCommitWrite` to recognize the apply of a value it already checked, or a rollback restoring the property's value from before the transaction (with `Ignore`, the landed value before the commit check), which no handler checked, and skip checking it. Its limits:
 - Values match by equality (`EqualityComparer<T>.Default`), so an equal new instance, for example from an interceptor that runs before `SubjectTransactionInterceptor`, is recognized as checked. A value whose `Equals` is looser than what the handler checks can pass an equal, unchecked value as the checked one.
 - Only the first handler to call it for a write recognizes it; another handler that intercepts the same write checks it again.
 - It does not recognize any apply after the transaction was disposed during the commit.
 
 ## Implementing a Custom Transaction Writer
 
-Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 3 of the [commit flow](#commit-flow) (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide. The writer is also responsible for enforcing the `SingleWrite` requirement.
+Most applications use the built-in `SourceTransactionWriter` registered by `WithSourceTransactions()` and never implement `ITransactionWriter`. A custom writer replaces stage 4 of the [commit flow](#commit-flow) (registered as an `ITransactionWriter` service on the context) and is only needed when source writes require protocol-specific orchestration the built-in writer cannot provide. The writer is also responsible for enforcing the `SingleWrite` requirement.
 
 **No property access.** Both writer callbacks execute while the caller's live ambient transaction is committing. Do not read or write subject properties from either callback, and do not suppress ambient execution-context flow to bypass this boundary. This includes getters: sibling or landed-model state is not represented by the supplied snapshot and can make source operations inconsistent with it. Construct writes from `changes` and `requirement`, and reverts from `written` and `revertState`, together with writer-owned configuration and any required subject state captured before `CommitAsync()`.
 
@@ -505,7 +506,7 @@ TransactionAwaitable BeginTransactionAsync(
 - **Single context binding**: a transaction is bound to the context it begins on. Writing a subject throws `InvalidOperationException` (`Cannot modify property 'FirstName': Transaction is bound to a different context.`) unless the subject's context shares the transaction's interceptor, for example through a fallback to the transaction's context. A subject whose context has no transaction support is not intercepted at all: its writes land immediately and are not part of the transaction.
 - **No nesting**: beginning a transaction while one is active in the same execution context throws `InvalidOperationException`: `Nested transactions are not supported.`
 - **ABA**: `FailOnConflict` compares values. A property that changes A to B and back to A between the first write and the commit is not a conflict. Use external versioning for strict version-based detection.
-- **Writes outside transactions**: conflict detection is not atomic with respect to raw property writes and external source callbacks. Transactions bound to the same context are serialized against each other (see [Guarantees](#guarantees)), but such a write can interleave between conflict detection, the handler checks and the apply.
+- **Writes outside transactions**: conflict detection is not atomic with respect to raw property writes and external source callbacks. Transactions bound to the same context are serialized against each other (see [Guarantees](#guarantees)), but such a write can interleave between the context check, the handler checks, conflict detection and the apply. Likewise, a subject that leaves the transaction's context during the commit, for example while the sources are written, still receives the value the sources accepted.
 - **Multiple sources**: source writes run in parallel and reverts are best-effort, so sources can briefly disagree and atomicity across sources is not guaranteed. For strict atomicity, use a single source per transaction or application-level compensation.
 - **Changing a source binding during a commit**: the source a property writes to is decided when the transaction commits, not when the value is set. Calling `SetSource` or `RemoveSource` on a property while a commit runs leaves it undefined whether that commit uses the old or the new binding. Reverts always target the sources that were actually written, even if the binding changed in the meantime.
 - **Value-transforming write interceptors** that run after `SubjectTransactionInterceptor` are not supported with source transactions: the source receives the captured value while the local model applies the transformed one. One that runs before it is supported: it transforms the value before it is captured, but runs again when the commit applies the value and when a rollback restores the old value, so its transform must be idempotent.

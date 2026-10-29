@@ -85,7 +85,7 @@ public sealed class SubjectTransaction : IDisposable
     /// Returns true when the current write is a commit applying the value of <paramref name="property"/> that
     /// <paramref name="handler"/> checked in <see cref="ITransactionHandler.OnCommitting"/>, or a rollback restoring
     /// the property's value from before the transaction (with <see cref="TransactionConflictBehavior.Ignore"/>, the landed
-    /// value at conflict detection), which no handler checked. Values match by
+    /// value before the commit check), which no handler checked. Values match by
     /// <see cref="EqualityComparer{T}.Default"/>, so a value whose <c>Equals</c> is looser than what the handler checks
     /// can pass an equal, unchecked value as the checked one.
     /// </summary>
@@ -622,13 +622,18 @@ public sealed class SubjectTransaction : IDisposable
         {
             var (rented, changes, checkedChanges) = SnapshotChanges();
             rentedArray = rented;
+            using (EnterCommitModelAccess())
+            {
+                ThrowIfSubjectsLeftContext(checkedChanges.Span);
+                RebaseOldValuesIfIgnoringConflicts(changes.Span);
+            }
+
             RunCommitCheck(checkedChanges.Span);
 
             SubjectTransactionException? failure = null;
             using (EnterCommitModelAccess())
             {
                 ThrowIfConflictsDetected(checkedChanges.Span);
-                RebaseOldValuesIfIgnoringConflicts(changes.Span);
 
                 var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, MarkingTransaction);
 
@@ -676,12 +681,17 @@ public sealed class SubjectTransaction : IDisposable
             commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
             var (rented, changes, checkedChanges) = SnapshotChanges();
             rentedArray = rented;
+            using (EnterCommitModelAccess())
+            {
+                ThrowIfSubjectsLeftContext(checkedChanges.Span);
+                RebaseOldValuesIfIgnoringConflicts(changes.Span);
+            }
+
             RunCommitCheck(checkedChanges.Span);
 
             using (EnterCommitModelAccess())
             {
                 ThrowIfConflictsDetected(checkedChanges.Span);
-                RebaseOldValuesIfIgnoringConflicts(changes.Span);
             }
 
             if (changes.IsEmpty)
@@ -1242,19 +1252,31 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
+    private void ThrowIfSubjectsLeftContext(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(
-            changes, Interceptor, detectValueConflicts: ConflictBehavior == TransactionConflictBehavior.FailOnConflict);
+        var conflictingProperties = SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(changes, Interceptor);
         if (conflictingProperties is not null)
         {
             throw new SubjectTransactionConflictException(conflictingProperties);
         }
     }
 
+    private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
+        {
+            var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
+            if (conflictingProperties is not null)
+            {
+                throw new SubjectTransactionConflictException(conflictingProperties);
+            }
+        }
+    }
+
     /// <summary>
     /// With <see cref="TransactionConflictBehavior.Ignore"/>, replaces the old value of each snapshot slot whose landed
-    /// value changed since the capturing write by that landed value, so a revert restores the value this commit overwrites.
+    /// value changed since the capturing write by that landed value, so the commit check receives, and a revert restores,
+    /// the value this commit overwrites.
     /// </summary>
     private void RebaseOldValuesIfIgnoringConflicts(Span<SubjectPropertyChange> changes)
     {

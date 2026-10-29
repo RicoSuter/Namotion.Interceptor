@@ -699,6 +699,47 @@ public class TransactionValidationTests
         Assert.Equal(withWriter ? 1 : 0, writer.WriteCount);
     }
 
+    [Theory]
+    [InlineData(false, TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(true, TransactionConflictBehavior.Ignore)]
+    public async Task WhenWrittenSubjectMovesToAContextWhoseValidatorRejectsTheValue_ThenCommitConflictsWithoutValidatingIt(
+        bool withWriter, TransactionConflictBehavior conflictBehavior)
+    {
+        // Arrange
+        var context = CreateContext(new RecordingValidator());
+        var writer = new TestTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        var otherValidator = new RecordingValidator(new MotorSpeedValidator());
+        var otherHolder = new MotorHolder(CreateContext(otherValidator));
+        var holder = new MotorHolder(context);
+        var motor = new Motor();
+        holder.Motor = motor;
+
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, conflictBehavior: conflictBehavior, checkMode: TransactionCheckMode.Deferred);
+        motor.MotorSpeed = 500; // above MaxAllowedSpeed, which only the validator of the other context rejects
+        await RunWithoutAsyncLocalFlowAsync(() =>
+        {
+            holder.Motor = null;
+            otherHolder.Motor = motor;
+        });
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        transaction.Dispose();
+        Assert.Equal([nameof(Motor.MotorSpeed)], exception.ConflictingProperties.Select(property => property.Name));
+        Assert.DoesNotContain(otherValidator.Calls, call => call.Property == nameof(Motor.MotorSpeed));
+        Assert.Equal(0, writer.WriteCount);
+        Assert.Equal(0, motor.MotorSpeed);
+    }
+
     [Fact]
     public async Task WhenIgnoreCommitRollsBackAfterAConcurrentWrite_ThenTheRestoredValueIsTheValidLandedValue()
     {
