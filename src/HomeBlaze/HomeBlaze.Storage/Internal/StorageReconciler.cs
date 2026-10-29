@@ -1,5 +1,5 @@
 using System.Text;
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
@@ -22,7 +22,7 @@ internal sealed class StorageReconciler
 {
     internal const int MaximumUnfinishedNamedPathCount = 1000;
 
-    private readonly IBlobStorage _client;
+    private readonly IStore _client;
     private readonly FluentStorageContainer _storage;
     private readonly FileSubjectFactory _subjectFactory;
     private readonly ConfigurableSubjectSerializer _serializer;
@@ -43,7 +43,7 @@ internal sealed class StorageReconciler
     private bool _hasUnappliedMove;
 
     public StorageReconciler(
-        IBlobStorage client,
+        IStore client,
         FluentStorageContainer storage,
         FileSubjectFactory subjectFactory,
         ConfigurableSubjectSerializer serializer,
@@ -416,9 +416,9 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Checks whether a folder of the index is gone from a storage on disk, where asking about a path in a folder
-    /// that does not exist creates that folder. Ask before a call that names a path in a folder that a pass has not
-    /// looked at since.
+    /// Checks whether a folder of the index is gone from a storage on disk, where reading, writing or deleting a
+    /// path in a folder that does not exist creates that folder. Ask before such a call for a path in a folder
+    /// that a pass has not looked at since.
     /// </summary>
     public async Task<bool> IsFolderGoneAsync(string folder, CancellationToken cancellationToken)
         => _isOnDisk && folder.Length > 0 && !await IsDirectoryOnDiskAsync(folder, cancellationToken);
@@ -431,7 +431,7 @@ internal sealed class StorageReconciler
             return false;
         }
 
-        var blobs = await _client.ListAsync(new ListOptions { FolderPath = StoragePath.GetParent(path) }, cancellationToken);
+        var blobs = await _client.ListObjects(new StorageListOptions { FolderPath = StoragePath.GetParent(path) }, cancellationToken);
         return blobs.Any(blob => blob.IsFolder && StoragePath.FromBlob(blob) == path);
     }
 
@@ -466,9 +466,8 @@ internal sealed class StorageReconciler
 
     public async Task<StorageVersion> GetVersionAsync(string path, CancellationToken cancellationToken)
     {
-        var blobs = await _client.GetBlobsAsync([path], cancellationToken);
-        var blob = blobs.FirstOrDefault();
-        return blob == null ? default : new StorageVersion(blob.Size ?? 0, blob.LastModificationTime);
+        var blob = await _client.GetObjectInfo(path, cancellationToken);
+        return blob == null ? default : new StorageVersion(blob.Size ?? 0, blob.DateModified);
     }
 
     /// <summary>
@@ -528,7 +527,7 @@ internal sealed class StorageReconciler
 
     private async Task<Dictionary<string, StorageListing>> ListAsync(CancellationToken cancellationToken)
     {
-        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken);
+        var blobs = await _client.ListObjects(new StorageListOptions { Recurse = true }, cancellationToken);
 
         var listing = new Dictionary<string, StorageListing>(blobs.Count, StringComparer.Ordinal);
         foreach (var blob in blobs)
@@ -545,7 +544,7 @@ internal sealed class StorageReconciler
                 continue;
             }
 
-            var version = blob.IsFolder ? default : new StorageVersion(blob.Size ?? 0, blob.LastModificationTime);
+            var version = blob.IsFolder ? default : new StorageVersion(blob.Size ?? 0, blob.DateModified);
             listing[path] = new StorageListing(path, blob.IsFolder, version);
         }
 
@@ -893,7 +892,7 @@ internal sealed class StorageReconciler
     }
 
     private async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)
-        => await _client.OpenReadAsync(path, cancellationToken)
+        => await _client.OpenRead(path, cancellationToken)
            ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
@@ -902,7 +901,7 @@ internal sealed class StorageReconciler
     // Null for a file that does not exist, for which the client returns null although its signature does not say so.
     private async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = await _client.OpenReadAsync(path, cancellationToken);
+        await using var stream = await _client.OpenRead(path, cancellationToken);
         if (stream is null)
         {
             return null;

@@ -1,5 +1,5 @@
-using FluentStorage;
-using FluentStorage.Blobs;
+using FluentStorage.Model;
+using FluentStorage.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Internal;
@@ -10,13 +10,22 @@ namespace HomeBlaze.Storage.Internal;
 /// further call is refused. Both fail with a <see cref="StorageUnresponsiveException"/>.
 /// </summary>
 /// <remarks>
-/// A call that was given up is not cancelled. It finishes or fails on its own, so a write can still land after
+/// <para>
+/// A call that was given up is not canceled. It finishes or fails on its own, so a write can still land after
 /// its caller got the failure. It then still reads from the stream it was given, so that stream must stay
 /// readable after the failure.
+/// </para>
+/// <para>
+/// Only <see cref="ListObjects"/>, <see cref="SetObject(string, Stream, bool, CancellationToken)"/>,
+/// <see cref="OpenRead"/>, <see cref="DeleteObject"/>, <see cref="ObjectExists"/>, <see cref="GetObjectInfo"/>
+/// and <see cref="Dispose"/> reach the inner storage. Every other member is that of <see cref="StoreBase"/>:
+/// some build on these, others throw or return a default without reaching the inner storage, so a new call
+/// into the storage must be one of these or be overridden here.
+/// </para>
 /// </remarks>
-internal sealed class TimeLimitedBlobStorage : IBlobStorage
+internal sealed class TimeLimitedStore : StoreBase
 {
-    private readonly IBlobStorage _inner;
+    private readonly IStore _inner;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly Action? _verifyRoot;
@@ -30,15 +39,15 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     /// <param name="verifyRoot">
     /// Runs as the first part of every call that names a path and throws when the root of the storage cannot
     /// be examined. The call then fails with a <see cref="StorageRootUnavailableException"/>. For a storage
-    /// that lists such a root as empty, and that creates the root again when it is asked about a path in a
-    /// folder or writes one.
+    /// that lists such a root as empty, and that creates the root again when it writes a path, or reads or
+    /// deletes a path in a folder.
     /// </param>
     /// <param name="whenAnswersAgain">
     /// Runs each time the last call that was given up has returned, so that calls are taken again. It runs on
     /// the thread on which that call ended and must neither block nor throw.
     /// </param>
-    public TimeLimitedBlobStorage(
-        IBlobStorage inner, TimeProvider timeProvider, ILogger? logger, Action? verifyRoot = null, Action? whenAnswersAgain = null)
+    public TimeLimitedStore(
+        IStore inner, TimeProvider timeProvider, ILogger? logger, Action? verifyRoot = null, Action? whenAnswersAgain = null)
     {
         _inner = inner;
         _timeProvider = timeProvider;
@@ -52,34 +61,32 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
     /// </summary>
     public bool IsUnresponsive => Volatile.Read(ref _abandonedCallCount) > 0;
 
-    public Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(ListAsync), options?.FolderPath ?? "/", () => VerifyRoot().ListAsync(options, cancellationToken), cancellationToken);
+    public override Task<List<StoreObject>> ListObjects(StorageListOptions? options = null, CancellationToken cancellationToken = default)
+        => RunAsync(
+            nameof(ListObjects),
+            string.IsNullOrEmpty(options?.FolderPath) ? "/" : options.FolderPath,
+            () => VerifyRoot().ListObjects(options, cancellationToken),
+            cancellationToken);
 
-    public Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(WriteAsync), fullPath, () => VerifyRoot().WriteAsync(fullPath, dataStream, append, cancellationToken), cancellationToken);
+    public override Task SetObject(string objectPath, Stream sourceStream, bool append, CancellationToken cancellationToken = default)
+        => RunAsync(nameof(SetObject), objectPath, () => VerifyRoot().SetObject(objectPath, sourceStream, append, cancellationToken), cancellationToken);
 
-    public Task<Stream> OpenReadAsync(string fullPath, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(OpenReadAsync), fullPath, () => VerifyRoot().OpenReadAsync(fullPath, cancellationToken), cancellationToken);
+    public override Task<Stream> OpenRead(string objectPath, CancellationToken cancellationToken = default)
+        => RunAsync(nameof(OpenRead), objectPath, () => VerifyRoot().OpenRead(objectPath, cancellationToken), cancellationToken);
 
-    public Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(DeleteAsync), fullPaths, () => VerifyRoot().DeleteAsync(fullPaths, cancellationToken), cancellationToken);
+    public override Task DeleteObject(string objectPath, CancellationToken cancellationToken = default)
+        => RunAsync(nameof(DeleteObject), objectPath, () => VerifyRoot().DeleteObject(objectPath, cancellationToken), cancellationToken);
 
-    public Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(ExistsAsync), fullPaths, () => VerifyRoot().ExistsAsync(fullPaths, cancellationToken), cancellationToken);
+    public override Task<bool> ObjectExists(string objectPath, CancellationToken cancellationToken = default)
+        => RunAsync(nameof(ObjectExists), objectPath, () => VerifyRoot().ObjectExists(objectPath, cancellationToken), cancellationToken);
 
-    public Task<IReadOnlyCollection<Blob>> GetBlobsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(GetBlobsAsync), fullPaths, () => VerifyRoot().GetBlobsAsync(fullPaths, cancellationToken), cancellationToken);
+    public override Task<StoreObject> GetObjectInfo(string objectPath, CancellationToken cancellationToken = default)
+        => RunAsync(nameof(GetObjectInfo), objectPath, () => VerifyRoot().GetObjectInfo(objectPath, cancellationToken), cancellationToken);
 
-    public Task SetBlobsAsync(IEnumerable<Blob> blobs, CancellationToken cancellationToken = default)
-        => RunAsync(nameof(SetBlobsAsync), null, () => VerifyRoot().SetBlobsAsync(blobs, cancellationToken), cancellationToken);
-
-    public Task<ITransaction> OpenTransactionAsync()
-        => RunAsync(nameof(OpenTransactionAsync), null, () => _inner.OpenTransactionAsync(), CancellationToken.None);
-
-    public void Dispose() => _inner.Dispose();
+    public override void Dispose() => _inner.Dispose();
 
     // Within the call, so that a root that stalls when it is examined is limited like the call itself.
-    private IBlobStorage VerifyRoot()
+    private IStore VerifyRoot()
     {
         try
         {
@@ -94,7 +101,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
         return _inner;
     }
 
-    private Task RunAsync(string operation, object? target, Func<Task> start, CancellationToken cancellationToken)
+    private Task RunAsync(string operation, string target, Func<Task> start, CancellationToken cancellationToken)
         => RunAsync(
             operation,
             target,
@@ -106,7 +113,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
             cancellationToken);
 
     private async Task<TResult> RunAsync<TResult>(
-        string operation, object? target, Func<Task<TResult>> start, CancellationToken cancellationToken)
+        string operation, string target, Func<Task<TResult>> start, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -125,7 +132,6 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
             return await call;
         }
 
-        // Counted before the text of the failure is built: that enumerates paths of the caller and can fail.
         Abandon(operation, target, call);
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -133,15 +139,10 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
             $"The storage did not complete {Describe(operation, target)} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.", this, isRefusal: false);
     }
 
-    private static string Describe(string operation, object? target)
-        => target switch
-        {
-            string path => $"{operation} for '{path}'",
-            IEnumerable<string> paths => $"{operation} for '{string.Join("', '", paths)}'",
-            _ => operation
-        };
+    private static string Describe(string operation, string target)
+        => $"{operation} for '{target}'";
 
-    private void Abandon<TResult>(string operation, object? target, Task<TResult> call)
+    private void Abandon<TResult>(string operation, string target, Task<TResult> call)
     {
         Interlocked.Increment(ref _abandonedCallCount);
 

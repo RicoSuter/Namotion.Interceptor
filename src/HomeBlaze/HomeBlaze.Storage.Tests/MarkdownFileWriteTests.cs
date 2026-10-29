@@ -367,12 +367,12 @@ public class MarkdownFileWriteTests : IDisposable
     {
         // Arrange - the page editor saves its text through WriteAsync, and the storage is still writing it.
         WriteFile("Notes.md", "# Heading\n\nold");
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
         var save = markdown.WriteAsync("# Heading\n\nsaved by the editor", CancellationToken.None);
         await writeReached;
 
@@ -417,14 +417,14 @@ public class MarkdownFileWriteTests : IDisposable
         // Arrange
         const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#first Name=First\n::\n\n:: HomeBlaze.Samples.Motor#second Name=Second\n::\n";
         WriteFile("Motors.md", content);
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
         var first = markdown.Children["first"];
         var second = markdown.Children["second"];
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
 
         // Act
         var failedDelete = markdown.DeleteBlockAsync(first, CancellationToken.None);
@@ -451,13 +451,13 @@ public class MarkdownFileWriteTests : IDisposable
         // Arrange
         const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n";
         WriteFile("Motors.md", content);
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
         var motor = Assert.IsType<Samples.Motor>(markdown.Children["motor"]);
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
 
         // Act
         motor.TargetSpeed = 1500;

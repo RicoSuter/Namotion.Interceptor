@@ -17,10 +17,8 @@ namespace HomeBlaze.Storage.Tests.Pages;
 public sealed class MarkdownPageFixture
 {
     /// <summary>
-    /// The xunit collection of every test class that writes to the in-memory blob storage.
-    /// The storage hashes each write with one shared hash instance that is not thread-safe,
-    /// so these classes must not run in parallel. It is the collection of <see cref="StorageTestBase"/>,
-    /// whose tests write to in-memory storages as well.
+    /// The xunit collection of <see cref="StorageTestBase"/>. The test classes of pages and of in-memory storages
+    /// share it, so they do not run next to each other or next to the tests of <see cref="StorageTestBase"/>.
     /// </summary>
     public const string StorageCollection = nameof(StorageTestBase);
 
@@ -194,10 +192,10 @@ public sealed class MarkdownPageFixture
     }
 
     /// <summary>Deletes the file without telling the page, like a deletion that the file watcher has not reported yet.</summary>
-    public Task DeleteAsync(string name) => Storage.Connection.Client.DeleteAsync([name], CancellationToken.None);
+    public Task DeleteAsync(string name) => Storage.Connection.Client.DeleteObject(name, CancellationToken.None);
 
-    public async Task<bool> ExistsAsync(string name) =>
-        (await Storage.Connection.Client.ExistsAsync([name], CancellationToken.None)).Single();
+    public Task<bool> ExistsAsync(string name) =>
+        Storage.Connection.Client.ObjectExists(name, CancellationToken.None);
 
     private sealed class MarkerHostedService : IHostedService
     {

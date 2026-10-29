@@ -1,5 +1,7 @@
 using FluentStorage;
-using FluentStorage.Blobs;
+using FluentStorage.Enums;
+using FluentStorage.Model;
+using FluentStorage.Storage;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
 namespace HomeBlaze.Storage.Tests;
@@ -30,10 +32,10 @@ public class StoragePathTests
                 await File.WriteAllTextAsync(fullPath, "content");
             }
 
-            using var storage = StorageFactory.Blobs.DirectoryFiles(directory.FullName);
+            using var storage = StorageFactory.Disk(directory.FullName);
 
             // Act
-            var blobs = await storage.ListAsync(recurse: true);
+            var blobs = await storage.ListObjects(new StorageListOptions { Recurse = true });
 
             // Assert
             Assert.Equal(
@@ -52,11 +54,11 @@ public class StoragePathTests
     [InlineData("/", "Notes.md", "Notes.md")]
     [InlineData("/Docs", "Readme.md", "Docs/Readme.md")]
     [InlineData("Docs/Guides/", "/Setup.md", "Docs/Guides/Setup.md")]
-    public void WhenBlobIsCreatedFromFolderAndName_ThenPathFromBlobEqualsItsNormalizedFullPath(
+    public void WhenObjectIsCreatedFromFolderAndName_ThenPathFromBlobEqualsItsNormalizedFullPath(
         string folderPath, string name, string expectedPath)
     {
         // Arrange
-        var blob = new Blob(folderPath, name, BlobItemKind.File);
+        var blob = new StoreObject(folderPath, name, StorageObjectType.File);
 
         // Act
         var path = StoragePath.FromBlob(blob);
@@ -71,11 +73,11 @@ public class StoragePathTests
     [InlineData("Notes.md", "Notes.md")]
     [InlineData("/Docs/Guides/Setup.md", "Docs/Guides/Setup.md")]
     [InlineData("Docs//Guides/", "Docs/Guides")]
-    public void WhenBlobIsCreatedFromFullPath_ThenPathFromBlobEqualsItsNormalizedFullPath(
+    public void WhenObjectIsCreatedFromFullPath_ThenPathFromBlobEqualsItsNormalizedFullPath(
         string fullPath, string expectedPath)
     {
         // Arrange: an in-memory storage creates the blobs of its listing this way.
-        var blob = new Blob(fullPath);
+        var blob = new StoreObject(fullPath);
 
         // Act
         var path = StoragePath.FromBlob(blob);
