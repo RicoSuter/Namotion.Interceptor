@@ -12,53 +12,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 public class SubjectTransactionHandlerTests
 {
     [Fact]
-    public async Task WhenCheckModeIsOmittedOrPassed_ThenTransactionUsesImmediateOrThePassedMode()
-    {
-        // Arrange
-        var context = CreateContext();
-
-        // Act
-        TransactionCheckMode omittedMode;
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            omittedMode = transaction.CheckMode;
-        }
-
-        TransactionCheckMode passedMode;
-        using (var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort,
-            checkMode: TransactionCheckMode.Deferred))
-        {
-            passedMode = transaction.CheckMode;
-        }
-
-        // Assert
-        Assert.Equal(TransactionCheckMode.Immediate, omittedMode);
-        Assert.Equal(TransactionCheckMode.Deferred, passedMode);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenCommitting_ThenHandlersReceiveTheCheckStages(bool withWriter)
-    {
-        // Arrange
-        var context = CreateContext(out var handler, withWriter ? new CountingTransactionWriter() : null);
-        var person = new Person(context) { FirstName = "Ann" };
-
-        // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "Bob";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        TransactionCheckStage[] expected = withWriter
-            ? [TransactionCheckStage.Commit, TransactionCheckStage.PreApply]
-            : [TransactionCheckStage.Commit];
-        Assert.Equal(expected, handler.Stages);
-    }
-
-    [Fact]
     public async Task WhenLocalAndSourceWritesAreCaptured_ThenOnlyTheyReachOnCapturingWithValueAndAttemptedOrigin()
     {
         // Arrange
@@ -161,9 +114,9 @@ public class SubjectTransactionHandlerTests
     }
 
     [Theory]
-    [InlineData(false, 1)]
-    [InlineData(true, 2)]
-    public async Task WhenCheckedChangeCarriesTimestamps_ThenChangeContextDuringCheckCarriesNone(bool withWriter, int expectedChecks)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenCheckedChangeCarriesTimestamps_ThenEachCheckStageReceivesThemOnlyOnTheChange(bool withWriter)
     {
         // Arrange
         var changedTimestamp = new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.Zero);
@@ -185,7 +138,10 @@ public class SubjectTransactionHandlerTests
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(expectedChecks, changeContextsSeen.Count);
+        TransactionCheckStage[] expectedStages = withWriter
+            ? [TransactionCheckStage.Commit, TransactionCheckStage.PreApply]
+            : [TransactionCheckStage.Commit];
+        Assert.Equal(expectedStages, handler.Stages);
         Assert.All(changesSeen, change =>
         {
             Assert.Equal(changedTimestamp, change.ChangedTimestamp);

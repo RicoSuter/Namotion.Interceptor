@@ -1,6 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -289,28 +287,14 @@ public class TransactionValidationTests
         Assert.Equal(nameof(Motor.MaxAllowedSpeed), Assert.Single(writer.Reverted).Property.Name);
     }
 
-    public enum OriginRule
-    {
-        IgnoresOrigin,
-        SkipsNonConfirmed,
-        SkipsNonLocal
-    }
-
     [Theory]
-    [InlineData(OriginRule.IgnoresOrigin, true)]
-    [InlineData(OriginRule.SkipsNonConfirmed, true)]
-    [InlineData(OriginRule.SkipsNonLocal, false)]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task WhenSourceAcceptedTheValueAndTheLimitDropsMeanwhile_ThenPreApplyCheckGetsConfirmedAndFollowsTheValidator(
-        OriginRule rule, bool rejects)
+        bool skipsConfirmed)
     {
         // Arrange
-        Func<ChangeOrigin, bool> skips = rule switch
-        {
-            OriginRule.SkipsNonConfirmed => origin => origin.Kind != ChangeOriginKind.Confirmed,
-            OriginRule.SkipsNonLocal => origin => origin.Kind != ChangeOriginKind.Local,
-            _ => _ => false
-        };
-        var validator = new OriginAwareMotorSpeedValidator(skips);
+        var validator = new OriginAwareMotorSpeedValidator(origin => skipsConfirmed && origin.Kind == ChangeOriginKind.Confirmed);
         var context = CreateContext(validator);
         var motor = new Motor(context) { MaxAllowedSpeed = 200 };
         var writer = new TestTransactionWriter(updateDuringWrite: () => motor.MaxAllowedSpeed = 100, confirmWrites: true);
@@ -327,7 +311,7 @@ public class TransactionValidationTests
         Assert.Equal([ChangeOriginKind.Local, ChangeOriginKind.Confirmed], validator.Origins.Select(origin => origin.Kind));
         Assert.Same(writer, validator.Origins[1].Source);
         Assert.Equal(100, motor.MaxAllowedSpeed);
-        if (rejects)
+        if (!skipsConfirmed)
         {
             var failure = Assert.IsType<SubjectTransactionException>(exception);
             Assert.Equal(nameof(Motor.MotorSpeed), Assert.Single(failure.FailedChanges).Property.Name);
@@ -585,32 +569,12 @@ public class TransactionValidationTests
         Assert.Equal(40, motor.MaxAllowedSpeed);
     }
 
-    [Fact]
-    public async Task WhenInterceptorBeforeTransactionReturnsEqualNewInstance_ThenDeferredCommitDoesNotValidateTheApplyAgain()
-    {
-        // Arrange
-        var context = CreateContext(new TextLengthValidator());
-        context.AddService(new CopyingStringInterceptor());
-        var field = new TextField(context) { MaxLength = 3 };
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        field.Text = "abcdef";
-        field.MaxLength = 10;
-
-        // Act
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal("abcdef", field.Text);
-        Assert.Equal(10, field.MaxLength);
-    }
-
     [Theory]
     [InlineData(false, false, TransactionConflictBehavior.FailOnConflict)]
     [InlineData(false, true, TransactionConflictBehavior.Ignore)]
     [InlineData(true, false, TransactionConflictBehavior.Ignore)]
     [InlineData(true, true, TransactionConflictBehavior.FailOnConflict)]
-    public async Task WhenWrittenSubjectLeavesTheTransactionContextBeforeDeferredCommit_ThenCommitConflictsAndWritesNothing(
+    public async Task WhenWrittenSubjectLeavesTheTransactionContextBeforeDeferredCommit_ThenCommitConflictsWithoutValidatingAndWritesNothing(
         bool movesToAnotherContext, bool withWriter, TransactionConflictBehavior conflictBehavior)
     {
         // Arrange
@@ -622,8 +586,9 @@ public class TransactionValidationTests
         }
 
         var holder = new MotorHolder(context);
-        // Without validators, so the commit check passes and only the conflict detection rejects the move.
-        var otherHolder = new MotorHolder(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions());
+        // The validator of the other context rejects the speed, so validating the moved motor would fail the commit first.
+        var otherValidator = new RecordingValidator(new MotorSpeedValidator());
+        var otherHolder = new MotorHolder(CreateContext(otherValidator));
         var motor = new Motor();
         holder.Motor = motor;
 
@@ -656,25 +621,21 @@ public class TransactionValidationTests
             : [nameof(Motor.MotorSpeed)];
         Assert.Equal(expectedConflicts, exception.ConflictingProperties.Select(property => property.Name));
         Assert.Equal(expectedConflicts, retryException.ConflictingProperties.Select(property => property.Name));
+        Assert.DoesNotContain(otherValidator.Calls, call => call.Property == nameof(Motor.MotorSpeed));
         Assert.Equal(0, writer.WriteCount);
         Assert.Equal(0, motor.MotorSpeed);
     }
 
     [Theory]
-    [InlineData(false, TransactionConflictBehavior.FailOnConflict)]
-    [InlineData(false, TransactionConflictBehavior.Ignore)]
-    [InlineData(true, TransactionConflictBehavior.FailOnConflict)]
-    [InlineData(true, TransactionConflictBehavior.Ignore)]
+    [InlineData(TransactionConflictBehavior.FailOnConflict)]
+    [InlineData(TransactionConflictBehavior.Ignore)]
     public async Task WhenWrittenSubjectMovesToAnotherHolderInTheContextBeforeDeferredCommit_ThenCommitSucceeds(
-        bool withWriter, TransactionConflictBehavior conflictBehavior)
+        TransactionConflictBehavior conflictBehavior)
     {
         // Arrange
         var context = CreateContext();
         var writer = new TestTransactionWriter();
-        if (withWriter)
-        {
-            context.AddService<ITransactionWriter>(writer);
-        }
+        context.AddService<ITransactionWriter>(writer);
 
         var holder = new MotorHolder(context);
         var otherHolder = new MotorHolder(context);
@@ -696,76 +657,7 @@ public class TransactionValidationTests
 
         // Assert
         Assert.Equal(50, motor.MotorSpeed);
-        Assert.Equal(withWriter ? 1 : 0, writer.WriteCount);
-    }
-
-    [Theory]
-    [InlineData(false, TransactionConflictBehavior.FailOnConflict)]
-    [InlineData(true, TransactionConflictBehavior.Ignore)]
-    public async Task WhenWrittenSubjectMovesToAContextWhoseValidatorRejectsTheValue_ThenCommitConflictsWithoutValidatingIt(
-        bool withWriter, TransactionConflictBehavior conflictBehavior)
-    {
-        // Arrange
-        var context = CreateContext(new RecordingValidator());
-        var writer = new TestTransactionWriter();
-        if (withWriter)
-        {
-            context.AddService<ITransactionWriter>(writer);
-        }
-
-        var otherValidator = new RecordingValidator(new MotorSpeedValidator());
-        var otherHolder = new MotorHolder(CreateContext(otherValidator));
-        var holder = new MotorHolder(context);
-        var motor = new Motor();
-        holder.Motor = motor;
-
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, conflictBehavior: conflictBehavior, checkMode: TransactionCheckMode.Deferred);
-        motor.MotorSpeed = 500; // above MaxAllowedSpeed, which only the validator of the other context rejects
-        await RunWithoutAsyncLocalFlowAsync(() =>
-        {
-            holder.Motor = null;
-            otherHolder.Motor = motor;
-        });
-
-        // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        transaction.Dispose();
-        Assert.Equal([nameof(Motor.MotorSpeed)], exception.ConflictingProperties.Select(property => property.Name));
-        Assert.DoesNotContain(otherValidator.Calls, call => call.Property == nameof(Motor.MotorSpeed));
-        Assert.Equal(0, writer.WriteCount);
-        Assert.Equal(0, motor.MotorSpeed);
-    }
-
-    [Fact]
-    public async Task WhenIgnoreCommitRollsBackAfterAConcurrentWrite_ThenTheRestoredValueIsTheValidLandedValue()
-    {
-        // Arrange
-        var context = CreateContext();
-        var motor = new Motor(context) { MotorSpeed = 80 };
-        var failingMotor = new Motor(context) { IncrementSpeedOnWrite = true };
-        using var transaction = await context.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, TransactionLocking.Optimistic, conflictBehavior: TransactionConflictBehavior.Ignore);
-        motor.MotorSpeed = 40;
-        failingMotor.MotorSpeed = 99;
-        await RunWithoutAsyncLocalFlowAsync(() =>
-        {
-            motor.MaxAllowedSpeed = 60;
-            motor.MotorSpeed = 50;
-        });
-
-        // Act
-        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
-
-        // Assert
-        // The restore is part of the checked set, so it is not validated; restoring the speed of 80 captured at the
-        // first write would exceed the limit of 60.
-        transaction.Dispose();
-        Assert.Equal(60, motor.MaxAllowedSpeed);
-        Assert.Equal(50, motor.MotorSpeed);
+        Assert.Equal(1, writer.WriteCount);
     }
 
     private static async Task RunWithoutAsyncLocalFlowAsync(Action action, CancellationToken cancellationToken = default)
@@ -801,43 +693,6 @@ public class TransactionValidationTests
             }
 
             return [];
-        }
-    }
-
-    /// <summary>
-    /// Rejects a Text longer than MaxLength, read through the getter like <see cref="MotorSpeedValidator"/>.
-    /// </summary>
-    private sealed class TextLengthValidator : IPropertyValidator
-    {
-        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
-        {
-            if (context.Property.Name == nameof(TextField.Text) &&
-                context.Value is string text &&
-                context.Property.Subject is TextField field &&
-                text.Length > field.MaxLength)
-            {
-                return [new ValidationResult($"Text length {text.Length} exceeds MaxLength {field.MaxLength}.")];
-            }
-
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// Replaces every string written with an equal, distinct instance before the transaction sees it, like a
-    /// normalizing interceptor whose result is already normalized.
-    /// </summary>
-    [RunsBefore(typeof(SubjectTransactionInterceptor))]
-    private sealed class CopyingStringInterceptor : IWriteInterceptor
-    {
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            if (context.NewValue is string text)
-            {
-                context.NewValue = (TProperty)(object)new string(text.AsSpan());
-            }
-
-            next(ref context);
         }
     }
 

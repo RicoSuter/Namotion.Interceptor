@@ -73,7 +73,7 @@ public class SubjectTransactionHandlerPreApplyCheckTests
         var source = new object();
         var writer = new CountingTransactionWriter { ConfirmingSource = source, UnwrittenPropertyNames = { nameof(Person.FirstName) } };
         var context = CreateContext(out var handler, writer);
-        handler.RejectPreApplyCheck(nameof(Person.LastName), "invalid last name");
+        handler.RejectPreApplyCheck(new InvalidOperationException("invalid last name"));
         var probe = new CommitWriteProbe(handler);
         context.AddService(probe);
         var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
