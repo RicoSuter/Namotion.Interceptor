@@ -48,9 +48,7 @@ using System.Text.Json.Serialization;
         {
             lock (((IInterceptorSubject)this).SyncRoot)
             {
-                _properties = ((IInterceptorSubject)this).Properties
-                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                    .ToFrozenDictionary();
+                _properties = ((IInterceptorSubject)this).MergeProperties(properties);
             }
         }
 

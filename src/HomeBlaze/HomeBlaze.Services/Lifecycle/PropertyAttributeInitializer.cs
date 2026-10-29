@@ -75,15 +75,12 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
             else if (reflectionAttribute is ConfigurationAttribute configAttribute)
             {
                 configurationAttribute = configAttribute;
-                if (property.TryGetAttribute(KnownAttributes.Configuration) is null)
+                var metadata = new ConfigurationMetadata
                 {
-                    var metadata = new ConfigurationMetadata
-                    {
-                        IsSecret = configAttribute.IsSecret
-                    };
-                    property.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata),
-                        _ => metadata, null);
-                }
+                    IsSecret = configAttribute.IsSecret
+                };
+                property.GetOrAddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata),
+                    _ => metadata, null);
             }
         }
 
@@ -113,7 +110,7 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
             return;
         }
 
-        if (hasState && property.TryGetAttribute(KnownAttributes.State) is null)
+        if (hasState)
         {
             var stateMetadata = new StateMetadata
             {
@@ -125,7 +122,7 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
                 IsEstimated = isEstimated ?? false,
                 Category = categoryAttribute.GetNormalizedCategory(),
             };
-            property.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
+            property.GetOrAddAttribute(KnownAttributes.State, typeof(StateMetadata),
                 _ => stateMetadata, null);
         }
     }

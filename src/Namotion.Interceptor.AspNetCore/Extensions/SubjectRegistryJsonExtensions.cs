@@ -29,22 +29,23 @@ public static class SubjectRegistryJsonExtensions
             var parent = new SubjectParent(property, null);
             do
             {
-                var attribute = registry
+                var registeredProperty = registry
                     .TryGetRegisteredSubject(parent.Property.Subject)?
-                    .TryGetProperty(parent.Property.Name)?
-                    .ReflectionAttributes
-                    .OfType<PropertyAttributeAttribute>()
-                    .FirstOrDefault();
+                    .TryGetProperty(parent.Property.Name);
 
-                if (attribute is not null)
+                if (registeredProperty is { IsAttribute: true })
                 {
+                    var attribute = registeredProperty.AttributeMetadata;
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
                         attribute.PropertyName), jsonSerializerOptions) +
                         "@" + attribute.AttributeName;
                 }
 
-                var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
+                // The registered property decides: the registry can register a property as plain while its
+                // metadata still carries [PropertyAttribute] (two providers for one attribute).
+                var propertyName = registeredProperty?.GetJsonPropertyName(jsonSerializerOptions)
+                    ?? GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
                 path = propertyName +
                     (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
@@ -94,16 +95,17 @@ public static class SubjectRegistryJsonExtensions
     public static JsonObject ToJsonObject(this IInterceptorSubject subject, JsonSerializerOptions jsonSerializerOptions)
     {
         var obj = new JsonObject();
+        var registeredSubject = subject.TryGetRegisteredSubject();
         foreach (var property in subject
             .Properties
             .Where(p => p.Value.GetValue is not null))
         {
-            // add static properties
-            var propertyName = GetJsonPropertyName(subject, property.Value, jsonSerializerOptions);
+            // add static properties, named by the registered property when there is one (see GetJsonPath)
+            var propertyName = registeredSubject?.TryGetProperty(property.Key)?.GetJsonPropertyName(jsonSerializerOptions)
+                ?? GetJsonPropertyName(subject, property.Value, jsonSerializerOptions);
             obj[propertyName] = ValueToJsonNode(property.Value.GetValue?.Invoke(subject), jsonSerializerOptions);
         }
 
-        var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is not null)
         {
             // add dynamic properties

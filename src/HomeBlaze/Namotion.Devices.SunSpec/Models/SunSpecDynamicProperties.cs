@@ -102,7 +102,7 @@ internal static class SunSpecDynamicProperties
         => subject.TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("The subject is not attached to a subject graph with a registry.");
 
-    // Checked before adding any property, because a property added under a used name would replace the existing one's metadata.
+    // Checked before adding any property, so that a used or repeated name rejects the whole group instead of throwing partway through it.
     private static void EnsureNamesAreFree(RegisteredSubject registered, SunSpecGroupDefinition group, List<SunSpecPropertyPoint> points)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);

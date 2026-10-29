@@ -28,6 +28,8 @@ public interface IInterceptorSubject
     /// Adds additional properties to this subject (e.g. from an inheriting class or dynamic context).
     /// </summary>
     /// <param name="properties">The additional properties.</param>
+    /// <exception cref="InvalidOperationException">A property name is already present on the subject or appears twice
+    /// in <paramref name="properties"/>. The property set is unchanged in that case.</exception>
     void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties);
     
     // TODO(perf): Use span here?

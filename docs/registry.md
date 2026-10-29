@@ -96,6 +96,8 @@ This pattern provides several benefits:
 - **Bindable**: Metadata can be bound to external sources (MQTT, OPC UA, etc.)
 - **Discoverable**: Metadata is accessible at runtime through the registry
 
+An attribute name is unique per property. The pair of target property and attribute name identifies the attribute, whatever the name of the property that provides it, so `Pressure_Minimum` above and a dynamic attribute `Minimum` added to `Pressure` at runtime would be the same attribute. A subject that declares two properties for one pair is not rejected, because registration runs while the subject is attached: the property whose name sorts first by ordinal comparison provides the attribute, and the other is registered as a plain property. The generator reports that shape at compile time as NI0066 (see [Diagnostics](generator.md#diagnostics)). `AddAttribute`, `AddDerivedAttribute`, `AddProperty` and `AddDerivedProperty` throw an `InvalidOperationException`, before the subject changes, when the property name or the attribute pair already exists.
+
 ## Dynamic property and attribute creation
 
 The registry allows you to dynamically add properties and attributes to registered subjects at runtime. This enables building flexible systems that can extend object models programmatically.
@@ -181,7 +183,7 @@ public class UnitAttribute : Attribute, ISubjectPropertyInitializer
 
     public void InitializeProperty(RegisteredSubjectProperty property)
     {
-        property.AddAttribute("Unit", typeof(string), _ => _unit, null);
+        property.GetOrAddAttribute("Unit", typeof(string), _ => _unit, null);
     }
 }
 
@@ -203,7 +205,7 @@ public class DefaultValueInitializer : ISubjectPropertyInitializer
 
         if (attribute is not null)
         {
-            property.AddAttribute("DefaultValue", property.Type,
+            property.GetOrAddAttribute("DefaultValue", property.Type,
                 _ => attribute.Value, null);
         }
     }
@@ -215,6 +217,8 @@ var context = InterceptorSubjectContext
 
 context.AddService<ISubjectPropertyInitializer>(new DefaultValueInitializer());
 ```
+
+Use `GetOrAddAttribute` or `GetOrAddDerivedAttribute` in an initializer rather than `AddAttribute`. Initializers run again when a subject is re-registered, for example when it moves between parents, and the dynamic attribute added the first time is still on the subject, so `AddAttribute` then throws. The get-or-add variants return that existing attribute unchanged when it has the requested type, and throw when it has another.
 
 ## Subject IDs
 
