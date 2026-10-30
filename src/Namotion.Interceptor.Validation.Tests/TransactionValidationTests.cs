@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -534,7 +535,7 @@ public class TransactionValidationTests
     [Theory]
     [InlineData(TransactionFailureHandling.BestEffort)]
     [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenDerivedPropertyBecomesInvalid_ThenBothChecksPassAndApplyFailsAfterSourceWrite(
+    public async Task WhenDerivedPropertyBecomesInvalid_ThenCommitCheckRejectsItBeforeSourceWrite(
         TransactionFailureHandling failureHandling)
     {
         // Arrange
@@ -545,26 +546,179 @@ public class TransactionValidationTests
         var motor = new PoweredMotor(context);
         _ = motor.Power;
         log.Clear();
-        using var transaction = await context.BeginTransactionAsync(failureHandling);
-        motor.MotorSpeed = 200;
 
         // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        SubjectTransactionValidationException exception;
+        using (var transaction = await context.BeginTransactionAsync(failureHandling))
+        {
+            motor.MotorSpeed = 200;
+            exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
 
         // Assert
         Assert.Equal(
             [
                 nameof(PoweredMotor.MotorSpeed), // capture
                 nameof(PoweredMotor.MotorSpeed), // commit check
-                "source write",
-                nameof(PoweredMotor.MotorSpeed), // pre-apply check
-                nameof(PoweredMotor.Power) // recalculation while the commit applies MotorSpeed
+                nameof(PoweredMotor.Power) // commit check, computed over the transaction's values
             ],
             log);
-        Assert.Equal(1, writer.WriteCount);
-        Assert.Equal(nameof(PoweredMotor.MotorSpeed), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal(0, writer.WriteCount);
+        var failed = Assert.Single(exception.FailedChanges);
+        Assert.Equal(nameof(PoweredMotor.Power), failed.Property.Name);
+        Assert.Equal(2000, failed.GetNewValue<int>());
         Assert.Contains("Power 2000 exceeds", Assert.IsType<PropertyValidationException>(Assert.Single(exception.Errors)).Message);
+        Assert.Equal(0, motor.MotorSpeed);
+    }
+
+    [Fact]
+    public async Task WhenSeveralChangesMakeDerivedPropertiesInvalid_ThenEachIsReportedOnce()
+    {
+        // Arrange
+        var context = CreateContext(new TankValidator());
+        var writer = new TestTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+        var tank = new Tank(context);
+
+        // Act
+        SubjectTransactionValidationException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            tank.Level = 150;
+            tank.Capacity = 120;
+            exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        // FreePercent depends on Level only through Free, so it is reached through the flattened dependencies.
+        Assert.Equal(
+            [nameof(Tank.Free), nameof(Tank.FreePercent)],
+            exception.FailedChanges.Select(change => change.Property.Name).Order());
+        Assert.Equal(-30, exception.FailedChanges.Single(change => change.Property.Name == nameof(Tank.Free)).GetNewValue<int>());
+        Assert.Equal(-25, exception.FailedChanges.Single(change => change.Property.Name == nameof(Tank.FreePercent)).GetNewValue<int>());
+        Assert.All(exception.Errors, error => Assert.IsType<PropertyValidationException>(error));
+        Assert.Equal(0, writer.WriteCount);
+        Assert.Equal(0, tank.Level);
+        Assert.Equal(100, tank.Capacity);
+    }
+
+    [Fact]
+    public async Task WhenDerivedGetterThrowsOverFinalSet_ThenCommitCheckSkipsIt()
+    {
+        // Arrange
+        var context = CreateContext(new TankValidator());
+        var tank = new Tank(context);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            // FreePercent divides by Capacity, so its getter throws over the final set.
+            tank.Capacity = 0;
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Equal(0, tank.Capacity);
+        Assert.Equal(0, tank.Free);
+    }
+
+    [Theory]
+    [InlineData(TransactionCheckMode.Immediate)]
+    [InlineData(TransactionCheckMode.Deferred)]
+    public async Task WhenDerivedPropertyIsInvalidOnlyBetweenApplies_ThenCommitSucceeds(TransactionCheckMode checkMode)
+    {
+        // Arrange
+        var context = CreateContext(new TankValidator());
+        var tank = new Tank(context);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, checkMode: checkMode))
+        {
+            // Level is applied first, so Free is negative until Capacity is applied.
+            tank.Level = 150;
+            tank.Capacity = 200;
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Equal(150, tank.Level);
+        Assert.Equal(200, tank.Capacity);
+        Assert.Equal(50, tank.Free);
+    }
+
+    [Fact]
+    public async Task WhenRollbackRevertsThroughAnInvalidDerivedValue_ThenTheRevertIsNotRejected()
+    {
+        // Arrange
+        var context = CreateContext(new TankValidator());
+        var tank = new Tank(context);
+        var failingTank = new Tank(context);
+        context.AddService(new LevelRejectingWriteInterceptor(failingTank));
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            tank.Level = 150;
+            tank.Capacity = 200;
+            failingTank.Level = 50;
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        // The revert restores Capacity 100 while Level is still 150, so Free is negative until Level is restored.
+        Assert.Equal("Level write failed.", Assert.Single(exception.Errors).Message);
+        Assert.Equal(0, tank.Level);
+        Assert.Equal(100, tank.Capacity);
+    }
+
+    [Fact]
+    public async Task WhenDerivedPropertyBecomesInvalidOutsideTransactionAfterCommit_ThenWriteThrows()
+    {
+        // Arrange
+        var context = CreateContext(new TankValidator());
+        var tank = new Tank(context);
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            tank.Level = 50;
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Act & Assert
+        // The commit applied on this thread, so a derived recalculation outside a transaction must be validated again.
+        Assert.Throws<PropertyValidationException>(() => tank.Level = 150);
+    }
+
+    [Fact]
+    public async Task WhenOutsideWriteMakesDerivedPropertyInvalidWhileSourcesAreWritten_ThenPreApplyCheckRejectsAndRevertsSources()
+    {
+        // Arrange
+        var context = CreateContext(new TankValidator());
+        var tank = new Tank(context);
+        var writer = new TestTransactionWriter(updateDuringWrite: () => tank.Level = 80);
+        context.AddService<ITransactionWriter>(writer);
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            // Free is valid over Level 0 in the commit check and negative over the Level written meanwhile.
+            tank.Capacity = 60;
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal(
+            [nameof(Tank.Free), nameof(Tank.FreePercent)],
+            exception.Errors.Select(error => Assert.IsType<PropertyValidationException>(error).Property.Name).Order());
+        Assert.Equal(nameof(Tank.Capacity), Assert.Single(writer.Reverted).Property.Name);
+        Assert.Equal(100, tank.Capacity);
+        Assert.Equal(80, tank.Level);
     }
 
     [Fact]
@@ -1021,6 +1175,39 @@ public class TransactionValidationTests
             }
 
             return [];
+        }
+    }
+
+    /// <summary>
+    /// Rejects a negative <see cref="Tank.Free"/> or <see cref="Tank.FreePercent"/>.
+    /// </summary>
+    private sealed class TankValidator : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            if (context.Property.Name is nameof(Tank.Free) or nameof(Tank.FreePercent) && context.Value is int value && value < 0)
+            {
+                return [new ValidationResult($"{context.Property.Name} {value} is negative.")];
+            }
+
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Throws for every write of <see cref="Tank.Level"/> on the given tank that reaches the model.
+    /// </summary>
+    [RunsAfter(typeof(SubjectTransactionInterceptor))]
+    private sealed class LevelRejectingWriteInterceptor(Tank tank) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, tank) && context.Property.Name == nameof(Tank.Level))
+            {
+                throw new InvalidOperationException("Level write failed.");
+            }
+
+            next(ref context);
         }
     }
 

@@ -5,10 +5,12 @@ namespace Namotion.Interceptor.Validation;
 
 /// <summary>
 /// Thrown by a commit when values in its final set are invalid, before anything is written. The transaction stays
-/// retryable: fix the values and commit again. <see cref="SubjectTransactionException.FailedChanges"/> holds only the
-/// invalid changes: the valid ones were not written either, and <see cref="SubjectTransactionException.AppliedChanges"/>
-/// is empty. <see cref="SubjectTransactionException.Errors"/> holds their validation errors, in the same order: a
-/// <see cref="PropertyValidationException"/> per change, holding each result its validators returned.
+/// retryable: fix the values and commit again. <see cref="SubjectTransactionException.FailedChanges"/> holds the invalid
+/// changes, then the invalid derived properties that depend on a changed property, each as a change whose old and new
+/// value are its computed value. The valid changes are not listed, but they were not written either, so
+/// <see cref="SubjectTransactionException.AppliedChanges"/> is empty. <see cref="SubjectTransactionException.Errors"/>
+/// holds the validation errors in the same order: a <see cref="PropertyValidationException"/> per entry, holding each
+/// result its validators returned.
 /// </summary>
 public sealed class SubjectTransactionValidationException : SubjectTransactionException
 {

@@ -376,6 +376,37 @@ public class SubjectTransactionWriterTests
     }
 
     [Fact]
+    public async Task WhenRestoreOfFailedApplyFailsInBestEffortWithoutHandlers_ThenLocalAndSourceKeepTheNewValue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new CountingTransactionWriter();
+        context.AddService<ITransactionWriter>(writer);
+        var rejectingInterceptor = new ValueRejectingWriteInterceptor();
+        context.AddService(rejectingInterceptor);
+        var subject = new TransactionCascadeSubject(context) { Plain = "model" };
+        subject.PlainChangedAction = _ => throw new InvalidOperationException("Hook failed.");
+        rejectingInterceptor.Rejected.Add((nameof(TransactionCascadeSubject.Plain), "model"));
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "new";
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal("new", subject.Plain);
+        Assert.Equal([nameof(TransactionCascadeSubject.Plain)], writer.ReceivedPropertyNames);
+        Assert.Empty(writer.Reverted);
+        Assert.Equal(nameof(TransactionCascadeSubject.Plain), Assert.Single(exception.FailedChanges).Property.Name);
+        Assert.Equal(nameof(TransactionCascadeSubject.Plain), Assert.Single(exception.AppliedChanges).Property.Name);
+        Assert.Equal(["Hook failed.", "Plain write failed."], exception.Errors.Select(error => error.Message));
+    }
+
+    [Fact]
     public async Task WhenApplyAndSourceRevertFailForOnePropertyInRollbackWithoutHandlers_ThenItIsListedTwice()
     {
         // Arrange

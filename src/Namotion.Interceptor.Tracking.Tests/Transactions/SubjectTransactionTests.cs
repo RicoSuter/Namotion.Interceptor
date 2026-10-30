@@ -344,6 +344,81 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenChangeHookThrowsAfterApplyStoredTheValue_ThenTheFailedChangeIsRestored()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new TransactionCascadeSubject(context) { Plain = "model" };
+        subject.PlainChangedAction = _ => throw new InvalidOperationException("Hook failed.");
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "new";
+            await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal("model", subject.Plain);
+    }
+
+    [Fact]
+    public async Task WhenChangeHookThrowsAfterTheStoredValueWasCoerced_ThenTheOldValueIsRestored()
+    {
+        // Arrange
+        var context = CreateContext();
+        context.AddService(new ValueCoercingWriteInterceptor("new", "coerced"));
+        var subject = new TransactionCascadeSubject(context) { Plain = "model" };
+        subject.PlainChangedAction = _ => throw new InvalidOperationException("Hook failed.");
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "new";
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal("model", subject.Plain);
+        Assert.Empty(exception.AppliedChanges);
+    }
+
+    [Fact]
+    public async Task WhenReadingTheFailedApplyThrows_ThenTheCommitRevertsAndReportsTheReadError()
+    {
+        // Arrange
+        var context = CreateContext();
+        var readException = new InvalidOperationException("Read failed.");
+        var readInterceptor = new ThrowingReadInterceptor(nameof(TransactionCascadeSubject.Plain), readException);
+        context.AddService(readInterceptor);
+        var subject = new TransactionCascadeSubject(context) { Plain = "model", SideEffect = "a" };
+        subject.PlainChangedAction = _ =>
+        {
+            readInterceptor.IsArmed = true;
+            throw new InvalidOperationException("Hook failed.");
+        };
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            subject.SideEffect = "b";
+            subject.Plain = "new";
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        readInterceptor.IsArmed = false;
+        Assert.Equal("a", subject.SideEffect);
+        Assert.Equal("model", subject.Plain);
+        Assert.Contains(readException, exception.Errors);
+    }
+
+    [Fact]
     public async Task WhenCommitFailureIsRetryable_ThenLaterWritesRemainCaptured()
     {
         // Arrange
@@ -844,6 +919,23 @@ public class SubjectTransactionTests
             if (context.NewValue is string value)
             {
                 context.NewValue = (TProperty)(object)value.ToUpperInvariant();
+            }
+
+            next(ref context);
+        }
+    }
+
+    /// <summary>
+    /// Replaces every write of one value that reaches the model with another, after the transaction captured it.
+    /// </summary>
+    [RunsAfter(typeof(SubjectTransactionInterceptor))]
+    private sealed class ValueCoercingWriteInterceptor(string value, string coercedValue) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.NewValue is string newValue && newValue == value)
+            {
+                context.NewValue = (TProperty)(object)coercedValue;
             }
 
             next(ref context);
