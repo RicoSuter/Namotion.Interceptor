@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -35,6 +36,41 @@ public class PathResolutionTests
         Assert.Equal(
             "Invalid path syntax: Unclosed '[' at position 8 in path 'Children[Servers'",
             json.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsHeldBelowAPropertyTheProviderExcludes_ThenToolsStillWriteAndResolveItsPath()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var device = new TestDevice(context) { DeviceName = "Lamp" };
+        var room = new TestRoom(context) { Name = "Kitchen", Device = device };
+        var root = new TestMixedGroup(context) { Items = new Dictionary<string, IInterceptorSubject> { ["room"] = room } };
+
+        var config = new McpServerConfiguration { PathProvider = new ExcludingPathProvider(nameof(TestMixedGroup.Items)) };
+        var tools = new McpToolFactory(root, config).CreateTools();
+
+        // Act
+        var search = JsonSerializer.SerializeToElement(await tools.First(t => t.Name == "search").Handler(
+            JsonSerializer.SerializeToElement(new { format = "json", types = new[] { nameof(TestDevice) } }), CancellationToken.None));
+        var property = JsonSerializer.SerializeToElement(await tools.First(t => t.Name == "get_property").Handler(
+            JsonSerializer.SerializeToElement(new { path = "Items[room].Device.DeviceName" }), CancellationToken.None));
+        var browse = JsonSerializer.SerializeToElement(await tools.First(t => t.Name == "browse").Handler(
+            JsonSerializer.SerializeToElement(new { format = "json", path = "Items[room].Device", depth = 0, includeProperties = true }), CancellationToken.None));
+
+        // Assert
+        var result = Assert.Single(search.GetProperty("results").EnumerateObject());
+        Assert.Equal("Items[room].Device", result.Name);
+        Assert.Equal("Items[room].Device", result.Value.GetProperty("$path").GetString());
+        Assert.Equal("Lamp", property.GetProperty("value").GetString());
+        Assert.Equal("Lamp", browse.GetProperty("result").GetProperty("properties").GetProperty("DeviceName").GetProperty("value").GetString());
+    }
+
+    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
 
     [Fact]

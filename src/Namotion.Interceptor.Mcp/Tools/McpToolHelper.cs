@@ -65,7 +65,7 @@ internal static class McpToolHelper
         bool includeInterfaces,
         IReadOnlySet<string>? propertyNames = null)
     {
-        var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
+        var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration);
 
         // Collect enrichments and extract known fields
         var enrichments = new Dictionary<string, object?>();
@@ -212,21 +212,28 @@ internal static class McpToolHelper
         return property.IsAttribute ? null : property;
     }
 
+    /// <summary>
+    /// The path of the subject with the configured prefix, or null when it has none: the root's path is the prefix, and
+    /// any other subject has one when the property holding it is one <paramref name="pathProvider"/> includes. The
+    /// properties above it are written whether the provider includes them or not, as get_property and browse resolve.
+    /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         IInterceptorSubject rootSubject,
-        string pathPrefix = "")
+        McpServerConfiguration configuration)
     {
+        var pathPrefix = configuration.PathPrefix;
         if (subject.Subject == rootSubject)
         {
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        if (subject.Parents.Length > 0)
+        var parents = subject.Parents;
+        if (parents.Length > 0 && pathProvider.IsPropertyIncluded(parents[0].Property))
         {
-            var parent = subject.Parents[0];
-            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
+            var parent = parents[0];
+            var path = parent.Property.TryGetPath(configuration.UnfilteredPathProvider, rootSubject, parent.Index);
             return path is not null ? $"{pathPrefix}{path}" : null;
         }
 
