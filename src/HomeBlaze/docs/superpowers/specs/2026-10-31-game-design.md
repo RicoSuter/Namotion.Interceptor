@@ -187,6 +187,21 @@ All assets are vendored under `HomeBlaze.Game/wwwroot/lib/` with their license f
 - An animated low-poly character pack released as CC0, from Quaternius or Kenney. The implementation plan picks the pack and verifies its license.
 - Grass and stone textures released as CC0, from ambientCG.
 
+## Demo world
+
+`src/HomeBlaze/HomeBlaze/Data/Files/Demo/Game.json` holds a `Game` with a house built from walls, so the game can be tried right away when running from source:
+
+- A house of about 12 by 9 tiles north of the spawn tile 0,0, so a new player starts outside and looks at it.
+- Outer walls with a door gap facing the spawn tile.
+- Inner walls dividing it into three rooms connected by door gaps.
+- A few freestanding walls outside, to try blocking and the diagonal squeeze rule.
+
+The seed folder of fresh installations stays unchanged.
+
+## Development workflow
+
+After each implementation task that leaves something runnable, the app is started in Release mode, listening on `http://192.168.1.201:<port>` so it can be tried from the local network, and work continues with the next task while it runs. The running instance is restarted after later tasks change the game.
+
 ## Error handling and edge cases
 
 | Situation | Behavior |
