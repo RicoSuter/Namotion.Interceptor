@@ -76,7 +76,6 @@ internal sealed class CollectionDiffBuilder
         // Build common order lists to detect reordering
         _oldRetainedOrder.Clear();
         _newRetainedOrder.Clear();
-        _newRetainedIndices.Clear();
         for (var i = 0; i < oldItems.Count; i++)
         {
             if (_newIndexMap.ContainsKey(oldItems[i]))
@@ -85,10 +84,7 @@ internal sealed class CollectionDiffBuilder
         for (var i = 0; i < newItems.Count; i++)
         {
             if (_oldIndexMap.ContainsKey(newItems[i]))
-            {
                 _newRetainedOrder.Add(newItems[i]);
-                _newRetainedIndices.Add(i);
-            }
         }
 
         // Detect reordering and compute intermediate indices for moves
@@ -97,6 +93,13 @@ internal sealed class CollectionDiffBuilder
             _oldRetainedIndexMap.Clear();
             for (var i = 0; i < _oldRetainedOrder.Count; i++)
                 _oldRetainedIndexMap[_oldRetainedOrder[i]] = i;
+
+            _newRetainedIndices.Clear();
+            for (var i = 0; i < newItems.Count; i++)
+            {
+                if (_oldIndexMap.ContainsKey(newItems[i]))
+                    _newRetainedIndices.Add(i);
+            }
 
             for (var i = 0; i < _newRetainedOrder.Count; i++)
             {
@@ -107,11 +110,12 @@ internal sealed class CollectionDiffBuilder
                     // Moves read their fromIndex from the list after all removes and inserts, where
                     // the n-th old retained item sits in the n-th non-inserted slot. Look the slot up
                     // by position, not by subject, because a subject can be listed more than once.
-                    // A subject listed more often in the old list than in the new one can have no
-                    // such slot, which the bounds check guards.
+                    // When a subject is listed more often in the old list than in the new one, the
+                    // extra occurrences sit after the last new index, because the applier does not
+                    // trim the list to Count.
                     var fromIndex = oldCommonIndex < _newRetainedIndices.Count
                         ? _newRetainedIndices[oldCommonIndex]
-                        : oldCommonIndex;
+                        : oldCommonIndex + newItems.Count - _newRetainedIndices.Count;
 
                     reorderedItems ??= [];
                     reorderedItems.Add((fromIndex, _newIndexMap[item], item));

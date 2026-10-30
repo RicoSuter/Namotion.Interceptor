@@ -210,7 +210,7 @@ Apply structural changes in two sub-phases:
 - All moves reference the state **after** removes/inserts have been applied
 - Multiple moves are applied simultaneously (each move reads from the snapshot)
 - Move `fromIndex` is the item's index after all removes and inserts (intermediate index, not original)
-- One move is sent for each retained item whose position relative to the other retained items changes
+- One move is sent for each retained item whose index among the retained items changes
 - A diff update does not reliably reproduce a collection that holds the same subject more than once
 
 | Operation | Index semantics |
@@ -245,7 +245,7 @@ Transform `[A, B]` → `[B, X, A]` (insert X, swap A and B):
 ```json
 {
   "operations": [
-    { "action": "Insert", "index": 1, "id": "X" },
+    { "action": "Insert", "index": 1, "id": "2" },
     { "action": "Move", "fromIndex": 2, "index": 0 },
     { "action": "Move", "fromIndex": 0, "index": 2 }
   ]
