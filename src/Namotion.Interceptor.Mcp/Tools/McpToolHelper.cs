@@ -215,7 +215,7 @@ internal static class McpToolHelper
     /// <summary>
     /// The path of the subject with the configured prefix, or null when it has none: the root's path is the prefix, and
     /// any other subject has one when the property holding it is one <paramref name="pathProvider"/> includes. The
-    /// properties above it are written whether the provider includes them or not, as get_property and browse resolve.
+    /// properties above it are in the path whether the provider includes them or not, as get_property and browse resolve.
     /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,

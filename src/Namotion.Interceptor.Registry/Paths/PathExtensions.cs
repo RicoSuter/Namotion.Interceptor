@@ -225,8 +225,8 @@ public static class PathExtensions
 
     /// <summary>
     /// Resolves one segment on a subject: the included property it names (see <see cref="IsIncluded"/>) and, when the
-    /// segment carries a key (an index, or an [InlinePaths] key written as the segment itself), the typed key and,
-    /// when requested, the subject stored at it.
+    /// segment carries a key (an index, or an [InlinePaths] key that is the segment itself), the typed key and, when
+    /// requested, the subject stored at it.
     /// </summary>
     private static bool TryResolveSegment(
         PathProviderBase pathProvider,
@@ -366,16 +366,15 @@ public static class PathExtensions
     /// the path to a child subject held at a specific index within this property.</param>
     /// <returns>The path, or null when the property or a property holding it up to the root is excluded by <see cref="PathProviderBase.IsPropertyIncluded"/> (for an attribute, also when the property it belongs to is, recursively), a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
-    /// A written path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> with the
+    /// A built path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> with the
     /// same provider resolves it back to the same property when the provider resolves the segments it gives. When a
     /// subject on the way has several parents and <paramref name="rootSubject"/> is given, the path is the first path,
     /// in parent order, that reaches the root through properties the provider includes; without a root it follows
-    /// the first parent of each subject. Keys
-    /// are written with their invariant text, quoted when the text is empty, starts with <c>'</c> or contains
-    /// <see cref="PathProviderBase.IndexClose"/>. A written path resolves back to the same entry for collection
-    /// positions and string, integer, <see cref="Guid"/> and enum keys. For other key types it does when the key's
-    /// text is unique within its dictionary, otherwise the first entry with that text wins. A segment that contains
-    /// the separator is written as is and does not resolve back.
+    /// the first parent of each subject. Keys are formatted with their invariant text, quoted when the text is empty,
+    /// starts with <c>'</c> or contains <see cref="PathProviderBase.IndexClose"/>. A built path resolves back to the
+    /// same entry for collection positions and string, integer, <see cref="Guid"/> and enum keys. For other key types
+    /// it does when the key's text is unique within its dictionary, otherwise the first entry with that text wins. A
+    /// segment that contains the separator is kept as is and does not resolve back.
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {
@@ -399,7 +398,7 @@ public static class PathExtensions
             {
                 var (frameProperty, index) = frames[i];
 
-                // [InlinePaths] frames emit just the key where the reader resolves it back.
+                // [InlinePaths] frames emit just the key where it resolves back as that key.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         frameProperty.Subject.GetType(), frameProperty.Name))

@@ -604,7 +604,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenHoldingPropertyIsExcludedByProvider_ThenNoPathIsWrittenOrResolvedThroughIt()
+    public void WhenHoldingPropertyIsExcludedByProvider_ThenNoPathIsBuiltOrResolvedThroughIt()
     {
         // Arrange
         var person = CreateTestGraph();

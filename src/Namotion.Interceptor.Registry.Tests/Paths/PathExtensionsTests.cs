@@ -880,7 +880,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenHoldingPropertyIsExcluded_ThenNoPathIsWrittenThroughIt()
+    public void WhenHoldingPropertyIsExcluded_ThenNoPathIsBuiltThroughIt()
     {
         // Arrange
         var context = CreateContext();
@@ -990,7 +990,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenLeafIsExcluded_ThenItIsNeitherWrittenNorResolved()
+    public void WhenLeafIsExcluded_ThenItIsNeitherBuiltNorResolved()
     {
         // Arrange
         var context = CreateContext();
@@ -1007,7 +1007,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenPropertyIsExcluded_ThenItsAttributesAreNeitherWrittenNorResolved()
+    public void WhenPropertyIsExcluded_ThenItsAttributesAreNeitherBuiltNorResolved()
     {
         // Arrange
         var context = CreateContext();
@@ -1034,7 +1034,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenAttributeIsExcluded_ThenItsAttributeIsNeitherWrittenNorResolvedButItsPropertyIs()
+    public void WhenAttributeIsExcluded_ThenItsAttributeIsNeitherBuiltNorResolvedButItsPropertyIs()
     {
         // Arrange
         var context = CreateContext();
@@ -1056,7 +1056,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenPropertyAndItsAttributesAreIncluded_ThenAttributePathsAreWrittenAndResolved()
+    public void WhenPropertyAndItsAttributesAreIncluded_ThenAttributePathsAreBuiltAndResolved()
     {
         // Arrange
         var context = CreateContext();
@@ -1080,7 +1080,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenAttributeHoldsSubjectBelowExcludedProperty_ThenNoPathIsWrittenOrResolvedThroughIt()
+    public void WhenAttributeHoldsSubjectBelowExcludedProperty_ThenNoPathIsBuiltOrResolvedThroughIt()
     {
         // Arrange
         var context = CreateContext();
@@ -1123,7 +1123,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenInlinePathsDictionaryIsExcluded_ThenItsKeysAreNeitherWrittenNorResolved()
+    public void WhenInlinePathsDictionaryIsExcluded_ThenItsKeysAreNeitherBuiltNorResolved()
     {
         // Arrange
         var context = CreateContext();
@@ -1156,7 +1156,7 @@ public class PathExtensionsTests
     [InlineData(nameof(Person.Children))]
     [InlineData(nameof(Person.FirstName))]
     [InlineData(nameof(Person.FirstName_MaxLength))]
-    public void WhenPathIsWrittenWithAProvider_ThenItResolvesBackToTheSamePropertyAndPassesNoExcludedProperty(string? excludedPropertyName)
+    public void WhenPathIsBuiltWithAProvider_ThenItResolvesBackToTheSamePropertyAndPassesNoExcludedProperty(string? excludedPropertyName)
     {
         // Arrange
         var context = CreateContext();

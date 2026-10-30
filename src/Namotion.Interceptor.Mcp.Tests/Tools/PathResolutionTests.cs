@@ -39,7 +39,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public async Task WhenSubjectIsHeldBelowAPropertyTheProviderExcludes_ThenToolsStillWriteAndResolveItsPath()
+    public async Task WhenSubjectIsHeldBelowAPropertyTheProviderExcludes_ThenToolsStillBuildAndResolveItsPath()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
