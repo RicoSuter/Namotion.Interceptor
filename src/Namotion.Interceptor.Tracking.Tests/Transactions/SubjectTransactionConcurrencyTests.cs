@@ -8,6 +8,7 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
@@ -44,34 +45,11 @@ internal sealed class DisposalCaptureGateValue(
 
 public class SubjectTransactionConcurrencyTests
 {
-    private static async Task RunWithoutAsyncLocalFlowAsync(Action action)
-    {
-        Task task;
-        var flowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            task = Task.Run(action);
-        }
-        finally
-        {
-            flowControl.Undo();
-        }
-
-        await task;
-    }
-
-    private static IInterceptorSubjectContext CreateTransactionContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
     [Fact]
     public async Task WhenCommittingFromDifferentAsyncFlow_ThenThrows()
     {
         // Arrange: begin in a separate flow so its AsyncLocal current-transaction does not reach here.
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var transaction = await Task.Run(async () =>
             await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort));
 
@@ -92,7 +70,7 @@ public class SubjectTransactionConcurrencyTests
     public async Task WhenDisposingFromDifferentAsyncFlow_ThenOtherTransactionSlotIsNotCleared()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         // transaction1 is begun in a separate flow, so its SetCurrent does not reach this flow.
         // Optimistic locking means neither transaction takes the lock at begin, so they can coexist.
@@ -117,7 +95,7 @@ public class SubjectTransactionConcurrencyTests
         // Arrange: capture the flow while a transaction is current, then dispose that transaction. The
         // captured flow keeps pointing at the disposed transaction, which is what any thread started
         // inside a transaction sees for its whole life (an Rx EventLoopScheduler worker, for example).
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Old" };
 
         var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -136,7 +114,7 @@ public class SubjectTransactionConcurrencyTests
         // Assert: the write went straight to the model instead of into the pooled dictionary. Read it
         // from a flow with no ambient transaction so no pending value can mask the stored value.
         string? modelFirstName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("New", modelFirstName);
         Assert.DoesNotContain(openTransaction.GetPendingChanges(), change => change.Property.Name == nameof(Person.FirstName));
 
@@ -151,7 +129,7 @@ public class SubjectTransactionConcurrencyTests
         // Arrange: same frozen-flow setup as the write test above. The write reaches the model, so its
         // derived cascade has to run with it: the disposed transaction has no commit left to replay it on,
         // so suppressing the cascade would drop the recalculation forever.
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Old", LastName = "Doe" };
 
         var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -180,7 +158,7 @@ public class SubjectTransactionConcurrencyTests
     public async Task WhenAmbientTransactionIsOpen_ThenWriteIsCapturedInsteadOfAppliedToModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Old" };
 
         // Act
@@ -193,7 +171,7 @@ public class SubjectTransactionConcurrencyTests
         Assert.Equal("New", pendingChange.GetNewValue<string?>());
 
         string? modelFirstName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("Old", modelFirstName);
     }
 
@@ -204,7 +182,7 @@ public class SubjectTransactionConcurrencyTests
         // that transaction. The captured flow keeps pointing at the disposed transaction, which is what any
         // thread started inside a transaction sees for its whole life (an Rx EventLoopScheduler worker,
         // for example).
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Model" };
 
         var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -232,7 +210,7 @@ public class SubjectTransactionConcurrencyTests
             new PropertyReference(person, nameof(Person.FirstName)), out _));
 
         string? modelFirstName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("Model", modelFirstName);
 
         // The open transaction still masks reads in its own flow.
@@ -246,7 +224,7 @@ public class SubjectTransactionConcurrencyTests
         // there so Dispose deterministically wins after the interceptor's lock-free ambient-state check.
         // Regression mutation: throwing instead of returning false from TryCaptureChange when disposal wins
         // lets ObjectDisposedException escape this public write path instead of falling through to the model.
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new DisposalCaptureGateSubject(context)
         {
             Value = new DisposalCaptureGateValue("Model")
@@ -309,7 +287,7 @@ public class SubjectTransactionConcurrencyTests
         // Arrange: freeze a flow while a transaction is current, then dispose that transaction from the flow
         // that owns it. Dispose clears the ambient slot only for the disposing flow, so the frozen flow keeps
         // pointing at the disposed transaction for the rest of its life.
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         var frozenFlow = ExecutionContext.Capture()
             ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
@@ -346,59 +324,47 @@ public class SubjectTransactionConcurrencyTests
         }
     }
 
-    [Fact]
-    public async Task WhenCommitIsParkedOnTheTransactionLockAndTheTransactionIsDisposed_ThenTheCommitCompletesWithoutFailing()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task WhenCommitIsParkedOnTheTransactionLockAndTheTransactionIsDisposed_ThenCommitThrowsObjectDisposed(
+        bool withHandler, bool withWriter)
     {
-        // Arrange: an optimistic commit parks acquiring the per-context transaction lock. A dispose on
-        // another flow then releases the pending-changes buffer while the commit is still parked, so the
-        // commit resumes with a null buffer. The null tolerance in StartCommitAndSnapshotChanges and
-        // FinishCommit is what keeps that from being a NullReferenceException; it is load-bearing, not
-        // defensive.
-        var context = CreateTransactionContext();
-        var person = new Person(context) { LastName = "Model" };
-
-        var lockHolder = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        SubjectTransaction? parkedTransaction = null;
-        Task? parkedCommit = null;
-        var commitParked = new ManualResetEventSlim();
-
-        // Suppressed so the parked transaction does not inherit lockHolder as its ambient transaction.
-        var flowControl = ExecutionContext.SuppressFlow();
-        Task starter;
-        try
+        // Arrange
+        var context = CreateContext();
+        var handler = new RecordingHandler();
+        if (withHandler)
         {
-            starter = Task.Run(async () =>
-            {
-                parkedTransaction = await context.BeginTransactionAsync(
-                    TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
-                person.LastName = "Pending";
-
-                // CommitAsync has already parked on the lock by the time it returns its incomplete task.
-                parkedCommit = parkedTransaction.CommitAsync(CancellationToken.None).AsTask();
-                commitParked.Set();
-                await parkedCommit;
-            });
-        }
-        finally
-        {
-            flowControl.Undo();
+            context.AddService<ITransactionHandler>(handler);
         }
 
-        Assert.True(commitParked.Wait(TimeSpan.FromSeconds(10)), "commit did not reach the transaction lock");
+        var writer = new CountingTransactionWriter();
+        if (withWriter)
+        {
+            context.AddService<ITransactionWriter>(writer);
+        }
+
+        var person = new Person(context) { FirstName = "Ann" };
+        var lockHolder = await BeginInOwnFlowAsync(context);
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, TransactionLocking.Optimistic);
+        person.FirstName = "Bob";
+        var commit = transaction.CommitAsync(CancellationToken.None).AsTask();
+        Assert.False(commit.IsCompleted);
 
         // Act
-        parkedTransaction!.Dispose();
-        lockHolder.Dispose();
-        await starter.WaitAsync(TimeSpan.FromSeconds(10));
+        RunOutsideTransactionFlow(transaction.Dispose);
+        RunOutsideTransactionFlow(lockHolder.Dispose);
 
         // Assert
-        Assert.True(parkedCommit!.IsCompletedSuccessfully);
-        Assert.Empty(parkedTransaction.GetPendingChanges());
-
-        string? modelLastName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelLastName = person.LastName);
-        Assert.Equal("Model", modelLastName);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => commit);
+        Assert.Empty(handler.Stages);
+        Assert.Equal(0, writer.WriteCalls);
+        string? landedFirstName = null;
+        RunOutsideTransactionFlow(() => landedFirstName = person.FirstName);
+        Assert.Equal("Ann", landedFirstName);
     }
 
     [Fact]
@@ -406,7 +372,7 @@ public class SubjectTransactionConcurrencyTests
     {
         // Arrange
         var writer = new ControllableTransactionWriter();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { LastName = "Model" };
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -418,7 +384,8 @@ public class SubjectTransactionConcurrencyTests
             DateTimeOffset.UnixEpoch,
             receivedTimestamp: null,
             currentValue: "Model",
-            newValue: "AfterDispose");
+            newValue: "AfterDispose",
+            restoresLandedValue: false);
 
         try
         {
@@ -444,7 +411,7 @@ public class SubjectTransactionConcurrencyTests
     {
         // Arrange
         var writer = new ControllableTransactionWriter();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.AddService<ITransactionWriter>(writer);
         var person = new Person(context) { FirstName = "Model" };
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -462,7 +429,7 @@ public class SubjectTransactionConcurrencyTests
 
             // Assert: observe the landed model outside any ambient transaction before replay is released.
             string? intermediateModelValue = null;
-            await RunWithoutAsyncLocalFlowAsync(() => intermediateModelValue = person.FirstName);
+            await RunOnThreadPoolWithoutFlowAsync(() => intermediateModelValue = person.FirstName);
             Assert.Equal("RawAfterDispose", intermediateModelValue);
         }
         finally
@@ -481,7 +448,7 @@ public class SubjectTransactionConcurrencyTests
     {
         // Arrange
         var writer = new ControllableTransactionWriter();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.AddService<ITransactionWriter>(writer);
         var subject = new TransactionCascadeSubject(context)
         {
@@ -527,7 +494,7 @@ public class SubjectTransactionConcurrencyTests
             string? modelPlain = null;
             string? modelSideEffect = null;
             string? modelDerivedWithSetter = null;
-            await RunWithoutAsyncLocalFlowAsync(() =>
+            await RunOnThreadPoolWithoutFlowAsync(() =>
             {
                 modelPlain = subject.Plain;
                 modelSideEffect = subject.SideEffect;
@@ -563,7 +530,7 @@ public class SubjectTransactionConcurrencyTests
     {
         // Arrange
         var writer = new ControllableTransactionWriter();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.AddService<ITransactionWriter>(writer);
         var subject = new TransactionCascadeSubject(context)
         {
@@ -603,7 +570,7 @@ public class SubjectTransactionConcurrencyTests
             string? modelPlain = null;
             string? modelSideEffect = null;
             string? modelDerivedWithSetter = null;
-            await RunWithoutAsyncLocalFlowAsync(() =>
+            await RunOnThreadPoolWithoutFlowAsync(() =>
             {
                 modelPlain = subject.Plain;
                 modelSideEffect = subject.SideEffect;
@@ -628,7 +595,7 @@ public class SubjectTransactionConcurrencyTests
     public async Task WhenWriterAccessesAmbientPropertyDuringCommit_ThenCommitReportsConcurrentAccess()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context) { Plain = "model" };
         context.AddService<ITransactionWriter>(new PropertyAccessingTransactionWriter(() => _ = subject.Plain));
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -643,6 +610,37 @@ public class SubjectTransactionConcurrencyTests
         Assert.Contains("commit is in progress", error.Message);
         Assert.Equal("model", subject.Plain);
         Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenTwoWriteBacksOfTheLandedValueRace_ThenNoChangeIsCaptured()
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out var handler, writer);
+        var person = new Person(context) { FirstName = "Ann" };
+        using var barrier = new Barrier(2);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        handler.RejectCapture = (property, value) =>
+        {
+            if (property.Name == nameof(Person.FirstName) && Equals(value, "Ann"))
+            {
+                // A timeout fails the write, and with it the test, instead of hanging it.
+                Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(30)));
+            }
+
+            return null;
+        };
+
+        // Act
+        await Task.WhenAll(Task.Run(() => person.FirstName = "Ann"), Task.Run(() => person.FirstName = "Ann"));
+        handler.RejectCapture = null;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(writer.ReceivedPropertyNames);
+        Assert.Equal("Ann", person.FirstName);
     }
 
     private sealed class ControllableTransactionWriter : ITransactionWriter

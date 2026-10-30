@@ -1,0 +1,341 @@
+@using System.Diagnostics.CodeAnalysis
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.JSInterop
+@using MudBlazor
+
+@inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
+
+@implements IAsyncDisposable
+
+@* The Markdown of a block of text in an editor that fills the dialog. A refusal, such as text that changed meanwhile, shows
+   above it and keeps what was typed, and so does a close: Escape and Cancel ask before they discard a change. Create writes
+   a new widget into the text, which the page gets with the save. So does a navigation, which closes the dialog. *@
+<NavigationLock OnBeforeInternalNavigation="OnBeforeInternalNavigationAsync" ConfirmExternalNavigation="_isChanged" />
+<MudDialog Class="markdown-text-dialog" ContentClass="markdown-text-dialog-content" DefaultFocus="DefaultFocus.None">
+    <DialogContent>
+        @* The dialog reports no Escape to its OnKeyDown, so its module watches the dialog for it, see watchEscape. The editor
+           stops a key that it uses, such as an Escape that closes its suggestions. *@
+        <div class="markdown-text-dialog-body" @ref="_body">
+            @if (_refusal is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="markdown-text-refusal">@_refusal</MudAlert>
+            }
+
+            <div class="markdown-text-editor" data-testid="markdown-text-input">
+                <MarkdownSourceEditor @ref="_editor"
+                                      EditorId="markdown-text-editor"
+                                      CssClass="markdown-text-editor-host"
+                                      InitialText="@Text"
+                                      IsDarkMode="IsDarkMode"
+                                      HasMinimap="false"
+                                      FocusesEnd="true"
+                                      ReservedNames="ReservedNames"
+                                      TextChanged="OnTextChanged"
+                                      SaveRequested="SaveAsync"/>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton StartIcon="@Icons.Material.Filled.Add" Class="mr-auto" Disabled="_isSaving" OnClick="CreateAsync" data-testid="markdown-text-create">Create</MudButton>
+        <MudButton Disabled="_isSaving" OnClick="CancelAsync" data-testid="markdown-text-cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_isSaving" OnClick="SaveAsync" data-testid="markdown-text-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    /* As high as MudBlazor lets a dialog be, so that the editor gets what the title, a refusal and the actions leave. */
+    .mud-dialog.markdown-text-dialog {
+        height: calc(100vh - var(--mud-appbar-height));
+        height: calc(100dvh - var(--mud-appbar-height));
+    }
+
+    .markdown-text-dialog .markdown-text-dialog-content {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .markdown-text-dialog-body {
+        display: contents;
+    }
+
+    .markdown-text-editor {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 120px;
+    }
+
+    .markdown-text-editor-host {
+        position: absolute;
+        inset: 0;
+    }
+</style>
+
+@code {
+    private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownTextDialog.razor.js";
+
+    [CascadingParameter]
+    private IMudDialogInstance Dialog { get; set; } = default!;
+
+    /// <summary>The Markdown that the editor starts with.</summary>
+    [Parameter]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Whether the editor shows in the colors of the dark mode.</summary>
+    [Parameter]
+    public bool IsDarkMode { get; set; } = true;
+
+    /// <summary>The names that the blocks of the page use, which a widget that Create writes cannot take.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string> ReservedNames { get; set; } = [];
+
+    /// <summary>Saves the text and returns why it was not saved, or null when it was.</summary>
+    [Parameter]
+    public Func<string, Task<string?>> Save { get; set; } = default!;
+
+    private MarkdownSourceEditor? _editor;
+    private ElementReference _body;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<MarkdownTextDialog>? _reference;
+    private IJSObjectReference? _escapeWatch;
+    private string? _refusal;
+    private bool _isSaving;
+    private bool _isCanceling;
+    private bool _isCreating;
+    private bool _isDisposed;
+
+    // Whether the editor has another text than it started with, as its last change told, for the prompt of the browser.
+    private bool _isChanged;
+
+    // Whether a save, a cancel or a create runs, or the editor is not there to take one.
+    [MemberNotNullWhen(false, nameof(_editor))]
+    private bool IsBusy => _isSaving || _isCanceling || _isCreating || _editor is null || _isDisposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await WatchEscapeAsync();
+        }
+    }
+
+    // A dispose while the watch starts would miss the watch, the module and the reference, so they are let go here then.
+    private async Task WatchEscapeAsync()
+    {
+        var reference = DotNetObjectReference.Create(this);
+        IJSObjectReference? module = null;
+        IJSObjectReference escapeWatch;
+        try
+        {
+            module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            escapeWatch = await module.InvokeAsync<IJSObjectReference>("watchEscape", _body, reference);
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            // Without the watch, Escape does nothing and Cancel still asks before it discards a change.
+            reference.Dispose();
+            await DisposeModuleAsync(module);
+            return;
+        }
+
+        if (_isDisposed)
+        {
+            await escapeWatch.InvokeVoidAsync("dispose");
+            await escapeWatch.DisposeAsync();
+            await module.DisposeAsync();
+            reference.Dispose();
+            return;
+        }
+
+        _module = module;
+        _reference = reference;
+        _escapeWatch = escapeWatch;
+    }
+
+    private static async Task DisposeModuleAsync(IJSObjectReference? module)
+    {
+        if (module is null)
+            return;
+
+        try
+        {
+            await module.DisposeAsync();
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            // The circuit is gone, and the module with it.
+        }
+    }
+
+    /// <summary>Called by the module of the dialog for an Escape in the dialog that the editor did not take.</summary>
+    [JSInvokable]
+    public async Task CancelByEscapeAsync()
+    {
+        try
+        {
+            await CancelAsync();
+        }
+        catch (Exception exception)
+        {
+            await DispatchExceptionAsync(exception);
+        }
+    }
+
+    // Ignored while a save runs, so that the write is never dropped without the dialog showing its outcome.
+    private async Task CancelAsync()
+    {
+        if (IsBusy)
+            return;
+
+        _isCanceling = true;
+        try
+        {
+            // Null when the editor is not there yet, and nothing was typed, or is gone, and with it what was typed.
+            var text = await _editor.GetTextAsync();
+            if (_isDisposed)
+                return;
+
+            if (text is null || IsUnchanged(text) ||
+                await DialogService.ShowMessageBoxAsync("Discard changes", "Discard your changes?", yesText: "Discard", cancelText: "Keep editing") == true)
+            {
+                Dialog.Cancel();
+            }
+        }
+        finally
+        {
+            _isCanceling = false;
+        }
+    }
+
+    // Renders only when the state flips, as the editor raises a change for every typed character.
+    private void OnTextChanged(string text)
+    {
+        var isChanged = !IsUnchanged(text);
+        if (isChanged != _isChanged)
+        {
+            _isChanged = isChanged;
+            StateHasChanged();
+        }
+    }
+
+    // The navigation closes the dialog, unless the user keeps the changed text. Reads the editor, which the last change
+    // reached the server from with a delay.
+    private async Task OnBeforeInternalNavigationAsync(LocationChangingContext context)
+    {
+        if (_isDisposed || _editor is null)
+            return;
+
+        var text = await _editor.GetTextAsync();
+        if (_isDisposed)
+            return;
+
+        if (text is not null && !IsUnchanged(text) &&
+            await DialogService.ShowMessageBoxAsync("Discard changes", "Discard your changes?", yesText: "Discard", cancelText: "Keep editing") != true)
+        {
+            context.PreventNavigation();
+            return;
+        }
+
+        Dialog.Cancel();
+    }
+
+    private bool IsUnchanged(string text) =>
+        string.Equals(text.Replace("\r\n", "\n"), Text.Replace("\r\n", "\n"), StringComparison.Ordinal);
+
+    private async Task CreateAsync()
+    {
+        if (IsBusy)
+            return;
+
+        _isCreating = true;
+        try
+        {
+            await _editor.CreateAsync();
+        }
+        finally
+        {
+            _isCreating = false;
+        }
+    }
+
+    // Also raised by the editor for Ctrl+S, or Cmd+S on a Mac, which renders the dialog after it as a click does.
+    private async Task SaveAsync()
+    {
+        if (IsBusy)
+            return;
+
+        _isSaving = true;
+        try
+        {
+            // Null when Escape or Cancel closed the dialog and disposed the editor while it was read, so nothing is saved.
+            if (await _editor.GetTextAsync() is not { } text || _isDisposed)
+                return;
+
+            _refusal = await Save(text);
+            if (_refusal is null)
+            {
+                Dialog.Close(DialogResult.Ok(true));
+            }
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        try
+        {
+            if (_escapeWatch is not null)
+            {
+                await _escapeWatch.InvokeVoidAsync("dispose");
+                await _escapeWatch.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (exception is JSException or OperationCanceledException or JSDisconnectedException)
+        {
+            // The circuit is gone, and there is nothing to dispose.
+        }
+        finally
+        {
+            _reference?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Shows the dialog until the text is saved or the dialog is canceled. The arguments are those of the parameters of the
+    /// same names.
+    /// </summary>
+    public static async Task ShowAsync(
+        IDialogService dialogService,
+        string title,
+        string text,
+        bool isDarkMode,
+        IReadOnlyCollection<string> reservedNames,
+        Func<string, Task<string?>> save)
+    {
+        var parameters = new DialogParameters<MarkdownTextDialog>
+        {
+            { dialog => dialog.Text, text },
+            { dialog => dialog.IsDarkMode, isDarkMode },
+            { dialog => dialog.ReservedNames, reservedNames },
+            { dialog => dialog.Save, save }
+        };
+        // Escape and a navigation are handled by the dialog, which asks before it discards a change, and a click beside the
+        // dialog does nothing.
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = false, BackdropClick = false, CloseOnNavigation = false
+        };
+        var reference = await dialogService.ShowAsync<MarkdownTextDialog>(title, parameters, options);
+        await reference.Result;
+    }
+}

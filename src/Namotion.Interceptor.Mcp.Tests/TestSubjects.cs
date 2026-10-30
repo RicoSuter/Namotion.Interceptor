@@ -121,3 +121,21 @@ public partial class TestDeviceList
         Devices = [];
     }
 }
+
+/// <summary>
+/// A subject equal to every other instance of its type, so only a comparison by reference tells two apart.
+/// </summary>
+[InterceptorSubject]
+public partial class TestEqualItem
+{
+    public partial string Name { get; set; }
+
+    public TestEqualItem()
+    {
+        Name = string.Empty;
+    }
+
+    public override bool Equals(object? obj) => obj is TestEqualItem;
+
+    public override int GetHashCode() => 0;
+}

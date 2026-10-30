@@ -1,10 +1,10 @@
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownWidgetBlockTests
 {
     private const string LeafType = "HomeBlaze.Storage.Tests.Pages.TestLeaf";
@@ -47,6 +47,39 @@ public class MarkdownWidgetBlockTests
 
         // Assert
         Assert.IsType<TestLeaf>(page.Children["TestLeaf_0"]);
+    }
+
+    [Fact]
+    public async Task WhenTextIsAddedBeforeAnUnnamedBlock_ThenTheReloadKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType} Name=a\n::\n");
+        var leaf = page.Children["TestLeaf_0"];
+
+        // Act
+        await fixture.UpdatePageAsync(page, $"# Title\n\nIntro with {{{{ missing/Path }}}}.\n\n:: {LeafType} Name=a\n::\n");
+
+        // Assert
+        Assert.Same(leaf, page.Children["TestLeaf_0"]);
+    }
+
+    [Fact]
+    public async Task WhenTextIsAddedBeforeAnUnnamedWidgetInsideABlock_ThenTheReloadKeepsItsSubject()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: {TestTypeNames.Namespace}.TestPanel#panel\n::: {LeafType} Name=a\n:::\n::\n");
+        var fragment = (MarkdownFragment)((TestPanel)page.Children["panel"]).Content!;
+        var leaf = fragment.Children["TestLeaf_0"];
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page, $":: {TestTypeNames.Namespace}.TestPanel#panel\nText before the leaf.\n\n::: {LeafType} Name=a\n:::\n::\n");
+
+        // Assert
+        Assert.Same(leaf, ((MarkdownFragment)((TestPanel)page.Children["panel"]).Content!).Children["TestLeaf_0"]);
     }
 
     [Fact]
@@ -349,7 +382,7 @@ public class MarkdownWidgetBlockTests
     }
 
     [Theory]
-    [InlineData(":: " + LeafType + "#TestLeaf_2\n::\n\n:: " + LeafType + "\n::")]
+    [InlineData(":: " + LeafType + "#TestLeaf_1\n::\n\n:: " + LeafType + "\n::")]
     [InlineData(":: " + LeafType + "\n::\n\n:: " + LeafType + "#TestLeaf_0\n::")]
     public async Task WhenIdEqualsAPositionalKey_ThenTheSecondBlockIsAnErrorBox(string content)
     {
@@ -597,5 +630,50 @@ public class MarkdownWidgetBlockTests
         var html = MarkdownPageFixture.Html(page.Children);
         Assert.Contains($"<a href=\"{expectedUrl}\">fragment only</a>", html);
         Assert.Contains($"<a href=\"{expectedUrl}\">with page name</a>", html);
+    }
+
+    [Fact]
+    public async Task WhenAPageIsRead_ThenEveryTopLevelBlockOfTextStartsAnHtmlSegmentOfItsOwn()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", $"# Title\n\nText {{{{ missing/Path }}}}.\n\n<div>raw</div>\n\n:: {LeafType} Name=a\n::\n\nAfter.\n");
+
+        // Assert: the raw HTML is a text block of its own that cannot be edited, and the text around it can.
+        var starts = page.Children.Values.OfType<HtmlSegment>()
+            .Select(segment => segment.Start)
+            .Where(start => start != HtmlSegmentStart.None);
+        Assert.Equal([HtmlSegmentStart.Text, HtmlSegmentStart.Text, HtmlSegmentStart.Source, HtmlSegmentStart.Text], starts);
+    }
+
+    [Fact]
+    public async Task WhenAPageHasContentThatCannotBeEditedInline_ThenWhatShowsSomethingStartsASourceSegmentNamedByItsKind()
+    {
+        // Arrange: a closing line that closes no block is an error block of one line.
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md",
+            "Text[^1].\n\n<!-- note -->\n\n<div>raw</div>\n\n<script>let a;</script>\n\n:: {.ab}\nStyled.\n::\n\n::\n\n[^1]: The footnote.\n");
+
+        // Assert
+        var starts = page.Children.Values.OfType<HtmlSegment>()
+            .Where(segment => segment.Start != HtmlSegmentStart.None)
+            .Select(segment => (segment.Start, segment.Kind));
+        Assert.Equal(
+            [
+                (HtmlSegmentStart.Text, null),
+                (HtmlSegmentStart.Other, "HTML"),
+                (HtmlSegmentStart.Source, "HTML"),
+                (HtmlSegmentStart.Other, "HTML"),
+                (HtmlSegmentStart.Source, "Style"),
+                (HtmlSegmentStart.Source, "Error"),
+                (HtmlSegmentStart.Source, "Footnotes")
+            ],
+            starts);
     }
 }

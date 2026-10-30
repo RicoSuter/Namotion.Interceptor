@@ -193,4 +193,6 @@ public class LoggingInterceptor : IWriteInterceptor
 }
 ```
 
+An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]` and transform idempotently, see [Edge Cases and Limitations](tracking-transactions.md#edge-cases-and-limitations).
+
 The pipeline is compiled per context and property type and cached. It is rebuilt when the context's services or fallback contexts change.
