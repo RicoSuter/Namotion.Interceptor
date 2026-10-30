@@ -56,6 +56,8 @@ var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Conf
 var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
+builder.Services.AddHomeBlazeDataProtection(builder.Configuration);
+
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);

@@ -506,8 +506,8 @@ public sealed class SubjectTransaction : IDisposable
     /// </exception>
     /// <exception cref="SubjectTransactionException">
     /// Thrown when one or more changes failed to commit. A registered <see cref="ITransactionWriter"/>
-    /// that throws instead of reporting failures makes the transaction terminal (it must be disposed,
-    /// not retried) and may leave its sources un-reverted.
+    /// that throws instead of reporting failures, or violates its contract, makes the transaction terminal (it must be
+    /// disposed, not retried) and may leave its sources in an undefined state.
     /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> cancels the wait for the optimistic lock, or when a writer
@@ -557,7 +557,16 @@ public sealed class SubjectTransaction : IDisposable
             var lockTask = AcquireOptimisticLockIfNeededAsync(cancellationToken);
             if (lockTask.IsCompletedSuccessfully)
             {
-                CommitWithoutWriter(lockTask.Result);
+                try
+                {
+                    CommitWithoutWriter(lockTask.Result);
+                }
+                catch (Exception exception)
+                {
+                    // Reported through the task, as on the async paths, so callers see the failure at the await.
+                    return ValueTask.FromException(exception);
+                }
+
                 return default;
             }
 
@@ -647,7 +656,23 @@ public sealed class SubjectTransaction : IDisposable
             using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            var failure = await ReconcileWithWriterAsync(writer, changes, checkOnlyChanges, commitToken).ConfigureAwait(false);
+            SubjectTransactionException? failure;
+            try
+            {
+                failure = await ReconcileWithWriterAsync(writer, changes, checkOnlyChanges, commitToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (!IsCommitCancellation(exception, commitToken))
+            {
+                // The writer ran, so a retry would write the snapshot again. What was applied locally is unknown here.
+                FinishCommit();
+                throw new SubjectTransactionException(
+                    "The transaction writer violated its contract during commit. Sources may be in an undefined " +
+                    "state and the local model may hold new values; the transaction is terminal and must be " +
+                    "disposed, not retried.",
+                    appliedChanges: [],
+                    failedChanges: changes.ToArray(),
+                    errors: [exception]);
+            }
 
             FinishCommit();
 
@@ -679,6 +704,10 @@ public sealed class SubjectTransaction : IDisposable
         {
             writeResult = await writer
                 .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
+
+            // A record struct returned as default carries null lists.
+            writeResult = new SourceWriteResult(
+                writeResult.Written ?? [], writeResult.Failed ?? [], writeResult.Errors ?? [], writeResult.RevertState);
 
             VerifySnapshotIntegrity(capturedProperties, changes.Span);
         }
@@ -890,7 +919,8 @@ public sealed class SubjectTransaction : IDisposable
     {
         try
         {
-            return await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
+            var result = await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
+            return new SourceRevertResult(result.Failed ?? [], result.Errors ?? []);
         }
         catch (Exception exception) when (!propagateTimeout || !IsCommitCancellation(exception, cancellationToken))
         {
