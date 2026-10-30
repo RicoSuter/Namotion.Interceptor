@@ -664,11 +664,9 @@ public class ChangeMergerTests
     }
 
     /// <summary>
-    /// The disposed merger is reachable: <see cref="ChangeQueueProcessor"/> releases the buffer
-    /// once its Dispose wins the flush gate, and the periodic flush task can outlive that and tick
-    /// again on whatever was enqueued in between. Throwing there escapes the flush, kills the periodic
-    /// loop for good and leaves the queue growing unbounded, so the guards are load-bearing rather
-    /// than defensive tidiness, and nothing else exercises them.
+    /// <see cref="ChangeQueueProcessor"/> disposes its merger only once no flush can run, so these guards
+    /// are a second line of defense: a merge or reset that threw after disposal would escape the flush and
+    /// lose its batch, and nothing else exercises them.
     /// </summary>
     [Fact]
     public void WhenDisposed_ThenMergeIsEmptyAndResetIsANoOp()

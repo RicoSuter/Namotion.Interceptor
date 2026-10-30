@@ -204,12 +204,8 @@ public class OutboundDropCountingTests
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            person.LastName = "probe" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The connected processor did not start buffering the warmup write.");
+        await WaitForOutboundChangeQueueRegistrationAsync(source);
+        person.LastName = "warmup";
         await warmupWritten.Task.WaitAsync(TestTimeout);
         await AsyncTestHelpers.WaitUntilAsync(
             () => source.Diagnostics.OutboundChanges.Depth == 0,
@@ -317,18 +313,17 @@ public class OutboundDropCountingTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        using var source = CreateSourceWithStalledOutboundQueue(person, context);
+        using var source = CreateSource(person, context);
 
         await source.StartAsync(CancellationToken.None);
         try
         {
             // Act
-            await WaitForBufferedOutboundChangeAsync(source, person);
+            await WaitForOutboundChangeQueueRegistrationAsync(source);
 
             // Assert
             // An unregistered QueueMetrics reports a null capacity too, so the capacity below only
-            // means "registered as unbounded" once the depth has proven the registration is live.
-            Assert.True(source.Diagnostics.OutboundChanges.Depth > 0);
+            // means "registered as unbounded" once the registration is known to be live.
             Assert.Null(source.Diagnostics.OutboundChanges.Capacity);
         }
         finally
@@ -343,17 +338,16 @@ public class OutboundDropCountingTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        using var source = CreateSourceWithStalledOutboundQueue(person, context);
+        using var source = CreateSource(person, context);
 
         await source.StartAsync(CancellationToken.None);
-        await WaitForBufferedOutboundChangeAsync(source, person);
+        await WaitForOutboundChangeQueueRegistrationAsync(source);
 
         // Act
         await source.StopAsync(CancellationToken.None);
 
         // Assert
-        // Nothing drains the processor's queue on the way out, so a non-zero depth here would mean
-        // the depth provider outlived the processor.
+        Assert.False(source.Diagnostics.OutboundChanges.IsRegistered);
         Assert.Equal(0, source.Diagnostics.OutboundChanges.Depth);
     }
 
@@ -396,31 +390,13 @@ public class OutboundDropCountingTests
         }
     }
 
-    /// <summary>
-    /// A source whose buffer time outlasts the test, so a captured change stays in the processor's
-    /// queue instead of being flushed away before the depth can be read.
-    /// </summary>
-    private static TestSubjectSource CreateSourceWithStalledOutboundQueue(
-        Person person, IInterceptorSubjectContext context)
-    {
-        var source = new TestSubjectSource(person, context, NullLogger.Instance,
-            bufferTime: TimeSpan.FromMinutes(5));
+    private static TestSubjectSource CreateSource(Person person, IInterceptorSubjectContext context) =>
+        new(person, context, NullLogger.Instance);
 
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
-        return source;
-    }
-
-    private static Task WaitForBufferedOutboundChangeAsync(TestSubjectSource source, Person person)
-    {
-        // Re-written on each poll because writes captured before the connected phase are parked in
-        // the retry queue rather than buffered by the processor.
-        var probeValue = 0;
-        return AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            person.FirstName = "v" + probeValue++;
-            return source.Diagnostics.OutboundChanges.Depth > 0;
-        }, message: "The outbound change queue never reported a depth.");
-    }
+    private static Task WaitForOutboundChangeQueueRegistrationAsync(TestSubjectSource source) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.OutboundChanges.IsRegistered,
+            message: "The outbound change queue was never registered.");
 
     private static ChangeQueueProcessor CreateBoundedProcessor(
         IInterceptorSubjectContext context,
@@ -460,10 +436,7 @@ public class OutboundDropCountingTests
         person.FirstName_MaxLength_Unit = "c" + tag;
         person.FirstName_MaxLength++;
 
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.DropCount >= OverflowChangeCount - 1,
-            message: "The bounded queue did not overflow.");
-
+        // The buffer time outlasts the test, so the teardown drain is what takes them and overflows.
         await cancellation.CancelAsync();
         try
         {
