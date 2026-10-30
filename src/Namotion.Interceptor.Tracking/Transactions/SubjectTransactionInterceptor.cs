@@ -93,7 +93,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     {
         if (transaction.IsInCommitScope)
         {
-            value = transaction.IsInHandlerCheck && transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
+            // Recorder-active reads are the landed-model view, also when a check recalculates a derived property.
+            value = transaction.IsInHandlerCheck &&
+                !DerivedPropertyChangeHandler.IsRecordingDerivedProperty &&
+                transaction.TryGetCheckedValue<TProperty>(context.Property, out var checkedValue)
                 ? checkedValue
                 : next(ref context);
             return true;

@@ -290,6 +290,62 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenHandlerRecalculatesDerivedPropertyDuringOnCommitting_ThenTrackingUsesLandedValues()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+        Exception? recalculationError = null;
+        handler.OnCommittingAction = (_, _) => recalculationError = Record.Exception(
+            () => new PropertyReference(person, nameof(Person.FullName)).RecalculateDerivedProperty());
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(recalculationError);
+        var fullNameChange = Assert.Single(notifications, change => change.Property.Name == nameof(Person.FullName));
+        Assert.Equal("Ann Lee", fullNameChange.GetOldValue<string>());
+        Assert.Equal("Bob Lee", fullNameChange.GetNewValue<string>());
+    }
+
+    [Fact]
+    public async Task WhenHandlerWriteOutsideTheTransactionRecalculatesDerivedPropertyAndCommitIsRejected_ThenOnlyLandedValuesArePublished()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        var subjectContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new TransactionCascadeSubject(subjectContext)
+        {
+            ProbeEvaluator = cascadeSubject => $"{cascadeSubject.Plain}|{person.FirstName}"
+        };
+
+        // Recalculates the derived property with the evaluator, so it depends on the person.
+        subject.Plain = "before";
+        var notifications = new List<SubjectPropertyChange>();
+        subjectContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+
+        // The subject's context does not route through the transaction interceptor, so the write lands.
+        handler.OnCommittingAction = (_, _) => subject.Plain = "during";
+        handler.RejectCommit = true;
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        var probeChange = Assert.Single(notifications, change => change.Property.Name == nameof(TransactionCascadeSubject.Probe));
+        Assert.Equal("before|Ann", probeChange.GetOldValue<string>());
+        Assert.Equal("during|Ann", probeChange.GetNewValue<string>());
+    }
+
+    [Fact]
     public async Task WhenAnotherThreadReadsDuringOnCommitting_ThenReadThrows()
     {
         // Arrange
@@ -571,6 +627,56 @@ public class SubjectTransactionHandlerTests
         // Assert
         Assert.True(competingCommit!.IsCompletedSuccessfully);
         Assert.Equal("Lee", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenEveryChangeIsWrittenBackWhileOptimisticCommitWaitsForTheLock_ThenHandlersAreNotCalled()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
+        person.FirstName = "Bob";
+        var commitLock = await context.GetService<SubjectTransactionInterceptor>()
+            .AcquireTransactionLockAsync(CancellationToken.None);
+
+        // Act
+        var commit = transaction.CommitAsync(CancellationToken.None);
+
+        // The commit waits for the lock and has not taken its snapshot yet, so the write back removes the change.
+        person.FirstName = "Ann";
+        commitLock.Dispose();
+        await commit;
+
+        // Assert
+        Assert.Equal(0, handler.CommittingCalls);
+        Assert.True(transaction.IsCommitted);
+        Assert.Equal("Ann", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenHandlerReadsDerivedPropertiesDuringOnCommitting_ThenTheyReflectTheTransactionValues()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        string? fullName = null;
+        string? fullNameWithPrefix = null;
+        handler.OnCommittingAction = (_, _) =>
+        {
+            fullName = person.FullName;
+            fullNameWithPrefix = person.FullNameWithPrefix;
+        };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Bob";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Bob Lee", fullName);
+        Assert.Equal("Mr. Bob Lee", fullNameWithPrefix);
     }
 
     [Theory]

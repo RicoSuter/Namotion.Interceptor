@@ -23,7 +23,9 @@ public interface ITransactionWriter
     /// </summary>
     /// <remarks>
     /// Report failures in the result, never throw: a throw returns neither the written set nor the revert state, so
-    /// the transaction fails terminally with nothing reverted. After, and only after, a source accepts a change,
+    /// the transaction fails terminally with nothing reverted. Only the commit timeout's
+    /// <see cref="OperationCanceledException"/> propagates and leaves the transaction retryable. After, and only after,
+    /// a source accepts a change,
     /// replace its slot in <paramref name="changes"/> with the same change marked by the accepting source
     /// (<see cref="SubjectPropertyChange.WithOrigin"/>), so that source's outbound queue recognizes the commit's apply
     /// and revert notifications as echoes. Change only the slot's <see cref="SubjectPropertyChange.Origin"/>, never
@@ -49,8 +51,10 @@ public interface ITransactionWriter
     /// </summary>
     /// <remarks>
     /// Report failures in the result instead of throwing: a throw counts as every requested revert failing, and the
-    /// commit fails terminally. <see cref="SourceRevertResult.Failed"/> must contain only changes from
-    /// <paramref name="written"/>.
+    /// commit fails terminally. Only the commit timeout's <see cref="OperationCanceledException"/> during the revert
+    /// after a source write failure or reported writer error in <see cref="TransactionFailureHandling.Rollback"/> mode
+    /// propagates and leaves the transaction retryable. <see cref="SourceRevertResult.Failed"/> must contain only
+    /// changes from <paramref name="written"/>.
     /// </remarks>
     /// <param name="written">The previously-written changes to revert, as returned in <see cref="SourceWriteResult.Written"/>.</param>
     /// <param name="revertState">The opaque writer-owned state from <see cref="SourceWriteResult.RevertState"/> identifying the original target sources.</param>

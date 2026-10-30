@@ -177,9 +177,10 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Tries to read a pending value for the given property.
-    /// Returns false if the transaction is committing or no pending value exists.
+    /// Tries to read a pending value for the given property. Returns false when the transaction no longer captures or
+    /// no pending value exists.
     /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown while a commit is in progress.</exception>
     internal bool TryGetPendingValue<TProperty>(PropertyReference property, out TProperty value)
     {
         lock (_pendingChangesLock)
@@ -507,6 +508,13 @@ public sealed class SubjectTransaction : IDisposable
     /// Thrown when one or more changes failed to commit. A registered <see cref="ITransactionWriter"/>
     /// that throws instead of reporting failures makes the transaction terminal (it must be disposed,
     /// not retried) and may leave its sources un-reverted.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> cancels the wait for the optimistic lock, or when a writer
+    /// propagates the commit timeout from its source writes or from the revert after a source write failure or reported
+    /// writer error in <see cref="TransactionFailureHandling.Rollback"/> mode. Nothing was applied locally and the
+    /// transaction stays retryable, but a source that accepted a write can keep the new value, see the Failure Table in
+    /// docs/tracking-transactions.md.
     /// </exception>
     /// <exception cref="Exception">
     /// Any exception a transaction handler throws in the commit check propagates unchanged. Nothing was written, and
@@ -1035,6 +1043,13 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             checkedChanges = rentedArray.AsMemory(0, changeCount + checkOnlyCount);
+        }
+
+        // Every change was written back before the snapshot, for example while an optimistic commit waited for the
+        // lock: nothing to check.
+        if (checkedChanges.IsEmpty)
+        {
+            return (checkedChanges, checkedChanges);
         }
 
         var changes = checkedChanges[..changeCount];
