@@ -198,6 +198,41 @@ jobs:
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
+  test-homeblazeapp-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.homeblaze == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      # These start the real application in process against a temporary folder. They are the only coverage
+      # that a mounted folder of files is left untouched, so they must not be left to run only locally.
+      - name: Run desktop app integration tests
+        run: |
+          dotnet test src/HomeBlaze/HomeBlaze.App.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload desktop app integration test coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: cobertura-coverage-homeblazeapp-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
   test-nugetplugins-integration:
     timeout-minutes: 15
     runs-on: ubuntu-latest
