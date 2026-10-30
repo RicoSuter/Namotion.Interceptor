@@ -68,6 +68,32 @@ public class PathResolutionTests
         Assert.Equal("Lamp", browse.GetProperty("result").GetProperty("properties").GetProperty("DeviceName").GetProperty("value").GetString());
     }
 
+    [Fact]
+    public async Task WhenSubjectIsHeldByAnAttributeOfAPropertyTheProviderExcludes_ThenSearchDoesNotListIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var root = new TestAttributedRoom(context)
+        {
+            Name = "Kitchen",
+            Name_Spare = new TestDevice { DeviceName = "Spare" },
+            Device = new TestDevice { DeviceName = "Lamp" }
+        };
+
+        var config = new McpServerConfiguration { PathProvider = new ExcludingPathProvider(nameof(TestAttributedRoom.Name)) };
+        var search = new McpToolFactory(root, config).CreateTools().First(t => t.Name == "search");
+
+        // Act
+        var result = JsonSerializer.SerializeToElement(await search.Handler(
+            JsonSerializer.SerializeToElement(new { format = "json", types = new[] { nameof(TestDevice) } }), CancellationToken.None));
+
+        // Assert
+        var found = Assert.Single(result.GetProperty("results").EnumerateObject());
+        Assert.Equal(nameof(TestAttributedRoom.Device), found.Name);
+    }
+
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
         public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;

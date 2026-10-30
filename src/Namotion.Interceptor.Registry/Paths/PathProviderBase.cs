@@ -29,6 +29,33 @@ public abstract class PathProviderBase : IPathProvider
     /// <inheritdoc />
     public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
+    /// <summary>
+    /// Gets whether paths may pass the property: <see cref="IsPropertyIncluded"/> includes it and, for an attribute,
+    /// the property it belongs to, recursively up to a property that is no attribute. The properties holding its
+    /// subject are not checked.
+    /// </summary>
+    /// <param name="property">The property to check.</param>
+    /// <returns>True when paths may pass the property; otherwise, false.</returns>
+    public bool IsPropertyIncludedInPaths(RegisteredSubjectProperty property)
+        => IsPropertyIncluded(property) && (!property.IsAttribute || IsAttributedPropertyIncluded(property));
+
+    private bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute)
+    {
+        var property = attribute;
+        do
+        {
+            // An attribute whose property is missing belongs to no included property.
+            property = property.Parent.TryGetProperty(property.AttributeMetadata.PropertyName);
+            if (property is null || !IsPropertyIncluded(property))
+            {
+                return false;
+            }
+        }
+        while (property.IsAttribute);
+
+        return true;
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// Default implementation returns the property's BrowseName.
