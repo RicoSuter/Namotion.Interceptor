@@ -4,7 +4,7 @@ Date: 2026-10-31
 
 ## Goal
 
-A multiplayer world inside HomeBlaze. Every browser client of the installation is a player on an infinite tile grid, rendered as a tilted 3D perspective scene with the own player centered on screen. Players walk in 8 directions, look at the tile in front of them and invoke the operations of the object standing there. Players can build and demolish walls and send each other messages.
+A multiplayer world inside HomeBlaze. Every browser client of the installation is a player on an infinite grid of 25 cm tiles, rendered as a tilted 3D perspective scene with the own player centered on screen. Players walk in 8 directions, look at the tile in front of them and invoke the operations of the object standing there. Players can build and demolish walls and send each other messages.
 
 ## Scope
 
@@ -13,8 +13,8 @@ In scope for the first version:
 - One `Game` subject that is a page, with players and objects as children.
 - One player per installation client, bound to that client; only that client moves it.
 - Movement in 8 directions, one tile per step, with blocking.
-- A `GameObject` base subject and one object type, `Wall`.
-- Interaction: the operations of the object on the target tile, and the operations of the game, invoked through the usual operation flow.
+- A `GameObject` base subject with a footprint of several tiles, and one object type, `Wall`.
+- Interaction: the operations of the objects in front of the player, and the operations of the game, invoked through the usual operation flow.
 - Rendering with Babylon.js, animated CC0 character models, 3 tile high walls.
 - Unit and E2E tests.
 
@@ -59,14 +59,19 @@ Game : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
   [Operation] BuildWallAsync([FromServices] GameCaller? caller, CancellationToken)
 
 GameObject (abstract)
-  [Configuration] int X                                    grows to the east
-  [Configuration] int Y                                    grows to the north
+  [Configuration] int X                                    south-west corner of the footprint, grows to the east
+  [Configuration] int Y                                    south-west corner of the footprint, grows to the north
+  abstract int Width                                       footprint in tiles, east to west
+  abstract int Depth                                       footprint in tiles, north to south
+  abstract int Height                                      in tiles, for rendering only
   virtual bool IsBlocking => true
 
 Wall : GameObject
+  [Configuration] Width, Depth, Height                     defaults 4, 1, 10: a segment 1 m long, 25 cm thick, 2.5 m tall
   [Operation] DemolishAsync([FromServices] GameCaller? caller, CancellationToken)
 
 GamePlayer : GameObject
+  Width, Depth, Height => 2, 2, 7                          50 by 50 cm footprint, 175 cm tall
   [Configuration] GameDirection Facing
   [State] string ClientId
   [State] bool IsConnected
@@ -77,7 +82,11 @@ GamePlayer : GameObject
 enum GameDirection { North, NorthEast, East, SouthEast, South, SouthWest, West, NorthWest }
 ```
 
+`Game.StepInterval` is a constant of 180 ms, about 1.4 m/s; it can become configurable later.
+
 Several `Game` subjects may exist; each one is an independent world with its own players.
+
+One tile is 25 cm. An object covers the tiles from X to X + Width - 1 and from Y to Y + Depth - 1. The player's footprint is square, so turning never changes the tiles it covers and diagonal facing needs no special rules; the model is drawn with real 50 by 25 by 175 cm proportions inside it. The generator's support for the configurable footprint of `Wall` against the abstract one of `GameObject` is settled in the implementation plan.
 
 `GamePlayer` derives from `GameObject`, so one occupancy lookup covers players and walls and the renderer treats both as objects. Players and objects still live in separate collections because different parties manage them and only named players persist.
 
@@ -91,9 +100,9 @@ The game page invokes operations with a small `IServiceProvider` wrapper that re
 
 The game runs as a `BackgroundService`. It watches the installation's `Clients` and each client's `IsConnected` and `Name` through property change tracking and reconciles its players on every change:
 
-- A client that is connected or named has a player. A new player spawns at 0,0, or on the nearest free tile found by a spiral search when 0,0 is blocked.
+- A client that is connected or named has a player. A new player spawns with its footprint at 0,0, or at the nearest position where its whole footprint is free, found by a spiral search.
 - A player is removed when its client is no longer in `Clients`, or is unnamed and disconnected.
-- `IsConnected` and `Title` mirror the client. The page renders only connected players. An offline named player keeps its saved position but does not block (`IsBlocking => IsConnected`), so nobody walks into an invisible obstacle. When it reconnects onto a tile that became blocked, it moves to the nearest free tile by the same spiral search as spawning.
+- `IsConnected` and `Title` mirror the client. The page renders only connected players. An offline named player keeps its saved position but does not block (`IsBlocking => IsConnected`), so nobody walks into an invisible obstacle. When it reconnects onto tiles that became blocked, it moves to the nearest free position by the same spiral search as spawning.
 - Renaming a client keeps its id, so its player keeps its position and persists from then on.
 - Forgetting a client turns its tabs into new anonymous clients, so the old player is removed and new ones spawn.
 - Without an installation subject there are no players and the page says so.
@@ -105,33 +114,34 @@ Moving is not an operation. The page calls the internal `Game.TryMove(GamePlayer
 
 Rules, all enforced on the server under the game's lock:
 
+- A step moves the footprint by one tile in the facing direction, 25 cm.
 - Every attempt sets `Facing`, also when the step is blocked. `turnOnly` (Shift) only turns.
-- A step onto a tile with a blocking object, wall or player, is refused.
-- A diagonal step is refused when both orthogonal neighbors it passes are blocked, so players cannot squeeze between corner-touching blockers.
-- A token bucket per player allows 6 steps per second with a burst of 3. A refused step leaves the position unchanged.
+- A step is refused when any tile the footprint newly covers holds a blocking object, wall or player.
+- A diagonal step is refused when both of its orthogonal steps would be refused, so players cannot squeeze between corner-touching blockers.
+- A token bucket per player refills one token per `StepInterval` with a burst of 3. A refused step leaves the position unchanged.
 - A step that would leave the `int` range is refused, checked with `long` arithmetic.
-- The target tile is the position plus the facing vector.
+- The target area is the footprint shifted one tile in the facing direction, minus the footprint itself: the 2 tiles in front when facing straight, the 3 tiles around the front corner when facing diagonally.
 
 ### Index
 
 One lock in `Game` guards moves, building, demolishing and reconciling. The game keeps:
 
-- a chunk index of 16 by 16 tile chunks to the objects in them, for radius queries;
-- a tile to blocking objects lookup, for occupancy.
+- a chunk index of 16 by 16 tile chunks to the objects whose footprint intersects them, for radius queries;
+- a tile to blocking objects lookup covering every tile of each footprint, for occupancy.
 
 The game's own changes update both incrementally, including a player's `IsConnected` change, which changes whether it blocks. Both are rebuilt when `Objects` or `Players` is replaced or an X or Y changes from outside the game, for example through the configuration editor or a reload. Two blocking objects on one tile, possible through hand edits, simply leave the tile blocked.
 
 ## Actions and interaction
 
-- The page shows the operations of the object on the own player's target tile in a panel, numbered 1 to 9 for the keyboard.
+- The page shows the operations of the objects in the own player's target area in a panel, grouped by object and numbered 1 to 9 across all of them for the keyboard.
 - The page shows the operations of the `Game` in a toolbar.
 - All operations are offered, except those whose `ExcludeFrom` includes `ExclusionTarget.UserInterface`.
 - Invoking goes through `OperationInvoker.InvokeAsync`, so parameters open the usual `MethodParameterDialog`, `RequiresConfirmation` opens `MethodConfirmationDialog`, errors and results open their usual dialogs, exactly as in the subject browser.
-- Before invoking, the page checks that the object still stands on the target tile. While a dialog is open the keyboard does not move the player, so the target cannot change during a dialog.
+- Before invoking, the page checks that the object is still in the target area. While a dialog is open the keyboard does not move the player, so the target cannot change during a dialog.
 
 Operations of the first version:
 
-- `Game.BuildWallAsync`: places a new `Wall` with a generated unique name on the actor's target tile. Refuses without actor or when the tile is blocked.
+- `Game.BuildWallAsync`: places a new default `Wall`, 4 by 1 tiles, across the actor's facing direction directly in front of the actor, centered on its footprint. Refuses without actor, when the actor faces diagonally, or when any of the tiles is blocked. The wall gets a generated unique name.
 - `Wall.DemolishAsync`: removes the wall from its parent game, found with `TryGetFirstParent<Game>()`.
 - `GamePlayer.SendMessageAsync`: sends a notification with the title "Message from {sender}" through the player's `HomeBlazeClient.SendNotificationAsync`. Refuses when the player's client is not connected.
 
@@ -152,6 +162,7 @@ Operations of the first version:
 
 - A canvas fills the viewport below the app bar, sized as `AgentPage` does.
 - A MudBlazor overlay above the canvas: a readout at the top left (`X 3 · Y -2 · NE`), a list of nearby players, the target panel at the bottom center and the toolbar at the bottom.
+- The page passes `StepInterval` to JS, which uses it for key repeat and the walk animation speed.
 - The page resolves its player from `CurrentClientConnection.Connection.ClientId` and `Game.Players`, shows "Joining…" until the player exists, and resolves again when the client id changes.
 - A loading indicator shows until Babylon, the models and the first snapshot are ready. A longer first load is acceptable.
 
@@ -160,13 +171,13 @@ Operations of the first version:
 `game.js`, an ES module imported by the page:
 
 - Loads `babylon.js` and `babylonjs.loaders.min.js` from `_content/HomeBlaze.Game/lib/babylonjs/` once, creates the engine on the canvas and disposes everything when the page goes away.
-- Combines held keys (arrow keys and WASD) into one of 8 directions, W plus D giving north east, and repeats about 6 times per second while held. Shift turns only. Each step calls .NET through a `DotNetObjectReference`.
+- Combines held keys (arrow keys and WASD) into one of 8 directions, W plus D giving north east, and repeats once per `StepInterval` while held. Shift turns only. Each step calls .NET through a `DotNetObjectReference`.
 - Ignores keys while focus is in an input field or a MudBlazor dialog is open.
 - Predicts the own player's steps against the objects it knows nearby, moves immediately and snaps back when the server refuses.
 
 ### Synchronization
 
-- First, a snapshot of every object within 100 tiles in each direction of the own player: id, kind, X, Y, facing, title and whether it is the own player.
+- First, a snapshot of every object whose footprint lies within 200 tiles (50 m) in each direction of the own player: id, kind, X, Y, Width, Depth, Height, facing, title and whether it is the own player.
 - Then additions, moves and removals in batches, at most about 20 per second. The page collects changes through property change tracking and computes entering and leaving objects with the chunk index when the own player or an object moves.
 - Change observers run synchronously under the game's lock, so the page's handlers only append to a buffer; calls to JS happen when the batch is flushed.
 - Coordinates travel as absolute integers, which JS numbers hold exactly. JS subtracts the camera position before anything reaches the GPU, so the world renders sharply near `int.MaxValue` despite 32-bit floats on the GPU.
@@ -174,9 +185,9 @@ Operations of the first version:
 
 ### Rendering
 
-- A perspective camera tilted about 50 degrees follows the own player smoothly. Fog fades the world out at about 100 tiles.
-- The ground is one plane around the camera with a repeating per-tile grass texture and faint grid lines. The target tile is outlined.
-- Walls are boxes 1 by 1 tiles wide and 3 tiles tall with a stone texture, drawn as thin instances. Walls that hide the own player from the camera fade to semi-transparent.
+- One world unit is one tile, 25 cm. A perspective camera tilted about 50 degrees follows the own player smoothly. Fog fades the world out at about 200 tiles.
+- The ground is one plane around the camera with a repeating grass texture and faint grid lines every 4 tiles (1 m). The target area is outlined.
+- Walls are boxes of their footprint and height with a stone texture, drawn as thin instances. Walls that hide the own player from the camera fade to semi-transparent.
 - Players are animated glTF characters with idle and walk animations, rotated to their facing, tinted with a color derived from the client id and labeled with their title.
 
 ## Assets
@@ -191,9 +202,9 @@ All assets are vendored under `HomeBlaze.Game/wwwroot/lib/` with their license f
 
 `src/HomeBlaze/HomeBlaze/Data/Files/Demo/Game.json` holds a `Game` with a house built from walls, so the game can be tried right away when running from source:
 
-- A house of about 12 by 9 tiles north of the spawn tile 0,0, so a new player starts outside and looks at it.
-- Outer walls with a door gap facing the spawn tile.
-- Inner walls dividing it into three rooms connected by door gaps.
+- A house of about 40 by 32 tiles (10 by 8 m) north of the spawn position 0,0, so a new player starts outside and looks at it.
+- Outer walls built from wall segments, with a door gap of 4 tiles (1 m) facing the spawn position.
+- Inner walls dividing it into three rooms connected by door gaps of 4 tiles.
 - A few freestanding walls outside, to try blocking and the diagonal squeeze rule.
 
 The seed folder of fresh installations stays unchanged.
@@ -210,7 +221,7 @@ After each implementation task that leaves something runnable, the app is starte
 | Player does not exist yet | The page shows "Joining…" |
 | Several tabs of a named client | All control and show the same player; the token bucket belongs to the player |
 | An anonymous tab reconnects with a new circuit | It is a new client: the old player is removed and a new one spawns |
-| An operation fails or `BuildWallAsync` finds the tile blocked | The operation throws with a clear message; `OperationInvoker` shows its error dialog |
+| An operation fails or `BuildWallAsync` finds a tile blocked | The operation throws with a clear message; `OperationInvoker` shows its error dialog |
 | Writing the configuration fails | A logged warning; the game keeps running |
 | Shutdown | Pending position changes are written in `StopAsync` |
 | Configuration reloaded or edited by hand | Index rebuilt and players reconciled; overlapping blockers leave the tile blocked |
@@ -222,19 +233,20 @@ All tests live in `HomeBlaze.Game.Tests`, named `When<Condition>_Then<ExpectedBe
 
 Unit tests:
 
-- Movement: blocked step refused but turns; diagonal squeeze refused; turn only; token bucket refuses the 4th quick step (`FakeTimeProvider`); steps past `int.MaxValue` and `int.MinValue` refused.
-- Spawning at 0,0 and on the nearest free tile.
+- Movement: blocked step refused but turns; a step blocked by only one tile of the footprint refused; diagonal squeeze refused; turn only; token bucket refuses the 4th quick step within one `StepInterval` (`FakeTimeProvider`); steps past `int.MaxValue` and `int.MinValue` refused.
+- Target area for straight and diagonal facing.
+- Spawning at 0,0 and at the nearest free position for the whole footprint.
 - Reconciling against a real `HomeBlazeInstallation`: anonymous client gets a player that disappears on disconnect; named client's player stays while offline and does not block; a reconnecting player on a blocked tile moves to the nearest free tile; renaming keeps the player; forgetting removes it.
-- Chunk index: radius queries, incremental updates, rebuild after an outside change.
+- Chunk index: radius queries, objects spanning several chunks, incremental updates, rebuild after an outside change.
 - View diffs: objects entering and leaving the radius as the own player or they move.
-- Operations: `BuildWallAsync` builds on the target, refuses a blocked tile and a missing actor; `DemolishAsync` removes the wall; `SendMessageAsync` reaches the client's tabs through a fake `IClientConnectionCallbacks`.
+- Operations: `BuildWallAsync` builds across the facing direction, refuses a blocked tile, diagonal facing and a missing actor; `DemolishAsync` removes the wall; `SendMessageAsync` reaches the client's tabs through a fake `IClientConnectionCallbacks`.
 - Actor resolution and the service provider wrapper.
 - Persistence: anonymous players dropped on load, coalesced position writes, pending writes on stop.
 
 E2E tests, marked `Category=Integration`, using `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through an own collection definition, with headless Chromium rendering WebGL through SwiftShader. They assert the DOM overlay, not canvas pixels:
 
 - The page loads and shows `X 0 · Y 0`.
-- An arrow key changes the readout to `X 1`; Shift with an arrow only changes the facing.
+- An arrow key held for one step changes the readout to `X 1`; Shift with an arrow only changes the facing.
 - Walking into a wall keeps the position and shows the wall in the target panel.
 - Build a wall from the toolbar, then demolish it from the target panel.
 - With two browser contexts, each lists the other among nearby players, and "Send message" opens the notification dialog in the other context.
