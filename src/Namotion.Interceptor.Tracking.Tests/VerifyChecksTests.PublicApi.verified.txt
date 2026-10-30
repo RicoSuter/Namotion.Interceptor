@@ -272,6 +272,11 @@ namespace Namotion.Interceptor.Tracking.Recorder
 }
 namespace Namotion.Interceptor.Tracking.Transactions
 {
+    public interface ITransactionHandler
+    {
+        void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context);
+        void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context);
+    }
     public interface ITransactionWriter
     {
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult> RevertSourceWritesAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, object? revertState, System.Threading.CancellationToken cancellationToken);
@@ -293,6 +298,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
     }
     public sealed class SubjectTransaction : System.IDisposable
     {
+        public Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode CheckMode { get; }
         public Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior ConflictBehavior { get; }
         public Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
         public Namotion.Interceptor.Tracking.Transactions.TransactionLocking Locking { get; }
@@ -301,6 +307,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public System.Threading.Tasks.ValueTask CommitAsync(System.Threading.CancellationToken cancellationToken) { }
         public void Dispose() { }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> GetPendingChanges() { }
+        public static bool TryConsumeCommitWrite<TProperty>(Namotion.Interceptor.Tracking.Transactions.ITransactionHandler handler, Namotion.Interceptor.PropertyReference property, TProperty value) { }
     }
     public sealed class SubjectTransactionConflictException : Namotion.Interceptor.Tracking.Transactions.SubjectTransactionException
     {
@@ -318,7 +325,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
     public static class SubjectTransactionExtensions
     {
         public static readonly System.TimeSpan DefaultCommitTimeout;
-        public static Namotion.Interceptor.Tracking.Transactions.TransactionAwaitable BeginTransactionAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionLocking locking = 0, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement = 0, Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior conflictBehavior = 0, System.TimeSpan? commitTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
+        public static Namotion.Interceptor.Tracking.Transactions.TransactionAwaitable BeginTransactionAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionLocking locking = 0, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement = 0, Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior conflictBehavior = 0, Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode checkMode = 0, System.TimeSpan? commitTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
     }
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler)})]
@@ -339,6 +346,29 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction GetResult() { }
         public void OnCompleted(System.Action continuation) { }
         public void UnsafeOnCompleted(System.Action continuation) { }
+    }
+    public readonly ref struct TransactionCaptureContext<TProperty>
+    {
+        public TProperty NewValue { get; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
+    }
+    public readonly ref struct TransactionCheckContext
+    {
+        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Changes { get; }
+        public Namotion.Interceptor.Tracking.Transactions.TransactionCheckStage Stage { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
+    }
+    public enum TransactionCheckMode
+    {
+        Immediate = 0,
+        Deferred = 1,
+    }
+    public enum TransactionCheckStage
+    {
+        Commit = 0,
+        PreApply = 1,
     }
     public enum TransactionConflictBehavior
     {

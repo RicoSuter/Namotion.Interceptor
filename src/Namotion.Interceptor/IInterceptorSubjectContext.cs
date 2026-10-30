@@ -53,6 +53,10 @@ public interface IInterceptorSubjectContext
     /// that has a service of its own resolves normally, so this only affects a chain that
     /// delegates all the way round. Intercepted property and method access resolve the same way
     /// and raise the same exception, so it can surface from an ordinary property getter or setter.
+    ///
+    /// Implementations must not return a non-empty array again after the services or fallback contexts
+    /// it was resolved from change, and two contexts that resolve different services of any type must
+    /// not share one. Callers may therefore key caches of any service type by the array's identity.
     /// </remarks>
     /// <typeparam name="TInterface">The type of services to retrieve.</typeparam>
     /// <returns>An immutable array of all matching services.</returns>

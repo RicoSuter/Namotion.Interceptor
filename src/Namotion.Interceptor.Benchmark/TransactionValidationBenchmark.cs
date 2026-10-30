@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -14,7 +15,9 @@ namespace Namotion.Interceptor.Benchmark;
 #pragma warning disable CS8618
 
 /// <summary>
-/// Measures property writes and transaction commits with property validation enabled.
+/// Measures property writes and transaction commits with property validation enabled. With <see cref="WithSource"/>,
+/// every written property is bound to a source, so a commit also writes to the source and validates again before the
+/// local apply.
 /// </summary>
 [MemoryDiagnoser]
 public class TransactionValidationBenchmark
@@ -26,10 +29,13 @@ public class TransactionValidationBenchmark
     private Tire[] _tires;
     private int _counter;
 
+    [Params(false, true)]
+    public bool WithSource;
+
     [GlobalSetup]
     public void Setup()
     {
-        _context = InterceptorSubjectContext
+        var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
@@ -37,9 +43,24 @@ public class TransactionValidationBenchmark
             .WithDataAnnotationValidation()
             .WithService<IPropertyValidator>(() => new NonNegativeDecimalValidator());
 
+        if (WithSource)
+        {
+            context.WithSourceTransactions();
+        }
+
+        _context = context;
         _car = new Car(_context);
         _tires = Enumerable.Range(0, PropertyCount).Select(_ => new Tire()).ToArray();
         _car.Tires = _tires;
+
+        if (WithSource)
+        {
+            var source = new BenchmarkSource(_car);
+            foreach (var tire in _tires)
+            {
+                new PropertyReference(tire, nameof(Tire.Pressure_Minimum)).SetSource(source);
+            }
+        }
     }
 
     [Benchmark]
