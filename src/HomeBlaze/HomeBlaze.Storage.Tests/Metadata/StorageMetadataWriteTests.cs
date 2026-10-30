@@ -546,7 +546,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         var storage = CreateStorage(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner), logger: logger);
         await storage.ConnectAsync(CancellationToken.None);
         client!.FailNextDeleteAfterItRan(new IOException("The answer was lost."));
-        var existsReached = client.PauseNext(nameof(PausableStore.ObjectExists));
+        var existsReached = client.PauseNext(nameof(IStore.ObjectExists));
 
         // Act
         var delete = storage.DeleteSubjectAsync(storage.Children["Motor"], CancellationToken.None);

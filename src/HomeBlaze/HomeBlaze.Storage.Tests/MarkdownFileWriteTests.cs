@@ -1,3 +1,4 @@
+using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -372,7 +373,7 @@ public class MarkdownFileWriteTests : IDisposable
         storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
         var save = markdown.WriteAsync("# Heading\n\nsaved by the editor", CancellationToken.None);
         await writeReached;
 
@@ -424,7 +425,7 @@ public class MarkdownFileWriteTests : IDisposable
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
         var first = markdown.Children["first"];
         var second = markdown.Children["second"];
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
 
         // Act
         var failedDelete = markdown.DeleteBlockAsync(first, CancellationToken.None);
@@ -457,7 +458,7 @@ public class MarkdownFileWriteTests : IDisposable
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
         var motor = Assert.IsType<Samples.Motor>(markdown.Children["motor"]);
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
 
         // Act
         motor.TargetSpeed = 1500;

@@ -10,18 +10,9 @@ namespace HomeBlaze.Storage.Internal;
 /// further call is refused. Both fail with a <see cref="StorageUnresponsiveException"/>.
 /// </summary>
 /// <remarks>
-/// <para>
 /// A call that was given up is not canceled. It finishes or fails on its own, so a write can still land after
 /// its caller got the failure. It then still reads from the stream it was given, so that stream must stay
 /// readable after the failure.
-/// </para>
-/// <para>
-/// Only <see cref="ListObjects"/>, <see cref="SetObject(string, Stream, bool, CancellationToken)"/>,
-/// <see cref="OpenRead"/>, <see cref="DeleteObject"/>, <see cref="ObjectExists"/>, <see cref="GetObjectInfo"/>
-/// and <see cref="Dispose"/> reach the inner storage. Every other member is that of <see cref="StoreBase"/>:
-/// some build on these, others throw or return a default without reaching the inner storage, so a new call
-/// into the storage must be one of these or be overridden here.
-/// </para>
 /// </remarks>
 internal sealed class TimeLimitedStore : StoreBase
 {
@@ -61,6 +52,8 @@ internal sealed class TimeLimitedStore : StoreBase
     /// </summary>
     public bool IsUnresponsive => Volatile.Read(ref _abandonedCallCount) > 0;
 
+    // Only the members overridden here reach the inner storage. Every other member of StoreBase builds on them or
+    // does not reach it, so a new kind of call into the storage must be overridden here.
     public override Task<List<StoreObject>> ListObjects(StorageListOptions? options = null, CancellationToken cancellationToken = default)
         => RunAsync(
             nameof(ListObjects),

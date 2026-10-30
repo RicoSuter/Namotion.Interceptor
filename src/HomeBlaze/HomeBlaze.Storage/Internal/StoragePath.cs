@@ -1,4 +1,3 @@
-using FluentStorage.Model;
 using HomeBlaze.Storage.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
@@ -10,12 +9,6 @@ internal static class StoragePath
 {
     public static string Normalize(string path)
         => path.Replace('\\', '/').Trim('/');
-
-    /// <summary>
-    /// The path of a listed blob, equal to <see cref="Normalize"/> of its full path, which FluentStorage normalizes when it creates the blob.
-    /// </summary>
-    public static string FromBlob(StoreObject blob)
-        => blob.FullPath;
 
     /// <summary>
     /// The path as a file subject receives it: with a leading slash.

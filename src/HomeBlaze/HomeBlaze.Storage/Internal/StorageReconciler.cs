@@ -432,7 +432,7 @@ internal sealed class StorageReconciler
         }
 
         var blobs = await _client.ListObjects(new StorageListOptions { FolderPath = StoragePath.GetParent(path) }, cancellationToken);
-        return blobs.Any(blob => blob.IsFolder && StoragePath.FromBlob(blob) == path);
+        return blobs.Any(blob => blob.IsFolder && blob.FullPath == path);
     }
 
     /// <summary>
@@ -532,7 +532,8 @@ internal sealed class StorageReconciler
         var listing = new Dictionary<string, StorageListing>(blobs.Count, StringComparer.Ordinal);
         foreach (var blob in blobs)
         {
-            var path = StoragePath.FromBlob(blob);
+            // FluentStorage normalizes the full path to the format of StoragePath.
+            var path = blob.FullPath;
             if (path.Length == 0 || StoragePathFilter.IsIgnored(path))
             {
                 continue;
