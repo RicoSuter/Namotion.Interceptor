@@ -3,6 +3,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using System.Collections;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
@@ -311,6 +312,98 @@ public class SubjectTransactionWriterTests
             writer.ReceivedPropertyNames);
     }
 
+    [Theory]
+    [InlineData(TransactionFailureHandling.Rollback, false)]
+    [InlineData(TransactionFailureHandling.Rollback, true)]
+    [InlineData(TransactionFailureHandling.BestEffort, false)]
+    [InlineData(TransactionFailureHandling.BestEffort, true)]
+    public async Task WhenWriterReturnsDefaultResult_ThenCommitAppliesTheChanges(
+        TransactionFailureHandling failureHandling, bool withHandler)
+    {
+        // Arrange
+        var writer = new CountingTransactionWriter { ReturnedWriteResult = default(SourceWriteResult) };
+        var context = CreateContext();
+        context.AddService<ITransactionWriter>(writer);
+        if (withHandler)
+        {
+            context.AddService<ITransactionHandler>(new RecordingHandler());
+        }
+
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(failureHandling);
+        person.FirstName = "Bob";
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Bob", person.FirstName);
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+        Assert.Contains("already been committed", retryException.Message);
+    }
+
+    [Theory]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    public async Task WhenWriterReturnsDefaultRevertResultAfterApplyFailure_ThenCommitFailsTerminally(
+        TransactionFailureHandling failureHandling)
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new CountingTransactionWriter { ReturnedRevertResult = default(SourceRevertResult) };
+        context.AddService<ITransactionWriter>(writer);
+        context.AddService(new ValueRejectingWriteInterceptor { Rejected = { (nameof(Person.LastName), "Kim") } });
+        var person = new Person(context) { FirstName = "Ann", LastName = "Lee" };
+        using var transaction = await context.BeginTransactionAsync(failureHandling);
+        person.FirstName = "Bob";
+        person.LastName = "Kim";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        Assert.Equal([nameof(Person.LastName)], exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Contains(writer.Reverted, change => change.Property.Name == nameof(Person.LastName));
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+        Assert.Contains("already been committed", retryException.Message);
+        Assert.Equal(1, writer.WriteCalls);
+    }
+
+    [Fact]
+    public async Task WhenWriterResultThrowsWhenRead_ThenCommitFailsTerminally()
+    {
+        // Arrange
+        var context = CreateContext();
+        var writer = new CountingTransactionWriter
+        {
+            ReturnedWriteResult = new SourceWriteResult([], new UnreadableList(), [], RevertState: null)
+        };
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "Bob";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        var error = Assert.Single(exception.Errors);
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal("unreadable", error.Message);
+        Assert.Same(error, exception.InnerException);
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Equal([nameof(Person.FirstName)], exception.FailedChanges.Select(change => change.Property.Name));
+        var retryException = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transaction.CommitAsync(CancellationToken.None));
+        Assert.Contains("already been committed", retryException.Message);
+        Assert.Equal(1, writer.WriteCalls);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
     [Fact]
     public async Task WhenApplyAndSourceRevertFailForOnePropertyInBestEffortWithoutHandlers_ThenStuckPropertyIsListedTwice()
     {
@@ -414,6 +507,17 @@ public class SubjectTransactionWriterTests
             Assert.Equal(changedTimestamp, revertedFirstName.ChangedTimestamp);
             Assert.Equal(receivedTimestamp, revertedFirstName.ReceivedTimestamp);
         }
+    }
+
+    private sealed class UnreadableList : IReadOnlyList<SubjectPropertyChange>
+    {
+        public int Count => throw new InvalidOperationException("unreadable");
+
+        public SubjectPropertyChange this[int index] => throw new InvalidOperationException("unreadable");
+
+        public IEnumerator<SubjectPropertyChange> GetEnumerator() => throw new InvalidOperationException("unreadable");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private static void AssertDerivedChange(
