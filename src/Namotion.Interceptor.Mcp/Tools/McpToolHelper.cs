@@ -203,7 +203,7 @@ internal static class McpToolHelper
         PathProviderBase pathProvider,
         string path)
     {
-        if (pathProvider.TryGetPropertyFromPath(subject, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+        if (pathProvider.TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;

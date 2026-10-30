@@ -23,7 +23,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Parses a path string into segments with their index text. Empty segments are skipped. The resolvers type
-    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/>.
+    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath"/>.
     /// </summary>
     /// <exception cref="FormatException">The path is malformed.</exception>
     public static List<(string segment, string? index)> ParsePath(this PathProviderBase pathProvider, string path)
@@ -63,11 +63,17 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Tries to get a property from a path starting at the given subject.
+    /// Tries to get a property from a path starting at the given subject. Every segment's property must be one
+    /// <see cref="PathProviderBase.IsPropertyIncluded"/> includes, otherwise the path is not found.
     /// </summary>
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
+    /// <param name="createMissingSubject">
+    /// Called for a subject reference on the way whose value is null. It creates and assigns the subject and returns
+    /// it, or returns null to report the path as not found. Not called for missing collection or dictionary items, and
+    /// not called at all for a malformed path. When null, a null reference on the way reports the path as not found.
+    /// </param>
     /// <returns>
     /// The property and the key of its last segment, or null when the path is malformed or not found. The key is the
     /// collection position, or the dictionary key typed to the dictionary's key type (for key types other than
@@ -77,36 +83,16 @@ public static class PathExtensions
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
-        string path)
-        => pathProvider.TryGetPropertyFromPath(rootSubject, path, includedPropertiesOnly: false, createMissingSubject: null);
-
-    /// <summary>
-    /// Tries to get a property from a path starting at the given subject, optionally resolving only properties the
-    /// provider includes and creating missing referenced subjects on the way.
-    /// </summary>
-    /// <param name="pathProvider">The path provider to use.</param>
-    /// <param name="rootSubject">The root subject to start from.</param>
-    /// <param name="path">The path to resolve.</param>
-    /// <param name="includedPropertiesOnly">Whether every segment's property must pass <see cref="PathProviderBase.IsPropertyIncluded"/>.</param>
-    /// <param name="createMissingSubject">
-    /// Called for a subject reference on the way whose value is null. It creates and assigns the subject and returns
-    /// it, or returns null to report the path as not found. Not called for missing collection or dictionary items, and
-    /// not called at all for a malformed path.
-    /// </param>
-    /// <returns>The property and the key of its last segment as in <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/>, or null.</returns>
-    public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
-        this PathProviderBase pathProvider,
-        RegisteredSubject rootSubject,
         string path,
-        bool includedPropertiesOnly,
-        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject)
-        => TryResolvePath(pathProvider, rootSubject, path, includedPropertiesOnly, createMissingSubject, resolveLastChild: false,
+        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject = null)
+        => TryResolvePath(pathProvider, rootSubject, path, createMissingSubject, resolveLastChild: false,
             out var property, out var index, out _)
             ? (property, index)
             : null;
 
     /// <summary>
-    /// Tries to get a subject from a path starting at the given subject.
+    /// Tries to get a subject from a path starting at the given subject. Every segment's property must be one
+    /// <see cref="PathProviderBase.IsPropertyIncluded"/> includes, otherwise the path is not found.
     /// Handles indices on the last segment (e.g., "Children[key]" resolves to the child subject).
     /// For paths ending in a subject reference property without an index (e.g., "Device"),
     /// the referenced subject is returned.
@@ -120,7 +106,7 @@ public static class PathExtensions
         RegisteredSubject rootSubject,
         string path)
     {
-        if (!TryResolvePath(pathProvider, rootSubject, path, includedPropertiesOnly: false, createMissingSubject: null, resolveLastChild: true,
+        if (!TryResolvePath(pathProvider, rootSubject, path, createMissingSubject: null, resolveLastChild: true,
                 out var property, out var index, out var child))
         {
             return null;
@@ -134,7 +120,6 @@ public static class PathExtensions
         PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
         string path,
-        bool includedPropertiesOnly,
         Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject,
         bool resolveLastChild,
         [NotNullWhen(true)] out RegisteredSubjectProperty? property,
@@ -167,8 +152,7 @@ public static class PathExtensions
             }
 
             var isLastSegment = !reader.HasNext;
-            if (!TryResolveSegment(pathProvider, currentSubject, segment, !isLastSegment || resolveLastChild, out property, out index, out child) ||
-                (includedPropertiesOnly && !pathProvider.IsPropertyIncluded(property)))
+            if (!TryResolveSegment(pathProvider, currentSubject, segment, !isLastSegment || resolveLastChild, out property, out index, out child))
             {
                 return Fail(out property, out index, out child);
             }
@@ -223,8 +207,9 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Resolves one segment on a subject: the property it names and, when the segment carries a key (an index, or an
-    /// [InlinePaths] key written as the segment itself), the typed key and, when requested, the subject stored at it.
+    /// Resolves one segment on a subject: the included property it names and, when the segment carries a key (an
+    /// index, or an [InlinePaths] key written as the segment itself), the typed key and, when requested, the subject
+    /// stored at it.
     /// </summary>
     private static bool TryResolveSegment(
         PathProviderBase pathProvider,
@@ -240,8 +225,9 @@ public static class PathExtensions
 
         var name = segment.GetName();
         property = pathProvider.TryGetPropertyFromSegment(subject, name);
-        if (property is null)
+        if (property is null || !pathProvider.IsPropertyIncluded(property))
         {
+            property = null;
             return false;
         }
 
@@ -282,12 +268,12 @@ public static class PathExtensions
         => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
     /// <summary>
-    /// Gets all properties from a collection of paths.
+    /// Gets all properties from a collection of paths, resolved as <see cref="TryGetPropertyFromPath"/> does.
     /// </summary>
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="paths">The paths to resolve.</param>
-    /// <returns>An enumerable of property and index tuples that were found.</returns>
+    /// <returns>An enumerable of property and index tuples that were found; paths not found are skipped.</returns>
     public static IEnumerable<(RegisteredSubjectProperty Property, object? Index)> GetPropertiesFromPaths(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
@@ -336,9 +322,11 @@ public static class PathExtensions
     /// <param name="propertyIndex">Optional index for the property (e.g., dictionary key or collection index).
     /// When provided, the property path includes this index, which is useful for computing
     /// the path to a child subject held at a specific index within this property.</param>
-    /// <returns>The path, or null when the property is excluded, a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
+    /// <returns>The path, or null when the property or a property holding it up to the root is excluded by <see cref="PathProviderBase.IsPropertyIncluded"/>, a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
-    /// Keys are written with their invariant text, quoted when the text is empty, starts with <c>'</c> or contains
+    /// A written path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath"/> with the
+    /// same provider resolves it back to the same property when the provider resolves the segments it gives. Keys
+    /// are written with their invariant text, quoted when the text is empty, starts with <c>'</c> or contains
     /// <see cref="PathProviderBase.IndexClose"/>. A written path resolves back to the same entry for collection
     /// positions and string, integer, <see cref="Guid"/> and enum keys. For other key types it does when the key's
     /// text is unique within its dictionary, otherwise the first entry with that text wins. A segment that contains
@@ -356,7 +344,7 @@ public static class PathExtensions
         var frames = PooledFrames.Rent();
         try
         {
-            if (!TryBuildPathFrames(property, rootSubject, propertyIndex, ref frames))
+            if (!TryBuildPathFrames(property, pathProvider, rootSubject, propertyIndex, ref frames))
             {
                 return null;
             }
@@ -364,15 +352,14 @@ public static class PathExtensions
             var builder = new StringBuilder();
             for (var i = frames.Count - 1; i >= 0; i--)
             {
-                var (prop, index) = frames[i];
+                var (frameProperty, index) = frames[i];
 
-                // [InlinePaths] frames emit just the key where the reader resolves it back; no IsPropertyIncluded
-                // check, since providers already include them and these frames are only traversed for navigation.
+                // [InlinePaths] frames emit just the key where the reader resolves it back.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
-                        prop.Subject.GetType(), prop.Name))
+                        frameProperty.Subject.GetType(), frameProperty.Name))
                 {
-                    if (!TryAppendInlineKey(builder, pathProvider, characters, prop, index))
+                    if (!TryAppendInlineKey(builder, pathProvider, characters, frameProperty, index))
                     {
                         return null;
                     }
@@ -380,7 +367,7 @@ public static class PathExtensions
                     continue;
                 }
 
-                var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
+                var segment = GetOwnSegment(pathProvider, frameProperty);
                 if (builder.Length > 0)
                 {
                     builder.Append(characters.Separator);
@@ -443,7 +430,9 @@ public static class PathExtensions
     /// <summary>
     /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to
     /// <paramref name="rootSubject"/> (the topmost frame is owned by the root), or to the absolute top when
-    /// <paramref name="rootSubject"/> is null. Returns false when a root is requested but not reachable.
+    /// <paramref name="rootSubject"/> is null, through properties <paramref name="pathProvider"/> includes; the leaf
+    /// itself is not checked. Returns false when a root is requested but not reachable, or the chain passes an
+    /// excluded property.
     /// <para>
     /// When a root is requested, the parent graph is searched across all parents so a shared subject (DAG)
     /// resolves through whichever parent reaches the root. A cycle is reported as false (no finite path)
@@ -451,7 +440,8 @@ public static class PathExtensions
     /// </para>
     /// </summary>
     private static bool TryBuildPathFrames(
-        RegisteredSubjectProperty property, IInterceptorSubject? rootSubject, object? propertyIndex, ref PooledFrames frames)
+        RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex,
+        ref PooledFrames frames)
     {
         frames.Add((property, propertyIndex));
 
@@ -481,7 +471,7 @@ public static class PathExtensions
             {
                 // First parent may not reach the root, so search all parents from the leaf.
                 frames.Reset();
-                return TrySearchToRoot(property, propertyIndex, rootSubject, ref frames);
+                return TrySearchToRoot(property, pathProvider, propertyIndex, rootSubject, ref frames);
             }
 
             // Start tracking only past the threshold; a revisit then means a cycle (no finite path) -> false.
@@ -491,6 +481,11 @@ public static class PathExtensions
             }
 
             var parent = parents[0];
+            if (!pathProvider.IsPropertyIncluded(parent.Property))
+            {
+                return false;
+            }
+
             frames.Add((parent.Property, parent.Index));
             current = parent.Property;
         }
@@ -498,13 +493,14 @@ public static class PathExtensions
 
     /// <summary>
     /// Iterative (explicit-stack) depth-first search that fills <paramref name="frames"/> (leaf-first) with
-    /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/>, returning false when
-    /// the root is not reachable. Cycles are pruned per branch; unreachable owners are memoized so a shared
-    /// subject in a DAG is explored once, keeping the search linear and overflow-free for arbitrarily deep
-    /// graphs.
+    /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/> through properties
+    /// <paramref name="pathProvider"/> includes, returning false when the root is not reachable that way. Cycles
+    /// are pruned per branch; unreachable owners are memoized so a shared subject in a DAG is explored once,
+    /// keeping the search linear and overflow-free for arbitrarily deep graphs.
     /// </summary>
     private static bool TrySearchToRoot(
-        RegisteredSubjectProperty property, object? propertyIndex, IInterceptorSubject rootSubject, ref PooledFrames frames)
+        RegisteredSubjectProperty property, PathProviderBase pathProvider, object? propertyIndex, IInterceptorSubject rootSubject,
+        ref PooledFrames frames)
     {
         frames.Add((property, propertyIndex));
         if (property.Subject == rootSubject)
@@ -535,6 +531,11 @@ public static class PathExtensions
                 stack[topIndex] = top; // top is a copy; write the advanced cursor back
 
                 var parentProperty = parent.Property;
+                if (!pathProvider.IsPropertyIncluded(parentProperty))
+                {
+                    continue;
+                }
+
                 frames.Add((parentProperty, parent.Index));
 
                 if (parentProperty.Subject == rootSubject)

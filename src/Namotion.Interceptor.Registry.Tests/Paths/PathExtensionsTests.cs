@@ -879,22 +879,171 @@ public class PathExtensionsTests
         public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
 
-    [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public void WhenIntermediateSegmentIsExcluded_ThenOnlyResolvesWithoutIncludedPropertiesOnly(bool includedPropertiesOnly, bool expectedResolved)
+    [Fact]
+    public void WhenHoldingPropertyIsExcluded_ThenNoPathIsWrittenThroughIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context)
+        {
+            Father = new Person(context) { FirstName = "Dad", Mother = new Person(context) { FirstName = "Grandma" } },
+            Mother = new Person(context) { FirstName = "Mom" }
+        };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+
+        // Act
+        var throughExcluded = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!.TryGetPath(pathProvider, null);
+        var deepThroughExcluded = person.TryGetRegisteredProperty(p => p.Father!.Mother!.FirstName)!.TryGetPath(pathProvider, person);
+        var excludedItself = person.TryGetRegisteredProperty(p => p.Father)!.TryGetPath(pathProvider, null);
+        var included = person.TryGetRegisteredProperty(p => p.Mother!.FirstName)!.TryGetPath(pathProvider, null);
+        var belowExcludedFromItsSubject = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!.TryGetPath(pathProvider, person.Father);
+
+        // Assert
+        Assert.Null(throughExcluded);
+        Assert.Null(deepThroughExcluded);
+        Assert.Null(excludedItself);
+        Assert.Equal("Mother.FirstName", included);
+        Assert.Equal("FirstName", belowExcludedFromItsSubject);
+    }
+
+    [Fact]
+    public void WhenSharedSubjectIsHeldThroughAnExcludedAndAnIncludedProperty_ThenPathGoesThroughTheIncludedOne()
+    {
+        // Arrange
+        var context = CreateContext();
+        var shared = new Person(context) { FirstName = "Shared" };
+        var person = new Person(context) { Father = shared, Children = [shared] };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+
+        // Act
+        var path = shared.TryGetRegisteredProperty(p => p.FirstName)!.TryGetPath(pathProvider, person);
+
+        // Assert
+        Assert.Equal("Children[0].FirstName", path);
+    }
+
+    [Fact]
+    public void WhenHoldingPropertyIsExcluded_ThenNoPathResolvesThroughIt()
     {
         // Arrange
         var context = CreateContext();
         var person = new Person(context) { Father = new Person(context) { FirstName = "Dad" } };
         var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+        var registered = person.TryGetRegisteredSubject()!;
 
         // Act
-        var result = pathProvider.TryGetPropertyFromPath(
-            person.TryGetRegisteredSubject()!, "Father.FirstName", includedPropertiesOnly, createMissingSubject: null);
+        var property = pathProvider.TryGetPropertyFromPath(registered, "Father.FirstName");
+        var holdingProperty = pathProvider.TryGetPropertyFromPath(registered, "Father");
+        var subject = pathProvider.TryGetSubjectFromPath(registered, "Father");
+        var properties = pathProvider.GetPropertiesFromPaths(registered, ["Father.FirstName", "FirstName"]).ToList();
 
         // Assert
-        Assert.Equal(expectedResolved, result is not null);
+        Assert.Null(property);
+        Assert.Null(holdingProperty);
+        Assert.Null(subject);
+        Assert.Equal("FirstName", Assert.Single(properties).Property.Name);
+    }
+
+    [Fact]
+    public void WhenLeafIsExcluded_ThenItIsNeitherWrittenNorResolved()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { Father = new Person(context) { LastName = "Doe" } };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.LastName));
+
+        // Act
+        var path = person.TryGetRegisteredProperty(p => p.Father!.LastName)!.TryGetPath(pathProvider, null);
+        var property = pathProvider.TryGetPropertyFromPath(person.TryGetRegisteredSubject()!, "Father.LastName");
+
+        // Assert
+        Assert.Null(path);
+        Assert.Null(property);
+    }
+
+    [Fact]
+    public void WhenInlinePathsDictionaryIsExcluded_ThenItsKeysAreNeitherWrittenNorResolved()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "Server" };
+        var root = new TestInlineContainer(context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestInlineContainer> { ["Servers"] = child }
+        };
+        var pathProvider = new ExcludingPathProvider(nameof(TestInlineContainer.Children));
+        var registered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var path = child.TryGetRegisteredProperty(c => c.Name)!.TryGetPath(pathProvider, root);
+        var bareKey = pathProvider.TryGetPropertyFromPath(registered, "Servers.Name");
+        var explicitKey = pathProvider.TryGetPropertyFromPath(registered, "Children[Servers].Name");
+        var subject = pathProvider.TryGetSubjectFromPath(registered, "Servers");
+
+        // Assert
+        Assert.Null(path);
+        Assert.Null(bareKey);
+        Assert.Null(explicitKey);
+        Assert.Null(subject);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(nameof(Person.Father))]
+    [InlineData(nameof(Person.Mother))]
+    [InlineData(nameof(Person.Children))]
+    [InlineData(nameof(Person.FirstName))]
+    public void WhenPathIsWrittenWithAProvider_ThenItResolvesBackToTheSamePropertyAndPassesNoExcludedProperty(string? excludedPropertyName)
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context)
+        {
+            FirstName = "Root",
+            Father = new Person(context) { FirstName = "Dad", Mother = new Person(context) { FirstName = "Grandma" } },
+            Mother = new Person(context) { FirstName = "Mom" },
+            Children = [new Person(context) { FirstName = "Kid", Father = new Person(context) { FirstName = "Step" } }]
+        };
+        var pathProvider = new ExcludingPathProvider(excludedPropertyName ?? "");
+        var registered = person.TryGetRegisteredSubject()!;
+
+        // Act
+        var results = registered
+            .GetAllProperties()
+            .Select(property => (Property: property, Path: property.TryGetPath(pathProvider, person)))
+            .ToList();
+
+        // Assert
+        Assert.Contains(results, result => result.Path is not null);
+        foreach (var (property, path) in results)
+        {
+            Assert.Equal(IsChainIncluded(property, person, pathProvider), path is not null);
+            if (path is not null)
+            {
+                var resolved = pathProvider.TryGetPropertyFromPath(registered, path);
+                Assert.NotNull(resolved);
+                Assert.Same(property, resolved.Value.Property);
+            }
+        }
+    }
+
+    private static bool IsChainIncluded(RegisteredSubjectProperty property, IInterceptorSubject root, PathProviderBase pathProvider)
+    {
+        while (true)
+        {
+            if (!pathProvider.IsPropertyIncluded(property))
+            {
+                return false;
+            }
+
+            if (property.Subject == root)
+            {
+                return true;
+            }
+
+            property = property.Parent.Parents[0].Property;
+        }
     }
 
     [Theory]
@@ -908,7 +1057,7 @@ public class PathExtensionsTests
 
         // Act
         var result = DefaultPathProvider.Instance.TryGetPropertyFromPath(
-            person.TryGetRegisteredSubject()!, "Father.FirstName", includedPropertiesOnly: false,
+            person.TryGetRegisteredSubject()!, "Father.FirstName",
             createMissingSubject: _ => createsSubject ? person.Father = new Person(context) : null);
 
         // Assert
