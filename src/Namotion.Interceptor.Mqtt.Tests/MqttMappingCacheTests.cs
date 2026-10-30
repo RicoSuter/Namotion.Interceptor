@@ -274,6 +274,62 @@ public class MqttMappingCacheTests
         Assert.Equal(2, mapper.PropertyLookupCount);
     }
 
+    [Fact]
+    public async Task WhenTheServerFiltersChanges_ThenItAdmitsOnlyPropertiesWithATopicAndServesThemFromTheTopicCache()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        subject.Child = new MqttCacheTestChild();
+        await using var server = CreateServer(subject, mapper);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var name = registered.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+        var comment = registered.TryGetProperty(nameof(MqttCacheTestRoot.Comment))!;
+        var child = registered.TryGetProperty(nameof(MqttCacheTestRoot.Child))!;
+
+        // Act
+        var nameIncluded = server.IsPropertyIncluded(name.Reference);
+        var nameIncludedAgain = server.IsPropertyIncluded(name.Reference);
+        var nameTopic = server.TryGetTopicForProperty(name.Reference, name).Topic;
+        var commentIncluded = server.IsPropertyIncluded(comment.Reference);
+        var childIncluded = server.IsPropertyIncluded(child.Reference);
+
+        // Assert
+        Assert.True(nameIncluded);
+        Assert.True(nameIncludedAgain);
+        Assert.Equal("name", nameTopic);
+        Assert.False(commentIncluded);
+        Assert.False(childIncluded);
+        Assert.Equal(2, mapper.MappingLookupCount);
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectOfACachedPropertyIsDetachedAndAttachedAgain_ThenTheServerFilterFollowsIt()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, mapper);
+        var value = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var includedBeforeDetach = server.IsPropertyIncluded(value.Reference);
+
+        // Act
+        subject.Child = null;
+        var includedAfterDetach = server.IsPropertyIncluded(value.Reference);
+        subject.Child = child;
+        var includedAfterAttach = server.IsPropertyIncluded(value.Reference);
+        var attachedValue = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var topicAfterAttach = server.TryGetTopicForProperty(attachedValue.Reference, attachedValue).Topic;
+
+        // Assert
+        Assert.True(includedBeforeDetach);
+        Assert.False(includedAfterDetach);
+        Assert.True(includedAfterAttach);
+        Assert.Equal("child/value", topicAfterAttach);
+    }
+
     private static MqttCacheTestRoot CreateRootSubject()
     {
         var context = InterceptorSubjectContext
@@ -425,6 +481,8 @@ public partial class MqttCacheTestRoot
 
     [Path("mqtt", "child")]
     public partial MqttCacheTestChild? Child { get; set; }
+
+    public partial string? Comment { get; set; }
 
     public MqttCacheTestRoot()
     {
