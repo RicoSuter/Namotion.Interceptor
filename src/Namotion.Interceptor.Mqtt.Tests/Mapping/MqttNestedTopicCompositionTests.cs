@@ -49,7 +49,7 @@ public class MqttNestedTopicCompositionTests
     }
 
     [Fact]
-    public async Task WhenHoldingPropertyHasNoSegment_ThenPropertyBelowItHasNoTopicInEitherDirection()
+    public async Task WhenHoldingPropertyHasNoSegment_ThenPropertyBelowItHasNoTopic()
     {
         // Arrange
         var mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/'));

@@ -39,7 +39,7 @@ public class MqttFluentMapperBuilderTests
     }
 
     [Fact]
-    public async Task WhenHoldingTypeIsUnmapped_ThenPropertyBelowItHasNoTopicInEitherDirection()
+    public async Task WhenHoldingPropertyIsUnmapped_ThenPropertyBelowItHasNoTopic()
     {
         // Arrange
         var fluent = new MqttFluentMapperBuilder<MqttFluentRoot>();
