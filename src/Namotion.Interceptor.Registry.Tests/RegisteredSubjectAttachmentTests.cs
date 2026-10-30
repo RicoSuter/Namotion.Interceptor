@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -136,6 +137,119 @@ public class RegisteredSubjectAttachmentTests
         Assert.False(registeredFirst.IsAttached);
         Assert.True(registeredSecond.IsAttached);
         Assert.Single(registeredSecond.Parents);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenTheParentASharedSubjectInheritedItsContextFromIsRemoved_ThenItStaysAttachedAsTheSameInstance(bool isReleasedBeforeRemoval)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var shared = new Person { FirstName = "Shared" };
+        var first = new Person { FirstName = "First", Mother = shared };
+        var second = new Person { FirstName = "Second" };
+        var root = new Person(context) { Mother = first, Father = second };
+        second.Mother = shared;
+        var registeredShared = shared.TryGetRegisteredSubject()!;
+
+        // Act
+        if (isReleasedBeforeRemoval)
+        {
+            first.Mother = null;
+        }
+
+        root.Mother = null;
+
+        // Assert
+        Assert.Same(registeredShared, shared.TryGetRegisteredSubject());
+        Assert.True(registeredShared.IsAttached);
+        Assert.Same(second, Assert.Single(registeredShared.Parents).Property.Subject);
+        Assert.True(context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(shared, static () => { }));
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), ((IInterceptorSubject)shared).Context.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public void WhenASharedSubjectLosesItsLastParentAfterTheContextHandOver_ThenItIsNoLongerAttached()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var shared = new Person { FirstName = "Shared" };
+        var first = new Person { FirstName = "First", Mother = shared };
+        var second = new Person { FirstName = "Second" };
+        var root = new Person(context) { Mother = first, Father = second };
+        second.Mother = shared;
+        root.Mother = null;
+        var registeredShared = shared.TryGetRegisteredSubject()!;
+
+        // Act
+        second.Mother = null;
+
+        // Assert
+        Assert.False(registeredShared.IsAttached);
+        Assert.Empty(registeredShared.Parents);
+        Assert.False(context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(shared, static () => { }));
+        Assert.Empty(((IInterceptorSubject)shared).Context.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public void WhenASubjectHeldTwiceByACollectionLosesOneOccurrence_ThenItStaysAttachedAsTheSameInstance()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var light = new Light { Name = "Lamp" };
+        var group = new LightGroup(context) { Lights = [light, light] };
+        var registeredLight = light.TryGetRegisteredSubject()!;
+
+        // Act
+        group.Lights = [light];
+
+        // Assert
+        Assert.Same(registeredLight, light.TryGetRegisteredSubject());
+        Assert.True(registeredLight.IsAttached);
+        Assert.Single(registeredLight.Parents);
+    }
+
+    [Fact]
+    public void WhenACollectionIsReordered_ThenItsItemsStayAttachedAsTheSameInstances()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var first = new Light { Name = "First" };
+        var second = new Light { Name = "Second" };
+        var group = new LightGroup(context) { Lights = [first, second] };
+        var registeredFirst = first.TryGetRegisteredSubject()!;
+        var registeredSecond = second.TryGetRegisteredSubject()!;
+
+        // Act
+        group.Lights = [second, first];
+
+        // Assert
+        Assert.Same(registeredFirst, first.TryGetRegisteredSubject());
+        Assert.Same(registeredSecond, second.TryGetRegisteredSubject());
+        Assert.True(registeredFirst.IsAttached);
+        Assert.True(registeredSecond.IsAttached);
+        Assert.Equal(1, Assert.Single(registeredFirst.Parents).Index);
+        Assert.Equal(0, Assert.Single(registeredSecond.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenASubjectConstructedWithTheContextIsReleasedByItsOnlyProperty_ThenTheRegistryAgreesWithTheLifecycle()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var light = new Light(context) { Name = "Lamp" };
+        var group = new LightGroup(context) { Lights = [light] };
+        var registeredLight = light.TryGetRegisteredSubject()!;
+        Assert.True(registeredLight.IsAttached);
+
+        // Act
+        group.Lights = [];
+
+        // Assert
+        var isAttachedInLifecycle = context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(light, static () => { });
+        Assert.Equal(isAttachedInLifecycle, registeredLight.IsAttached);
+        Assert.Empty(registeredLight.Parents);
     }
 
     [Fact]
