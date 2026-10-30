@@ -137,6 +137,7 @@ namespace Namotion.Interceptor.Registry.Paths
         public string Name { get; }
         public override char PathSeparator { get; }
         public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public override bool TryGetIncludedPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
         public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public class CamelCasePathProvider : Namotion.Interceptor.Registry.Paths.IPathProvider
@@ -152,6 +153,7 @@ namespace Namotion.Interceptor.Registry.Paths
         public DefaultPathProvider(char pathSeparator) { }
         public override char PathSeparator { get; }
         public static Namotion.Interceptor.Registry.Paths.DefaultPathProvider Instance { get; }
+        public override bool TryGetIncludedPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
     }
     public interface IPathProvider
     {
@@ -201,6 +203,7 @@ namespace Namotion.Interceptor.Registry.Paths
         public virtual char PathSeparator { get; }
         public virtual bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public bool IsPropertyIncludedInPaths(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public virtual bool TryGetIncludedPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
         public virtual Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment) { }
         public virtual string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }

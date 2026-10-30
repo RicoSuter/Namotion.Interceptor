@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
@@ -67,6 +68,36 @@ public class FluentPathProviderTests
         // Assert
         Assert.False(included);
         Assert.Null(segment);
+    }
+
+    [Fact]
+    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyIncludedAndTryGetPropertySegment()
+    {
+        // Arrange
+        var registry = new FluentMappingRegistry<Meta>();
+        registry.AddPropertyMetadata(typeof(Person), nameof(Person.FirstName), "first", new Meta());
+        registry.AddPropertyMetadata(typeof(Person), nameof(Person.LastName), segment: null, new Meta());
+        var provider = new FluentPathProvider<Meta>(registry);
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [1] = new Person { FirstName = "Ann" } } };
+        var properties = root.TryGetRegisteredSubject()!.GetAllProperties().ToList();
+
+        // Act
+        var results = properties
+            .Select(property => (Property: property, Included: provider.TryGetIncludedPropertySegment(property, out var segment), Segment: segment))
+            .ToList();
+
+        // Assert
+        Assert.Equal(
+            ["Members", "first", nameof(Person.LastName)],
+            results.Where(result => result.Included).Select(result => result.Segment));
+        foreach (var (property, included, segment) in results)
+        {
+            var expectedIncluded = provider.IsPropertyIncluded(property);
+            Assert.Equal(expectedIncluded, included);
+            Assert.Equal(expectedIncluded ? provider.TryGetPropertySegment(property) ?? property.BrowseName : null, segment);
+        }
     }
 
     [Fact]

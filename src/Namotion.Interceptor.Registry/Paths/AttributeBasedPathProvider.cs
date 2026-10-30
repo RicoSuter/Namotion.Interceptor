@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -11,6 +12,7 @@ public class AttributeBasedPathProvider : PathProviderBase
 {
     private readonly string _name;
     private readonly char _pathSeparator;
+    private readonly bool _isExactType;
 
     /// <summary>
     /// Creates a provider that filters [Path] attributes by name.
@@ -21,6 +23,7 @@ public class AttributeBasedPathProvider : PathProviderBase
     {
         _name = name ?? throw new ArgumentNullException(nameof(name));
         _pathSeparator = pathSeparator;
+        _isExactType = GetType() == typeof(AttributeBasedPathProvider);
     }
 
     /// <summary>
@@ -46,6 +49,20 @@ public class AttributeBasedPathProvider : PathProviderBase
     /// </remarks>
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
         => FindPathAttribute(property.ReflectionAttributes, out _)?.Path;
+
+    /// <inheritdoc />
+    public override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        // A derived provider may override the members this answers in one scan.
+        if (!_isExactType)
+        {
+            return base.TryGetIncludedPropertySegment(property, out segment);
+        }
+
+        var attribute = FindPathAttribute(property.ReflectionAttributes, out var hasInlinePaths);
+        segment = attribute?.Path ?? (hasInlinePaths ? property.BrowseName : null);
+        return segment is not null;
+    }
 
     // Indexed rather than enumerated: this runs for every property of a subject on each segment lookup, and an
     // interface enumerator would allocate per call.

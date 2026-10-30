@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -38,6 +39,44 @@ public abstract class PathProviderBase : IPathProvider
     /// <returns>True when paths may pass the property; otherwise, false.</returns>
     public bool IsPropertyIncludedInPaths(RegisteredSubjectProperty property)
         => IsPropertyIncluded(property) && (!property.IsAttribute || IsAttributedPropertyIncluded(property));
+
+    /// <summary>
+    /// Gets whether <see cref="IsPropertyIncluded"/> includes the property and, when it does, the segment paths use
+    /// for it: <see cref="TryGetPropertySegment"/>, or the property's BrowseName when that is null.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="segment">The segment of the included property, or null.</param>
+    /// <returns>True when the property is included; otherwise, false.</returns>
+    /// <remarks>
+    /// Override it to answer both from one lookup. An override must agree with <see cref="IsPropertyIncluded"/> and
+    /// <see cref="TryGetPropertySegment"/>, which other callers use on their own.
+    /// </remarks>
+    public virtual bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        if (!IsPropertyIncluded(property))
+        {
+            segment = null;
+            return false;
+        }
+
+        segment = TryGetPropertySegment(property) ?? property.BrowseName;
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="TryGetIncludedPropertySegment"/> under the rule of <see cref="IsPropertyIncludedInPaths"/>.
+    /// </summary>
+    internal bool TryGetSegmentIncludedInPaths(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        if (TryGetIncludedPropertySegment(property, out segment) &&
+            (!property.IsAttribute || IsAttributedPropertyIncluded(property)))
+        {
+            return true;
+        }
+
+        segment = null;
+        return false;
+    }
 
     private bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute)
     {

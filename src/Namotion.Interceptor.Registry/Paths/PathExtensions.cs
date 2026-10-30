@@ -240,13 +240,13 @@ public static class PathExtensions
 
         var name = segment.GetName();
         property = pathProvider.TryGetPropertyFromSegment(subject, name);
-        if (property is null || !pathProvider.IsPropertyIncludedInPaths(property))
+        if (property is null || !pathProvider.TryGetSegmentIncludedInPaths(property, out var ownSegment))
         {
             property = null;
             return false;
         }
 
-        var isInlinePathsKey = IsInlinePathsKey(pathProvider, subject, property, name);
+        var isInlinePathsKey = IsInlinePathsKey(subject, property, name, ownSegment);
         bool resolved;
         if (segment.HasIndex)
         {
@@ -275,12 +275,9 @@ public static class PathExtensions
     /// A bare segment is an [InlinePaths] key when it resolved to the inline property without naming it.
     /// </summary>
     private static bool IsInlinePathsKey(
-        PathProviderBase pathProvider, RegisteredSubject subject, RegisteredSubjectProperty property, string segment)
-        => segment != GetOwnSegment(pathProvider, property) &&
+        RegisteredSubject subject, RegisteredSubjectProperty property, string segment, string ownSegment)
+        => segment != ownSegment &&
            InlinePathsAttribute.IsInlinePathsProperty(subject.Subject.GetType(), property.Name);
-
-    private static string GetOwnSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
-        => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
     /// <summary>
     /// Gets all properties from a collection of paths, resolved as <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> does.
@@ -351,7 +348,7 @@ public static class PathExtensions
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {
-        if (!pathProvider.IsPropertyIncludedInPaths(property))
+        if (!pathProvider.TryGetSegmentIncludedInPaths(property, out var leafSegment))
         {
             return null;
         }
@@ -361,7 +358,7 @@ public static class PathExtensions
         var frames = PooledFrames.Rent();
         try
         {
-            if (!TryBuildPathFrames(property, pathProvider, rootSubject, propertyIndex, ref frames))
+            if (!TryBuildPathFrames(property, leafSegment, pathProvider, rootSubject, propertyIndex, ref frames))
             {
                 return null;
             }
@@ -369,14 +366,14 @@ public static class PathExtensions
             var builder = new StringBuilder();
             for (var i = frames.Count - 1; i >= 0; i--)
             {
-                var (frameProperty, index) = frames[i];
+                var (frameProperty, index, segment) = frames[i];
 
                 // [InlinePaths] frames emit just the key where it resolves back as that key.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         frameProperty.Subject.GetType(), frameProperty.Name))
                 {
-                    if (!TryAppendInlineKey(builder, pathProvider, characters, frameProperty, index))
+                    if (!TryAppendInlineKey(builder, pathProvider, characters, frameProperty, index, segment))
                     {
                         return null;
                     }
@@ -384,7 +381,6 @@ public static class PathExtensions
                     continue;
                 }
 
-                var segment = GetOwnSegment(pathProvider, frameProperty);
                 if (builder.Length > 0)
                 {
                     builder.Append(characters.Separator);
@@ -407,7 +403,7 @@ public static class PathExtensions
 
     private static bool TryAppendInlineKey(
         StringBuilder builder, PathProviderBase pathProvider, PathCharacters characters,
-        RegisteredSubjectProperty property, object index)
+        RegisteredSubjectProperty property, object index, string ownSegment)
     {
         var text = PathSyntax.FormatIndex(index);
         if (builder.Length > 0)
@@ -415,7 +411,6 @@ public static class PathExtensions
             builder.Append(characters.Separator);
         }
 
-        var ownSegment = GetOwnSegment(pathProvider, property);
         if (CanWriteBareInlineKey(pathProvider, characters, property, text, ownSegment))
         {
             builder.Append(text);
@@ -448,8 +443,8 @@ public static class PathExtensions
     /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to
     /// <paramref name="rootSubject"/> (the topmost frame is owned by the root), or to the absolute top when
     /// <paramref name="rootSubject"/> is null, through properties <paramref name="pathProvider"/> includes (see
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>); the leaf itself is not checked. Returns false when a root is requested but not
-    /// reachable, or the chain passes an excluded property.
+    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), each with its segment; the leaf itself is not checked.
+    /// Returns false when a root is requested but not reachable, or the chain passes an excluded property.
     /// <para>
     /// When a root is requested, the parent graph is searched across all parents so a shared subject (DAG)
     /// resolves through whichever parent reaches the root. A cycle is reported as false (no finite path)
@@ -457,10 +452,10 @@ public static class PathExtensions
     /// </para>
     /// </summary>
     private static bool TryBuildPathFrames(
-        RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex,
-        ref PooledFrames frames)
+        RegisteredSubjectProperty property, string leafSegment, PathProviderBase pathProvider, IInterceptorSubject? rootSubject,
+        object? propertyIndex, ref PooledFrames frames)
     {
-        frames.Add((property, propertyIndex));
+        frames.Add((property, propertyIndex, leafSegment));
 
         // Cheap first-parent walk for the common single-parent chain (no visited-set allocation); falls
         // back to a full multi-parent search at the first branch when a root is requested.
@@ -488,7 +483,7 @@ public static class PathExtensions
             {
                 // First parent may not reach the root, so search all parents from the leaf.
                 frames.Reset();
-                return TrySearchToRoot(property, pathProvider, propertyIndex, rootSubject, ref frames);
+                return TrySearchToRoot(property, leafSegment, pathProvider, propertyIndex, rootSubject, ref frames);
             }
 
             // Start tracking only past the threshold; a revisit then means a cycle (no finite path) -> false.
@@ -498,12 +493,12 @@ public static class PathExtensions
             }
 
             var parent = parents[0];
-            if (!pathProvider.IsPropertyIncludedInPaths(parent.Property))
+            if (!pathProvider.TryGetSegmentIncludedInPaths(parent.Property, out var parentSegment))
             {
                 return false;
             }
 
-            frames.Add((parent.Property, parent.Index));
+            frames.Add((parent.Property, parent.Index, parentSegment));
             current = parent.Property;
         }
     }
@@ -511,15 +506,16 @@ public static class PathExtensions
     /// <summary>
     /// Iterative (explicit-stack) depth-first search that fills <paramref name="frames"/> (leaf-first) with
     /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/> through properties
-    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), returning false when the root is not reachable that way. Cycles
-    /// are pruned per branch; unreachable owners are memoized so a shared subject in a DAG is explored once,
-    /// keeping the search linear and overflow-free for arbitrarily deep graphs.
+    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), each with its
+    /// segment, returning false when the root is not reachable that way. Cycles are pruned per branch; unreachable
+    /// owners are memoized so a shared subject in a DAG is explored once, keeping the search linear and overflow-free
+    /// for arbitrarily deep graphs.
     /// </summary>
     private static bool TrySearchToRoot(
-        RegisteredSubjectProperty property, PathProviderBase pathProvider, object? propertyIndex, IInterceptorSubject rootSubject,
-        ref PooledFrames frames)
+        RegisteredSubjectProperty property, string leafSegment, PathProviderBase pathProvider, object? propertyIndex,
+        IInterceptorSubject rootSubject, ref PooledFrames frames)
     {
-        frames.Add((property, propertyIndex));
+        frames.Add((property, propertyIndex, leafSegment));
         if (property.Subject == rootSubject)
         {
             return true;
@@ -548,12 +544,12 @@ public static class PathExtensions
                 stack[topIndex] = top; // top is a copy; write the advanced cursor back
 
                 var parentProperty = parent.Property;
-                if (!pathProvider.IsPropertyIncludedInPaths(parentProperty))
+                if (!pathProvider.TryGetSegmentIncludedInPaths(parentProperty, out var parentSegment))
                 {
                     continue;
                 }
 
-                frames.Add((parentProperty, parent.Index));
+                frames.Add((parentProperty, parent.Index, parentSegment));
 
                 if (parentProperty.Subject == rootSubject)
                 {
@@ -602,17 +598,17 @@ public static class PathExtensions
     /// </summary>
     private struct PooledFrames
     {
-        private static readonly ArrayPool<(RegisteredSubjectProperty Property, object? Index)> Pool = ArrayPool<(RegisteredSubjectProperty Property, object? Index)>.Shared;
+        private static readonly ArrayPool<(RegisteredSubjectProperty Property, object? Index, string Segment)> Pool = ArrayPool<(RegisteredSubjectProperty Property, object? Index, string Segment)>.Shared;
 
-        private (RegisteredSubjectProperty Property, object? Index)[] _array;
+        private (RegisteredSubjectProperty Property, object? Index, string Segment)[] _array;
 
         public int Count { get; private set; }
 
         public static PooledFrames Rent() => new() { _array = Pool.Rent(16) };
 
-        public readonly (RegisteredSubjectProperty Property, object? Index) this[int index] => _array[index];
+        public readonly (RegisteredSubjectProperty Property, object? Index, string Segment) this[int index] => _array[index];
 
-        public void Add(in (RegisteredSubjectProperty Property, object? Index) frame)
+        public void Add(in (RegisteredSubjectProperty Property, object? Index, string Segment) frame)
         {
             if (Count == _array.Length)
             {
