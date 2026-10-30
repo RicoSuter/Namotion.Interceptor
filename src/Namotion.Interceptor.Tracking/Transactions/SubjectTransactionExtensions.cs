@@ -12,6 +12,9 @@ public static class SubjectTransactionExtensions
     /// </summary>
     public static readonly TimeSpan DefaultCommitTimeout = TimeSpan.FromSeconds(30);
 
+    // The largest delay a CancellationTokenSource accepts.
+    private static readonly TimeSpan MaxCommitTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     /// <summary>
     /// Begins a new transaction bound to this context.
     /// </summary>
@@ -31,6 +34,10 @@ public static class SubjectTransactionExtensions
     /// </param>
     /// <param name="cancellationToken">Cancels waiting for the exclusive lock when the transaction begins.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="commitTimeout"/> is negative and not <see cref="Timeout.InfiniteTimeSpan"/>, or
+    /// greater than <see cref="uint.MaxValue"/> - 1 milliseconds (about 49.7 days).
+    /// </exception>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The transaction policies are independent optional parameters with defaults, so callers name only the ones they change.")]
     public static TransactionAwaitable BeginTransactionAsync(
         this IInterceptorSubjectContext context,
@@ -43,6 +50,13 @@ public static class SubjectTransactionExtensions
         CancellationToken cancellationToken = default)
     {
         var effectiveTimeout = commitTimeout ?? DefaultCommitTimeout;
+        if (effectiveTimeout != Timeout.InfiniteTimeSpan && (effectiveTimeout < TimeSpan.Zero || effectiveTimeout > MaxCommitTimeout))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(commitTimeout), effectiveTimeout,
+                "The commit timeout must be Timeout.InfiniteTimeSpan or between zero and uint.MaxValue - 1 milliseconds.");
+        }
+
         var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, checkMode, effectiveTimeout, cancellationToken);
         return new TransactionAwaitable(task);
     }
