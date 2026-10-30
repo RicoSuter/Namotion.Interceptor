@@ -23,7 +23,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Parses a path string into segments with their index text. Empty segments are skipped. The resolvers type
-    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath"/>.
+    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/>.
     /// </summary>
     /// <exception cref="FormatException">The path is malformed.</exception>
     public static List<(string segment, string? index)> ParsePath(this PathProviderBase pathProvider, string path)
@@ -69,11 +69,6 @@ public static class PathExtensions
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
-    /// <param name="createMissingSubject">
-    /// Called for a subject reference on the way whose value is null. It creates and assigns the subject and returns
-    /// it, or returns null to report the path as not found. Not called for missing collection or dictionary items, and
-    /// not called at all for a malformed path. When null, a null reference on the way reports the path as not found.
-    /// </param>
     /// <returns>
     /// The property and the key of its last segment, or null when the path is malformed or not found. The key is the
     /// collection position, or the dictionary key typed to the dictionary's key type (for key types other than
@@ -83,8 +78,28 @@ public static class PathExtensions
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
+        string path)
+        => pathProvider.TryGetPropertyFromPath(rootSubject, path, createMissingSubject: null);
+
+    /// <summary>
+    /// Tries to get a property from a path starting at the given subject, creating missing referenced subjects on the
+    /// way. Every segment's property must be one <see cref="PathProviderBase.IsPropertyIncluded"/> includes, otherwise
+    /// the path is not found.
+    /// </summary>
+    /// <param name="pathProvider">The path provider to use.</param>
+    /// <param name="rootSubject">The root subject to start from.</param>
+    /// <param name="path">The path to resolve.</param>
+    /// <param name="createMissingSubject">
+    /// Called for a subject reference on the way whose value is null. It creates and assigns the subject and returns
+    /// it, or returns null to report the path as not found. Not called for missing collection or dictionary items, and
+    /// not called at all for a malformed path. When null, a null reference on the way reports the path as not found.
+    /// </param>
+    /// <returns>The property and the key of its last segment as in <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/>, or null.</returns>
+    public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
+        this PathProviderBase pathProvider,
+        RegisteredSubject rootSubject,
         string path,
-        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject = null)
+        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject)
         => TryResolvePath(pathProvider, rootSubject, path, createMissingSubject, resolveLastChild: false,
             out var property, out var index, out _)
             ? (property, index)
@@ -268,7 +283,7 @@ public static class PathExtensions
         => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
     /// <summary>
-    /// Gets all properties from a collection of paths, resolved as <see cref="TryGetPropertyFromPath"/> does.
+    /// Gets all properties from a collection of paths, resolved as <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> does.
     /// </summary>
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
@@ -324,7 +339,7 @@ public static class PathExtensions
     /// the path to a child subject held at a specific index within this property.</param>
     /// <returns>The path, or null when the property or a property holding it up to the root is excluded by <see cref="PathProviderBase.IsPropertyIncluded"/>, a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
-    /// A written path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath"/> with the
+    /// A written path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> with the
     /// same provider resolves it back to the same property when the provider resolves the segments it gives. When a
     /// subject on the way has several parents and <paramref name="rootSubject"/> is given, the path is the first path,
     /// in parent order, that reaches the root through properties the provider includes; without a root it follows

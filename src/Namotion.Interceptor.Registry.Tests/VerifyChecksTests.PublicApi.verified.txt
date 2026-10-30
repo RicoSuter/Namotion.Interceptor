@@ -183,7 +183,11 @@ namespace Namotion.Interceptor.Registry.Paths
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Property",
                 "Index"})]
-        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetPropertyFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.IInterceptorSubject?>? createMissingSubject = null) { }
+        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetPropertyFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Property",
+                "Index"})]
+        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetPropertyFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.IInterceptorSubject?>? createMissingSubject) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetSubjectFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path) { }
         public static bool TryParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] [System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "segment",
