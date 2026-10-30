@@ -5,7 +5,6 @@ using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownLinkScopeTests
 {
     private static readonly string Namespace = typeof(TestLeaf).Namespace!;

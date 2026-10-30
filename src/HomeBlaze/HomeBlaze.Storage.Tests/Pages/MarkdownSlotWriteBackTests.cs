@@ -13,7 +13,6 @@ using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownSlotWriteBackTests
 {
     private const string ReloadRefusal = "Blocks cannot be inserted or removed until the page has been read again.";

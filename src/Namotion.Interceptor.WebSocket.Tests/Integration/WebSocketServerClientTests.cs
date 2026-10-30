@@ -289,6 +289,55 @@ public class WebSocketServerClientTests
         _output.WriteLine($"Client synced: Name={client.Root.Name}, Items[0].Label={client.Root.Items[0].Label}, Items[2].Value={client.Root.Items[2].Value}");
     }
 
+    [Theory]
+    [InlineData("a,b", "b,x,a")]
+    [InlineData("a,b,c,d", "d,x,b")]
+    [InlineData("a,b,c", "b,y,a,c")]
+    public async Task WhenServerCombinesInsertAndMoveInCollection_ThenClientConvergesWithRetainedItems(string oldOrder, string newOrder)
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (context, root) => root.Items = oldOrder.Split(',').Select(label => new TestItem(context) { Label = label }).ToArray(),
+            port: portLease.Port);
+
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Labels(client.Root!) == oldOrder,
+            timeout: TimeSpan.FromSeconds(10),
+            message: "Client should receive initial collection");
+
+        var clientItemsBefore = client.Root!.Items.ToDictionary(item => item.Label);
+        var serverItemsBefore = server.Root!.Items.ToDictionary(item => item.Label);
+
+        // Act
+        server.Root.Items = newOrder
+            .Split(',')
+            .Select(label => serverItemsBefore.TryGetValue(label, out var item) ? item : new TestItem { Label = label })
+            .ToArray();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Labels(client.Root!) == newOrder,
+            () => $"Client should converge to [{newOrder}] but has [{Labels(client.Root!)}]",
+            timeout: TimeSpan.FromSeconds(10));
+
+        foreach (var item in client.Root.Items)
+        {
+            if (clientItemsBefore.TryGetValue(item.Label, out var itemBefore))
+            {
+                Assert.Same(itemBefore, item);
+            }
+        }
+
+        static string Labels(TestRoot root) => string.Join(",", root.Items.Select(item => item.Label));
+    }
+
     [Fact]
     public async Task Server_MaxConnectionsReached_ShouldRejectNewClient()
     {

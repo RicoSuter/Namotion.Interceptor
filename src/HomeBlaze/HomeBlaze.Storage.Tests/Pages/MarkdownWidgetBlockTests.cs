@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownWidgetBlockTests
 {
     private const string LeafType = "HomeBlaze.Storage.Tests.Pages.TestLeaf";
