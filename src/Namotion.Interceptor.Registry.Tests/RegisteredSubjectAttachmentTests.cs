@@ -248,7 +248,8 @@ public class RegisteredSubjectAttachmentTests
 
         // Assert
         var isAttachedInLifecycle = context.TryGetLifecycleInterceptor()!.TryRunWhileAttached(light, static () => { });
-        Assert.Equal(isAttachedInLifecycle, registeredLight.IsAttached);
+        Assert.False(isAttachedInLifecycle);
+        Assert.False(registeredLight.IsAttached);
         Assert.Empty(registeredLight.Parents);
     }
 
