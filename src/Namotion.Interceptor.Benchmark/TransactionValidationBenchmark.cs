@@ -41,7 +41,7 @@ public class TransactionValidationBenchmark
             .WithRegistry()
             .WithTransactions()
             .WithDataAnnotationValidation()
-            .WithService<IPropertyValidator>(() => new NonNegativeDecimalValidator());
+            .WithService<IPropertyValidator>(() => new NonNegativeDecimalValidator(), validator => validator is NonNegativeDecimalValidator);
 
         if (WithSource)
         {
