@@ -295,7 +295,7 @@ if (server.TryGetVariableNode(sensor.GetPropertyReference(nameof(Sensor.Value)),
 }
 ```
 
-Returns `false` if the property is not exposed by this server, not yet created, or was removed during a server restart.
+Returns `false` if the property is not exposed by this server, not yet created, its subject was detached, or it was removed during a server restart.
 
 ## Resilience
 

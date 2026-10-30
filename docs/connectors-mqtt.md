@@ -209,7 +209,7 @@ public partial class Sensor
 }
 ```
 
-A `[Path]` segment should not contain `/`. A property with `[Path("mqtt", "metrics/Humidity")]` is published to `home/living-room/metrics/Humidity`, but the MQTT server cannot resolve that topic back to the property, so messages clients publish on it are ignored (see [Path Syntax](registry.md#path-syntax)). For a nested topic, put the property on a child subject with its own segment.
+A `[Path]` segment should not contain `/`. A property with `[Path("mqtt", "metrics/Humidity")]` is published to `home/living-room/metrics/Humidity`, but the MQTT server cannot resolve that topic back to the property, so values clients publish on it are not applied to the property (see [Path Syntax](registry.md#path-syntax)). For a nested topic, put the property on a child subject with its own segment.
 
 Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](registry.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to.
 
@@ -306,7 +306,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts; the client's internal reconnect does not reconcile, see [Connectors: Known Limitations](connectors.md#known-limitations)) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration
