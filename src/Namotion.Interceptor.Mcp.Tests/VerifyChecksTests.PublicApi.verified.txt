@@ -3,6 +3,10 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Mcp.Abstractions
 {
+    public interface IMcpAccessPolicy
+    {
+        bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action);
+    }
     public interface IMcpSubjectEnricher
     {
         System.Collections.Generic.IDictionary<string, object?> GetSubjectEnrichments(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject);
@@ -14,6 +18,11 @@ namespace Namotion.Interceptor.Mcp.Abstractions
     public interface IMcpTypeProvider
     {
         System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.Abstractions.McpTypeInfo> GetTypes();
+    }
+    public static class McpAccessActions
+    {
+        public const string Read = "read";
+        public const string Write = "write";
     }
     public class McpTypeInfo : System.IEquatable<Namotion.Interceptor.Mcp.Abstractions.McpTypeInfo>
     {
@@ -38,17 +47,26 @@ namespace Namotion.Interceptor.Mcp
     public class McpServerConfiguration
     {
         public McpServerConfiguration() { }
+        public Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy? AccessPolicy { get; init; }
         public System.Type[] ExcludeTypes { get; init; }
         public bool IsReadOnly { get; init; }
         public int MaxDepth { get; init; }
         public int MaxSubjectsPerResponse { get; init; }
         public string PathPrefix { get; init; }
         public required Namotion.Interceptor.Registry.Paths.IPathProvider PathProvider { get; init; }
-        public System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, string?>? PropertyWriteFilter { get; init; }
         public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpSubjectEnricher> SubjectEnrichers { get; init; }
         public System.Collections.Generic.IDictionary<string, string> ToolDescriptionAdditions { get; init; }
         public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider> ToolProviders { get; init; }
         public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpTypeProvider> TypeProviders { get; init; }
+    }
+    public static class McpServerConfigurationExtensions
+    {
+        public static bool IsAllowed(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Property",
+                "Index"})]
+        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetReadableProperty(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, string path) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetReadableSubject(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, string path) { }
     }
     public sealed class McpToolAnnotations : System.IEquatable<Namotion.Interceptor.Mcp.McpToolAnnotations>
     {
