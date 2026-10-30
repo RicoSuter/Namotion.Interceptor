@@ -922,6 +922,51 @@ public class PathExtensionsTests
         Assert.Equal("Children[0].FirstName", path);
     }
 
+    [Theory]
+    [InlineData(null, "Mother.Father.FirstName")]
+    [InlineData(nameof(Person.Mother), "Children[0].Father.FirstName")]
+    [InlineData(nameof(Person.Father), null)]
+    public void WhenSubjectHasSeveralParents_ThenPathIsTheFirstInParentOrderThroughIncludedProperties(
+        string? excludedPropertyName, string? expectedPath)
+    {
+        // Arrange
+        var context = CreateContext();
+        var shared = new Person { FirstName = "Shared" };
+        var root = new Person(context)
+        {
+            Mother = new Person { Father = shared },
+            Children = [new Person { Father = shared }]
+        };
+        var pathProvider = new ExcludingPathProvider(excludedPropertyName ?? "");
+
+        // Act
+        var path = shared.TryGetRegisteredProperty(p => p.FirstName)!.TryGetPath(pathProvider, root);
+
+        // Assert
+        Assert.Equal(2, shared.TryGetRegisteredSubject()!.Parents.Length);
+        Assert.Equal(expectedPath, path);
+    }
+
+    [Fact]
+    public void WhenFirstParentIsOutsideTheRoot_ThenPathGoesThroughTheParentThatReachesIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var shared = new Person { FirstName = "Shared" };
+        var child = new Person { Father = shared };
+        _ = new Person(context)
+        {
+            Mother = new Person { Father = shared },
+            Children = [child]
+        };
+
+        // Act
+        var path = shared.TryGetRegisteredProperty(p => p.FirstName)!.TryGetPath(DefaultPathProvider.Instance, child);
+
+        // Assert
+        Assert.Equal("Father.FirstName", path);
+    }
+
     [Fact]
     public void WhenHoldingPropertyIsExcluded_ThenNoPathResolvesThroughIt()
     {

@@ -302,7 +302,7 @@ public interface IPathProvider
 
 A path provider defines a view of the graph: `IsPropertyIncluded` decides which properties are in it and `TryGetPropertySegment` gives their segments. Paths go only through properties the provider includes, in both directions:
 
-- `TryGetPath` and `GetPaths` write no path for a property when it or any property holding it up to the root is excluded, including an `[InlinePaths]` dictionary whose key is written as a bare segment. With a root given and a subject held by several parents, the path goes through a parent whose chain is included, if there is one.
+- `TryGetPath` and `GetPaths` write no path for a property when it or any property holding it up to the root is excluded, including an `[InlinePaths]` dictionary whose key is written as a bare segment. When a subject on the way has several parents and a root is given, the path is the first path, in parent order, that reaches the root through properties the provider includes, and there is none only when no such path exists. Without a root, the path follows the first parent of each subject.
 - `TryGetPropertyFromPath`, `TryGetSubjectFromPath` and `GetPropertiesFromPaths` resolve a path only when every segment names a property the provider includes.
 
 So a path written with a provider resolves back with the same provider to the same property, and never passes an excluded property. A nested property has a path only when every level above it is included: with `AttributeBasedPathProvider`, every property holding a subject on the way needs a `[Path]` attribute of its own.
