@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class DocumentationFolderFixtureTests
 {
     [Fact]

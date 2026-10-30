@@ -16,12 +16,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 
 public sealed class MarkdownPageFixture
 {
-    /// <summary>
-    /// The xunit collection of <see cref="StorageTestBase"/>. The test classes of pages and of in-memory storages
-    /// share it, so they do not run next to each other or next to the tests of <see cref="StorageTestBase"/>.
-    /// </summary>
-    public const string StorageCollection = nameof(StorageTestBase);
-
     private MarkdownPageFixture(FluentStorageContainer storage, IServiceProvider services)
     {
         Storage = storage;

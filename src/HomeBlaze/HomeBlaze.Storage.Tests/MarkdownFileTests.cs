@@ -9,7 +9,6 @@ using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
-using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -17,7 +16,6 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownFileTests
 {
     [Fact]
