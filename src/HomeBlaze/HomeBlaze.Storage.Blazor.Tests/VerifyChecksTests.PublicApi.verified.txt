@@ -1,0 +1,270 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Storage.Blazor
+{
+    public class BlazorSubjectSetupService : HomeBlaze.Storage.Abstractions.ISubjectSetupService
+    {
+        public BlazorSubjectSetupService(MudBlazor.IDialogService dialogService) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.CreateSubjectResult?> CreateSubjectAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.RenderExpression?))]
+    public class RenderExpressionComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    {
+        public RenderExpressionComponent() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public static class ServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeStorage(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+}
+namespace HomeBlaze.Storage.Blazor.Files
+{
+    public sealed class DisposeAwareCodeEditor : BlazorMonaco.Editor.StandaloneCodeEditor
+    {
+        public DisposeAwareCodeEditor() { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Storage.Files.JsonFile?))]
+    public class JsonFileEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent
+    {
+        public JsonFileEditComponent() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsCreating { get; set; }
+        public bool IsDirty { get; }
+        public bool IsValid { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        public event System.Action<bool>? IsDirtyChanged;
+        public event System.Action<bool>? IsValidChanged;
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+        public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public class MarkdownContentView : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public MarkdownContentView() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject>? Children { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Content { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="ParentSubjectComponent")]
+        public HomeBlaze.Components.SubjectComponent? Owner { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter]
+        public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter]
+        public HomeBlaze.Components.PageStructureEditor? StructureEditor { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnParametersSet() { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Edit, typeof(HomeBlaze.Storage.Files.MarkdownFile))]
+    public class MarkdownFileEditComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.Abstractions.ISubjectEditComponent, HomeBlaze.Components.ISubjectRevealTarget
+    {
+        public MarkdownFileEditComponent() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsCreating { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsDarkMode")]
+        public bool IsDarkMode { get; set; }
+        public bool IsDirty { get; }
+        public bool IsValid { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        public event System.Action<bool>? IsDirtyChanged;
+        public event System.Action<bool>? IsValidChanged;
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+        protected override void OnParametersSet() { }
+        public System.Threading.Tasks.Task<bool> RevealAsync(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public System.Threading.Tasks.Task SaveAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Page, typeof(HomeBlaze.Storage.Files.MarkdownFile))]
+    public class MarkdownFilePageComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    {
+        public MarkdownFilePageComponent() { }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsDarkMode")]
+        public bool IsDarkMode { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="IsEditing")]
+        public bool IsEditing { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="ParentSubjectComponent")]
+        public HomeBlaze.Components.SubjectComponent? PageComponent { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter]
+        public HomeBlaze.Components.WidgetSelection? Selection { get; set; }
+        [Microsoft.AspNetCore.Components.CascadingParameter(Name="SourceEditor")]
+        public HomeBlaze.Components.ISubjectRevealTarget? SourceEditor { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Pages.MarkdownFragment?))]
+    public class MarkdownFragmentWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
+    {
+        public MarkdownFragmentWidget() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class MarkdownSourceEditor : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public MarkdownSourceEditor() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Storage.Blazor.Models.DecorationRegion?> ActiveRegionChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? CssClass { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? EditorId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool FocusesEnd { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<int, Namotion.Interceptor.IInterceptorSubject?>? GetBlockSubject { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool HasMinimap { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string InitialText { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback Initialized { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsDarkMode { get; set; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Blazor.Models.BlockOutline> Outlines { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Blazor.Models.DecorationRegion> Regions { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyCollection<string> ReservedNames { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback SaveRequested { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Action<string>? TextChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.Task<string?> CreateAsync() { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public System.Threading.Tasks.Task<string?> GetTextAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override void OnInitialized() { }
+        public System.Threading.Tasks.Task RefreshDecorationsAsync() { }
+        [Microsoft.JSInterop.JSInvokable]
+        public System.Threading.Tasks.Task RequestSaveFromKeysAsync() { }
+        public System.Threading.Tasks.Task<bool> RevealAsync(int startLine, int endLine) { }
+        public System.Threading.Tasks.Task SetTextAsync(string text) { }
+    }
+    public class MarkdownTextDialog : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public MarkdownTextDialog() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsDarkMode { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyCollection<string> ReservedNames { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Threading.Tasks.Task<string?>> Save { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Text { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        [Microsoft.JSInterop.JSInvokable]
+        public System.Threading.Tasks.Task CancelByEscapeAsync() { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        public static System.Threading.Tasks.Task ShowAsync(MudBlazor.IDialogService dialogService, string title, string text, bool isDarkMode, System.Collections.Generic.IReadOnlyCollection<string> reservedNames, System.Func<string, System.Threading.Tasks.Task<string?>> save) { }
+    }
+    [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.HtmlSegment?))]
+    public class MarkdownTextWidget : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent, HomeBlaze.Components.ITextBlockWidget
+    {
+        public MarkdownTextWidget() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Html { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Kind { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+}
+namespace HomeBlaze.Storage.Blazor.Models
+{
+    public class BlockOutline : System.IEquatable<HomeBlaze.Storage.Blazor.Models.BlockOutline>
+    {
+        public BlockOutline(int StartLine, int EndLine, int? ConfigurationStartLine, int HeadEndLine, int HeadEndColumn, int Depth, string Name, HomeBlaze.Storage.Blazor.Models.FencePosition HeadFence, HomeBlaze.Storage.Blazor.Models.FencePosition? ClosingFence, HomeBlaze.Storage.Blazor.Models.FencePosition? NamePosition = default) { }
+        public HomeBlaze.Storage.Blazor.Models.FencePosition? ClosingFence { get; init; }
+        public int? ConfigurationStartLine { get; init; }
+        public int Depth { get; init; }
+        public int EndLine { get; init; }
+        public int HeadEndColumn { get; init; }
+        public int HeadEndLine { get; init; }
+        public HomeBlaze.Storage.Blazor.Models.FencePosition HeadFence { get; init; }
+        public string Name { get; init; }
+        public HomeBlaze.Storage.Blazor.Models.FencePosition? NamePosition { get; init; }
+        public int StartLine { get; init; }
+    }
+    public static class BlockOutlineDecorations
+    {
+        public const int ClosingFenceKind = 4;
+        public const int ColorCount = 5;
+        public const int ExpressionKind = 1;
+        public const int FenceKind = 3;
+        public const int FoldKind = 5;
+        public const int HeadKind = 2;
+        public const int NameKind = 6;
+        public const int RecordLength = 6;
+        public const int SubjectBlockKind = 0;
+        public static HomeBlaze.Storage.Blazor.Models.EditorDecorations Create(System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Blazor.Models.DecorationRegion> regions, System.Collections.Generic.IReadOnlyList<HomeBlaze.Storage.Blazor.Models.BlockOutline> outlines) { }
+    }
+    public class DecorationRegion : System.IEquatable<HomeBlaze.Storage.Blazor.Models.DecorationRegion>
+    {
+        public DecorationRegion(int StartLine, int StartColumn, int EndLine, int EndColumn, HomeBlaze.Storage.Blazor.Models.DecorationRegionType Type, string Name, Namotion.Interceptor.IInterceptorSubject? Subject = null, int? BlockIndex = default) { }
+        public int? BlockIndex { get; init; }
+        public int EndColumn { get; init; }
+        public int EndLine { get; init; }
+        public string Name { get; init; }
+        public int StartColumn { get; init; }
+        public int StartLine { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject? Subject { get; init; }
+        public HomeBlaze.Storage.Blazor.Models.DecorationRegionType Type { get; init; }
+        public bool ContainsPosition(int line, int column) { }
+    }
+    public enum DecorationRegionType
+    {
+        Expression = 0,
+        SubjectBlock = 1,
+    }
+    public readonly struct EditorDecorations : System.IEquatable<HomeBlaze.Storage.Blazor.Models.EditorDecorations>
+    {
+        public EditorDecorations(int[] Values, string[] Labels) { }
+        public string[] Labels { get; init; }
+        public int[] Values { get; init; }
+    }
+    public readonly struct FencePosition : System.IEquatable<HomeBlaze.Storage.Blazor.Models.FencePosition>
+    {
+        public FencePosition(int Line, int Column, int Length) { }
+        public int Column { get; init; }
+        public int Length { get; init; }
+        public int Line { get; init; }
+    }
+    public static class MarkdownBlockMatcher
+    {
+        public static HomeBlaze.Storage.Pages.MarkdownBlock? FindSavedBlock(string editorText, string? savedText, int blockIndex) { }
+        public static HomeBlaze.Storage.Pages.MarkdownBlock? FindSavedBlockAfterWriteBack(string editorText, string? savedText, int blockIndex) { }
+    }
+    public static class MarkdownBlockNames
+    {
+        public const string Rule = "A name starts with a letter or \'_\' and contains only letters, digits, \'_\' and \'-\'" +
+            ".";
+        public static HomeBlaze.Components.Dialogs.SubjectNameOptions CreateNameOptions(string pageText) { }
+        public static HomeBlaze.Components.Dialogs.SubjectNameOptions CreateNameOptions(string text, System.Collections.Generic.IReadOnlyCollection<string> reservedNames) { }
+        public static string? GetError(string name) { }
+        public static System.Collections.Generic.IReadOnlySet<string> GetUsedNames(string pageText) { }
+    }
+    public static class MarkdownDecorationParser
+    {
+        public static System.Collections.Generic.List<HomeBlaze.Storage.Blazor.Models.DecorationRegion> Parse(string? content, System.Func<int, Namotion.Interceptor.IInterceptorSubject?>? getBlockSubject = null) { }
+        public static HomeBlaze.Storage.Blazor.Models.MarkdownDecorations ParseDecorations(string? content, System.Func<int, Namotion.Interceptor.IInterceptorSubject?>? getBlockSubject = null) { }
+    }
+    public sealed class MarkdownDecorations : System.IEquatable<HomeBlaze.Storage.Blazor.Models.MarkdownDecorations>
+    {
+        public MarkdownDecorations(System.Collections.Generic.List<HomeBlaze.Storage.Blazor.Models.DecorationRegion> Regions, System.Collections.Generic.List<HomeBlaze.Storage.Blazor.Models.BlockOutline> Outlines) { }
+        public System.Collections.Generic.List<HomeBlaze.Storage.Blazor.Models.BlockOutline> Outlines { get; init; }
+        public System.Collections.Generic.List<HomeBlaze.Storage.Blazor.Models.DecorationRegion> Regions { get; init; }
+    }
+}

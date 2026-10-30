@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
-/// On convergence failure, exits the process with non-zero exit code.
+/// When a cycle fails to converge or has an unexpected commit failure, exits the process with non-zero exit code.
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
@@ -37,7 +37,7 @@ public class VerificationEngine : BackgroundService
     private bool _failed;
 
     /// <summary>
-    /// Whether the last cycle failed to converge. Used to set the process exit code.
+    /// Whether the last cycle failed. Used to set the process exit code.
     /// </summary>
     public bool Failed => _failed;
 
@@ -136,7 +136,7 @@ public class VerificationEngine : BackgroundService
             var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
             cycleStopwatch.Stop();
 
-            if (outcome.Converged)
+            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines) == CycleResult.Pass)
             {
                 _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
@@ -150,10 +150,18 @@ public class VerificationEngine : BackgroundService
                 continue;
             }
 
-            _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
-                _cycleNumber, _configuration.ConvergenceTimeout);
+            if (outcome.Converged)
+            {
+                _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} unexpected commit failures, see the logged errors) ===",
+                    _cycleNumber, _mutationEngines.Sum(engine => engine.UnexpectedFailedCommitCount));
+            }
+            else
+            {
+                _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
+                    _cycleNumber, _configuration.ConvergenceTimeout);
 
-            await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
+                await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
+            }
 
             _cycleStatistics.RecordFail(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
             _cycleRecorder?.FinishCycle(_cycleNumber, CycleResult.Fail);

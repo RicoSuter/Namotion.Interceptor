@@ -9,7 +9,6 @@ using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownPageScopeTests
 {
     private const string Namespace = "HomeBlaze.Storage.Tests.Pages";
@@ -541,20 +540,21 @@ public class MarkdownPageScopeTests
     }
 
     [Fact]
-    public async Task WhenTargetOfAnAbsolutePathAppearsAfterThePageWasParsed_ThenTheValueOfTheExpressionIsPublished()
+    public async Task WhenTargetOfAnAbsolutePathAppearsAfterThePageWasParsed_ThenTheVersionOfThePathsChangesAndTheTextFollows()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", "Title: {{ /later.md/Title }}");
         var expression = FindExpression(page.Children.Values, "/later.md/Title");
-        var expressionChanges = RecordChangedProperties(expression);
-        Assert.Null(expression.Value);
+        var pathResolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+        var pathsVersionBefore = pathResolver.PathsVersion;
+        Assert.Equal(string.Empty, expression.GetText(timeZone: null));
 
         // Act
         await fixture.AddPageAsync("later.md", "---\ntitle: Later\n---\n\ntext");
 
-        // Assert
-        Assert.Contains(nameof(RenderExpression.Value), expressionChanges);
-        Assert.Equal("Later", expression.Value);
+        // Assert: a render reads the version of the paths and then the text, see RenderExpression.Value.
+        Assert.NotEqual(pathsVersionBefore, pathResolver.PathsVersion);
+        Assert.Equal("Later", expression.GetText(timeZone: null));
     }
 }

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Pages;
@@ -18,4 +20,11 @@ public sealed record MarkdownParseResult(
         null,
         new Dictionary<int, IInterceptorSubject>(),
         new Dictionary<string, IInterceptorSubject>());
+
+    /// <summary>A snapshot without text blocks, such as one that a write published before the read of its text.</summary>
+    internal static readonly IReadOnlyDictionary<HtmlSegment, MarkdownTextBlock> NoTextBlocks =
+        FrozenDictionary<HtmlSegment, MarkdownTextBlock>.Empty;
+
+    /// <summary>The text block that each HTML segment of the parse starts, by the segment.</summary>
+    internal IReadOnlyDictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; init; } = NoTextBlocks;
 }

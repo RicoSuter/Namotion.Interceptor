@@ -21,7 +21,7 @@ public class CyclesCsvTests
 
             // Assert: byte-identical to the header that VerificationEngine.ExecuteAsync wrote previously.
             var expected =
-                "               Timestamp,  Cycle, Result,              Profile,  MutateSeconds,  ConvergeSeconds, CycleSeconds,   ValueMutations,  StructuralMutations,  ChaosEvents,     HeapMB,  ProcessMB"
+                "               Timestamp,  Cycle, Result,              Profile,  MutateSeconds,  ConvergeSeconds, CycleSeconds,   ValueMutations,  StructuralMutations,  ChaosEvents,     HeapMB,  ProcessMB,    Commits,  ConflictCommits,  SourceWriteFailedCommits,  UnexpectedFailedCommits"
                 + Environment.NewLine;
             Assert.Equal(expected, File.ReadAllText(path));
         }
@@ -51,7 +51,11 @@ public class CyclesCsvTests
                 StructuralMutations: 0,
                 ChaosEvents: 0,
                 HeapMb: 42.3,
-                ProcessMb: 128.9);
+                ProcessMb: 128.9,
+                Commits: 120,
+                ConflictCommits: 2,
+                SourceWriteFailedCommits: 5,
+                UnexpectedFailedCommits: 0);
 
             // Act
             file.WriteHeader();
@@ -62,7 +66,7 @@ public class CyclesCsvTests
             var lines = File.ReadAllLines(path);
             Assert.Equal(2, lines.Length);
             Assert.Equal(
-                "2026-05-12T10:30:45.123Z,      7,   Pass,             no-chaos,           60.0,              4.5,         65.7,            12345,                    0,            0,       42.3,      128.9",
+                "2026-05-12T10:30:45.123Z,      7,   Pass,             no-chaos,           60.0,              4.5,         65.7,            12345,                    0,            0,       42.3,      128.9,        120,                2,                         5,                        0",
                 lines[1]);
         }
         finally
