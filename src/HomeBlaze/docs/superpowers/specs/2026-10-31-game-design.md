@@ -133,8 +133,8 @@ The game's own changes update both incrementally, including a player's `IsConnec
 
 ## Actions and interaction
 
-- The page shows the operations of the objects in the own player's target area in a panel, grouped by object and numbered 1 to 9 across all of them for the keyboard.
-- The page shows the operations of the `Game` in a toolbar.
+- The side panel's "Looking at" section shows the operations of the objects in the own player's target area, grouped by object and numbered 1 to 9 across all of them for the keyboard.
+- The side panel's "Actions" section shows the operations of the `Game`.
 - All operations are offered, except those whose `ExcludeFrom` includes `ExclusionTarget.UserInterface`.
 - Invoking goes through `OperationInvoker.InvokeAsync`, so parameters open the usual `MethodParameterDialog`, `RequiresConfirmation` opens `MethodConfirmationDialog`, errors and results open their usual dialogs, exactly as in the subject browser.
 - Before invoking, the page checks that the object is still in the target area. While a dialog is open the keyboard does not move the player, so the target cannot change during a dialog.
@@ -160,8 +160,13 @@ Operations of the first version:
 
 `GamePage.razor` with `[SubjectComponent(SubjectComponentType.Page, typeof(Game))]`:
 
-- A canvas fills the viewport below the app bar, sized as `AgentPage` does.
-- A MudBlazor overlay above the canvas: a readout at the top left (`X 3 · Y -2 · NE`), a list of nearby players, the target panel at the bottom center and the toolbar at the bottom.
+- The canvas fills the viewport below the app bar, sized as `AgentPage` does, except for a side panel on the right. The canvas carries no overlays besides the loading and error messages.
+- The side panel is always visible, about 240 px wide and styled like the rest of HomeBlaze. From top to bottom it shows:
+  - **Position**: `X 3 · Y -2 · facing NE`.
+  - **Looking at**: shown only while objects are in the target area; each object's title with its operations as buttons, numbered 1 to 9 across all objects.
+  - **Actions**: the operations of the `Game`, such as "Build wall".
+  - **Nearby**: the connected players within the view radius, each with its color dot, the own player first.
+- On viewports narrower than the MudBlazor `Md` breakpoint, the panel moves below the canvas.
 - The page passes `StepInterval` to JS, which uses it for key repeat and the walk animation speed.
 - The page resolves its player from `CurrentClientConnection.Connection.ClientId` and `Game.Players`, shows "Joining…" until the player exists, and resolves again when the client id changes.
 - A loading indicator shows until Babylon, the models and the first snapshot are ready. A longer first load is acceptable.
@@ -226,7 +231,7 @@ After each implementation task that leaves something runnable, the app is starte
 | Writing the configuration fails | A logged warning; the game keeps running |
 | Shutdown | Pending position changes are written in `StopAsync` |
 | Configuration reloaded or edited by hand | Index rebuilt and players reconciled; overlapping blockers leave the tile blocked |
-| WebGL unavailable, or Babylon or a model fails to load | The page shows a message instead of the canvas; the overlay and the server side are unaffected |
+| WebGL unavailable, or Babylon or a model fails to load | The page shows a message instead of the canvas; the side panel and the server side are unaffected |
 
 ## Testing
 
@@ -244,13 +249,13 @@ Unit tests:
 - Actor resolution and the service provider wrapper.
 - Persistence: anonymous players dropped on load, coalesced position writes, pending writes on stop.
 
-E2E tests, marked `Category=Integration`, using `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through an own collection definition, with headless Chromium rendering WebGL through SwiftShader. They assert the DOM overlay, not canvas pixels:
+E2E tests, marked `Category=Integration`, using `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through an own collection definition, with headless Chromium rendering WebGL through SwiftShader. They assert the side panel, not canvas pixels:
 
 - The page loads and shows `X 0 · Y 0`.
 - An arrow key held for one step changes the readout to `X 1`; Shift with an arrow only changes the facing.
-- Walking into a wall keeps the position and shows the wall in the target panel.
-- Build a wall from the toolbar, then demolish it from the target panel.
-- With two browser contexts, each lists the other among nearby players, and "Send message" opens the notification dialog in the other context.
+- Walking into a wall keeps the position and shows the wall under "Looking at".
+- Build a wall from "Actions", then demolish it from "Looking at".
+- With two browser contexts, each lists the other under "Nearby", and "Send message" opens the notification dialog in the other context.
 
 The Connector Tester and benchmarks do not apply.
 
