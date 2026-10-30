@@ -7,7 +7,6 @@ using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownStructureEditTests
 {
     private const string PanelType = Namespace + ".TestPanel";

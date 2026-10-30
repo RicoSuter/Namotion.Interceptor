@@ -10,7 +10,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// Ordinary mistakes of a page author, loaded with the widget types that ship: each one must show the
 /// message of the mistake at the line of the mistake.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownPageMistakeTests
 {
     private const string TestNamespace = "HomeBlaze.Storage.Tests.Pages";
