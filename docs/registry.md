@@ -307,7 +307,7 @@ A path provider defines a view of the graph: `IsPropertyIncluded` decides which 
 
 So a path written with a provider never passes an excluded property, and resolves back with the same provider to the same property when the provider's `TryGetPropertyFromSegment` finds each property by the segment `TryGetPropertySegment` gives it (or by its `BrowseName` when that is null), which the built-in providers do. Within that, the limits in [Path Syntax](#path-syntax) apply: a segment that contains the separator does not resolve back, and a key of a type other than string, integer, `Guid` or enum resolves to the first entry with the same text. A nested property has a path only when every level above it is included: with `AttributeBasedPathProvider`, every property holding a subject on the way needs a `[Path]` attribute of its own.
 
-An attribute is included or excluded on its own, independent of the property it belongs to: excluding a property does not exclude its attributes.
+An attribute belongs to its property: it is included only when the provider includes both the attribute and the property it belongs to, and for an attribute of an attribute, that attribute in turn. Excluding a property therefore excludes its attributes too, so no path is written or resolved to them or through a subject one of them holds. To give an attribute a path with `AttributeBasedPathProvider`, annotate the attribute and its property.
 
 ```csharp
 [InterceptorSubject]

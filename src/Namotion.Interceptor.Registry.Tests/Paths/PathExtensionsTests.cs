@@ -1007,7 +1007,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenPropertyIsExcluded_ThenItsIncludedAttributeIsStillWrittenAndResolved()
+    public void WhenPropertyIsExcluded_ThenItsAttributesAreNeitherWrittenNorResolved()
     {
         // Arrange
         var context = CreateContext();
@@ -1015,17 +1015,111 @@ public class PathExtensionsTests
         var pathProvider = new ExcludingPathProvider(nameof(Person.FirstName));
         var firstName = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!;
         var attribute = firstName.TryGetAttribute("MaxLength")!;
+        var attributeOfAttribute = attribute.TryGetAttribute("Unit")!;
+        var registered = person.TryGetRegisteredSubject()!;
+
+        // Act
+        var attributePath = attribute.TryGetPath(pathProvider, person);
+        var attributeOfAttributePath = attributeOfAttribute.TryGetPath(pathProvider, person);
+        var resolvedAttribute = pathProvider.TryGetPropertyFromPath(registered, "Father.MaxLength");
+        var resolvedAttributeOfAttribute = pathProvider.TryGetPropertyFromPath(registered, "Father.Unit");
+        var paths = new[] { attribute, attributeOfAttribute }.GetPaths(pathProvider, person).ToList();
+
+        // Assert
+        Assert.Null(attributePath);
+        Assert.Null(attributeOfAttributePath);
+        Assert.Null(resolvedAttribute);
+        Assert.Null(resolvedAttributeOfAttribute);
+        Assert.Empty(paths);
+    }
+
+    [Fact]
+    public void WhenAttributeIsExcluded_ThenItsAttributeIsNeitherWrittenNorResolvedButItsPropertyIs()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { Father = new Person(context) { FirstName = "Dad" } };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.FirstName_MaxLength));
+        var firstName = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!;
+        var attributeOfAttribute = firstName.TryGetAttribute("MaxLength")!.TryGetAttribute("Unit")!;
+        var registered = person.TryGetRegisteredSubject()!;
 
         // Act
         var propertyPath = firstName.TryGetPath(pathProvider, person);
-        var attributePath = attribute.TryGetPath(pathProvider, person);
-        var resolved = attributePath is null ? null : pathProvider.TryGetPropertyFromPath(person.TryGetRegisteredSubject()!, attributePath);
+        var attributeOfAttributePath = attributeOfAttribute.TryGetPath(pathProvider, person);
+        var resolvedAttributeOfAttribute = pathProvider.TryGetPropertyFromPath(registered, "Father.Unit");
 
         // Assert
-        Assert.Null(propertyPath);
-        Assert.NotNull(attributePath);
-        Assert.NotNull(resolved);
-        Assert.Same(attribute, resolved.Value.Property);
+        Assert.Equal("Father.FirstName", propertyPath);
+        Assert.Null(attributeOfAttributePath);
+        Assert.Null(resolvedAttributeOfAttribute);
+    }
+
+    [Fact]
+    public void WhenPropertyAndItsAttributesAreIncluded_ThenAttributePathsAreWrittenAndResolved()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { Father = new Person(context) { FirstName = "Dad" } };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.LastName));
+        var attribute = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!.TryGetAttribute("MaxLength")!;
+        var attributeOfAttribute = attribute.TryGetAttribute("Unit")!;
+        var registered = person.TryGetRegisteredSubject()!;
+
+        // Act
+        var attributePath = attribute.TryGetPath(pathProvider, person);
+        var attributeOfAttributePath = attributeOfAttribute.TryGetPath(pathProvider, person);
+        var resolvedAttribute = pathProvider.TryGetPropertyFromPath(registered, attributePath!);
+        var resolvedAttributeOfAttribute = pathProvider.TryGetPropertyFromPath(registered, attributeOfAttributePath!);
+
+        // Assert
+        Assert.Equal("Father.MaxLength", attributePath);
+        Assert.Equal("Father.Unit", attributeOfAttributePath);
+        Assert.Same(attribute, resolvedAttribute?.Property);
+        Assert.Same(attributeOfAttribute, resolvedAttributeOfAttribute?.Property);
+    }
+
+    [Fact]
+    public void WhenAttributeHoldsSubjectBelowExcludedProperty_ThenNoPathIsWrittenOrResolvedThroughIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new AttributeHolder(context) { Label = "Child" };
+        var root = new AttributeHolder(context) { Label = "Root", Label_Child = child };
+        var pathProvider = new ExcludingPathProvider(nameof(AttributeHolder.Label));
+        var value = child.TryGetRegisteredProperty(c => c.Value)!;
+        var registered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var pathWithRoot = value.TryGetPath(pathProvider, root);
+        var pathWithoutRoot = value.TryGetPath(pathProvider, null);
+        var resolvedProperty = pathProvider.TryGetPropertyFromPath(registered, "Child.Value");
+        var resolvedSubject = pathProvider.TryGetSubjectFromPath(registered, "Child");
+
+        // Assert
+        Assert.Equal("Child.Value", value.TryGetPath(DefaultPathProvider.Instance, root));
+        Assert.Null(pathWithRoot);
+        Assert.Null(pathWithoutRoot);
+        Assert.Null(resolvedProperty);
+        Assert.Null(resolvedSubject);
+    }
+
+    [Fact]
+    public void WhenSharedSubjectIsHeldByAttributeOfExcludedPropertyAndByIncludedProperty_ThenPathGoesThroughTheIncludedOne()
+    {
+        // Arrange
+        var context = CreateContext();
+        var shared = new AttributeHolder(context) { Label = "Shared" };
+        var root = new AttributeHolder(context) { Label = "Root", Label_Child = shared };
+        root.Other = shared;
+        var pathProvider = new ExcludingPathProvider(nameof(AttributeHolder.Label));
+
+        // Act
+        var path = shared.TryGetRegisteredProperty(c => c.Value)!.TryGetPath(pathProvider, root);
+
+        // Assert
+        Assert.Equal(nameof(AttributeHolder.Label_Child), shared.TryGetRegisteredSubject()!.Parents[0].Property.Name);
+        Assert.Equal("Other.Value", path);
     }
 
     [Fact]
@@ -1061,6 +1155,7 @@ public class PathExtensionsTests
     [InlineData(nameof(Person.Mother))]
     [InlineData(nameof(Person.Children))]
     [InlineData(nameof(Person.FirstName))]
+    [InlineData(nameof(Person.FirstName_MaxLength))]
     public void WhenPathIsWrittenWithAProvider_ThenItResolvesBackToTheSamePropertyAndPassesNoExcludedProperty(string? excludedPropertyName)
     {
         // Arrange
@@ -1099,7 +1194,8 @@ public class PathExtensionsTests
     {
         while (true)
         {
-            if (!pathProvider.IsPropertyIncluded(property))
+            if (!pathProvider.IsPropertyIncluded(property) ||
+                (property.IsAttribute && !IsAttributedPropertyIncluded(property, pathProvider)))
             {
                 return false;
             }
@@ -1111,6 +1207,13 @@ public class PathExtensionsTests
 
             property = property.Parent.Parents[0].Property;
         }
+    }
+
+    private static bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute, PathProviderBase pathProvider)
+    {
+        var property = attribute.GetAttributedProperty();
+        return pathProvider.IsPropertyIncluded(property) &&
+            (!property.IsAttribute || IsAttributedPropertyIncluded(property, pathProvider));
     }
 
     [Theory]
@@ -1157,4 +1260,17 @@ public partial class TryGetPathIndexChild
     {
         Name = "";
     }
+}
+
+[Namotion.Interceptor.Attributes.InterceptorSubject]
+public partial class AttributeHolder
+{
+    public partial string? Label { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Label), "Child")]
+    public partial AttributeHolder? Label_Child { get; set; }
+
+    public partial AttributeHolder? Other { get; set; }
+
+    public partial string? Value { get; set; }
 }
