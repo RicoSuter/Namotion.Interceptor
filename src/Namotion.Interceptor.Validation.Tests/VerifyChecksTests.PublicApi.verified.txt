@@ -23,11 +23,29 @@ namespace Namotion.Interceptor.Validation
         public Namotion.Interceptor.PropertyReference Property { get; }
         public TProperty Value { get; }
     }
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+    public sealed class PropertyValidationException : System.ComponentModel.DataAnnotations.ValidationException
+    {
+        public PropertyValidationException(Namotion.Interceptor.PropertyReference property, object? value, System.Collections.Generic.IReadOnlyList<System.ComponentModel.DataAnnotations.ValidationResult> validationResults) { }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public System.Collections.Generic.IReadOnlyList<System.ComponentModel.DataAnnotations.ValidationResult> ValidationResults { get; }
+    }
+    public sealed class SubjectTransactionValidationException : Namotion.Interceptor.Tracking.Transactions.SubjectTransactionException
+    {
+        public SubjectTransactionValidationException(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Collections.Generic.IReadOnlyList<System.Exception> errors) { }
+    }
+    [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
-    public class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor
+    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler),
+            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor),
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
+    public sealed class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
     {
         public ValidationInterceptor() { }
+        public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
+        public void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context) { }
+        public void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
 }
