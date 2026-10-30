@@ -1007,6 +1007,28 @@ public class PathExtensionsTests
     }
 
     [Fact]
+    public void WhenPropertyIsExcluded_ThenItsIncludedAttributeIsStillWrittenAndResolved()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { Father = new Person(context) { FirstName = "Dad" } };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.FirstName));
+        var firstName = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!;
+        var attribute = firstName.TryGetAttribute("MaxLength")!;
+
+        // Act
+        var propertyPath = firstName.TryGetPath(pathProvider, person);
+        var attributePath = attribute.TryGetPath(pathProvider, person);
+        var resolved = attributePath is null ? null : pathProvider.TryGetPropertyFromPath(person.TryGetRegisteredSubject()!, attributePath);
+
+        // Assert
+        Assert.Null(propertyPath);
+        Assert.NotNull(attributePath);
+        Assert.NotNull(resolved);
+        Assert.Same(attribute, resolved.Value.Property);
+    }
+
+    [Fact]
     public void WhenInlinePathsDictionaryIsExcluded_ThenItsKeysAreNeitherWrittenNorResolved()
     {
         // Arrange
