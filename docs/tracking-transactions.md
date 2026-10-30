@@ -196,7 +196,7 @@ The transaction writer enforces `SingleWrite` at commit, before writing anything
 
 ### Commit Timeout
 
-**Default: 30 seconds.** The timeout bounds only the transaction writer's source writes and reverts; commits without a writer are not timed. What a timeout causes depends on when it fires, see [Commit Failures](#commit-failures).
+**Default: 30 seconds.** The timeout bounds only the transaction writer's source writes and reverts; commits without a writer are not timed. What a timeout causes depends on when it fires, see [Commit Failures](#commit-failures). `BeginTransactionAsync()` throws `ArgumentOutOfRangeException` for a negative timeout other than `Timeout.InfiniteTimeSpan` and for one greater than `uint.MaxValue - 1` milliseconds (about 49.7 days), also when no writer is registered. `TimeSpan.Zero` is accepted and is not "no timeout": with the built-in writer, every source write then times out immediately.
 
 ```csharp
 // Custom timeout
@@ -317,7 +317,7 @@ catch (SubjectTransactionException exception)
 | Local apply fails, `Rollback` without handlers | All old, local applies and source writes reverted | The failed applies and any failed local or source revert; with source transactions, also the changes without a source | No |
 | Local apply fails, with handlers, any mode | All old: no further change is applied, the applied ones and the source writes are reverted | Every change (failed source writes first), then each failed local revert (in reverse apply order), then each remaining failed source revert | No |
 | Custom writer reports errors without failed changes, `BestEffort` | All new | Empty, the errors are in `Errors` | No |
-| Custom writer throws, or violates its contract | Local all old, sources unknown and not reverted | Every change | No |
+| Custom writer throws, or violates its contract | Sources unknown. Local all old, unless a result list throws when read: then the local model may hold new values, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer) | Every change | No |
 
 Notes:
 - `AppliedChanges` lists the changes that landed. It is empty whenever the commit reverted or applied nothing.
@@ -464,6 +464,7 @@ Most applications use the built-in `SourceTransactionWriter` registered by `With
 - A throw from `WriteToSourcesAsync` fails the commit terminally with every change reported as failed and nothing applied. Its sources are not reverted, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. Only the commit timeout's `OperationCanceledException` propagates and leaves the transaction retryable, so report a write timeout as a failed write, as the built-in writer does.
 - A throw from `RevertSourceWritesAsync` counts as every requested revert failing, and the commit fails terminally. Only the commit timeout's `OperationCanceledException` during the revert after a source write failure or reported writer error in `Rollback` mode propagates and leaves the transaction retryable.
 - `SourceRevertResult.Failed` must contain only changes from `written`.
+- A null list in a `SourceWriteResult` or `SourceRevertResult`, for example in a `default` one, counts as empty. A list that throws when read fails the commit terminally with every change reported as failed and `AppliedChanges` empty, even when the reverts already ran or the changes were already applied locally, so the local model may hold new values.
 
 **In-place marking.** A custom writer must follow the in-place marking contract documented in the XML documentation of `ITransactionWriter.WriteToSourcesAsync`. Moving or replacing a snapshot slot silently corrupts the local apply. Not marking an accepted slot is allowed, but its apply notification publishes without a `Confirmed` origin and the outbound queue pushes the committed value to the source again. While developing a writer, enable the runtime contract validation:
 
