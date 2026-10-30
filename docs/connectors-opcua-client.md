@@ -507,7 +507,7 @@ Between the SDK's `OnReconnectComplete` (step 3) and the health check's full sta
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). When the source restarts its connection loop, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. The client's internal session reconnect reloads the state but does not run this reconcile: queued writes stay in the retry queue until the next local write flushes it or the connection loop restarts. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
 
 ### Resilience Configuration
 

@@ -116,10 +116,10 @@ Register your custom validator:
 var context = InterceptorSubjectContext
     .Create()
     .WithPropertyValidation()
-    .WithService<IPropertyValidator>(() => new NoSwearWordsValidator());
+    .WithService<IPropertyValidator>(() => new NoSwearWordsValidator(), validator => validator is NoSwearWordsValidator);
 ```
 
-Multiple validators can be registered and all will run. Errors from all validators are combined into a single `ValidationException`.
+Pass the `exists` predicate: without it, `WithService` skips the registration when any `IPropertyValidator` is already registered, for example the one added by `WithDataAnnotationValidation()`. Multiple validators can be registered this way and all will run. Errors from all validators are combined into a single `ValidationException`.
 
 ### Use Cases for Custom Validators
 
@@ -136,7 +136,7 @@ Both can be used together:
 var context = InterceptorSubjectContext
     .Create()
     .WithDataAnnotationValidation()  // Includes WithPropertyValidation()
-    .WithService<IPropertyValidator>(() => new MyCustomValidator());
+    .WithService<IPropertyValidator>(() => new MyCustomValidator(), validator => validator is MyCustomValidator);
 ```
 
 Data Annotations and custom validators all run on each property write. If any validator returns errors, the write is rejected.

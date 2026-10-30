@@ -206,13 +206,10 @@ public partial class Sensor
     // Topic: home/living-room/Temperature
     [Path("mqtt", "Temperature")]
     public partial decimal Temperature { get; set; }
-
-    // Nested paths supported:
-    // Topic: home/living-room/metrics/Humidity
-    [Path("mqtt", "metrics/Humidity")]
-    public partial decimal Humidity { get; set; }
 }
 ```
+
+A `[Path]` segment must not contain `/`. A property with `[Path("mqtt", "metrics/Humidity")]` is published to `home/living-room/metrics/Humidity`, but inbound messages on that topic are not resolved back to it (see [Path Syntax](registry.md#path-syntax)). For a nested topic, put the property on a child subject with its own segment.
 
 Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](registry.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to.
 

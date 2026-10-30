@@ -204,7 +204,7 @@ using var tx = await context.BeginTransactionAsync(
 
 ### Commit Timeout
 
-**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`; if a revert is in progress when it fires, an `OperationCanceledException` is thrown.
+**Default: 30-second timeout**, applied only to the external source write/revert phase (commits with no sources are not timed). If a source write exceeds it, that write is reported as a failure in a `SubjectTransactionException`; if a revert is in progress when it fires, or a revert is needed after it fired (another source already accepted its write), an `OperationCanceledException` is thrown and the commit stays retryable. See [Failure Flows and Consistency](#failure-flows-and-consistency).
 
 ```csharp
 // Custom timeout
@@ -302,7 +302,7 @@ catch (SubjectTransactionException ex)
 }
 ```
 
-The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during a source revert (`OperationCanceledException`) is the one exception and stays retryable; a timeout during a source write is reported as a failed write and handled like any other source failure, which is terminal.
+The built-in `SourceTransactionWriter` never throws: a source that fails or throws is reported as a failed write and reverted through the normal failure handling. Only a custom `ITransactionWriter` that throws instead of reporting violates this contract. In that case the commit fails with a `SubjectTransactionException` reporting every change as failed, applies nothing to the local model, and the transaction becomes terminal (it must be disposed, not retried). Its sources are not reverted then, because the writer never returned the written set and revert state that reverting requires, so they may be left in an undefined state. A custom writer that throws from `RevertSourceWritesAsync` is handled the same way: the changes it was asked to revert are reported as failed reverts and the commit fails terminally. An in-place marking contract violation detected by `SubjectTransaction.ValidateWriterContract` (see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer)) also fails terminally. A commit timeout during a source revert (`OperationCanceledException`) is the one exception and stays retryable. A timeout during a source write is reported as a failed write and handled like any other source failure, which is terminal, as long as no revert is needed. Reverts run with the same commit token, so when the write timed out and another source already accepted its write, the revert is canceled before it starts: the commit throws `OperationCanceledException`, stays retryable, and the sources that accepted keep the new value until a retry succeeds.
 
 ### SubjectTransactionConflictException
 
@@ -325,14 +325,14 @@ catch (SubjectTransactionConflictException ex)
 |-----------|-------|
 | `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
 | `ObjectDisposedException` | Using a disposed transaction |
-| `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
+| `OperationCanceledException` | Commit timeout during source revert, including the revert that follows a source-write timeout (a source-write timeout that needs no revert is reported via `SubjectTransactionException`) |
 
 ### Failure Flows and Consistency
 
 A commit attempt ends in one of three states:
 
 - **Committed**: the commit succeeded. The transaction is finished and must be disposed.
-- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
+- **Failed, retryable**: the commit aborted before anything was written at all (conflict detected, optimistic lock not acquired), or a commit timeout interrupted a source revert. In the second case sources that accepted a write keep the new value, and with BestEffort the local model may already be partly applied. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
 - **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
 
 Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
@@ -356,7 +356,7 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 |----------|------|-------------|------------|---------|
 | All source writes and applies succeed | any | new | new | committed |
 | Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
-| A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
+| A source write fails, reverts succeed | Rollback | all old | all old | terminal failure |
 | A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
 | A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
 | A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
@@ -367,16 +367,17 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 
 | Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
 |----------|------|-------------|------------|---------|------------|
-| Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
+| Commit timeout during source revert (with Rollback this includes a source-write timeout after another source accepted its write) | any | not or only partially reverted, new on the sources that accepted | old (BestEffort: applied properties new) | retryable failure | lasts until a retry succeeds; with Optimistic locking the retry can conflict, and disposing without a retry leaves the sources ahead |
 | A source revert fails or throws | any | new on the stuck source | old | terminal failure | source ahead of local |
 | A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
 | Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
 
-Three root causes account for every divergence:
+Four root causes account for every divergence:
 
 1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
 2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
 3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
+4. **A revert ran out of commit time.** Reverts use the commit timeout, so after a timeout they are canceled before or while they run. Unlike a failed compensating write this is not terminal: the commit throws `OperationCanceledException` and stays retryable, and the divergence lasts until a retry succeeds.
 
 ## Advanced Topics
 
