@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -454,7 +454,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
 
-**All reconnection paths guarantee eventual consistency** through a full server state read. The client never relies solely on subscription notifications for state synchronization after a reconnection.
+**All reconnection paths reload the server state** with a full read, so server-to-client values are eventually consistent. The client never relies solely on subscription notifications for state synchronization after a reconnection. None of the reconnection flows below reconciles queued client-to-server writes, see **Eventual consistency for writes** below.
 
 #### Reconnection Flows
 
@@ -507,7 +507,7 @@ Between the SDK's `OnReconnectComplete` (step 3) and the health check's full sta
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). The queue is reconciled only when the source restarts its connection loop, which for this client happens when the initial connection or initial load fails, not on a connection loss after startup: after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. None of the reconnection flows above runs this reconcile. They reload the state, and queued writes stay in the retry queue until a local write to any property this source owns flushes it, or the connection loop restarts, see [Connectors: Known Limitations](connectors.md#known-limitations). Combined with the full state read for server-to-client values, writes are eventually consistent in both directions once one of those happens.
 
 ### Resilience Configuration
 
