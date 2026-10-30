@@ -40,7 +40,7 @@ internal class OpcUaSubjectLoader
         CancellationToken cancellationToken)
     {
         var monitoredItems = new List<MonitoredItem>();
-        var loadedSubjects = new HashSet<IInterceptorSubject>();
+        var loadedSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
         var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
         await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
         return monitoredItems;

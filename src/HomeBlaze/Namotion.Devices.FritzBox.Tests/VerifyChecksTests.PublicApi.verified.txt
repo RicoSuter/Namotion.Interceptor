@@ -1,0 +1,314 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.FritzBox.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.FritzBox.Client
+{
+    public sealed class FritzBoxCertificateException : System.Exception { }
+    public sealed class FritzBoxFirmwareException : System.Exception { }
+    public sealed class FritzBoxLoginException : System.Exception { }
+    public sealed class FritzBoxServiceUnavailableException : System.Exception { }
+}
+namespace Namotion.Devices.FritzBox
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Router")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Network")]
+    [System.ComponentModel.Description("AVM FRITZ!Box router with its network clients, mesh access points, internet conne" +
+        "ction and WLANs")]
+    [System.ComponentModel.DisplayName("FRITZ!Box")]
+    public class FritzBox : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.IHubDevice, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const string DefaultName = "FRITZ!Box";
+        public const int DefaultPollingIntervalSeconds = 15;
+        public const int DefaultRetryIntervalSeconds = 30;
+        public const int MaximumIntervalSeconds = 3600;
+        public const int MinimumIntervalSeconds = 5;
+        public FritzBox(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.FritzBox.FritzBox> logger) { }
+        public FritzBox(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.FritzBox.FritzBox> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=960)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.FritzBox.FritzBoxAccessPoint> AccessPoints { get; }
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=130)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public int ClientCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=962)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.FritzBox.FritzBoxClient> Clients { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=123, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilobytePerSecond)]
+        [System.ComponentModel.Category("Internet")]
+        public decimal? DownloadRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=111)]
+        [System.ComponentModel.Category("Internet")]
+        public string? ExternalIpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=112)]
+        [System.ComponentModel.Category("Internet")]
+        public string? ExternalIpv6Address { get; }
+        public string? HardwareRevision { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostAddress { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=113)]
+        [System.ComponentModel.Category("Internet")]
+        public System.TimeSpan? InternetConnectionUptime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=110)]
+        [System.ComponentModel.Category("Internet")]
+        public bool? IsInternetConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=121, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MegabitPerSecond)]
+        [System.ComponentModel.Category("Internet")]
+        public decimal? MaximumDownloadRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=120, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MegabitPerSecond)]
+        [System.ComponentModel.Category("Internet")]
+        public decimal? MaximumUploadRate { get; }
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? Password { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=131)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public int PresentClientCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=941)]
+        [System.ComponentModel.Category("Certificate")]
+        public string? PresentedCertificateFingerprint { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=940)]
+        [System.ComponentModel.Category("Certificate")]
+        public string? PresentedPublicKeyPin { get; }
+        public string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? PublicKeyPin { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        public string? SerialNumber { get; }
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=122, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilobytePerSecond)]
+        [System.ComponentModel.Category("Internet")]
+        public decimal? UploadRate { get; }
+        public System.TimeSpan? Uptime { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Username { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=961)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.FritzBox.FritzBoxWlan> Wlans { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class FritzBoxAccessPoint : HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public FritzBoxAccessPoint(string macAddress) { }
+        public FritzBoxAccessPoint(string macAddress, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=404)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public int ClientCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.FritzBox.FritzBoxClient> Clients { get; }
+        public string? Gateway { get; }
+        public string? HardwareRevision { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        public string? IpAddress { get; }
+        public bool IsConnected { get; }
+        public bool? IsWireless { get; }
+        public string MacAddress { get; }
+        public string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [System.ComponentModel.Category("Mesh")]
+        public Namotion.Devices.FritzBox.FritzBoxMeshRole MeshRole { get; }
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public string? Name { get; }
+        public string? ProductCode { get; }
+        public string? SerialNumber { get; }
+        public int? SignalStrength { get; }
+        public string? SoftwareVersion { get; }
+        public string? SubnetMask { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MegabitPerSecond)]
+        [System.ComponentModel.Category("Mesh")]
+        public decimal? UplinkSpeed { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("Mesh")]
+        public string? UplinkType { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class FritzBoxClient : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Sensors.IPresenceSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public FritzBoxClient(string macAddress) { }
+        public FritzBoxClient(string macAddress, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=404)]
+        [System.ComponentModel.Category("Network")]
+        public string? AccessPointMacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403)]
+        [System.ComponentModel.Category("Network")]
+        public string? AccessPointName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=405)]
+        [System.ComponentModel.Category("Network")]
+        public string? Band { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Device", Position=408)]
+        [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(Namotion.Interceptor.IInterceptorSubject))]
+        [System.ComponentModel.Category("Network")]
+        public string? DevicePath { get; }
+        public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public string? HostName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [System.ComponentModel.Category("Network")]
+        public Namotion.Devices.FritzBox.FritzBoxInterfaceType InterfaceType { get; }
+        public string? IpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("Network")]
+        public bool? IsGuest { get; }
+        public bool? IsPresent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=409)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Network")]
+        public bool IsPrivateMacAddress { get; }
+        public bool? IsWireless { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=407, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MegabitPerSecond)]
+        [System.ComponentModel.Category("Network")]
+        public decimal? LinkSpeed { get; }
+        public string MacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=406)]
+        [System.ComponentModel.Category("Network")]
+        public int? Port { get; }
+        public int? SignalStrength { get; }
+        public string? SubnetMask { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class FritzBoxConnectionCheck
+    {
+        public const string InvalidHostAddressMessage = "Enter the router\'s IP address or host name without http:// or a port.";
+        public static System.Threading.Tasks.Task<Namotion.Devices.FritzBox.FritzBoxConnectionCheckResult> CheckAsync(string hostAddress, string? username, string? password, System.Threading.CancellationToken cancellationToken) { }
+        public static bool TryNormalizeHostAddress(string? input, out string normalized) { }
+    }
+    public sealed class FritzBoxConnectionCheckResult : System.IEquatable<Namotion.Devices.FritzBox.FritzBoxConnectionCheckResult>
+    {
+        public FritzBoxConnectionCheckResult(bool IsSuccess, string? HostAddress, string? ErrorMessage, string? Model, string? PublicKeyPin, string? CertificateFingerprint) { }
+        public string? CertificateFingerprint { get; init; }
+        public string? ErrorMessage { get; init; }
+        public string? HostAddress { get; init; }
+        public bool IsSuccess { get; init; }
+        public string? Model { get; init; }
+        public string? PublicKeyPin { get; init; }
+    }
+    public static class FritzBoxDiscovery
+    {
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>> DiscoverAsync(System.TimeSpan timeout, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class FritzBoxDiscoveryResult : System.IEquatable<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>
+    {
+        public FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn, bool IsRepeater) { }
+        public string? FriendlyName { get; init; }
+        public string HostAddress { get; init; }
+        public bool IsRepeater { get; init; }
+        public string? Model { get; init; }
+        public string? Udn { get; init; }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class FritzBoxGuestWlan : Namotion.Devices.FritzBox.FritzBoxWlan, HomeBlaze.Abstractions.Devices.ISwitchController, Namotion.Interceptor.IInterceptorSubject
+    {
+        public FritzBoxGuestWlan(Namotion.Devices.FritzBox.FritzBox router, string serviceType) { }
+        public FritzBoxGuestWlan(Namotion.Devices.FritzBox.FritzBox router, string serviceType, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        public System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public enum FritzBoxInterfaceType
+    {
+        Unknown = 0,
+        Ethernet = 1,
+        Wlan = 2,
+        HomePlug = 3,
+    }
+    public enum FritzBoxMeshRole
+    {
+        Unknown = 0,
+        Master = 1,
+        Slave = 2,
+    }
+    public static class FritzBoxServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddFritzBox(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.FritzBox.FritzBox>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class FritzBoxWlan : HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public FritzBoxWlan(string role, string serviceType) { }
+        public FritzBoxWlan(string role, string serviceType, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        public string? Band { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403)]
+        public int? Channel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=404)]
+        public int? ClientCount { get; }
+        public bool? IsOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public string Role { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        public string? Ssid { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class FritzBoxWlanRoles
+    {
+        public const string Band24 = "2.4GHz";
+        public const string Band5 = "5GHz";
+        public const string Band6 = "6GHz";
+        public const string Guest = "Guest";
+    }
+}

@@ -8,34 +8,12 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionTests
 {
-    private static async Task RunWithoutAsyncLocalFlowAsync(Action action)
-    {
-        Task task;
-        var flowControl = ExecutionContext.SuppressFlow();
-        try
-        {
-            task = Task.Run(action);
-        }
-        finally
-        {
-            flowControl.Undo();
-        }
-
-        await task;
-    }
-
-    private static IInterceptorSubjectContext CreateTransactionContext()
-    {
-        return InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-    }
-
     [Fact]
     public async Task WhenTransactionsNotEnabled_ThenBeginThrows()
     {
@@ -52,13 +30,12 @@ public class SubjectTransactionTests
         Assert.Contains("WithTransactions()", exception.Message);
     }
 
-
     [Fact]
     public async Task WhenTransactionIsBoundToAnUnrelatedContext_ThenWriteThrows()
     {
         // Arrange
-        var subjectContext = CreateTransactionContext();
-        var transactionContext = CreateTransactionContext();
+        var subjectContext = CreateContext();
+        var transactionContext = CreateContext();
         var person = new Person(subjectContext);
 
         using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
@@ -76,7 +53,7 @@ public class SubjectTransactionTests
     public async Task WhenTransactionCommitted_ThenChangesAreApplied()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         // Act
@@ -96,7 +73,7 @@ public class SubjectTransactionTests
     public async Task WhenTransactionDisposedWithoutCommit_ThenChangesAreDiscarded()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act
@@ -113,7 +90,7 @@ public class SubjectTransactionTests
     public async Task WhenReadingPropertyDuringTransaction_ThenPendingValueIsReturned()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act & Assert
@@ -129,7 +106,7 @@ public class SubjectTransactionTests
     public async Task WhenSamePropertyWrittenTwice_ThenLastWriteWinsAndOriginalOldValuePreserved()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act
@@ -154,7 +131,7 @@ public class SubjectTransactionTests
     public async Task WhenCommittedWithNoChanges_ThenSucceeds()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         // Act & Assert
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -170,7 +147,7 @@ public class SubjectTransactionTests
     public async Task WhenConflictDetected_ThenConflictExceptionThrown()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         using (var transaction = await context.BeginTransactionAsync(
@@ -180,7 +157,7 @@ public class SubjectTransactionTests
         {
             person.FirstName = "InTransaction";
 
-            await RunWithoutAsyncLocalFlowAsync(() => { person.FirstName = "ExternalChange"; });
+            await RunOnThreadPoolWithoutFlowAsync(() => { person.FirstName = "ExternalChange"; });
 
             // Act & Assert
             var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
@@ -198,7 +175,7 @@ public class SubjectTransactionTests
     public async Task WhenConflictBehaviorIsIgnore_ThenNoConflictException()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         using (var transaction = await context.BeginTransactionAsync(
@@ -208,7 +185,7 @@ public class SubjectTransactionTests
         {
             person.FirstName = "InTransaction";
 
-            await RunWithoutAsyncLocalFlowAsync(() => { person.FirstName = "ExternalChange"; });
+            await RunOnThreadPoolWithoutFlowAsync(() => { person.FirstName = "ExternalChange"; });
 
             // Act
             await transaction.CommitAsync(CancellationToken.None);
@@ -223,7 +200,7 @@ public class SubjectTransactionTests
     {
         // Arrange: a successful non-empty commit, so the committed state comes from the
         // full commit path rather than the empty-commit early return.
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -244,7 +221,7 @@ public class SubjectTransactionTests
     public async Task WhenEmptyCommitIsTerminal_ThenLaterAccessUsesTheModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         await transaction.CommitAsync(CancellationToken.None);
@@ -252,8 +229,8 @@ public class SubjectTransactionTests
         // Act
         person.FirstName = "landed-after-empty-commit";
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.FirstName);
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "external-after-empty-commit");
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = person.FirstName);
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "external-after-empty-commit");
 
         // Assert
         Assert.Equal("landed-after-empty-commit", landedValue);
@@ -265,7 +242,7 @@ public class SubjectTransactionTests
     public async Task WhenSuccessfulCommitIsTerminal_ThenLaterAccessUsesTheModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "model" };
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "committed";
@@ -274,8 +251,8 @@ public class SubjectTransactionTests
         // Act
         person.LastName = "landed-after-commit";
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.LastName);
-        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = "external-after-commit");
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = person.LastName);
+        await RunOnThreadPoolWithoutFlowAsync(() => person.LastName = "external-after-commit");
 
         // Assert
         Assert.Equal("committed", person.FirstName);
@@ -288,7 +265,7 @@ public class SubjectTransactionTests
     public async Task WhenCommitFailureIsTerminal_ThenLaterAccessUsesTheModel()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var subject = new TransactionCascadeSubject(context) { Plain = "model" };
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         subject.Plain = "applied";
@@ -300,8 +277,8 @@ public class SubjectTransactionTests
         // Act
         subject.SideEffect = "landed-after-terminal-failure";
         string? landedValue = null;
-        await RunWithoutAsyncLocalFlowAsync(() => landedValue = subject.SideEffect);
-        await RunWithoutAsyncLocalFlowAsync(() => subject.SideEffect = "external-after-terminal-failure");
+        await RunOnThreadPoolWithoutFlowAsync(() => landedValue = subject.SideEffect);
+        await RunOnThreadPoolWithoutFlowAsync(() => subject.SideEffect = "external-after-terminal-failure");
 
         // Assert
         Assert.Equal("applied", subject.Plain);
@@ -311,17 +288,44 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenApplyFailsInBestEffortWithoutHandlers_ThenSuccessfulAppliesAreKept()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new TransactionCascadeSubject(context) { Plain = "model", Failing = "model" };
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            // The failing change comes first, so the applies continue after it.
+            subject.Failing = "fails";
+            subject.Plain = "applied";
+            subject.ThrowOnFailingWrite = true;
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal("applied", subject.Plain);
+        Assert.Equal("model", subject.Failing);
+        Assert.Equal([nameof(TransactionCascadeSubject.Plain)], exception.AppliedChanges.Select(change => change.Property.Name));
+        Assert.Equal([nameof(TransactionCascadeSubject.Failing)], exception.FailedChanges.Select(change => change.Property.Name));
+        Assert.Contains("Successful changes have been applied", exception.Message);
+    }
+
+    [Fact]
     public async Task WhenCommitFailureIsRetryable_ThenLaterWritesRemainCaptured()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "original" };
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
         person.FirstName = "pending";
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "external");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "external");
         await Assert.ThrowsAsync<SubjectTransactionConflictException>(
             () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
@@ -334,10 +338,10 @@ public class SubjectTransactionTests
             change => change.Property.Name == nameof(Person.LastName));
 
         string? modelLastName = null;
-        await RunWithoutAsyncLocalFlowAsync(() => modelLastName = person.LastName);
+        await RunOnThreadPoolWithoutFlowAsync(() => modelLastName = person.LastName);
         Assert.Null(modelLastName);
 
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "original");
+        await RunOnThreadPoolWithoutFlowAsync(() => person.FirstName = "original");
         await transaction.CommitAsync(CancellationToken.None);
         Assert.Equal("pending", person.FirstName);
         Assert.Equal("captured-after-conflict", person.LastName);
@@ -347,7 +351,7 @@ public class SubjectTransactionTests
     public async Task WhenTransactionDisposed_ThenCommitThrows()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         transaction.Dispose();
 
@@ -360,7 +364,7 @@ public class SubjectTransactionTests
     public async Task WhenNestedTransactionAttempted_ThenThrows()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
@@ -377,7 +381,7 @@ public class SubjectTransactionTests
     public async Task WhenExclusiveLocking_ThenSecondTransactionWaits()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var order = new List<int>();
         var task1CanCommit = new ManualResetEventSlim(false);
         var task2Waiting = new ManualResetEventSlim(false);
@@ -421,7 +425,7 @@ public class SubjectTransactionTests
     public async Task WhenOptimisticLocking_ThenBothTransactionsCanBegin()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var bothStarted = new CountdownEvent(2);
 
         // Act
@@ -465,7 +469,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -494,7 +498,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
@@ -517,7 +521,7 @@ public class SubjectTransactionTests
     public async Task WhenGetPendingChangesCalled_ThenReturnsSnapshotOfPendingChanges()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         // Act
@@ -539,7 +543,7 @@ public class SubjectTransactionTests
     public async Task WhenDisposeCalledMultipleTimes_ThenIsIdempotent()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         Assert.Same(transaction, SubjectTransaction.Current);
 
@@ -555,7 +559,7 @@ public class SubjectTransactionTests
     public async Task WhenMultipleSubjectsModified_ThenAllChangesCommittedAtomically()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person1 = new Person(context);
         var person2 = new Person(context);
 
@@ -576,7 +580,7 @@ public class SubjectTransactionTests
     public async Task WhenExclusiveTransactionDisposed_ThenLockIsReleased()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
 
         var disposedTransaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort,
@@ -600,7 +604,7 @@ public class SubjectTransactionTests
     public async Task WhenDerivedPropertyRead_ThenReflectsPendingChanges()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context);
 
         // Act
@@ -622,7 +626,7 @@ public class SubjectTransactionTests
     public async Task WhenConflictExceptionThrown_ThenConflictingPropertiesAreReported()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original1", LastName = "Original2" };
 
         using (var transaction = await context.BeginTransactionAsync(
@@ -633,7 +637,7 @@ public class SubjectTransactionTests
             person.FirstName = "InTx1";
             person.LastName = "InTx2";
 
-            await RunWithoutAsyncLocalFlowAsync(() =>
+            await RunOnThreadPoolWithoutFlowAsync(() =>
             {
                 person.FirstName = "External1";
                 person.LastName = "External2";
@@ -653,7 +657,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyNotChangedExternally_ThenNoConflictDetected()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Original" };
 
         // Act
@@ -675,7 +679,7 @@ public class SubjectTransactionTests
     {
         // Arrange
         var changes = new List<SubjectPropertyChange>();
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
         var person = new Person(context) { FirstName = "Ann" };
         changes.Clear();
@@ -699,7 +703,7 @@ public class SubjectTransactionTests
     public async Task WhenLandedValueIsWrittenWithoutPendingChange_ThenNothingIsCaptured()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         // Act
@@ -714,7 +718,7 @@ public class SubjectTransactionTests
     public async Task WhenPropertyIsRewrittenAfterWriteBack_ThenItIsCapturedAsNewChange()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         using var transaction = await context.BeginTransactionAsync(
@@ -724,7 +728,7 @@ public class SubjectTransactionTests
         person.FirstName = "Bob";
         person.FirstName = "Ann";
         person.LastName = "Smith";
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "External");
+        RunOutsideTransactionFlow(() => person.FirstName = "External");
         person.FirstName = "Carl";
 
         // Act
@@ -767,7 +771,7 @@ public class SubjectTransactionTests
     public async Task WhenPendingValueIsWrittenAgainAfterItLandedOutside_ThenChangeStaysPendingAndConflicts()
     {
         // Arrange
-        var context = CreateTransactionContext();
+        var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann" };
 
         using var transaction = await context.BeginTransactionAsync(
@@ -775,9 +779,9 @@ public class SubjectTransactionTests
             TransactionLocking.Optimistic,
             conflictBehavior: TransactionConflictBehavior.FailOnConflict);
         person.FirstName = "Bob";
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "Bob");
+        RunOutsideTransactionFlow(() => person.FirstName = "Bob");
         person.FirstName = "Bob";
-        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "Eve");
+        RunOutsideTransactionFlow(() => person.FirstName = "Eve");
 
         // Act & Assert
         await Assert.ThrowsAsync<SubjectTransactionConflictException>(
@@ -785,18 +789,22 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenInterceptorNormalizesFirstWriteToLandedValue_ThenItIsCaptured()
+    public async Task WhenInterceptorNormalizesFirstWriteToLandedValue_ThenItIsNotCaptured()
     {
         // Arrange
-        var context = CreateTransactionContext().WithService(() => new UpperCaseInterceptor());
+        var writer = new CountingTransactionWriter();
+        var context = CreateContext(out _, writer).WithService(() => new UpperCaseInterceptor());
         var person = new Person(context) { FirstName = "ann" };
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "ann";
+        var pendingChanges = transaction.GetPendingChanges();
+        await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal("ANN", Assert.Single(transaction.GetPendingChanges()).GetNewValue<string>());
+        Assert.Empty(pendingChanges);
+        Assert.Empty(writer.ReceivedPropertyNames);
     }
 
     [RunsBefore(typeof(SubjectTransactionInterceptor))]

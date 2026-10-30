@@ -1,4 +1,4 @@
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -51,14 +51,14 @@ public class FluentStorageContainerConfigurationWriterTests : StorageTestBase
     public async Task WhenTwoSubjectsOfOneFileAreSavedAtOnce_ThenTheFileHoldsBothChanges()
     {
         // Arrange
-        PausableBlobStorage? client = null;
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        PausableStore? client = null;
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var first = new ConfigurationWriterTestSubject(Context!);
         var second = new ConfigurationWriterTestSubject(Context!);
         var file = new ConfigurationWriterTestSubject(Context!) { Items = [first, second] };
         await storage.AddSubjectAsync(FilePath, file, CancellationToken.None);
         first.Name = "first, saved";
-        var firstWriteReached = client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var firstWriteReached = client!.PauseNext(nameof(IStore.SetObject));
         var firstSave = storage.WriteConfigurationAsync(first, CancellationToken.None);
         await firstWriteReached;
 

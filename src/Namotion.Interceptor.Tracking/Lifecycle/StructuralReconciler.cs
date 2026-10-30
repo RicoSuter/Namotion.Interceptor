@@ -94,7 +94,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             {
                 var revision = graph.SetBaseline(property, newValue, newOccurrences);
                 journal.IsComplete = false;
-                ReconcileOccurrences(property, newValue, oldOccurrences, newOccurrences, ownership, revision);
+                ReconcileOccurrences(property, oldOccurrences, newOccurrences, ownership, revision);
                 if (graph.StillOwnsPublication(property, ownership, revision))
                 {
                     journal.Complete(newOccurrences);
@@ -158,7 +158,6 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
     /// </summary>
     private void ReconcileOccurrences(
         PropertyReference property,
-        object? newValue,
         List<SubjectOccurrence> oldOccurrences,
         List<SubjectOccurrence> newOccurrences,
         SubjectOwnership ownership,
@@ -179,7 +178,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 return;
             }
 
-            RefreshRetainedIndices(property, newValue, oldOccurrences, newOccurrences, newCounts);
+            RefreshRetainedIndices(property, oldOccurrences, newOccurrences, newCounts);
         }
         finally
         {
@@ -269,18 +268,18 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
     }
 
     /// <summary>
-    /// Rewrites the occurrence indices of every subject in the new value, then lets property handlers
-    /// refresh their own collection projections. A retained edge keeps its identity across a reorder
-    /// or a rekey, so it changes index without an attach or detach transition.
+    /// Rewrites the occurrence indices of every subject in the new value, then reports the retained
+    /// subjects whose indices changed to the <see cref="IChildIndexHandler"/> services. A retained
+    /// edge keeps its identity across a reorder or a rekey, so it changes index without an attach or
+    /// detach transition.
     /// </summary>
     private void RefreshRetainedIndices(
         PropertyReference property,
-        object? newValue,
         List<SubjectOccurrence> oldOccurrences,
         List<SubjectOccurrence> newOccurrences,
         Dictionary<IInterceptorSubject, int> newCounts)
     {
-        if (newValue is not IEnumerable || newValue is string || newOccurrences.Count == 0)
+        if (newOccurrences.Count == 0)
         {
             return;
         }
@@ -290,6 +289,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             return;
         }
 
+        List<SubjectChild>? movedChildren = null;
         var groups = LifecycleScratch.RentIndexGroups();
         try
         {
@@ -302,8 +302,13 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                     continue;
                 }
 
-                ownership.SetIncomingIndices(property, group.Value);
-                ownership.RepublishParents();
+                // An occurrence this write attached already carries its index and was published by
+                // its attach, so only a retained one can change here.
+                if (ownership.SetIncomingIndices(property, group.Value))
+                {
+                    ownership.RepublishParents();
+                    (movedChildren ??= []).Add(new SubjectChild(group.Key, group.Value[0]));
+                }
             }
         }
         finally
@@ -311,7 +316,10 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             LifecycleScratch.Return(groups);
         }
 
-        notifier.RefreshCollectionProperty(property, newValue);
+        if (movedChildren is not null)
+        {
+            notifier.QueueChildIndexChanges(property, movedChildren);
+        }
     }
 
     private static bool HasRetainedOccurrence(List<SubjectOccurrence> oldOccurrences, Dictionary<IInterceptorSubject, int> newCounts)

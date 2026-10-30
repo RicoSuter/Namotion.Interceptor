@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Tracking.Change;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.ExceptionServices;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
@@ -17,7 +18,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, OwnershipGraph graph, ILifecycleHandler descentHandler)
 {
-    private enum NotificationKind { Attached, Detaching, LifecycleHandler, Refresh, AttachProperty, DetachProperty, RecalculateDerived, ReleaseClaim }
+    private enum NotificationKind { Attached, Detaching, LifecycleHandler, ChildIndices, AttachProperty, DetachProperty, RecalculateDerived, ReleaseClaim }
     private readonly record struct Notification(NotificationKind Kind, SubjectLifecycleChange Change, object? Value = null);
     private readonly List<PropertyChangeInterceptor.Publication> _propertyChanges = [];
     private readonly List<Notification> _notifications = [];
@@ -149,7 +150,7 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
     {
         _propertyChanges.Add(publication);
     }
-    public void RefreshCollectionProperty(PropertyReference property, object? value) => _notifications.Add(new(NotificationKind.Refresh, new SubjectLifecycleChange { Subject = property.Subject, Property = property, ReferenceCount = 0 }, value));
+    public void QueueChildIndexChanges(PropertyReference property, List<SubjectChild> children) => _notifications.Add(new(NotificationKind.ChildIndices, new SubjectLifecycleChange { Subject = property.Subject, Property = property, ReferenceCount = 0 }, children));
     public void QueueProperty(PropertyReference property, bool attach) => _notifications.Add(new(attach ? NotificationKind.AttachProperty : NotificationKind.DetachProperty, new SubjectLifecycleChange { Subject = property.Subject, Property = property, ReferenceCount = 0 }));
     public void QueueDerivedRecalculation(IInterceptorSubject subject) => _notifications.Add(new(NotificationKind.RecalculateDerived, new SubjectLifecycleChange { Subject = subject, ReferenceCount = 0 }));
     public void QueueRelease(IInterceptorSubject subject, SubjectOwnership ownership) => _notifications.Add(new(NotificationKind.ReleaseClaim, new SubjectLifecycleChange { Subject = subject, ReferenceCount = 0 }, Value: ownership));
@@ -222,7 +223,9 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
                 try { ((ILifecycleHandler)notification.Value!).HandleLifecycleChange(notification.Change); }
                 catch (Exception exception) { (failures ??= []).Add(exception); }
                 break;
-            case NotificationKind.Refresh:
+            case NotificationKind.ChildIndices:
+                InvokeChildIndexHandlers(in notification, ref failures);
+                break;
             case NotificationKind.AttachProperty:
             case NotificationKind.DetachProperty:
                 InvokePropertyHandlers(in notification, ref failures);
@@ -259,9 +262,23 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
             InvokePropertyHandler(handler, in notification, ref failures);
         }
 
-        if (notification.Kind != NotificationKind.Refresh && notification.Change.Subject is IPropertyLifecycleHandler subjectHandler)
+        if (notification.Change.Subject is IPropertyLifecycleHandler subjectHandler)
         {
             InvokePropertyHandler(subjectHandler, in notification, ref failures);
+        }
+    }
+
+    // Out of line for the same reason as CompleteRelease: it runs only for a write that moved a
+    // retained child.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void InvokeChildIndexHandlers(in Notification notification, ref List<Exception>? failures)
+    {
+        var property = notification.Change.Property.GetValueOrDefault();
+        var children = CollectionsMarshal.AsSpan((List<SubjectChild>)notification.Value!);
+        foreach (var handler in context.GetServices<IChildIndexHandler>())
+        {
+            try { handler.HandleChildIndexChanges(property, children); }
+            catch (Exception exception) { (failures ??= []).Add(exception); }
         }
     }
 
@@ -321,8 +338,7 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
             switch (notification.Kind)
             {
                 case NotificationKind.AttachProperty: handler.AttachProperty(change); break;
-                case NotificationKind.DetachProperty: handler.DetachProperty(change); break;
-                default: handler.RefreshCollectionProperty(property, notification.Value); break;
+                default: handler.DetachProperty(change); break;
             }
         }
         catch (Exception exception) { (failures ??= []).Add(exception); }

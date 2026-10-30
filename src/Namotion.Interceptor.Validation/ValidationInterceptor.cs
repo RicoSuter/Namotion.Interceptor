@@ -1,53 +1,195 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
-using System.Text;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Validation;
 
 /// <summary>
-/// Interceptor that validates property values using registered validators before writing.
-/// Runs before the transaction interceptor to validate during both capture and commit phases.
+/// Validates property values with the registered <see cref="IPropertyValidator"/> services. Writes that reach the
+/// model are validated before any derived recalculation, change notification or lifecycle handling. Writes captured
+/// by a transaction are validated as an <see cref="ITransactionHandler"/>, according to the transaction's
+/// <see cref="TransactionCheckMode"/>; a write recognized by
+/// <see cref="SubjectTransaction.TryConsumeCommitWrite"/> is not validated again.
 /// </summary>
-[RunsBefore(typeof(SubjectTransactionInterceptor))]
-public class ValidationInterceptor : IWriteInterceptor,
+[RunsAfter(typeof(SubjectTransactionInterceptor))]
+[RunsBefore(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
+public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler,
     ISingletonContextService<ValidationInterceptor>
 {
+    private static readonly ConcurrentDictionary<Type, ITypedValidation> TypedValidations = new();
+
+    static ValidationInterceptor()
+    {
+        // An untyped write registers only object, so the common value types are registered up front: their commit
+        // checks then use the property type whichever writes ran before.
+        TypedValidation<int>.Register();
+        TypedValidation<long>.Register();
+        TypedValidation<double>.Register();
+        TypedValidation<float>.Register();
+        TypedValidation<decimal>.Register();
+        TypedValidation<bool>.Register();
+        TypedValidation<DateTime>.Register();
+        TypedValidation<DateTimeOffset>.Register();
+        TypedValidation<TimeSpan>.Register();
+        TypedValidation<Guid>.Register();
+    }
+
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        if (!SubjectTransaction.TryConsumeCommitWrite(this, context.Property, context.NewValue))
+        {
+            ThrowIfInvalid(context.Property, context.NewValue, context.Origin);
+        }
+
+        next(ref context);
+    }
+
+    /// <inheritdoc />
+    public void OnCapturing<TProperty>(in TransactionCaptureContext<TProperty> context)
+    {
+        // Registers the typed commit check for TProperty, in both modes, before the change reaches OnCommitting.
+        TypedValidation<TProperty>.Register();
+
+        if (context.Transaction.CheckMode == TransactionCheckMode.Immediate)
+        {
+            ThrowIfInvalid(context.Property, context.NewValue, context.Origin);
+        }
+    }
+
+    /// <inheritdoc />
+    public void OnCommitting(in TransactionCheckContext context)
+    {
+        List<SubjectPropertyChange>? failedChanges = null;
+        List<Exception>? errors = null;
+        IInterceptorSubjectContext? validatorsContext = null;
+        var validators = ImmutableArray<IPropertyValidator>.Empty;
+        Type? validationType = null;
+        ITypedValidation? typedValidation = null;
+        foreach (ref readonly var change in context.Changes)
+        {
+            var subjectContext = change.Property.Subject.TryGetContext();
+            if (subjectContext is null)
+            {
+                continue;
+            }
+
+            if (!ReferenceEquals(subjectContext, validatorsContext))
+            {
+                validatorsContext = subjectContext;
+                validators = subjectContext.GetServices<IPropertyValidator>();
+            }
+
+            if (validators.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            var propertyType = change.Property.Metadata.Type;
+            if (!ReferenceEquals(propertyType, validationType))
+            {
+                validationType = propertyType;
+                typedValidation = TypedValidations.TryGetValue(propertyType, out var registered) ? registered : null;
+            }
+
+            var validationResults = typedValidation is not null && typedValidation.TryValidate(validators, change, out var typedResults)
+                ? typedResults
+                : Validate(validators, change.Property, change.GetNewValue<object?>(), change.Origin);
+            if (validationResults is not null)
+            {
+                (failedChanges ??= []).Add(change);
+                (errors ??= []).Add(new PropertyValidationException(change.Property, change.GetNewValue<object?>(), validationResults));
+            }
+        }
+
+        if (failedChanges is not null)
+        {
+            throw new SubjectTransactionValidationException(failedChanges, errors!);
+        }
+    }
+
+    private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
         // The chain executing this write was resolved from the subject's attached context, so that
         // context's validators are the ones that apply; an unattached subject runs no chain and is
         // never validated.
-        var validators = context.Property.Subject.TryGetContext()?.GetServices<IPropertyValidator>()
-            ?? ImmutableArray<IPropertyValidator>.Empty;
+        var validators = property.Subject.TryGetContext()?.GetServices<IPropertyValidator>() ?? ImmutableArray<IPropertyValidator>.Empty;
+        var validationResults = Validate(validators, property, value, origin);
+        if (validationResults is not null)
+        {
+            throw new PropertyValidationException(property, value, validationResults);
+        }
+    }
 
-        var validationContext = new PropertyValidationContext<TProperty>(context.Property, context.NewValue, context.Origin);
+    /// <summary>
+    /// Returns the results of every validator for <paramref name="value"/>, or null when the value is valid.
+    /// </summary>
+    private static List<ValidationResult>? Validate<TProperty>(
+        ImmutableArray<IPropertyValidator> validators,
+        PropertyReference property,
+        TProperty value,
+        ChangeOrigin origin)
+    {
+        var validationContext = new PropertyValidationContext<TProperty>(property, value, origin);
 
-        List<ValidationResult>? additionalErrors = null;
+        List<ValidationResult>? validationResults = null;
         foreach (var validator in validators)
         {
-            foreach (var error in validator.Validate(in validationContext))
+            foreach (var validationResult in validator.Validate(in validationContext))
             {
-                additionalErrors ??= [];
-                additionalErrors.Add(error);
+                (validationResults ??= []).Add(validationResult);
             }
         }
 
-        if (additionalErrors is not null)
+        return validationResults;
+    }
+
+    /// <summary>
+    /// Validates the new value of a change as the type it is registered for. Returns false without validating when the
+    /// new value is not of that type: null for a value type, or a value of another type, which only an untyped write
+    /// can store.
+    /// </summary>
+    private interface ITypedValidation
+    {
+        bool TryValidate(
+            ImmutableArray<IPropertyValidator> validators,
+            in SubjectPropertyChange change,
+            out List<ValidationResult>? validationResults);
+    }
+
+    private sealed class TypedValidation<TProperty> : ITypedValidation
+    {
+        // An explicit static constructor runs before the first Register call returns, while a field initializer alone
+        // only guarantees running before a field is read.
+        static TypedValidation()
         {
-            var sb = new StringBuilder();
-            foreach (var error in additionalErrors)
-            {
-                sb.Append('\n');
-                sb.Append(error.ErrorMessage);
-            }
-            
-            throw new ValidationException(sb.ToString());
+            TypedValidations.TryAdd(typeof(TProperty), new TypedValidation<TProperty>());
         }
 
-        next(ref context);
+        /// <summary>Registers the typed commit check for <typeparamref name="TProperty"/>, once per type.</summary>
+        public static void Register()
+        {
+            // Empty: calling it runs the static constructor, which registers the type.
+        }
+
+        public bool TryValidate(
+            ImmutableArray<IPropertyValidator> validators,
+            in SubjectPropertyChange change,
+            out List<ValidationResult>? validationResults)
+        {
+            if (change.TryGetNewValue(out TProperty value))
+            {
+                validationResults = Validate(validators, change.Property, value, change.Origin);
+                return true;
+            }
+
+            validationResults = null;
+            return false;
+        }
     }
 }

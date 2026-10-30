@@ -9,7 +9,6 @@ using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
-using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -17,8 +16,6 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
-// Writes to an in-memory storage, see the remarks of StorageTestBase.
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownFileTests
 {
     [Fact]
@@ -704,7 +701,7 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public async Task WhenAPageHasTwoParagraphs_ThenItsHtmlSegmentHasTheStartOfTheSecond()
+    public async Task WhenAPageHasTwoParagraphs_ThenEachIsAnHtmlSegmentThatIsABlock()
     {
         // Arrange
         var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
@@ -715,12 +712,19 @@ public class MarkdownFileTests
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
-        var child = Assert.Single(markdown.Children);
-        var html = Assert.IsType<HtmlSegment>(child.Value);
-        Assert.Equal(["<p>First.</p>\n", "<p>Second.</p>\n"], html.Blocks.ToArray());
-        Assert.True(html.StartsWithBlock);
-        Assert.True(html.EndsWithBlock);
-        Assert.Matches("^Html_0_[0-9a-f]{16}$", child.Key);
+        Assert.Collection(
+            markdown.Children,
+            first => AssertBlock(first, "^Html_0_[0-9a-f]{16}$", "<p>First.</p>\n"),
+            second => AssertBlock(second, "^Html_1_[0-9a-f]{16}$", "<p>Second.</p>\n"));
+
+        static void AssertBlock(KeyValuePair<string, IInterceptorSubject> child, string keyPattern, string html)
+        {
+            var segment = Assert.IsType<HtmlSegment>(child.Value);
+            Assert.Equal([html], segment.Blocks.ToArray());
+            Assert.True(segment.StartsWithBlock);
+            Assert.True(segment.EndsWithBlock);
+            Assert.Matches(keyPattern, child.Key);
+        }
     }
 
     [Fact]
@@ -731,18 +735,18 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "blocks.md", "First.\n\nSecond.");
         var markdown = CreateMarkdownFile(serviceProvider, storage, "blocks.md");
         await markdown.OnFileChangedAsync(CancellationToken.None);
-        var before = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
+        var before = markdown.Children.First();
 
         // Act
-        // The same HTML as raw HTML is one block.
-        await WriteFileAsync(storage, "blocks.md", "<p>First.</p>\n<p>Second.</p>");
+        // Raw HTML after the paragraph is joined with it, so the paragraph no longer ends a block.
+        await WriteFileAsync(storage, "blocks.md", "First.\n<p>Second.</p>");
         await markdown.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
-        var after = Assert.Single(markdown.Children, child => child.Value is HtmlSegment);
+        var after = markdown.Children.First();
         var html = Assert.IsType<HtmlSegment>(after.Value);
         Assert.Equal(((HtmlSegment)before.Value).Html, html.Html);
-        Assert.Single(html.Blocks);
+        Assert.False(html.EndsWithBlock);
         Assert.NotEqual(before.Key, after.Key);
         Assert.NotSame(before.Value, html);
     }

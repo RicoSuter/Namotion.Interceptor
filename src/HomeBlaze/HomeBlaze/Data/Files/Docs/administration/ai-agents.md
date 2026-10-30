@@ -278,7 +278,6 @@ Each tool can be allowed on its own; the edit form marks them "Changes pages and
 The operations change text only and refuse:
 
 - **Changing blocks**: adding, changing, removing or moving any [block](pages.md#blocks), with its arguments, `json` block and everything inside, because a block creates or configures running subjects. Slot blocks such as `Footer` and style blocks such as `:: {.note}` count. Text directly after a block without a closing line belongs to it.
-- **Recreating unnamed blocks**: a change that would create the subject of a block without a `#name` again, such as adding an expression or a first text before it, see [What an Edit of the Page Keeps](pages.md#what-an-edit-of-the-page-keeps). Editing existing text is fine; a `#name` given in the page editor frees the text before it.
 - **Active content**: raw HTML, images and media, math and diagram blocks, element attributes such as `{onclick=...}`, abbreviation definitions such as `*[HB]: HomeBlaze` (which change text inside blocks and expressions), and links other than http, https and mailto. Active content a page already has may stay or be removed. One gap remains: an agent can add a link reference definition with an http or https address, which changes where a `[text][label]` link inside a block leads.
 - **Large pages**: more than 64 KB of source, counted with `***` for hidden values.
 

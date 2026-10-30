@@ -14,7 +14,7 @@ The context is typically created once at application startup and shared across a
 
 ## Adding Services
 
-Services are registered using the fluent API. Services can be interceptors, handlers, or any custom service type. `WithService<TService>` only registers when no service of type `TService` is registered yet (including through fallback contexts), so a repeated call is a no-op; `AddService` always adds another instance:
+Services are registered using the fluent API. Services can be interceptors, handlers, or any custom service type. `WithService<TService>` only registers when no service of type `TService` is registered yet, so a repeated call is a no-op; `AddService` always adds another instance:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -193,4 +193,6 @@ public class LoggingInterceptor : IWriteInterceptor
 }
 ```
 
-The pipeline is compiled per context and property type and cached. It is rebuilt when the context's services or fallback contexts change.
+An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]` and transform idempotently, see [Edge Cases and Limitations](tracking-transactions.md#edge-cases-and-limitations).
+
+The pipeline is compiled per context and property type and cached. It is rebuilt when the context's services change.

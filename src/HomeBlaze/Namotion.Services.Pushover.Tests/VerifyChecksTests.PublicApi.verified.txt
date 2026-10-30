@@ -1,0 +1,95 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Services.Pushover.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Services.Pushover
+{
+    public sealed class PushoverException : System.Exception
+    {
+        public PushoverException(string message, System.Exception innerException) { }
+        public bool IsApplicationTokenInvalid { get; }
+        public System.Net.HttpStatusCode? StatusCode { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("NotificationsActive")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Notifications")]
+    [System.ComponentModel.Description("Pushover push notifications to phones and desktops, one target per user or group")]
+    [System.ComponentModel.DisplayName("Pushover")]
+    public class PushoverService : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public PushoverService(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Services.Pushover.PushoverService> logger) { }
+        public PushoverService(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Services.Pushover.PushoverService> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? ApplicationToken { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Services.Pushover.PushoverTarget> Targets { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Send", Position=1, Title="Send to all targets")]
+        public System.Threading.Tasks.Task SendToAllTargetsAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public static string CreateTargetKey(string name, System.Collections.Generic.IReadOnlyCollection<string> existingKeys) { }
+    }
+    public static class PushoverServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPushoverService(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Services.Pushover.PushoverService>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Person")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Description("Pushover user or group that receives notifications")]
+    [System.ComponentModel.DisplayName("Pushover target")]
+    public class PushoverTarget : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Messaging.INotificationPublisher, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public static readonly System.TimeSpan MaximumEmergencyExpire;
+        public static readonly System.TimeSpan MinimumEmergencyRetry;
+        public PushoverTarget() { }
+        public PushoverTarget(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string[] Devices { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan EmergencyExpire { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan EmergencyRetry { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastSentAt { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? UserKey { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Abstractions.Messaging.NotificationResult> SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}

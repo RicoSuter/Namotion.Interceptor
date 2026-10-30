@@ -1,0 +1,201 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Installation.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Installation
+{
+    public sealed class GitHubRequestException : System.Exception
+    {
+        public GitHubRequestException(string message, System.TimeSpan? retryAfter) { }
+        public System.TimeSpan? RetryAfter { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Devices")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Description("Browser connected to this installation, which shows notifications as a dialog")]
+    [System.ComponentModel.DisplayName("Client")]
+    public class HomeBlazeClient : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Messaging.INotificationPublisher, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HomeBlazeClient() { }
+        public HomeBlazeClient(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public int ConnectionCount { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string Id { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsNamed { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public System.DateTimeOffset? LastConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? TokenHash { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Removes the name of this client; its open tabs become anonymous clients again.", Icon="Delete", Position=2, RequiresConfirmation=true, Title="Forget")]
+        public System.Threading.Tasks.Task ForgetAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Names this client, which keeps it when its browser closes.", Icon="Edit", Position=1, Title="Rename")]
+        public System.Threading.Tasks.Task RenameAsync(string name, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.Abstractions.Messaging.NotificationResult> SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SingleInstance]
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Info")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("System")]
+    [System.ComponentModel.Description("Reports the build, environment and available updates of this installation")]
+    [System.ComponentModel.DisplayName("Installation")]
+    public class HomeBlazeInstallation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public HomeBlazeInstallation(Microsoft.Extensions.Hosting.IHostEnvironment hostEnvironment, System.Net.Http.IHttpClientFactory httpClientFactory, HomeBlaze.Services.DeveloperModeService developerModeService, HomeBlaze.Services.Clients.ClientConnectionService clientConnectionService, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Installation.HomeBlazeInstallation> logger) { }
+        public HomeBlazeInstallation(Microsoft.Extensions.Hosting.IHostEnvironment hostEnvironment, System.Net.Http.IHttpClientFactory httpClientFactory, HomeBlaze.Services.DeveloperModeService developerModeService, HomeBlaze.Services.Clients.ClientConnectionService clientConnectionService, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Installation.HomeBlazeInstallation> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=404)]
+        [System.ComponentModel.Category("Build")]
+        public string? Branch { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=409)]
+        [System.ComponentModel.Category("Build")]
+        public System.Uri? BuildRunUrl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=406)]
+        [System.ComponentModel.Category("Build")]
+        public System.DateTimeOffset? BuildTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=401)]
+        [System.ComponentModel.Category("Build")]
+        public HomeBlaze.Installation.InstallationChannel Channel { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.Dictionary<string, HomeBlaze.Installation.HomeBlazeClient> Clients { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("Build")]
+        public string? Commit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=405)]
+        [System.ComponentModel.Category("Build")]
+        public System.DateTimeOffset? CommitDate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=410)]
+        [System.ComponentModel.Category("Build")]
+        public System.Uri? CommitUrl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=464)]
+        [System.ComponentModel.Category("Update")]
+        public int? CommitsBehind { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=465)]
+        [System.ComponentModel.Category("Update")]
+        public System.Uri? CompareUrl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=444)]
+        [System.ComponentModel.Category("Runtime")]
+        public int? ConfigurationPropertyCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=440)]
+        [System.ComponentModel.Category("Runtime")]
+        public int ConnectedCircuitCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=423)]
+        [System.ComponentModel.Category("Environment")]
+        public string? DataDirectory { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=424, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        [System.ComponentModel.Category("Environment")]
+        public long? DataVolumeFreeSpace { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=425, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        [System.ComponentModel.Category("Environment")]
+        public long? DataVolumeTotalSize { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=426, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Environment")]
+        public decimal? DataVolumeUsage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=420)]
+        [System.ComponentModel.Category("Environment")]
+        public string EnvironmentName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=421)]
+        [System.ComponentModel.Category("Environment")]
+        public bool IsDeveloperMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=466)]
+        [System.ComponentModel.Category("Update")]
+        public System.DateTimeOffset? LastUpdateCheck { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=462)]
+        [System.ComponentModel.Category("Update")]
+        public System.DateTimeOffset? LatestReleaseDate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=463)]
+        [System.ComponentModel.Category("Update")]
+        public System.Uri? LatestReleaseUrl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=461)]
+        [System.ComponentModel.Category("Update")]
+        public string? LatestVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=445)]
+        [System.ComponentModel.Category("Runtime")]
+        public int? OperationCount { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=442)]
+        [System.ComponentModel.Category("Runtime")]
+        public int? PropertyCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=446)]
+        [System.ComponentModel.Category("Runtime")]
+        public int? QueryCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=408)]
+        [System.ComponentModel.Category("Build")]
+        public System.Uri? RepositoryUrl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=443)]
+        [System.ComponentModel.Category("Runtime")]
+        public int? StatePropertyCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=441)]
+        [System.ComponentModel.Category("Runtime")]
+        public int? SubjectCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403)]
+        [System.ComponentModel.Category("Build")]
+        public string? Tag { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=460)]
+        [System.ComponentModel.Category("Update")]
+        public bool? UpdateAvailable { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool UpdateCheckEnabled { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan UpdateCheckInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=467)]
+        [System.ComponentModel.Category("Update")]
+        public string? UpdateCheckStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        [System.ComponentModel.Category("Build")]
+        public string Version { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=411)]
+        [System.ComponentModel.Category("Build")]
+        public System.Uri? VersionUrl { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Asks GitHub for a newer version now.", Icon="Update", Title="Check for updates")]
+        public void CheckForUpdates() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum InstallationChannel
+    {
+        Release = 0,
+        Edge = 1,
+        Development = 2,
+    }
+}

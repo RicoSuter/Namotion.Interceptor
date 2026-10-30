@@ -365,11 +365,29 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
-            // No Contains check needed - LifecycleInterceptor already guarantees
-            // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
-            _children.Add(child);
+            // No Contains check needed: the lifecycle attaches each occurrence once.
+            _children.Insert(GetInsertPosition(child.Index), child);
             _childrenCache = default;
         }
+    }
+
+    // Children of a collection are kept in position order, which an append leaves as it is. A
+    // property declared as a dictionary is not reordered by key, so its children stay in the order
+    // they were attached, whatever the type of their keys. Caller must hold _children.
+    private int GetInsertPosition(object? index)
+    {
+        var position = _children.Count;
+        if (index is int newPosition && !IsSubjectDictionary)
+        {
+            while (position > 0 &&
+                   _children[position - 1].Index is int previousPosition &&
+                   previousPosition > newPosition)
+            {
+                position--;
+            }
+        }
+
+        return position;
     }
 
     internal void RemoveChild(SubjectPropertyChild child)
@@ -395,7 +413,18 @@ public class RegisteredSubjectProperty
             }
             else
             {
-                index = _children.IndexOf(child);
+                // The same key instance matches even when its key type's Equals does not report it
+                // equal to itself.
+                for (var i = 0; i < _children.Count; i++)
+                {
+                    var candidate = _children[i];
+                    if (candidate.Subject == child.Subject &&
+                        (ReferenceEquals(candidate.Index, child.Index) || Equals(candidate.Index, child.Index)))
+                    {
+                        index = i;
+                        break;
+                    }
+                }
             }
 
             if (index == -1)
@@ -412,15 +441,15 @@ public class RegisteredSubjectProperty
     /// _children then _knownSubjects, which is the inverse of HandleLifecycleChange's lock order.
     /// The outer topology gate serializes both paths and prevents deadlock.
     /// </summary>
-    /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
+    /// <param name="collectionValue">The current collection value.</param>
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
     internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
     {
-        if (collectionValue is null or IInterceptorSubject or string)
+        if (collectionValue is null or string)
             return;
 
         // Match structural scanning: dictionary keys win even when the value implements ICollection.
-        if (collectionValue is IDictionary ||
+        if (collectionValue is IInterceptorSubject or IDictionary ||
             Type.IsSubjectDictionaryType() || collectionValue.GetType().IsSubjectDictionaryType())
         {
             RefreshOccurrenceIndices(collectionValue, registry);
@@ -536,7 +565,11 @@ public class RegisteredSubjectProperty
                     cursors[subject] = index;
                 }
 
-                if (keyedValue is IDictionary dictionary)
+                if (keyedValue is IInterceptorSubject single)
+                {
+                    MoveChildToKey(cursors, nextSlots, single, null, registry);
+                }
+                else if (keyedValue is IDictionary dictionary)
                 {
                     foreach (DictionaryEntry entry in dictionary)
                     {
@@ -613,7 +646,8 @@ public class RegisteredSubjectProperty
         var collectionPositions = _reusableCollectionPositions;
         collectionPositions?.Clear();
 
-        if (value is IList list)
+        // A multidimensional array is an IList whose indexer throws, so it is enumerated like any other value.
+        if (value is IList list and not Array { Rank: > 1 })
         {
             for (var index = 0; index < list.Count; index++)
             {

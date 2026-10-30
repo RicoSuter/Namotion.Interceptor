@@ -166,21 +166,17 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is not null && _firstParent.Equals(entry))
+            if (IsEntry(_firstParent, parent, index))
             {
                 PromoteFirstParentFromAdditional();
                 return;
             }
 
-            if (_additionalParents is not null)
+            var position = IndexOfAdditionalParent(parent, index);
+            if (position >= 0)
             {
-                var indexInList = _additionalParents.IndexOf(entry);
-                if (indexInList >= 0)
-                {
-                    _additionalParents.RemoveAt(indexInList);
-                    InvalidateParentsSnapshot();
-                }
+                _additionalParents!.RemoveAt(position);
+                InvalidateParentsSnapshot();
             }
         }
     }
@@ -220,24 +216,43 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
+            var newEntry = new SubjectPropertyParent { Property = property, Index = newIndex };
+            if (IsEntry(_firstParent, property, oldIndex))
             {
-                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
+                _firstParent = newEntry;
                 InvalidateParentsSnapshot();
                 return;
             }
 
-            if (_additionalParents is not null)
+            var position = IndexOfAdditionalParent(property, oldIndex);
+            if (position >= 0)
             {
-                var indexInList = _additionalParents.IndexOf(oldEntry);
-                if (indexInList >= 0)
-                {
-                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                    InvalidateParentsSnapshot();
-                }
+                _additionalParents![position] = newEntry;
+                InvalidateParentsSnapshot();
             }
         }
+    }
+
+    // Caller must hold _lock.
+    private int IndexOfAdditionalParent(RegisteredSubjectProperty property, object? index)
+    {
+        if (_additionalParents is not null)
+        {
+            for (var i = 0; i < _additionalParents.Count; i++)
+            {
+                if (IsEntry(_additionalParents[i], property, index))
+                    return i;
+            }
+        }
+
+        return -1;
+    }
+
+    // The index is stored as the key instance the value held, so the same instance matches even when its key type's
+    // Equals does not report it equal to itself.
+    private static bool IsEntry(in SubjectPropertyParent entry, RegisteredSubjectProperty property, object? index)
+    {
+        return entry.Property == property && (ReferenceEquals(entry.Index, index) || Equals(entry.Index, index));
     }
 
     // Promotes the head (not the tail) of the overflow list so the surviving parents

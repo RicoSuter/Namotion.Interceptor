@@ -74,7 +74,7 @@ public class SubjectSetupDialogTests
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await browserLink.ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = PageLoadTimeout });
+        await _fixture.WaitForUrlAsync(page, url => url.Contains("/browser"), PageLoadTimeout);
 
         // The URL changes before the browser has built its panes, and the pane's Create operation is
         // what the dialog is opened from, so that button is the condition the next step depends on.

@@ -1,0 +1,664 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Ecowitt.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Ecowitt
+{
+    public class EcowittClient
+    {
+        public EcowittClient(System.Net.Http.HttpClient httpClient, string hostAddress) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittDeviceInfo> GetDeviceInfoAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittLiveData> GetLiveDataAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittNetworkInfo> GetNetworkInfoAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittSensorInfo[]> GetSensorsInfoAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittVersionInfo> GetVersionAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Cloud")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Climate")]
+    [System.ComponentModel.Description("Ecowitt weather station gateway with dynamic sensor discovery")]
+    [System.ComponentModel.DisplayName("Ecowitt gateway")]
+    public class EcowittGateway : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.IHubDevice, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittGateway(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Ecowitt.EcowittGateway> logger) { }
+        public EcowittGateway(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Ecowitt.EcowittGateway> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittChannelSensor[] ChannelSensors { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=25)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittCo2Sensor[] Co2Sensors { get; }
+        public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? HardwareRevision { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] HiddenSensors { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostAddress { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittIndoorSensor? IndoorSensor { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsConnected { get; }
+        public bool? IsWireless { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittLeafWetnessSensor[] LeafWetnessSensors { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=26)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittLeakSensor[] LeakSensors { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittLightningSensor? LightningSensor { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? MacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittOutdoorSensor? OutdoorSensor { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public decimal PiezoRainCumulativeOffset { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittRainGauge? PiezoRainGauge { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public decimal PiezoRainLastMonthlyValue { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=24)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittPm25Sensor[] Pm25Sensors { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public decimal RainCumulativeOffset { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittRainGauge? RainGauge { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public decimal RainLastMonthlyValue { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=30)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sensors { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SerialNumber { get; }
+        public int? SignalStrength { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittSoilMoistureSensor[] SoilMoistureSensors { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        public string? SubnetMask { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public Namotion.Devices.Ecowitt.Sensors.EcowittTemperatureSensor[] TemperatureSensors { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class EcowittServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddEcowittGateway(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Ecowitt.EcowittGateway>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+}
+namespace Namotion.Devices.Ecowitt.Models
+{
+    public class EcowittChannelData
+    {
+        public EcowittChannelData() { }
+        public int Channel { get; set; }
+        public decimal? Humidity { get; set; }
+        public string? Name { get; set; }
+        public decimal? Temperature { get; set; }
+    }
+    public class EcowittCo2Data
+    {
+        public EcowittCo2Data() { }
+        public int Channel { get; set; }
+        public decimal? Co2 { get; set; }
+        public decimal? Co2Avg24h { get; set; }
+        public decimal? Humidity { get; set; }
+        public decimal? Temperature { get; set; }
+    }
+    public class EcowittDeviceInfo
+    {
+        public EcowittDeviceInfo() { }
+        public string? Frequency { get; set; }
+        public string? Model { get; set; }
+        public string? StationType { get; set; }
+    }
+    public class EcowittIndoorData
+    {
+        public EcowittIndoorData() { }
+        public decimal? AbsolutePressure { get; set; }
+        public decimal? Humidity { get; set; }
+        public decimal? RelativePressure { get; set; }
+        public decimal? Temperature { get; set; }
+    }
+    public class EcowittLeafData
+    {
+        public EcowittLeafData() { }
+        public int Channel { get; set; }
+        public decimal? Wetness { get; set; }
+    }
+    public class EcowittLeakData
+    {
+        public EcowittLeakData() { }
+        public int Channel { get; set; }
+        public bool IsLeaking { get; set; }
+    }
+    public class EcowittLightningData
+    {
+        public EcowittLightningData() { }
+        public decimal? Distance { get; set; }
+        public System.DateTimeOffset? LastStrikeTime { get; set; }
+        public int? StrikeCount { get; set; }
+    }
+    public class EcowittLiveData
+    {
+        public EcowittLiveData() { }
+        public Namotion.Devices.Ecowitt.Models.EcowittChannelData[] Channels { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittCo2Data[] Co2 { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittIndoorData? Indoor { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittLeafData[] LeafWetness { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittLeakData[] Leaks { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittLightningData? Lightning { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittOutdoorData? Outdoor { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittRainData? PiezoRain { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittPm25Data[] Pm25 { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittRainData? Rain { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittSoilData[] SoilMoisture { get; set; }
+        public Namotion.Devices.Ecowitt.Models.EcowittTemperatureData[] Temperatures { get; set; }
+    }
+    public class EcowittNetworkInfo
+    {
+        public EcowittNetworkInfo() { }
+        public string? Dns { get; set; }
+        public string? Gateway { get; set; }
+        public string? IpAddress { get; set; }
+        public bool? IsWireless { get; set; }
+        public string? MacAddress { get; set; }
+        public string? SubnetMask { get; set; }
+    }
+    public class EcowittOutdoorData
+    {
+        public EcowittOutdoorData() { }
+        public decimal? DewPoint { get; set; }
+        public decimal? FeelsLikeTemperature { get; set; }
+        public decimal? Humidity { get; set; }
+        public decimal? Illuminance { get; set; }
+        public decimal? MaxDailyGust { get; set; }
+        public decimal? SolarRadiation { get; set; }
+        public decimal? Temperature { get; set; }
+        public decimal? UvIndex { get; set; }
+        public decimal? VaporPressureDeficit { get; set; }
+        public decimal? WindDirection { get; set; }
+        public decimal? WindGust { get; set; }
+        public decimal? WindSpeed { get; set; }
+    }
+    public class EcowittPm25Data
+    {
+        public EcowittPm25Data() { }
+        public int Channel { get; set; }
+        public decimal? Pm25 { get; set; }
+        public decimal? Pm25Avg24h { get; set; }
+    }
+    public class EcowittRainData
+    {
+        public EcowittRainData() { }
+        public decimal? DailyRain { get; set; }
+        public decimal? HourlyRain { get; set; }
+        public decimal? Last24HoursRain { get; set; }
+        public decimal? MonthlyRain { get; set; }
+        public decimal? RainEvent { get; set; }
+        public decimal? RainRate { get; set; }
+        public decimal? TotalRain { get; set; }
+        public decimal? WeeklyRain { get; set; }
+        public decimal? YearlyRain { get; set; }
+    }
+    public class EcowittSensorInfo
+    {
+        public EcowittSensorInfo() { }
+        public int? Battery { get; set; }
+        public string? Name { get; set; }
+        public int? Rssi { get; set; }
+        public string? SensorId { get; set; }
+        public string? SensorType { get; set; }
+        public int? SignalLevel { get; set; }
+        public int TypeCode { get; set; }
+    }
+    public class EcowittSoilData
+    {
+        public EcowittSoilData() { }
+        public int Channel { get; set; }
+        public decimal? Moisture { get; set; }
+    }
+    public class EcowittTemperatureData
+    {
+        public EcowittTemperatureData() { }
+        public int Channel { get; set; }
+        public decimal? Temperature { get; set; }
+    }
+    public class EcowittVersionInfo
+    {
+        public EcowittVersionInfo() { }
+        public string? Version { get; set; }
+    }
+}
+namespace Namotion.Devices.Ecowitt.Sensors
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittChannelSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittChannelSensor(int channel) { }
+        public EcowittChannelSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? Humidity { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? Name { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittCo2Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittCo2Sensor(int channel) { }
+        public EcowittCo2Sensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public decimal? Co2 { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public decimal? Co2Avg24h { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? Humidity { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittIndoorSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IBarometricPressureSensor, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittIndoorSensor() { }
+        public EcowittIndoorSensor(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hectopascal)]
+        public decimal? AbsolutePressure { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? Humidity { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hectopascal)]
+        public decimal? RelativePressure { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittLeafWetnessSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittLeafWetnessSensor(int channel) { }
+        public EcowittLeafWetnessSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? LeafWetness { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittLeakSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittLeakSensor(int channel) { }
+        public EcowittLeakSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool? IsLeaking { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittLightningSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittLightningSensor() { }
+        public EcowittLightningSensor(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? Distance { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastStrikeTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int? StrikeCount { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittOutdoorSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ILightSensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, HomeBlaze.Abstractions.Sensors.IUvIndexSensor, HomeBlaze.Abstractions.Sensors.IWindSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittOutdoorSensor() { }
+        public EcowittOutdoorSensor(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? DewPoint { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? FeelsLikeTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? Humidity { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Lux)]
+        [System.ComponentModel.Category("Sun")]
+        public decimal? Illuminance { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MeterPerSecond)]
+        [System.ComponentModel.Category("Wind")]
+        public decimal? MaxDailyGust { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Sun")]
+        public decimal? SolarRadiation { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.UvIndex)]
+        [System.ComponentModel.Category("Sun")]
+        public decimal? UvIndex { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public decimal? VaporPressureDeficit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Degree)]
+        [System.ComponentModel.Category("Wind")]
+        public decimal? WindDirection { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MeterPerSecond)]
+        [System.ComponentModel.Category("Wind")]
+        public decimal? WindGust { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MeterPerSecond)]
+        [System.ComponentModel.Category("Wind")]
+        public decimal? WindSpeed { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittPm25Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittPm25Sensor(int channel) { }
+        public EcowittPm25Sensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public decimal? Pm25 { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public decimal? Pm25Avg24h { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittRainGauge : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IRainSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittRainGauge(string name) { }
+        public EcowittRainGauge(string name, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? DailyRain { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? HourlyRain { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsRaining { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? Last24HoursRain { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? MonthlyRain { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? RainEvent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MillimeterPerHour)]
+        public decimal? RainRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        public decimal? TotalRain { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? WeeklyRain { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
+        [System.ComponentModel.Category("Rainfall")]
+        public decimal? YearlyRain { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittSensor : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittSensor(string sensorId) { }
+        public EcowittSensor(string sensorId, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? BatteryLevel { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsOnline { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastSeen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DecibelMilliwatt)]
+        [System.ComponentModel.Category("Signal")]
+        public int? Rssi { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Device")]
+        public string SensorId { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Signal")]
+        public int? SignalStrength { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Device")]
+        public int TypeCode { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Device")]
+        public string? TypeDescription { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [System.ComponentModel.Category("Device")]
+        public string? TypeName { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittSoilMoistureSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ISoilSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittSoilMoistureSensor(int channel) { }
+        public EcowittSoilMoistureSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? SoilMoisture { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class EcowittTemperatureSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public EcowittTemperatureSensor(int channel) { }
+        public EcowittTemperatureSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int Channel { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}

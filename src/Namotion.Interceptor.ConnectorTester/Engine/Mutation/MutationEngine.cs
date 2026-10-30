@@ -27,6 +27,10 @@ public sealed class MutationEngine : BackgroundService
     public int StructuralMutationRate => _structuralMutationRate;
     public long ValueMutationCount => _counters.ValueMutationCount;
     public long StructuralMutationCount => _counters.StructuralMutationCount;
+    public long CommitCount => _counters.CommitCount;
+    public long ConflictCommitCount => _counters.ConflictCommitCount;
+    public long SourceWriteFailedCommitCount => _counters.SourceWriteFailedCommitCount;
+    public long UnexpectedFailedCommitCount => _counters.UnexpectedFailedCommitCount;
 
     public void ResetCounters() => _counters.Reset();
 
@@ -60,7 +64,7 @@ public sealed class MutationEngine : BackgroundService
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
         var context = ((IInterceptorSubject)root).GetContext();
-        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration);
+        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
     }
 
@@ -75,7 +79,7 @@ public sealed class MutationEngine : BackgroundService
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
         var context = ((IInterceptorSubject)root).GetContext();
-        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex);
+        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, logger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
     }
 

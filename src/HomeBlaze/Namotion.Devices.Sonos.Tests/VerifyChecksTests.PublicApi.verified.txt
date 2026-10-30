@@ -1,0 +1,587 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Sonos.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Sonos
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public abstract class SonosDevice : HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? AvailableSoftwareUpdate { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Gateway { get; }
+        public string? HardwareRevision { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IpAddress { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsConnected { get; }
+        public bool? IsWireless { get; }
+        public string? MacAddress { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        public string? Model { get; }
+        public string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string RoomName { get; }
+        public string? SerialNumber { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public int? SignalStrength { get; }
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=901)]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SubnetMask { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string Uuid { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class SonosFaultException : System.Exception
+    {
+        public string Action { get; }
+        public int? UpnpErrorCode { get; }
+    }
+    public sealed class SonosFavorite : System.IEquatable<Namotion.Devices.Sonos.SonosFavorite>
+    {
+        public SonosFavorite(string Title, string Uri, bool IsContainer, string? ImageUri) { }
+        public string? ImageUri { get; init; }
+        public bool IsContainer { get; init; }
+        public string Title { get; init; }
+        public string Uri { get; init; }
+        public override string ToString() { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class SonosGroup : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.IVirtualSubject, HomeBlaze.Abstractions.Media.IAudioPlayer, HomeBlaze.Abstractions.Media.IMediaPlaybackController, HomeBlaze.Abstractions.Media.IMediaPlaybackState, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeController, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("ChangeVolume", "IsEnabled")]
+        public bool ChangeVolume_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public Namotion.Devices.Sonos.SonosPlayer Coordinator { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackAlbum { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackArtist { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public System.TimeSpan? CurrentTrackDuration { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackImageUri { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public System.TimeSpan? CurrentTrackPosition { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackTitle { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackUri { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconName { get; }
+        public bool? IsMuted { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsPlaying { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public Namotion.Devices.Sonos.SonosPlayer[] Members { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Mute", "IsEnabled")]
+        public bool Mute_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Next", "IsEnabled")]
+        public bool Next_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Pause", "IsEnabled")]
+        public bool Pause_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayFavorite", "IsEnabled")]
+        public bool PlayFavorite_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayStream", "IsEnabled")]
+        public bool PlayStream_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayUri", "IsEnabled")]
+        public bool PlayUri_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Play", "IsEnabled")]
+        public bool Play_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Abstractions.Media.MediaPlaybackState? PlaybackState { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Previous", "IsEnabled")]
+        public bool Previous_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        public Namotion.Devices.Sonos.SonosRepeatMode? Repeat { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Seek", "IsEnabled")]
+        public bool Seek_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetRepeat", "IsEnabled")]
+        public bool SetRepeat_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetShuffle", "IsEnabled")]
+        public bool SetShuffle_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetSleepTimer", "IsEnabled")]
+        public bool SetSleepTimer_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetVolume", "IsEnabled")]
+        public bool SetVolume_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        public bool? Shuffle { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        public System.TimeSpan? SleepTimerRemaining { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Source")]
+        public Namotion.Devices.Sonos.SonosSource? Source { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Source")]
+        public string? SourceTitle { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Stop", "IsEnabled")]
+        public bool Stop_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TogglePlayback", "IsEnabled")]
+        public bool TogglePlayback_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Unmute", "IsEnabled")]
+        public bool Unmute_IsEnabled { get; }
+        public decimal? Volume { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Changes the group volume by a relative amount.", Position=11, Title="Change Volume")]
+        [System.ComponentModel.Category("Volume")]
+        public System.Threading.Tasks.Task ChangeVolumeAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal delta, System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Mutes every player in the group.", Icon="VolumeOff", Position=12, Title="Mute")]
+        public System.Threading.Tasks.Task MuteAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Skips to the next track of the group.", Icon="SkipNext", Position=4, Title="Next")]
+        public System.Threading.Tasks.Task NextAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Pauses playback of the group.", Icon="Pause", Position=2, Title="Pause")]
+        public System.Threading.Tasks.Task PauseAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Starts or resumes playback of the group.", Icon="PlayArrow", Position=1, Title="Play")]
+        public System.Threading.Tasks.Task PlayAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays the Sonos favorite with the given title on the group.", Position=20, Title="Play Favorite")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayFavoriteAsync(string title, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays an http(s) or x-rincon-mp3radio stream on the group as radio, which Sonos r" +
+            "econnects when it ends.", Position=22, Title="Play Stream")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayStreamAsync(string uri, string? title, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays a URI once as a normal track on the group, which ends and can be sought.", Position=21, Title="Play URI")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayUriAsync(string uri, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Goes back to the previous track of the group.", Icon="SkipPrevious", Position=5, Title="Previous")]
+        public System.Threading.Tasks.Task PreviousAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Seeks the current track of the group to the given position.", Position=7, Title="Seek")]
+        public System.Threading.Tasks.Task SeekAsync(System.TimeSpan position, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the repeat mode of the group.", Position=31, Title="Set Repeat")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task SetRepeatAsync(Namotion.Devices.Sonos.SonosRepeatMode repeat, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns shuffle on or off for the group.", Position=30, Title="Set Shuffle")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task SetShuffleAsync(bool shuffle, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the sleep timer of the group, at most 23:59:59; zero cancels it.", Position=32, Title="Set Sleep Timer")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task SetSleepTimerAsync(System.TimeSpan duration, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the group volume.", Position=10, Title="Set Volume")]
+        public System.Threading.Tasks.Task SetVolumeAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal volume, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Stops playback of the group.", Icon="Stop", Position=3, Title="Stop")]
+        public System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Pauses the group when it plays, otherwise starts playback.", Position=6, Title="Play or Pause")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task TogglePlaybackAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Unmutes every player in the group.", Icon="VolumeUp", Position=13, Title="Unmute")]
+        public System.Threading.Tasks.Task UnmuteAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class SonosHomeTheater : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public bool? NightMode { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetNightMode", "IsEnabled")]
+        public bool SetNightMode_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetSpeechEnhancement", "IsEnabled")]
+        public bool SetSpeechEnhancement_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public bool? SpeechEnhancement { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns night mode on or off for this home theater player.", Position=1, Title="Set Night Mode")]
+        public System.Threading.Tasks.Task SetNightModeAsync(bool nightMode, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns speech enhancement on or off for this home theater player.", Position=2, Title="Set Speech Enhancement")]
+        public System.Threading.Tasks.Task SetSpeechEnhancementAsync(bool speechEnhancement, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class SonosPlayer : Namotion.Devices.Sonos.SonosDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Media.IAudioPlayer, HomeBlaze.Abstractions.Media.IMediaPlaybackController, HomeBlaze.Abstractions.Media.IMediaPlaybackState, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeController, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        [System.ComponentModel.Category("Sound")]
+        public int? Bass { get; }
+        public decimal? BatteryLevel { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("ChangeVolume", "IsEnabled")]
+        public bool ChangeVolume_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackAlbum { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackArtist { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public System.TimeSpan? CurrentTrackDuration { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackImageUri { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public System.TimeSpan? CurrentTrackPosition { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackTitle { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? CurrentTrackUri { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=410)]
+        [System.ComponentModel.Category("Group")]
+        public string? GroupCoordinatorUuid { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=33)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Source")]
+        public bool HasLineIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public Namotion.Devices.Sonos.SonosHomeTheater? HomeTheater { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=341)]
+        public bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=411)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Group")]
+        public bool IsGroupCoordinator { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=32)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Source")]
+        public bool IsHomeTheater { get; }
+        public bool? IsMuted { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsPlaying { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("JoinGroup", "IsEnabled")]
+        public bool JoinGroup_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("LeaveGroup", "IsEnabled")]
+        public bool LeaveGroup_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("Sound")]
+        public bool? Loudness { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Mute", "IsEnabled")]
+        public bool Mute_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Next", "IsEnabled")]
+        public bool Next_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Pause", "IsEnabled")]
+        public bool Pause_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayFavorite", "IsEnabled")]
+        public bool PlayFavorite_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayNotification", "IsEnabled")]
+        public bool PlayNotification_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayStream", "IsEnabled")]
+        public bool PlayStream_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PlayUri", "IsEnabled")]
+        public bool PlayUri_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Play", "IsEnabled")]
+        public bool Play_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Abstractions.Media.MediaPlaybackState? PlaybackState { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Previous", "IsEnabled")]
+        public bool Previous_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("RampVolume", "IsEnabled")]
+        public bool RampVolume_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        public Namotion.Devices.Sonos.SonosRepeatMode? Repeat { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=40)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Sonos.SonosSatellite> Satellites { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Seek", "IsEnabled")]
+        public bool Seek_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetBass", "IsEnabled")]
+        public bool SetBass_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetLoudness", "IsEnabled")]
+        public bool SetLoudness_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetRepeat", "IsEnabled")]
+        public bool SetRepeat_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetShuffle", "IsEnabled")]
+        public bool SetShuffle_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetSleepTimer", "IsEnabled")]
+        public bool SetSleepTimer_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetTreble", "IsEnabled")]
+        public bool SetTreble_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetVolume", "IsEnabled")]
+        public bool SetVolume_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        public bool? Shuffle { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Playback")]
+        public System.TimeSpan? SleepTimerRemaining { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Source")]
+        public Namotion.Devices.Sonos.SonosSource? Source { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Source")]
+        public string? SourceTitle { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Stop", "IsEnabled")]
+        public bool Stop_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SwitchToLineIn", "IsEnabled")]
+        public bool SwitchToLineIn_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SwitchToTv", "IsEnabled")]
+        public bool SwitchToTv_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TogglePlayback", "IsEnabled")]
+        public bool TogglePlayback_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [System.ComponentModel.Category("Sound")]
+        public int? Treble { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Unmute", "IsEnabled")]
+        public bool Unmute_IsEnabled { get; }
+        public decimal? Volume { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Changes the volume of this player by a relative amount.", Position=11, Title="Change Volume")]
+        [System.ComponentModel.Category("Volume")]
+        public System.Threading.Tasks.Task ChangeVolumeAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal delta, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Joins this player to the group of the given room, by room name or UUID.", Position=50, Title="Join Group")]
+        [System.ComponentModel.Category("Group")]
+        public System.Threading.Tasks.Task JoinGroupAsync(string room, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Removes this player from its group so it plays standalone.", Position=51, Title="Leave Group")]
+        [System.ComponentModel.Category("Group")]
+        public System.Threading.Tasks.Task LeaveGroupAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Mutes this player.", Icon="VolumeOff", Position=13, Title="Mute")]
+        public System.Threading.Tasks.Task MuteAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Skips to the next track of the player\'s group.", Icon="SkipNext", Position=4, Title="Next")]
+        public System.Threading.Tasks.Task NextAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Pauses playback of the player\'s group.", Icon="Pause", Position=2, Title="Pause")]
+        public System.Threading.Tasks.Task PauseAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Starts or resumes playback of the player\'s group.", Icon="PlayArrow", Position=1, Title="Play")]
+        public System.Threading.Tasks.Task PlayAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays the Sonos favorite with the given title on the player\'s group.", Position=20, Title="Play Favorite")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayFavoriteAsync(string title, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays an http(s) sound over the current playback of this player, which resumes af" +
+            "terwards; needs S2 speakers.", Position=23, Title="Play Notification")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayNotificationAsync(string soundUri, [HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal volume, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays an http(s) or x-rincon-mp3radio stream on the player\'s group as radio, whic" +
+            "h Sonos reconnects when it ends.", Position=22, Title="Play Stream")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayStreamAsync(string uri, string? title, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Plays a URI once as a normal track on the player\'s group, which ends and can be s" +
+            "ought.", Position=21, Title="Play URI")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task PlayUriAsync(string uri, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Goes back to the previous track of the player\'s group.", Icon="SkipPrevious", Position=5, Title="Previous")]
+        public System.Threading.Tasks.Task PreviousAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Ramps the volume of this player gradually to the given value.", Position=12, Title="Ramp Volume")]
+        [System.ComponentModel.Category("Volume")]
+        public System.Threading.Tasks.Task RampVolumeAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal volume, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Seeks the current track of the player\'s group to the given position.", Position=7, Title="Seek")]
+        public System.Threading.Tasks.Task SeekAsync(System.TimeSpan position, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the bass of this player, from -10 to 10.", Position=40, Title="Set Bass")]
+        [System.ComponentModel.Category("Sound")]
+        public System.Threading.Tasks.Task SetBassAsync(int bass, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns loudness compensation on or off for this player.", Position=42, Title="Set Loudness")]
+        [System.ComponentModel.Category("Sound")]
+        public System.Threading.Tasks.Task SetLoudnessAsync(bool loudness, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the repeat mode of the player\'s group.", Position=31, Title="Set Repeat")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task SetRepeatAsync(Namotion.Devices.Sonos.SonosRepeatMode repeat, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns shuffle on or off for the player\'s group.", Position=30, Title="Set Shuffle")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task SetShuffleAsync(bool shuffle, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the sleep timer of the player\'s group, at most 23:59:59; zero cancels it.", Position=32, Title="Set Sleep Timer")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task SetSleepTimerAsync(System.TimeSpan duration, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the treble of this player, from -10 to 10.", Position=41, Title="Set Treble")]
+        [System.ComponentModel.Category("Sound")]
+        public System.Threading.Tasks.Task SetTrebleAsync(int treble, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the volume of this player.", Position=10, Title="Set Volume")]
+        public System.Threading.Tasks.Task SetVolumeAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal volume, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Stops playback of the player\'s group.", Icon="Stop", Position=3, Title="Stop")]
+        public System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Switches this player to its line-in input.", Position=25, Title="Switch to Line-In")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task SwitchToLineInAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Switches this home theater player to its TV input.", Position=24, Title="Switch to TV")]
+        [System.ComponentModel.Category("Source")]
+        public System.Threading.Tasks.Task SwitchToTvAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Pauses the player\'s group when it plays, otherwise starts playback.", Position=6, Title="Play or Pause")]
+        [System.ComponentModel.Category("Playback")]
+        public System.Threading.Tasks.Task TogglePlaybackAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Unmutes this player.", Icon="VolumeUp", Position=14, Title="Unmute")]
+        public System.Threading.Tasks.Task UnmuteAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public enum SonosRepeatMode
+    {
+        Off = 0,
+        All = 1,
+        One = 2,
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class SonosSatellite : Namotion.Devices.Sonos.SonosDevice, Namotion.Interceptor.IInterceptorSubject
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public Namotion.Devices.Sonos.SonosSatelliteRole Role { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? Title { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+    }
+    public enum SonosSatelliteRole
+    {
+        Other = 0,
+        Subwoofer = 1,
+        RearLeft = 2,
+        RearRight = 3,
+        StereoPartner = 4,
+    }
+    public static class SonosServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddSonosSystem(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Sonos.SonosSystem>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    public enum SonosSource
+    {
+        None = 0,
+        Tv = 1,
+        LineIn = 2,
+        SpotifyConnect = 3,
+        AirPlay = 4,
+        Radio = 5,
+        Queue = 6,
+        Other = 7,
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("LibraryMusic")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Media")]
+    [System.ComponentModel.Description("Sonos household with its room players, satellites and groups")]
+    [System.ComponentModel.DisplayName("Sonos system")]
+    public class SonosSystem : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IHubDevice, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const int DefaultEventPort = 6329;
+        public const int DefaultIntervalSeconds = 30;
+        public const int MaximumIntervalSeconds = 3600;
+        public const int MinimumIntervalSeconds = 5;
+        public SonosSystem(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Sonos.SonosSystem> logger) { }
+        public SonosSystem(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Sonos.SonosSystem> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public string? ActiveEventCallbackHost { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public bool AreEventsActive { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? EventCallbackHost { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int EventPort { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public Namotion.Devices.Sonos.SonosFavorite[] Favorites { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("GroupAll", "IsEnabled")]
+        public bool GroupAll_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Sonos.SonosGroup> Groups { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconName { get; }
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Sonos.SonosPlayer> Players { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Refresh", "IsEnabled")]
+        public bool Refresh_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? SeedHost { get; set; }
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("UngroupAll", "IsEnabled")]
+        public bool UngroupAll_IsEnabled { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Groups every connected room with the given room, by room name or UUID (party mode" +
+            ").", Position=2, Title="Group All Rooms")]
+        public System.Threading.Tasks.Task GroupAllAsync(string room, System.Threading.CancellationToken cancellationToken) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Reads topology, state and favorites now instead of at the next poll.", Icon="Refresh", Position=1, Title="Refresh")]
+        public System.Threading.Tasks.Task RefreshAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Makes every room standalone.", Position=3, Title="Ungroup All Rooms")]
+        public System.Threading.Tasks.Task UngroupAllAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+}

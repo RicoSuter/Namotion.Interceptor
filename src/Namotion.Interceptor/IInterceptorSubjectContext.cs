@@ -63,6 +63,11 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Retrieves all registered services of the specified type.
     /// </summary>
+    /// <remarks>
+    /// Implementations must not return a non-empty array again after the services it was resolved
+    /// from change, and two contexts that resolve different services of any type must not share one.
+    /// Callers may therefore key caches of any service type by the array's identity.
+    /// </remarks>
     /// <typeparam name="TInterface">The type of services to retrieve.</typeparam>
     /// <returns>An immutable array of all matching services.</returns>
     ImmutableArray<TInterface> GetServices<TInterface>();

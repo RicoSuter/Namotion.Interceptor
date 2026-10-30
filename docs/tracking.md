@@ -413,6 +413,33 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+### Child Index Changes
+
+A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:
+
+```csharp
+public class MyChildIndexHandler : IChildIndexHandler
+{
+    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    {
+        foreach (var child in children)
+        {
+            // child.Subject now sits at child.Index in the value of property
+        }
+    }
+}
+```
+
+These rules hold for every index the library keeps, in the registry (`Children`, `Parents`) and in parent tracking (`GetParents()`):
+
+- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry per occurrence, each with its own position or key.
+- The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject one of whose kept occurrences changed its index, and not at all when none did. A subject is reported once, with the first of its positions or keys in enumeration order, so a handler that keeps every occurrence reads them from the property's value. A subject the write attached already carries its index and is not reported.
+- An index is compared with the one the edge got when the property was last reconciled, not with the old value as it is now, so a collection or dictionary mutated in place does not change what is compared. Assigning the same instance again is not a structural change, so after an in-place mutation, assign a new instance.
+- The lifecycle compares keys by reference, and keys of framework primitive types such as `string`, numbers and enums by value, so it runs no user `Equals`. A key that is equal to the old one but another instance counts as changed: the subject is reported and the stored index takes the new instance.
+- The same requirements apply as to `ILifecycleHandler` (below). The handler must not write the property that was written, and the span is only valid during the call.
+- Once concurrent writes settle, every index matches the stored value. While a write runs, a reader on another thread can see the value and the indices updated at different times.
+- On detach, `SubjectLifecycleChange.Index` is the position or key the removed occurrence had in the previous value. The occurrences a subject keeps get their new indices after the detach callbacks.
+
 ### Thread Safety
 
 The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property. Reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
@@ -698,6 +725,8 @@ var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is
 Entries are per occurrence: a subject listed twice in one collection has two, one per index. Nothing is materialised for a subject until `GetParents()` is first called on it, so a consumer that never asks pays nothing. The order of the entries is unspecified; only the set of occurrences is meaningful.
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
+
+Every parent carries an `Index`, which follows the assigned value as described in [Child Index Changes](#child-index-changes).
 
 The parents are not a tracked property, so a derived property that reads them records no dependency on them. Its value is computed when its subject enters the graph, which for a subject created with a context is construction, before it has a parent. Such a subject's derived properties are therefore computed again when the first edge from an anchored parent consumes its constructor's anchor, and a value that changed is published then. Any other change of the parents, such as moving a subject or reaching a subject through an ancestor that gained a parent of its own, is not noticed: call `RecalculateDerivedProperty()` on the property for that.
 

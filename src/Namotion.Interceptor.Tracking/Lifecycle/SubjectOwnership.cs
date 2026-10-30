@@ -130,14 +130,18 @@ internal sealed class SubjectOwnership
     /// meaningful; assigning the whole set at once is what makes a reorder or a duplicate whose new
     /// index collides with a retained one come out right.
     /// </summary>
-    public void SetIncomingIndices(PropertyReference property, List<object?> indices)
+    /// <returns>Whether an edge got another index.</returns>
+    public bool SetIncomingIndices(PropertyReference property, List<object?> indices)
     {
         lock (this)
         {
+            var changed = false;
             var next = 0;
             if (_incomingCount > 0 && _firstProperty.Equals(property) && next < indices.Count)
             {
-                _firstIndex = indices[next++];
+                var index = indices[next++];
+                changed = !IsSameIndex(_firstIndex, index);
+                _firstIndex = index;
             }
 
             if (_additionalEdges is not null)
@@ -146,11 +150,33 @@ internal sealed class SubjectOwnership
                 {
                     if (_additionalEdges[i].Property.Equals(property))
                     {
-                        _additionalEdges[i] = new IncomingEdge(property, indices[next++]);
+                        var index = indices[next++];
+                        changed |= !IsSameIndex(_additionalEdges[i].Index, index);
+                        _additionalEdges[i] = new IncomingEdge(property, index);
                     }
                 }
             }
+
+            return changed;
         }
+    }
+
+    // Keys are compared by reference unless they are framework primitives, so that no user
+    // equality runs under the gate. An equal key of another instance counts as moved, which only
+    // costs a handler a redundant update.
+    private static bool IsSameIndex(object? oldIndex, object? newIndex)
+    {
+        if (ReferenceEquals(oldIndex, newIndex))
+        {
+            return true;
+        }
+
+        if (oldIndex is null || newIndex is null || oldIndex.GetType() != newIndex.GetType())
+        {
+            return false;
+        }
+
+        return Type.GetTypeCode(oldIndex.GetType()) != TypeCode.Object && oldIndex.Equals(newIndex);
     }
 
     /// <summary>

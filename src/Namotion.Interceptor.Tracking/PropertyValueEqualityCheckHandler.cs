@@ -15,19 +15,25 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) ||
-            IsWriteBackOfPendingChange(context.Property, context.NewValue))
+        if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {
             next(ref context);
         }
-    }
-
-    // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction holds
-    // another value, so it is passed on and the transaction removes its pending change.
-    private static bool IsWriteBackOfPendingChange<TProperty>(PropertyReference property, TProperty newValue)
-    {
-        return SubjectTransaction.HasActiveTransaction &&
-            SubjectTransaction.TryGetPendingValueInCurrentTransaction(property, out TProperty pendingValue) &&
-            !EqualityComparer<TProperty>.Default.Equals(pendingValue, newValue);
+        else if (SubjectTransaction.HasActiveTransaction && SubjectTransaction.Current is { } transaction)
+        {
+            // CurrentValue is the landed value, not the transaction's. A write of it is a change when the transaction
+            // holds another value, so it is passed on and the transaction removes its pending change.
+            if (transaction.TryGetPendingValueForWriteBack(context.Property, out TProperty pendingValue) &&
+                !EqualityComparer<TProperty>.Default.Equals(pendingValue, context.NewValue))
+            {
+                next(ref context);
+            }
+            else
+            {
+                // A Deferred transaction with FailOnConflict records the unchanged write for the commit check, in
+                // every flow carrying SubjectTransaction.Current, child tasks included.
+                SubjectTransactionInterceptor.RecordUnchangedWrite(transaction, ref context);
+            }
+        }
     }
 }

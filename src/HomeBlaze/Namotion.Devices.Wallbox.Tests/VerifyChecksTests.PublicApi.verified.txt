@@ -1,0 +1,244 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Wallbox.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Wallbox.Model
+{
+    public class ChargerInformation
+    {
+        public ChargerInformation() { }
+        public string? Id { get; set; }
+        public string? Model { get; set; }
+        public string? Name { get; set; }
+        public string? SerialNumber { get; set; }
+        public int Status { get; set; }
+    }
+    public enum WallboxChargerStatus
+    {
+        Unknown = 0,
+        Disconnected = 1,
+        Error = 2,
+        Ready = 3,
+        Waiting = 4,
+        Locked = 5,
+        Updating = 6,
+        Scheduled = 7,
+        Paused = 8,
+        WaitingForCarDemand = 9,
+        WaitingInQueueByPowerSharing = 10,
+        WaitingInQueueByPowerBoost = 11,
+        WaitingMidFailed = 12,
+        WaitingMidSafetyMarginExceeded = 13,
+        WaitingInQueueByEcoSmart = 14,
+        Charging = 15,
+        Discharging = 16,
+        LockedCarConnected = 17,
+    }
+    public enum WallboxEcoSmartMode
+    {
+        Disabled = 0,
+        Eco = 1,
+        FullSolar = 2,
+    }
+}
+namespace Namotion.Devices.Wallbox
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("EvStation")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Energy")]
+    [System.ComponentModel.Description("Wallbox EV charger (Pulsar, Commander, Quasar) via cloud API")]
+    [System.ComponentModel.DisplayName("Wallbox charger")]
+    public class WallboxCharger : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState, HomeBlaze.Abstractions.Devices.Energy.IVehicleCharger, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Sensors.IPowerSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public WallboxCharger(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Wallbox.WallboxCharger> logger) { }
+        public WallboxCharger(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Wallbox.WallboxCharger> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=26)]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Charging")]
+        public decimal? ChargeLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public Namotion.Devices.Wallbox.Model.WallboxChargerStatus ChargerStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true, Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        [System.ComponentModel.Category("Charging")]
+        public decimal? ChargingCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
+        public decimal? ChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        [System.ComponentModel.Category("Energy")]
+        public string? Currency { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=16)]
+        [System.ComponentModel.Category("Energy")]
+        public Namotion.Devices.Wallbox.Model.WallboxEcoSmartMode? EcoSmartMode { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Email { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? EnergyPrice { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public string? HardwareRevision { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=30)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=15)]
+        [System.ComponentModel.Category("Energy")]
+        public bool? IsEcoSmartEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        [System.ComponentModel.Category("Lock")]
+        public bool? IsLocked { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        public bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=33)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Lock", "IsEnabled")]
+        public bool Lock_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=19)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        [System.ComponentModel.Category("Charging")]
+        public decimal? MaximumAvailableChargingCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        [System.ComponentModel.Category("Charging")]
+        public decimal? MaximumChargingCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
+        public decimal? MaximumChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string Password { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("PauseCharging", "IsEnabled")]
+        public bool PauseCharging_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? Power { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public string? ProductCode { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("ResumeCharging", "IsEnabled")]
+        public bool ResumeCharging_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string SerialNumber { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Wallbox.WallboxChargingSession Session { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=25)]
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=31)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=32)]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=12, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? TotalConsumedEnergy { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Unlock", "IsEnabled")]
+        public bool Unlock_IsEnabled { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Lock", Title="Lock")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task LockAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Title="Lock Charge Port")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task LockChargePortAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Pause", Title="Pause Charging")]
+        public System.Threading.Tasks.Task PauseChargingAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Reboot")]
+        [System.ComponentModel.Category("Device")]
+        public System.Threading.Tasks.Task RebootAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PlayArrow", Title="Resume Charging")]
+        public System.Threading.Tasks.Task ResumeChargingAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Title="Set Eco-Smart Mode")]
+        [System.ComponentModel.Category("Energy")]
+        public System.Threading.Tasks.Task SetEcoSmartAsync(Namotion.Devices.Wallbox.Model.WallboxEcoSmartMode mode, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Title="Set Energy Price")]
+        [System.ComponentModel.Category("Energy")]
+        public System.Threading.Tasks.Task SetEnergyPriceAsync(decimal pricePerKwh, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Set ICP Max Current")]
+        [System.ComponentModel.Category("Charging")]
+        public System.Threading.Tasks.Task SetIcpMaxCurrentAsync(int amperes, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Title="Set Maximum Charging Current")]
+        [System.ComponentModel.Category("Charging")]
+        public System.Threading.Tasks.Task SetMaximumChargingCurrentAsync(int amperes, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Toggle Charge Port Lock")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task ToggleChargePortLockAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="LockOpen", RequiresConfirmation=true, Title="Unlock")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task UnlockAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Unlock Charge Port")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task UnlockChargePortAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Update Firmware")]
+        [System.ComponentModel.Category("Device")]
+        public System.Threading.Tasks.Task UpdateFirmwareAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class WallboxChargingSession : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public WallboxChargingSession() { }
+        public WallboxChargingSession(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? AddedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? AddedGreenEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? AddedGridEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? AddedRange { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? ChargeLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public System.TimeSpan? ChargingTime { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=0)]
+        public bool IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public decimal? SessionCost { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public class WallboxClient
+    {
+        public WallboxClient(System.Net.Http.IHttpClientFactory httpClientFactory, string email, string password) { }
+        public System.Threading.Tasks.Task<Namotion.Devices.Wallbox.Model.ChargerInformation[]> GetChargersAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public static class WallboxServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddWallboxCharger(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Wallbox.WallboxCharger>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+}

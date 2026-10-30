@@ -21,7 +21,7 @@ namespace Namotion.Interceptor.Registry;
 /// A projection only: no registry state participates in ownership or reachability.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler
 {
     private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
         ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
@@ -278,7 +278,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         RegisteredSubjectProperty? registeredProperty;
         lock (_knownSubjects)
@@ -288,9 +288,10 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 .TryGetProperty(property.Name);
         }
 
-        // Call outside lock — RefreshCollectionIndices updates parent entries;
-        // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshCollectionIndices(value, registry: this);
+        // Every occurrence has an entry, and the span names only the first one of each subject, so
+        // the indices are taken from the value. Called outside the lock: RefreshCollectionIndices
+        // updates parent entries, and holding _knownSubjects would risk deadlock.
+        registeredProperty?.RefreshCollectionIndices(registeredProperty.GetValue(), registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

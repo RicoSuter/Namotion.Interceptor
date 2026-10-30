@@ -1,0 +1,364 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Shelly.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Shelly
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class ShellyCover : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.Covers.IPositionController, HomeBlaze.Abstractions.Devices.Covers.IPositionState, HomeBlaze.Abstractions.Devices.Covers.IRollerShutter, HomeBlaze.Abstractions.Devices.Covers.IRollerShutterController, HomeBlaze.Abstractions.Devices.Covers.IRollerShutterState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalCurrentSensor, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IElectricalVoltageSensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public ShellyCover(Namotion.Devices.Shelly.ShellyDevice device, int index) { }
+        public ShellyCover(Namotion.Devices.Shelly.ShellyDevice device, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public string? ApiState { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Close", "IsEnabled")]
+        public bool Close_IsEnabled { get; }
+        public int? CurrentPosition { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? ElectricalCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? ElectricalFrequency { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Volt)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? ElectricalVoltage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=402)]
+        public bool? IsCalibrating { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsMoving { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        public string? LastDirection { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? MeasuredPower { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Open", "IsEnabled")]
+        public bool Open_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Position { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=350)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? PowerFactor { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Abstractions.Devices.Covers.RollerShutterState? ShutterState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public string? Source { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Stop", "IsEnabled")]
+        public bool Stop_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? TotalExportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? TotalImportedEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="KeyboardArrowDown", Position=2, Title="Close")]
+        public System.Threading.Tasks.Task CloseAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="KeyboardArrowUp", Position=1, Title="Open")]
+        public System.Threading.Tasks.Task OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation]
+        public System.Threading.Tasks.Task SetPositionAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal position, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Stop", Position=3, Title="Stop")]
+        public System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Hub")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Switches")]
+    [System.ComponentModel.Description("Shelly Gen2 device with dynamic component discovery (switches, covers, energy met" +
+        "ers, inputs, temperature sensors, phase netted energy counters)")]
+    [System.ComponentModel.DisplayName("Shelly device")]
+    public class ShellyDevice : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public ShellyDevice(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Shelly.ShellyDevice> logger) { }
+        public ShellyDevice(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Shelly.ShellyDevice> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Shelly.ShellyCover[] Covers { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? DeviceName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Shelly.ShellyEnergyMeter? EnergyMeter { get; }
+        public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public int? Generation { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? HardwareRevision { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostAddress { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Shelly.ShellyInput[] Inputs { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? IpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public bool? IsWireless { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? MacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? Password { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SerialNumber { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int? SignalStrength { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        public string? SubnetMask { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Shelly.ShellySwitch[] Switches { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Shelly.ShellyTemperatureSensor[] TemperatureSensors { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("Device")]
+        public System.TimeSpan? Uptime { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class ShellyEnergyMeter : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IPowerMeter, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public ShellyEnergyMeter() { }
+        public ShellyEnergyMeter(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=313, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.VoltAmpere)]
+        public decimal? ApparentPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=314, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? ElectricalCurrent { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=318)]
+        public bool? IsTotalEnergyPhaseNetted { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        public decimal? MeasuredPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=315, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? NeutralCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public Namotion.Devices.Shelly.ShellyEnergyMeterPhase[] Phases { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalExportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=317, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalExportedPhaseEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalImportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=316, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalImportedPhaseEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class ShellyEnergyMeterPhase : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalCurrentSensor, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IElectricalVoltageSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public ShellyEnergyMeterPhase(string phase) { }
+        public ShellyEnergyMeterPhase(string phase, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=312, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        public decimal? ActivePower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=313, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.VoltAmpere)]
+        public decimal? ApparentPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? ElectricalCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
+        public decimal? ElectricalFrequency { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Volt)]
+        public decimal? ElectricalVoltage { get; }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=350)]
+        public decimal? PowerFactor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=317, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalExportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=316, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalImportedEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class ShellyInput : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public ShellyInput(int index) { }
+        public ShellyInput(int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
+        public double? CountFrequency { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=100)]
+        public bool? IsActive { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsCounterInput { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=400)]
+        public long? TotalCount { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class ShellyServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddShellyDevice(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Shelly.ShellyDevice>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class ShellySwitch : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IPowerRelay, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalCurrentSensor, HomeBlaze.Abstractions.Sensors.IElectricalVoltageSensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Devices.SwitchEvent>
+    {
+        public ShellySwitch(Namotion.Devices.Shelly.ShellyDevice device, int index) { }
+        public ShellySwitch(Namotion.Devices.Shelly.ShellyDevice device, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? ElectricalCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Volt)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? ElectricalVoltage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool? IsOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? MeasuredPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public string? Source { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? TotalExportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [System.ComponentModel.Category("Energy")]
+        public decimal? TotalImportedEnergy { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOff", "IsEnabled")]
+        public bool TurnOff_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOn", "IsEnabled")]
+        public bool TurnOn_IsEnabled { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public void Dispose() { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.IDisposable Subscribe(System.IObserver<HomeBlaze.Abstractions.Devices.SwitchEvent> observer) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PowerOff", Position=2, Title="Turn Off")]
+        public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PowerSettingsNew", Position=1, Title="Turn On")]
+        public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class ShellyTemperatureSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public ShellyTemperatureSensor(int index) { }
+        public ShellyTemperatureSensor(int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}

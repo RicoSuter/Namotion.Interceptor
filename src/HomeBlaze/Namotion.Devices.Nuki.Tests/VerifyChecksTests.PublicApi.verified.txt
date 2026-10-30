@@ -1,0 +1,275 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Nuki.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Nuki
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Hub")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Security")]
+    [System.ComponentModel.Description("Nuki bridge with its smart locks and Openers")]
+    [System.ComponentModel.DisplayName("Nuki bridge")]
+    public class NukiBridge : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IHubDevice, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const int MaximumIntervalSeconds = 3600;
+        public const int MinimumIntervalSeconds = 1;
+        public static readonly System.TimeSpan DefaultPollingInterval;
+        public static readonly System.TimeSpan DefaultRetryInterval;
+        public NukiBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Nuki.NukiBridge> logger) { }
+        public NukiBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Nuki.NukiBridge> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [System.ComponentModel.Category("Device")]
+        public Namotion.Devices.Nuki.NukiBridgeType? BridgeType { get; }
+        public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [System.ComponentModel.Category("Device")]
+        public long? HardwareId { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostAddress { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=404)]
+        [System.ComponentModel.Category("Device")]
+        public bool? IsServerConnected { get; }
+        public bool? IsWireless { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Nuki.NukiSmartLock> Locks { get; }
+        public string? MacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Nuki.NukiOpener> Openers { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Power { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403)]
+        [System.ComponentModel.Category("Device")]
+        public long? ServerId { get; }
+        public int? SignalStrength { get; }
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        public string? SubnetMask { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? Token { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public Namotion.Devices.Nuki.NukiTokenMode TokenMode { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? TotalConsumedEnergy { get; }
+        [System.ComponentModel.Category("Device")]
+        public System.TimeSpan? Uptime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=852)]
+        [System.ComponentModel.Category("Device")]
+        public string? WifiFirmwareVersion { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, System.TimeSpan fallback) { }
+        public static string? ValidateHostAddress(string? hostAddress) { }
+    }
+    public static class NukiBridgeDiscovery
+    {
+        public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
+        public static System.Threading.Tasks.Task<Namotion.Devices.Nuki.NukiTokenModeDetection> DetectTokenModeAsync(string hostAddress, string token, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.Nuki.NukiDiscoveredBridge>> DiscoverAsync(System.Net.Http.HttpClient httpClient, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<string?> PairAsync(string hostAddress, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public enum NukiBridgeType
+    {
+        Hardware = 0,
+        Software = 1,
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public abstract class NukiDevice : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        [System.ComponentModel.Category("Device")]
+        public Namotion.Devices.Nuki.NukiDeviceType DeviceType { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public virtual string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=341)]
+        [System.ComponentModel.Category("Battery")]
+        public bool? IsBatteryCritical { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        [System.ComponentModel.Category("Device")]
+        public long NukiId { get; }
+        public string? SoftwareVersion { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum NukiDeviceType
+    {
+        SmartLock = 0,
+        Opener = 2,
+        SmartDoor = 3,
+        SmartLock3 = 4,
+    }
+    public sealed class NukiDiscoveredBridge : System.IEquatable<Namotion.Devices.Nuki.NukiDiscoveredBridge>
+    {
+        public NukiDiscoveredBridge(long BridgeId, string HostAddress) { }
+        public long BridgeId { get; init; }
+        public string HostAddress { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class NukiOpener : Namotion.Devices.Nuki.NukiDevice, Namotion.Interceptor.IInterceptorSubject
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("ActivateContinuousMode", "IsEnabled")]
+        public bool ActivateContinuousMode_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("ActivateRingToOpen", "IsEnabled")]
+        public bool ActivateRingToOpen_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("DeactivateContinuousMode", "IsEnabled")]
+        public bool DeactivateContinuousMode_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("DeactivateRingToOpen", "IsEnabled")]
+        public bool DeactivateRingToOpen_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=131)]
+        [System.ComponentModel.Category("Opener")]
+        public bool? IsContinuousModeActive { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=132)]
+        [System.ComponentModel.Category("Doorbell")]
+        public bool? IsRinging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=133)]
+        [System.ComponentModel.Category("Doorbell")]
+        public System.DateTimeOffset? LastRingTime { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("OpenDoor", "IsEnabled")]
+        public bool OpenDoor_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=130)]
+        [System.ComponentModel.Category("Opener")]
+        public Namotion.Devices.Nuki.NukiOpenerState? OpenerState { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the door every time someone rings, until continuous mode is deactivated.", Position=4, RequiresConfirmation=true, Title="Activate continuous mode")]
+        [System.ComponentModel.Category("Opener")]
+        public System.Threading.Tasks.Task ActivateContinuousModeAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the door the next time someone rings.", Position=2, RequiresConfirmation=true, Title="Activate ring to open")]
+        [System.ComponentModel.Category("Opener")]
+        public System.Threading.Tasks.Task ActivateRingToOpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Stops opening the door on every ring.", Position=5, Title="Deactivate continuous mode")]
+        [System.ComponentModel.Category("Opener")]
+        public System.Threading.Tasks.Task DeactivateContinuousModeAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Stops opening the door on the next ring.", Position=3, Title="Deactivate ring to open")]
+        [System.ComponentModel.Category("Opener")]
+        public System.Threading.Tasks.Task DeactivateRingToOpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Actuates the electric strike so that the door can be pushed open.", Icon="MeetingRoom", Position=1, RequiresConfirmation=true, Title="Open door")]
+        [System.ComponentModel.Category("Opener")]
+        public System.Threading.Tasks.Task OpenDoorAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public enum NukiOpenerState
+    {
+        Untrained = 0,
+        Online = 1,
+        RingToOpenActive = 2,
+        Open = 3,
+        Opening = 4,
+        BootRun = 5,
+    }
+    public static class NukiServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddNukiBridge(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Nuki.NukiBridge>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class NukiSmartLock : Namotion.Devices.Nuki.NukiDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Locks.IDoorLatchController, HomeBlaze.Abstractions.Devices.Locks.IDoorLock, HomeBlaze.Abstractions.Devices.Locks.IDoorLockController, HomeBlaze.Abstractions.Devices.Locks.IDoorLockState, HomeBlaze.Abstractions.Sensors.IDoorSensor, Namotion.Interceptor.IInterceptorSubject
+    {
+        [System.ComponentModel.Category("Battery")]
+        public decimal? BatteryLevel { get; }
+        public HomeBlaze.Abstractions.Sensors.DoorState? DoorState { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public override string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=342)]
+        [System.ComponentModel.Category("Battery")]
+        public bool? IsBatteryCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=343)]
+        [System.ComponentModel.Category("Battery")]
+        public bool? IsKeypadBatteryCritical { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("LockNGoWithUnlatch", "IsEnabled")]
+        public bool LockNGoWithUnlatch_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("LockNGo", "IsEnabled")]
+        public bool LockNGo_IsEnabled { get; }
+        public HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Lock", "IsEnabled")]
+        public bool Lock_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("ToggleLock", "IsEnabled")]
+        public bool ToggleLock_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Unlatch", "IsEnabled")]
+        public bool Unlatch_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Unlock", "IsEnabled")]
+        public bool Unlock_IsEnabled { get; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public System.Threading.Tasks.Task LockAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Unlocks the door and locks it again after a short time.", Icon="Timer", Position=10, RequiresConfirmation=true, Title="Lock \'n\' Go")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task LockNGoAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Unlocks the door, pulls the latch and locks the door again after a short time.", Icon="Timer", Position=11, RequiresConfirmation=true, Title="Lock \'n\' Go with unlatch")]
+        [System.ComponentModel.Category("Lock")]
+        public System.Threading.Tasks.Task LockNGoWithUnlatchAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task UnlatchAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task UnlockAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public enum NukiTokenMode
+    {
+        Encrypted = 0,
+        Plain = 1,
+    }
+    public sealed class NukiTokenModeDetection : System.IEquatable<Namotion.Devices.Nuki.NukiTokenModeDetection>
+    {
+        public NukiTokenModeDetection(Namotion.Devices.Nuki.NukiTokenMode Mode, string? Warning) { }
+        public Namotion.Devices.Nuki.NukiTokenMode Mode { get; init; }
+        public string? Warning { get; init; }
+    }
+}
