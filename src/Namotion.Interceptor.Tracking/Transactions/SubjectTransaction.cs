@@ -774,8 +774,13 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             // BestEffort without handlers: keep source == model for failed-apply properties by reverting only their
-            // source writes. A failed revert lists its property a second time, so a stuck property can be told apart.
-            var toRevert = SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true);
+            // source writes. A failed apply whose restore failed stayed applied (it is in 'applied'), so its source
+            // keeps the new value as well. A failed revert lists its property a second time, so a stuck property can
+            // be told apart.
+            var toRevert = SubjectPropertyChangeOperations.FilterByProperty(
+                SubjectPropertyChangeOperations.FilterByProperty(written, applyFailed, keepMatches: true),
+                applied,
+                keepMatches: false);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, propagateTimeout: false, cancellationToken).ConfigureAwait(false);
             return CreateBestEffortFailureException(
                 applied,
@@ -808,8 +813,8 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Returns the changes a Rollback commit without handlers reports after a failed apply: the apply failures, the
     /// other changes without a source whose local revert succeeded, then the changes whose local revert failed, then
-    /// those whose source revert failed and local revert did not. Only a failed apply whose source revert failed
-    /// appears a second time; every other change appears at most once.
+    /// those whose source revert failed and local revert did not. Only a failed apply whose source revert failed, or
+    /// whose restore and local revert both failed, appears a second time; every other change appears at most once.
     /// </summary>
     private static IReadOnlyList<SubjectPropertyChange> GetRolledBackFailedChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
