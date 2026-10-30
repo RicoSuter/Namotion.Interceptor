@@ -47,6 +47,33 @@ public class MqttNestedTopicCompositionTests
         Assert.NotNull(found);
         Assert.Equal("Temperature", found.Name);
     }
+
+    [Fact]
+    public async Task WhenHoldingPropertyHasNoSegment_ThenPropertyBelowItHasNoTopicInEitherDirection()
+    {
+        // Arrange
+        var mapper = new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/'));
+
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new MqttUnannotatedHolderRoot(context) { Device = new MqttNestedChild() };
+        var temperature = root.Device!.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
+
+        // Act
+        var found = mapper.TryGetMapping(temperature, root, out var mapping);
+        var resolved = await mapper.TryGetPropertyAsync(
+            new MqttLookupKey("Device/temperature"), root.TryGetRegisteredSubject()!, CancellationToken.None);
+
+        // Assert
+        Assert.False(found);
+        Assert.Null(mapping);
+        Assert.Null(resolved);
+    }
+}
+
+[InterceptorSubject]
+public partial class MqttUnannotatedHolderRoot
+{
+    public partial MqttNestedChild? Device { get; set; }
 }
 
 [InterceptorSubject]
