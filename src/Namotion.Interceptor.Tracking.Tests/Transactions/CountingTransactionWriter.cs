@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 /// <summary>
 /// Accepts every change except the configured failed or unwritten ones, records its calls and reverts, and optionally
 /// marks accepted snapshot slots as confirmed in place, as the writer contract requires. Reports the reverts of the
-/// configured properties as failed, and optionally completes a revert only when the commit timeout cancels it.
+/// configured properties as failed, and optionally completes a revert only when the commit timeout cancels it, or
+/// returns a configured result in place of the computed one.
 /// </summary>
 internal sealed class CountingTransactionWriter : ITransactionWriter
 {
@@ -26,6 +27,10 @@ internal sealed class CountingTransactionWriter : ITransactionWriter
     public HashSet<string> FailedRevertPropertyNames { get; } = [];
 
     public bool RevertsUntilCanceled { get; init; }
+
+    public SourceWriteResult? ReturnedWriteResult { get; init; }
+
+    public SourceRevertResult? ReturnedRevertResult { get; init; }
 
     /// <summary>Gets every change passed to a revert, also those whose revert is reported as failed.</summary>
     public List<SubjectPropertyChange> Reverted { get; } = [];
@@ -59,7 +64,7 @@ internal sealed class CountingTransactionWriter : ITransactionWriter
         var failed = all.Where(change => FailedPropertyNames.Contains(change.Property.Name)).ToArray();
         var written = all.Where(IsWritten).ToArray();
         Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("source write failed")] : [];
-        return new(new SourceWriteResult(written, failed, errors, RevertState: null));
+        return new(ReturnedWriteResult ?? new SourceWriteResult(written, failed, errors, RevertState: null));
     }
 
     public async ValueTask<SourceRevertResult> RevertSourceWritesAsync(
@@ -75,7 +80,7 @@ internal sealed class CountingTransactionWriter : ITransactionWriter
 
         var failed = written.Where(change => FailedRevertPropertyNames.Contains(change.Property.Name)).ToArray();
         Exception[] errors = failed.Length > 0 ? [new InvalidOperationException("revert failed")] : [];
-        return new SourceRevertResult(failed, errors);
+        return ReturnedRevertResult ?? new SourceRevertResult(failed, errors);
     }
 
     private bool IsWritten(SubjectPropertyChange change)

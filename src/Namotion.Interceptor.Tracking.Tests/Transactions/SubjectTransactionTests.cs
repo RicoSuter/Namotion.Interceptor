@@ -406,6 +406,90 @@ public class SubjectTransactionTests
         }
     }
 
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(-2)]
+    [InlineData(-1.5)]
+    [InlineData(-0.5)]
+    [InlineData(4294967295)]
+    public async Task WhenCommitTimeoutIsOutOfRange_ThenBeginThrows(double milliseconds)
+    {
+        // Arrange
+        var context = CreateContext();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await context.BeginTransactionAsync(
+                TransactionFailureHandling.BestEffort,
+                TransactionLocking.Exclusive,
+                commitTimeout: TimeSpan.FromMilliseconds(milliseconds));
+        });
+        Assert.Null(SubjectTransaction.Current);
+
+        // A leaked exclusive lock would block this begin, so the bound turns a hang into a failure.
+        using var lockTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var nextTransaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, TransactionLocking.Exclusive, cancellationToken: lockTimeout.Token);
+        Assert.Same(nextTransaction, SubjectTransaction.Current);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task WhenCommitTimeoutIsZeroOrInfinite_ThenBeginSucceeds(double milliseconds)
+    {
+        // Arrange
+        var context = CreateContext();
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, commitTimeout: TimeSpan.FromMilliseconds(milliseconds));
+
+        // Assert
+        Assert.Same(transaction, SubjectTransaction.Current);
+    }
+
+    [Fact]
+    public async Task WhenCommitTimeoutIsTheTimerMaximum_ThenCommitSucceeds()
+    {
+        // Arrange
+        var context = CreateContext();
+        context.AddService<ITransactionWriter>(new CountingTransactionWriter());
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort, commitTimeout: TimeSpan.FromMilliseconds(uint.MaxValue - 1));
+        person.FirstName = "Bob";
+
+        // Act
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Bob", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenCommitWithoutWriterFails_ThenCommitAsyncReturnsFaultedTask()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        handler.RejectCommit = true;
+        var person = new Person(context) { FirstName = "Ann" };
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "Bob";
+
+        // Act
+        var commitTask = transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(commitTask.IsFaulted);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => commitTask.AsTask());
+        Assert.Equal("rejected", exception.Message);
+        handler.RejectCommit = false;
+        await transaction.CommitAsync(CancellationToken.None);
+        Assert.Equal("Bob", person.FirstName);
+    }
+
     [Fact]
     public async Task WhenExclusiveLocking_ThenSecondTransactionWaits()
     {
