@@ -110,7 +110,7 @@ The game runs as a `BackgroundService`. It watches the installation's `Clients` 
 
 ## Movement
 
-Moving is not an operation. The page calls the internal `Game.TryMove(GamePlayer player, GameDirection direction, bool turnOnly)` and only ever passes the player of its own circuit's client, so MCP, agents and other clients cannot move a player. The result carries whether the step was accepted plus the authoritative position and facing.
+Moving is not an operation. The page calls the internal `Game.TryMove(GamePlayer player, GameDirection direction, bool turnOnly)` once per step and only ever passes the player of its own circuit's client, so MCP, agents and other clients cannot move a player. The result carries whether the step was accepted plus the authoritative position and facing. The browser sends each step rather than key down and up, so a delayed message never makes a player walk further than intended.
 
 Rules, all enforced on the server under the game's lock:
 
@@ -173,7 +173,8 @@ Operations of the first version:
 - Loads `babylon.js` and `babylonjs.loaders.min.js` from `_content/HomeBlaze.Game/lib/babylonjs/` once, creates the engine on the canvas and disposes everything when the page goes away.
 - Combines held keys (arrow keys and WASD) into one of 8 directions, W plus D giving north east, and repeats once per `StepInterval` while held. Shift turns only. Each step calls .NET through a `DotNetObjectReference`.
 - Ignores keys while focus is in an input field or a MudBlazor dialog is open.
-- Predicts the own player's steps against the objects it knows nearby, moves immediately and snaps back when the server refuses.
+- Predicts the own player's steps against the objects it knows nearby and moves immediately. Each step carries an increasing sequence number, which the page echoes with the server's verdict. When the server refuses a step, the browser resets to the server's position and replays the pending steps sent after it (client-side prediction with server reconciliation).
+- Draws other players about 100 ms behind real time and interpolates between their received positions, so their walking looks even despite network jitter.
 
 ### Synchronization
 
