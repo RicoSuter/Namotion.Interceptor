@@ -244,6 +244,7 @@ class GameVoice {
             // The processor outputs only silence; the connection keeps the browser running it.
             node.connect(context.destination);
             this.capture = { stream, source, node };
+            this.watchCaptureEnd(stream, generation);
             return STARTED;
         } catch (error) {
             if (stream) {
@@ -251,6 +252,17 @@ class GameVoice {
             }
 
             return { isStarted: false, error: toError(error) };
+        }
+    }
+
+    // A track ends without stop() when the device is unplugged or the browser revokes access.
+    watchCaptureEnd(stream, generation) {
+        for (const track of stream.getAudioTracks()) {
+            track.onended = () => {
+                if (!this.isDisposed && generation === this.captureGeneration) {
+                    this.dotNet.invokeMethodAsync('OnCaptureEnded').catch(() => { });
+                }
+            };
         }
     }
 
@@ -277,6 +289,10 @@ class GameVoice {
         capture.node.port.postMessage('stop');
         capture.source.disconnect();
         capture.node.disconnect();
+        for (const track of capture.stream.getAudioTracks()) {
+            track.onended = null;
+        }
+
         stopTracks(capture.stream);
     }
 
