@@ -2,17 +2,18 @@ namespace HomeBlaze.Game.World;
 
 /// <summary>
 /// Finds the length of the shortest open path that sound takes from a source footprint to the footprints around it.
-/// Paths run over the corners of the tiles, called vertices here. A vertex is open while none of its four tiles blocks
-/// sound by <see cref="GameWorldIndex.IsSoundBlocked"/>. A path therefore never touches a blocking tile, not even at a
-/// corner, and never slips through a joint where two walls meet at a corner. Steps go to the 16 vertices at the offsets
-/// (1, 0), (1, 1) and (2, 1) in every orientation, with their lengths in <see cref="Unit"/> rounded to integers. Every
-/// tile that such a step touches belongs to one of its two vertices, so a step between open vertices needs no further
-/// check. Not thread-safe: reuses its buffers from search to search.
+/// Paths run between tile centers. A tile is open while no object with <see cref="GameObject.IsSoundBlocking"/> covers
+/// it; the tiles of the source footprint always are. Steps go to the 16 tiles at the offsets (1, 0), (1, 1) and (2, 1)
+/// in every orientation, with their lengths in <see cref="Unit"/> rounded to integers, and need every tile that the
+/// segment between the two centers passes or touches to be open: a diagonal step also both tiles beside its corner, so
+/// it never cuts through a joint where two walls meet at a corner, and a step to (2, 1) also the tiles (1, 0) and
+/// (1, 1). Not thread-safe: reuses its buffers from search to search.
 /// </summary>
 /// <remarks>
-/// The lengths are exact integer sums on an undirected graph, and a path starts and ends the same way at either
-/// footprint, so both directions give the same length. A grid length exceeds the straight length by at most 2.75 %;
-/// <see cref="GetOpenLength"/> gives the grid length without walls to compare with.
+/// A target tile that is not open still gets the length of a step into it, so a target footprint that overlaps a
+/// sound blocking object is reached through its open neighbors; such a tile never continues a path. A grid length
+/// exceeds the straight length by at most 2.75 %; <see cref="GetOpenLength"/> gives the grid length without walls to
+/// compare with.
 /// </remarks>
 internal sealed class SoundPathSearch
 {
@@ -22,7 +23,7 @@ internal sealed class SoundPathSearch
     public const int Unit = 1000;
 
     /// <summary>
-    /// The length of a target that no open path within <see cref="MaximumLength"/> reaches.
+    /// The length of a target that no open path within the hearing radius plus 2 tiles reaches.
     /// </summary>
     public const int NoPath = int.MaxValue;
 
@@ -35,31 +36,38 @@ internal sealed class SoundPathSearch
     private const int Margin = HearingRange.HearingRadius + 2;
     private const int MaximumLength = Margin * Unit;
 
-    // Closed vertices around the grid, so the longest step never leaves the buffers.
+    // Closed tiles around the grid, so the longest step never leaves the buffers.
     private const int Padding = 2;
 
-    private static readonly (int X, int Y, int Length)[] Steps =
+    // Each step with the two tiles besides its target that it passes or touches; a straight step names its own tile.
+    private static readonly Step[] Steps =
     [
-        (1, 0, StraightLength), (-1, 0, StraightLength), (0, 1, StraightLength), (0, -1, StraightLength),
-        (1, 1, DiagonalLength), (1, -1, DiagonalLength), (-1, 1, DiagonalLength), (-1, -1, DiagonalLength),
-        (2, 1, KnightLength), (2, -1, KnightLength), (-2, 1, KnightLength), (-2, -1, KnightLength),
-        (1, 2, KnightLength), (1, -2, KnightLength), (-1, 2, KnightLength), (-1, -2, KnightLength),
+        new(1, 0, StraightLength, 0, 0, 0, 0), new(-1, 0, StraightLength, 0, 0, 0, 0),
+        new(0, 1, StraightLength, 0, 0, 0, 0), new(0, -1, StraightLength, 0, 0, 0, 0),
+        new(1, 1, DiagonalLength, 1, 0, 0, 1), new(1, -1, DiagonalLength, 1, 0, 0, -1),
+        new(-1, 1, DiagonalLength, -1, 0, 0, 1), new(-1, -1, DiagonalLength, -1, 0, 0, -1),
+        new(2, 1, KnightLength, 1, 0, 1, 1), new(2, -1, KnightLength, 1, 0, 1, -1),
+        new(-2, 1, KnightLength, -1, 0, -1, 1), new(-2, -1, KnightLength, -1, 0, -1, -1),
+        new(1, 2, KnightLength, 0, 1, 1, 1), new(1, -2, KnightLength, 0, -1, 1, -1),
+        new(-1, 2, KnightLength, 0, 1, -1, 1), new(-1, -2, KnightLength, 0, -1, -1, -1),
     ];
 
     private readonly int[] _stepOffsets = new int[Steps.Length];
+    private readonly int[] _firstPassedOffsets = new int[Steps.Length];
+    private readonly int[] _secondPassedOffsets = new int[Steps.Length];
     private readonly PriorityQueue<int, int> _queue = new();
     private readonly List<Footprint> _blockers = [];
-    private bool[] _blockedTiles = [];
-    private bool[] _openVertices = [];
+    private bool[] _openTiles = [];
     private int[] _lengths = [];
 
-    // The vertex at index 0 and the size of the grid, padding included; a row holds _columns vertices.
+    // The tile at index 0 and the size of the grid, padding included; a row holds _columns tiles.
     private long _originX;
     private long _originY;
     private int _columns;
     private int _rows;
 
-    // The source and index state of the lengths in _lengths.
+    // The source and index state of the lengths in _lengths; no lengths for a source of an invalid size.
+    private bool _isPrepared;
     private bool _hasLengths;
     private Footprint _source;
     private GameWorldIndex? _index;
@@ -71,213 +79,237 @@ internal sealed class SoundPathSearch
     /// </summary>
     public void Prepare(Footprint source, GameWorldIndex index)
     {
-        if (_hasLengths && _source == source && ReferenceEquals(_index, index) && _indexVersion == index.Version)
+        if (_isPrepared && _source == source && ReferenceEquals(_index, index) && _indexVersion == index.Version)
         {
             return;
         }
 
-        _hasLengths = false;
-        SetGrid(source);
-        MarkBlockedTiles(index);
-        MarkOpenVertices();
-        Seed(source);
-        Expand();
+        _isPrepared = false;
+        _hasLengths = HasValidSize(source);
+        if (_hasLengths)
+        {
+            SetGrid(source);
+            MarkOpenTiles(source, index);
+            Seed(source);
+            Expand();
+        }
+
         _source = source;
         _index = index;
         _indexVersion = index.Version;
-        _hasLengths = true;
+        _isPrepared = true;
     }
 
     /// <summary>
     /// Gets the length of the shortest open path from the center of the prepared source to the center of the target,
-    /// in <see cref="Unit"/>, or <see cref="NoPath"/>.
+    /// in <see cref="Unit"/>, or <see cref="NoPath"/>, also for a source or target of an invalid size.
     /// </summary>
     /// <exception cref="InvalidOperationException">No source is prepared.</exception>
     public int GetLength(Footprint target)
     {
-        if (!_hasLengths)
+        if (!_isPrepared)
         {
             throw new InvalidOperationException("No source is prepared.");
         }
 
-        var center = GetDoubledCenter(target);
+        if (!_hasLengths || !HasValidSize(target))
+        {
+            return NoPath;
+        }
+
         var shortest = (long)NoPath;
-        var lastY = Math.Min(target.Top + 1, _originY + _rows - 1 - Padding);
+        var lastY = Math.Min(target.Top, _originY + _rows - 1 - Padding);
         for (var y = Math.Max(target.Y, _originY + Padding); y <= lastY; y++)
         {
-            shortest = Math.Min(shortest, GetShortestInRow(target, y, center));
+            shortest = Math.Min(shortest, GetShortestInRow(target, y));
         }
 
         return shortest <= MaximumLength ? (int)shortest : NoPath;
     }
 
     /// <summary>
-    /// Gets the length in <see cref="Unit"/> of a path between two points without walls, from their offset in half tiles.
+    /// Gets the length in <see cref="Unit"/> of a path between the centers of two footprints without walls, by the same
+    /// rule as <see cref="GetLength"/>, through the tiles nearest to each center.
     /// </summary>
-    public static long GetOpenLength(long doubledDeltaX, long doubledDeltaY)
+    public static long GetOpenLength(Footprint first, Footprint second)
     {
-        var longer = Math.Max(Math.Abs(doubledDeltaX), Math.Abs(doubledDeltaY));
-        var shorter = Math.Min(Math.Abs(doubledDeltaX), Math.Abs(doubledDeltaY));
-
-        // The two step directions next to the direction of the offset, in half tiles.
-        var doubled = 2 * shorter <= longer
-            ? shorter * KnightLength + (longer - 2 * shorter) * StraightLength
-            : (2 * shorter - longer) * DiagonalLength + (longer - shorter) * KnightLength;
-        return doubled / 2;
-    }
-
-    // In half tiles, so the center of every footprint is a whole number.
-    private static (long X, long Y) GetDoubledCenter(Footprint footprint) =>
-        (2L * footprint.X + footprint.Width, 2L * footprint.Y + footprint.Depth);
-
-    private long GetShortestInRow(Footprint target, long y, (long X, long Y) center)
-    {
-        var shortest = (long)NoPath;
-        var lastX = Math.Min(target.Right + 1, _originX + _columns - 1 - Padding);
-        for (var x = Math.Max(target.X, _originX + Padding); x <= lastX; x++)
+        var columns = GetCenterTiles(first.X, first.Width);
+        var rows = GetCenterTiles(first.Y, first.Depth);
+        var shortest = long.MaxValue;
+        for (var y = rows.First; y <= rows.Last; y++)
         {
-            var length = _lengths[GetVertex(x, y)];
-            if (length != NoPath)
+            for (var x = columns.First; x <= columns.Last; x++)
             {
-                shortest = Math.Min(shortest, length + GetOpenLength(2 * x - center.X, 2 * y - center.Y));
+                shortest = Math.Min(shortest, GetCenterLength(first, x, y) + GetOpenLengthTo(x, y, second));
             }
         }
 
         return shortest;
     }
 
-    private int GetVertex(long x, long y) => (int)((y - _originY) * _columns + (x - _originX));
+    private static long GetOpenLengthTo(long x, long y, Footprint target)
+    {
+        var columns = GetCenterTiles(target.X, target.Width);
+        var rows = GetCenterTiles(target.Y, target.Depth);
+        var shortest = long.MaxValue;
+        for (var targetY = rows.First; targetY <= rows.Last; targetY++)
+        {
+            for (var targetX = columns.First; targetX <= columns.Last; targetX++)
+            {
+                var length = GetOffsetLength(2 * (targetX - x), 2 * (targetY - y)) + GetCenterLength(target, targetX, targetY);
+                shortest = Math.Min(shortest, length);
+            }
+        }
 
-    // Vertices exist from the int minimum to one past the int maximum, the corners of every tile.
+        return shortest;
+    }
+
+    // The one tile at the center of an odd size, or the two beside the center of an even one.
+    private static (long First, long Last) GetCenterTiles(int start, int size) =>
+        ((long)start + (size - 1) / 2, (long)start + size / 2);
+
+    // The length from the center of the footprint to the center of the tile.
+    private static long GetCenterLength(Footprint footprint, long x, long y) =>
+        GetOffsetLength(
+            2 * x + 1 - (2L * footprint.X + footprint.Width),
+            2 * y + 1 - (2L * footprint.Y + footprint.Depth));
+
+    // The grid length without walls of an offset in half tiles, through the two step directions next to its direction.
+    private static long GetOffsetLength(long doubledDeltaX, long doubledDeltaY)
+    {
+        var longer = Math.Max(Math.Abs(doubledDeltaX), Math.Abs(doubledDeltaY));
+        var shorter = Math.Min(Math.Abs(doubledDeltaX), Math.Abs(doubledDeltaY));
+        var doubled = 2 * shorter <= longer
+            ? shorter * KnightLength + (longer - 2 * shorter) * StraightLength
+            : (2 * shorter - longer) * DiagonalLength + (longer - shorter) * KnightLength;
+        return doubled / 2;
+    }
+
+    private static bool HasValidSize(Footprint footprint) =>
+        GameWorldIndex.IsValidSize(footprint.Width) && GameWorldIndex.IsValidSize(footprint.Depth);
+
+    private long GetShortestInRow(Footprint target, long y)
+    {
+        var shortest = (long)NoPath;
+        var lastX = Math.Min(target.Right, _originX + _columns - 1 - Padding);
+        for (var x = Math.Max(target.X, _originX + Padding); x <= lastX; x++)
+        {
+            var length = _lengths[GetTile(x, y)];
+            if (length != NoPath)
+            {
+                shortest = Math.Min(shortest, length + GetCenterLength(target, x, y));
+            }
+        }
+
+        return shortest;
+    }
+
+    private int GetTile(long x, long y) => (int)((y - _originY) * _columns + (x - _originX));
+
     private void SetGrid(Footprint source)
     {
         var firstX = Math.Max(int.MinValue, source.X - (long)Margin);
-        var lastX = Math.Min(int.MaxValue + 1L, source.Right + 1 + Margin);
+        var lastX = Math.Min(int.MaxValue, source.Right + Margin);
         var firstY = Math.Max(int.MinValue, source.Y - (long)Margin);
-        var lastY = Math.Min(int.MaxValue + 1L, source.Top + 1 + Margin);
+        var lastY = Math.Min(int.MaxValue, source.Top + Margin);
         _originX = firstX - Padding;
         _originY = firstY - Padding;
         _columns = (int)(lastX - firstX + 1) + 2 * Padding;
         _rows = (int)(lastY - firstY + 1) + 2 * Padding;
         for (var step = 0; step < Steps.Length; step++)
         {
-            _stepOffsets[step] = Steps[step].Y * _columns + Steps[step].X;
+            var (x, y, _, firstPassedX, firstPassedY, secondPassedX, secondPassedY) = Steps[step];
+            _stepOffsets[step] = y * _columns + x;
+            _firstPassedOffsets[step] = firstPassedY * _columns + firstPassedX;
+            _secondPassedOffsets[step] = secondPassedY * _columns + secondPassedX;
         }
 
-        // The tile grid has one column and row more: tile (x, y) has the vertex (x, y) as its south-west corner.
-        var vertexCount = _columns * _rows;
-        var tileCount = (_columns + 1) * (_rows + 1);
-        if (_lengths.Length < vertexCount)
+        var tileCount = _columns * _rows;
+        if (_lengths.Length < tileCount)
         {
-            _lengths = new int[vertexCount];
-            _openVertices = new bool[vertexCount];
-        }
-
-        if (_blockedTiles.Length < tileCount)
-        {
-            _blockedTiles = new bool[tileCount];
+            _lengths = new int[tileCount];
+            _openTiles = new bool[tileCount];
         }
     }
 
-    // The tile at column 0 is the one west of the vertex at column 0, so tile column = tile x - _originX + 1.
-    private void MarkBlockedTiles(GameWorldIndex index)
+    // Opens the tiles inside the padding, closes those of sound blocking objects and opens the source footprint again.
+    private void MarkOpenTiles(Footprint source, GameWorldIndex index)
     {
-        var tileCount = (_columns + 1) * (_rows + 1);
-        Array.Clear(_blockedTiles, 0, tileCount);
-        var firstX = Math.Max(int.MinValue, _originX - 1);
-        var lastX = Math.Min(int.MaxValue, _originX + _columns - 1);
-        var firstY = Math.Max(int.MinValue, _originY - 1);
-        var lastY = Math.Min(int.MaxValue, _originY + _rows - 1);
-        var area = new Footprint((int)firstX, (int)firstY, (int)(lastX - firstX + 1), (int)(lastY - firstY + 1));
+        Array.Clear(_openTiles, 0, _columns * _rows);
+        var area = new Footprint(
+            (int)(_originX + Padding), (int)(_originY + Padding), _columns - 2 * Padding, _rows - 2 * Padding);
+        MarkTiles(area, area, isOpen: true);
         _blockers.Clear();
         index.QuerySoundBlocking(area, _blockers);
         foreach (var blocker in _blockers)
         {
-            MarkBlocker(blocker, area);
+            MarkTiles(blocker, area, isOpen: false);
         }
 
         _blockers.Clear();
+        MarkTiles(source, area, isOpen: true);
     }
 
-    private void MarkBlocker(Footprint blocker, Footprint area)
+    private void MarkTiles(Footprint footprint, Footprint area, bool isOpen)
     {
-        var firstX = Math.Max(blocker.X, area.X) - _originX + 1;
-        var lastX = Math.Min(blocker.Right, area.Right) - _originX + 1;
-        var firstY = Math.Max(blocker.Y, area.Y) - _originY + 1;
-        var lastY = Math.Min(blocker.Top, area.Top) - _originY + 1;
-        var tileColumns = _columns + 1;
-        for (var row = firstY; row <= lastY; row++)
+        var firstX = Math.Max(footprint.X, area.X);
+        var lastX = Math.Min(footprint.Right, area.Right);
+        var lastY = Math.Min(footprint.Top, area.Top);
+        for (var y = (long)Math.Max(footprint.Y, area.Y); y <= lastY; y++)
         {
-            var rowStart = (int)(row * tileColumns);
-            Array.Fill(_blockedTiles, true, rowStart + (int)firstX, (int)(lastX - firstX + 1));
+            Array.Fill(_openTiles, isOpen, GetTile(firstX, y), (int)(lastX - firstX + 1));
         }
     }
 
-    // A vertex at column c and row r has the tiles at columns c and c + 1 and rows r and r + 1 around it.
-    private void MarkOpenVertices()
-    {
-        var tileColumns = _columns + 1;
-        Array.Clear(_openVertices, 0, _columns * _rows);
-        for (var row = Padding; row < _rows - Padding; row++)
-        {
-            var south = row * tileColumns;
-            var north = south + tileColumns;
-            var vertexRow = row * _columns;
-            for (var column = Padding; column < _columns - Padding; column++)
-            {
-                _openVertices[vertexRow + column] = !(_blockedTiles[south + column] || _blockedTiles[south + column + 1]
-                    || _blockedTiles[north + column] || _blockedTiles[north + column + 1]);
-            }
-        }
-    }
-
-    // Starts at every open vertex of the footprint with its length from the center, which the footprint does not block.
+    // Starts at every tile of the footprint with its length from the center.
     private void Seed(Footprint source)
     {
         Array.Fill(_lengths, NoPath, 0, _columns * _rows);
         _queue.Clear();
-        var center = GetDoubledCenter(source);
-        for (var y = (long)source.Y; y <= source.Top + 1; y++)
+        for (var y = (long)source.Y; y <= source.Top; y++)
         {
-            for (var x = (long)source.X; x <= source.Right + 1; x++)
+            for (var x = (long)source.X; x <= source.Right; x++)
             {
-                SeedVertex(GetVertex(x, y), (int)GetOpenLength(2 * x - center.X, 2 * y - center.Y));
+                var tile = GetTile(x, y);
+                var length = (int)GetCenterLength(source, x, y);
+                _lengths[tile] = length;
+                _queue.Enqueue(tile, length);
             }
-        }
-    }
-
-    private void SeedVertex(int vertex, int length)
-    {
-        if (_openVertices[vertex] && length < _lengths[vertex])
-        {
-            _lengths[vertex] = length;
-            _queue.Enqueue(vertex, length);
         }
     }
 
     private void Expand()
     {
-        while (_queue.TryDequeue(out var vertex, out var length))
+        while (_queue.TryDequeue(out var tile, out var length))
         {
-            // A vertex is queued again whenever its length shrinks; only the entry with its final length expands it.
-            if (length == _lengths[vertex])
+            // A tile is queued again whenever its length shrinks; only the entry with its final length expands it.
+            if (length == _lengths[tile])
             {
-                ExpandVertex(vertex, length);
+                ExpandTile(tile, length);
             }
         }
     }
 
-    private void ExpandVertex(int vertex, int length)
+    private void ExpandTile(int tile, int length)
     {
         for (var step = 0; step < Steps.Length; step++)
         {
-            var next = vertex + _stepOffsets[step];
+            var next = tile + _stepOffsets[step];
             var nextLength = length + Steps[step].Length;
-            if (nextLength <= MaximumLength && nextLength < _lengths[next] && _openVertices[next])
+            if (nextLength <= MaximumLength && nextLength < _lengths[next] && IsPassable(tile, step))
             {
                 _lengths[next] = nextLength;
-                _queue.Enqueue(next, nextLength);
+                if (_openTiles[next])
+                {
+                    _queue.Enqueue(next, nextLength);
+                }
             }
         }
     }
+
+    private bool IsPassable(int tile, int step) =>
+        _openTiles[tile + _firstPassedOffsets[step]] && _openTiles[tile + _secondPassedOffsets[step]];
+
+    private readonly record struct Step(
+        int X, int Y, int Length, int FirstPassedX, int FirstPassedY, int SecondPassedX, int SecondPassedY);
 }

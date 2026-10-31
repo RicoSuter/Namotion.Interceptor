@@ -271,6 +271,88 @@ public class HearingRangeTests
     }
 
     [Fact]
+    public void WhenOnlyASlitOneTileWideOpensAWall_ThenTheVoicePassesItWithTheDetour()
+    {
+        // Arrange
+        // A wall along row 10 with the slit at column 5, 4 tiles east of the line between the centers at x 1.
+        AddWall(-20, 10, 25, 1);
+        AddWall(6, 10, 25, 1);
+        var first = CreatePlayer("a", 0, 0);
+        var second = CreatePlayer("b", 0, 20);
+
+        // Act
+        var volume = GetVolume(first, second);
+
+        // Assert
+        // Through the slit the path is about 21.9 tiles long.
+        var expected = HearingRange.GetDistanceGain(21.9) * HearingRange.GetOcclusionGain(1.9);
+        Assert.InRange(volume, expected * 0.8, expected * 1.2);
+        Assert.True(volume < 0.2 * 0.8);
+    }
+
+    [Fact]
+    public void WhenAGapIsTwoTilesWide_ThenTheVoicePassesItAtLeastAsLoudAsThroughASlit()
+    {
+        // Arrange
+        AddWall(-20, 10, 25, 1);
+        AddWall(7, 10, 25, 1);
+        var first = CreatePlayer("a", 0, 0);
+        var second = CreatePlayer("b", 0, 20);
+        var slitIndex = new GameWorldIndex();
+        slitIndex.AddOrUpdate(new Wall { X = -20, Y = 10, Width = 25, Depth = 1 });
+        slitIndex.AddOrUpdate(new Wall { X = 6, Y = 10, Width = 25, Depth = 1 });
+
+        // Act
+        var gapVolume = GetVolume(first, second);
+        var slitVolume = HearingRange.GetVolume(first, second, slitIndex, new SoundPathSearch());
+
+        // Assert
+        Assert.InRange(gapVolume, slitVolume, 0.2 * 0.8);
+    }
+
+    [Theory]
+    [InlineData("a")]
+    [InlineData("z")]
+    public void WhenAPlayerStandsInAWallNextToASlit_ThenItHearsATalkerBehindTheWallThroughTheSlit(string clientId)
+    {
+        // Arrange
+        // The player covers the slit at 5, 10 and the wall tile 6, 10; the client id decides which end is searched from.
+        AddWall(-20, 10, 25, 1);
+        AddWall(6, 10, 25, 1);
+        var player = CreatePlayer(clientId, 5, 10);
+        var talker = CreatePlayer("m", 0, 24);
+
+        // Act
+        var forward = GetVolume(player, talker);
+        var backward = HearingRange.GetVolume(talker, player, _index, new SoundPathSearch());
+
+        // Assert
+        Assert.InRange(forward, 0.05, HearingRange.GetDistanceGain(Math.Sqrt(25 + 196)));
+        Assert.Equal(forward, backward);
+    }
+
+    [Fact]
+    public void WhenADoorOnTheOnlyPathClosesBetweenTwoSearchesFromTheSameFootprint_ThenTheSearchIsRepeated()
+    {
+        // Arrange
+        var door = AddRoomAroundTheOrigin10TilesNorth();
+        door.IsOpen = true;
+        _index.AddOrUpdate(door);
+        var inside = CreatePlayer("a", 0, 10);
+        var outside = CreatePlayer("b", 8, 0);
+        var openVolume = GetVolume(inside, outside);
+
+        // Act
+        door.IsOpen = false;
+        _index.AddOrUpdate(door);
+        var closedVolume = GetVolume(inside, outside);
+
+        // Assert
+        Assert.True(openVolume > 0);
+        Assert.Equal(0.0, closedVolume);
+    }
+
+    [Fact]
     public void WhenWallsMeetOnlyAtCorners_ThenTheVoiceDoesNotSlipThroughTheJoints()
     {
         // Arrange
@@ -291,10 +373,11 @@ public class HearingRangeTests
     }
 
     [Fact]
-    public void WhenTheLineRunsAlongTheFaceOfAWall_ThenTheWallMakesItQuieter()
+    public void WhenTheLineRunsAlongTheFaceOfAWall_ThenTheVoicePassesBesideItAtFullVolume()
     {
         // Arrange
-        // The centers lie on the line between rows 0 and 1, which touches this wall in row 0.
+        // The centers lie on the line between rows 0 and 1, which touches this wall in row 0; the path through the
+        // centers of row 1 is as long as the one without the wall.
         AddWall(10, 0, 1, 1);
         var first = CreatePlayer("a", 0, 0);
         var second = CreatePlayer("b", 20, 0);
@@ -303,7 +386,7 @@ public class HearingRangeTests
         var volume = GetVolume(first, second);
 
         // Assert
-        Assert.InRange(volume, 0.1, 0.2 - 0.01);
+        Assert.Equal(0.2, volume, 6);
     }
 
     [Fact]
@@ -430,7 +513,7 @@ public class HearingRangeTests
         // Assert
         var changes = volumes.Zip(volumes.Skip(1), (previous, next) => Math.Abs(next - previous) / previous).ToList();
         Assert.All(changes, change => Assert.InRange(change, 0, 0.15));
-        Assert.True(volumes[^1] < volumes[0] * 0.7);
+        Assert.True(volumes[^1] < HearingRange.GetDistanceGain(Math.Sqrt(404)) * 0.7);
     }
 
     [Fact]
@@ -519,10 +602,11 @@ public class HearingRangeTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    public void WhenAVerticalLineRunsAlongTheFaceOfAWall_ThenTheWallMakesItQuieter(int wallX)
+    public void WhenAVerticalLineRunsAlongTheFaceOfAWall_ThenTheVoicePassesBesideItAtFullVolume(int wallX)
     {
         // Arrange
-        // The centers lie on the line between columns 0 and 1, which touches this wall in either column.
+        // The centers lie on the line between columns 0 and 1, which touches this wall in either column; the path
+        // through the centers of the other column is as long as the one without the wall.
         AddWall(wallX, 10, 1, 1);
         var first = CreatePlayer("a", 0, 0);
         var second = CreatePlayer("b", 0, 20);
@@ -531,7 +615,7 @@ public class HearingRangeTests
         var volume = GetVolume(first, second);
 
         // Assert
-        Assert.InRange(volume, 0.1, 0.2 - 0.01);
+        Assert.Equal(0.2, volume, 6);
     }
 
     [Fact]

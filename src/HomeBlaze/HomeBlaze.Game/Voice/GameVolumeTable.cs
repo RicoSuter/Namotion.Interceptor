@@ -43,26 +43,26 @@ internal sealed class GameVolumeTable
     }
 
     /// <summary>
-    /// Builds the table for the connected players, comparing only players within the hearing radius, which the index
+    /// Builds the table for the connected players of a valid size, comparing only players within the hearing radius, which the index
     /// finds. The index must be up to date; the caller guards it, and also the <paramref name="candidates"/> list and
     /// the <paramref name="search"/>, which are scratch space.
     /// </summary>
     public static GameVolumeTable Build(Dictionary<string, GamePlayer> players, GameWorldIndex index, List<GameObject> candidates,
         SoundPathSearch search)
     {
-        var connectedCount = 0;
+        var hearingCount = 0;
         foreach (var player in players.Values)
         {
-            if (player.IsConnected)
+            if (CanHear(player))
             {
-                connectedCount++;
+                hearingCount++;
             }
         }
 
-        var rows = new Dictionary<string, List<GameVolumeEntry>>(connectedCount);
+        var rows = new Dictionary<string, List<GameVolumeEntry>>(hearingCount);
         foreach (var player in players.Values)
         {
-            if (player.IsConnected)
+            if (CanHear(player))
             {
                 rows[player.ClientId] = [];
             }
@@ -80,6 +80,9 @@ internal sealed class GameVolumeTable
 
         return Create(rows);
     }
+
+    // A player of a size that the index leaves out has no row, so its huge area is never queried.
+    private static bool CanHear(GamePlayer player) => player.IsConnected && GameWorldIndex.HasValidSize(player);
 
     // Computes each pair once, from the player with the smaller id, and adds it to both rows. The listener goes first,
     // so the paths of its pairs come from one search.

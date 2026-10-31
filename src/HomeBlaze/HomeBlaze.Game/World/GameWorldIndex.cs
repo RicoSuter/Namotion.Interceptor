@@ -148,10 +148,17 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private static bool HasValidSize(GameObject gameObject) =>
+    /// <summary>
+    /// Whether the width, depth and height of the object are from 1 to <see cref="GameObject.MaximumSize"/>, which the
+    /// index requires.
+    /// </summary>
+    internal static bool HasValidSize(GameObject gameObject) =>
         IsValidSize(gameObject.Width) && IsValidSize(gameObject.Depth) && IsValidSize(gameObject.Height);
 
-    private static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
+    /// <summary>
+    /// Whether the size is from 1 to <see cref="GameObject.MaximumSize"/>.
+    /// </summary>
+    internal static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
 
     private bool IsBlockedByAny(List<GameObject> objects, Footprint area, GameObject? ignored)
     {
