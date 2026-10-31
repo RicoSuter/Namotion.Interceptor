@@ -629,7 +629,12 @@ public static class PathExtensions
             Count = 0;
         }
 
-        public readonly void Return() => Pool.Return(_array, clearArray: true);
+        // Entries past Count are already cleared, so clearing the used ones is enough.
+        public readonly void Return()
+        {
+            Array.Clear(_array, 0, Count);
+            Pool.Return(_array);
+        }
     }
 
     /// <summary>

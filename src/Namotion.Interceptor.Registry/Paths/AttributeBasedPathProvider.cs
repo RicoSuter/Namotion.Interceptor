@@ -12,7 +12,6 @@ public class AttributeBasedPathProvider : PathProviderBase
 {
     private readonly string _name;
     private readonly char _pathSeparator;
-    private readonly bool _isExactType;
 
     /// <summary>
     /// Creates a provider that filters [Path] attributes by name.
@@ -23,7 +22,6 @@ public class AttributeBasedPathProvider : PathProviderBase
     {
         _name = name ?? throw new ArgumentNullException(nameof(name));
         _pathSeparator = pathSeparator;
-        _isExactType = GetType() == typeof(AttributeBasedPathProvider);
     }
 
     /// <summary>
@@ -53,8 +51,9 @@ public class AttributeBasedPathProvider : PathProviderBase
     /// <inheritdoc />
     public override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        // A derived provider may override the members this answers in one scan.
-        if (!_isExactType)
+        // A derived provider may override the members this answers in one scan. Checked per call rather than cached in
+        // a field: a devirtualized call folds the check and its fallback away.
+        if (GetType() != typeof(AttributeBasedPathProvider))
         {
             return base.TryGetIncludedPropertySegment(property, out segment);
         }

@@ -9,7 +9,6 @@ namespace Namotion.Interceptor.Registry.Paths;
 public class DefaultPathProvider : PathProviderBase
 {
     private readonly char _pathSeparator;
-    private readonly bool _isExactType;
 
     /// <summary>
     /// Gets the singleton instance of the default path provider (separator '.').
@@ -25,7 +24,6 @@ public class DefaultPathProvider : PathProviderBase
     public DefaultPathProvider(char pathSeparator)
     {
         _pathSeparator = pathSeparator;
-        _isExactType = GetType() == typeof(DefaultPathProvider);
     }
 
     /// <inheritdoc />
@@ -34,8 +32,9 @@ public class DefaultPathProvider : PathProviderBase
     /// <inheritdoc />
     public override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        // A derived provider may override the members this skips.
-        if (!_isExactType)
+        // A derived provider may override the members this skips. Checked per call rather than cached in a field: a
+        // devirtualized call folds the check and its fallback away, so the override inlines.
+        if (GetType() != typeof(DefaultPathProvider))
         {
             return base.TryGetIncludedPropertySegment(property, out segment);
         }
