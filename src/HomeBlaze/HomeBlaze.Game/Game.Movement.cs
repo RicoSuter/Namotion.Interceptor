@@ -1,0 +1,125 @@
+using HomeBlaze.Game.World;
+
+namespace HomeBlaze.Game;
+
+/// <summary>
+/// The verdict on a step and the position and facing of the player after it.
+/// </summary>
+internal readonly record struct MoveResult(bool IsAccepted, int X, int Y, GameDirection Facing);
+
+public partial class Game
+{
+    /// <summary>
+    /// The steps, and separately the turns, a player may take at once after a pause; one more each
+    /// <see cref="StepInterval"/>.
+    /// </summary>
+    internal const int StepBurst = 3;
+
+    /// <summary>
+    /// Turns the player toward <paramref name="direction"/> and, unless <paramref name="turnOnly"/>, steps one tile that
+    /// way when the step is allowed; the caller must pass only the player of its own client.
+    /// </summary>
+    internal MoveResult TryMove(GamePlayer player, GameDirection direction, bool turnOnly)
+    {
+        lock (_lock)
+        {
+            if (!IsPlayerOfThisGame(player) || !Enum.IsDefined(direction))
+            {
+                return new MoveResult(false, player.X, player.Y, player.Facing);
+            }
+
+            var rateLimiter = turnOnly
+                ? player.TurnRateLimiter ??= new RateLimiter(_timeProvider, StepInterval, StepBurst)
+                : player.StepRateLimiter ??= new RateLimiter(_timeProvider, StepInterval, StepBurst);
+            if (!rateLimiter.TryTake())
+            {
+                return new MoveResult(false, player.X, player.Y, player.Facing);
+            }
+
+            if (player.Facing != direction)
+            {
+                player.Facing = direction;
+                _isSaveRequested = true;
+            }
+
+            if (turnOnly || !TryGetStep(player, direction, out var moved))
+            {
+                return new MoveResult(turnOnly, player.X, player.Y, player.Facing);
+            }
+
+            player.X = moved.X;
+            player.Y = moved.Y;
+            _isSaveRequested = true;
+            GetIndex().AddOrUpdate(player);
+            return new MoveResult(true, player.X, player.Y, player.Facing);
+        }
+    }
+
+    /// <summary>
+    /// Gets the visible objects other than the player in the tiles in front of it, from south-west to north-east.
+    /// </summary>
+    internal IReadOnlyList<GameObject> GetTargetObjects(GamePlayer player)
+    {
+        lock (_lock)
+        {
+            var tiles = new List<Footprint>(3);
+            TargetArea.GetTiles(player.Footprint, player.Facing, tiles);
+            if (tiles.Count == 0 || !player.Footprint.TryMove(player.Facing.GetOffsetX(), player.Facing.GetOffsetY(), out var shifted))
+            {
+                return [];
+            }
+
+            var targets = new List<GameObject>();
+            GetIndex().Query(shifted, targets);
+            for (var index = targets.Count - 1; index >= 0; index--)
+            {
+                if (ReferenceEquals(targets[index], player) || !IntersectsAny(targets[index].Footprint, tiles))
+                {
+                    targets.RemoveAt(index);
+                }
+            }
+
+            targets.Sort(static (first, second) => first.Y != second.Y ? first.Y.CompareTo(second.Y) : first.X.CompareTo(second.X));
+            return targets;
+        }
+    }
+
+    private static bool IntersectsAny(Footprint footprint, List<Footprint> tiles)
+    {
+        foreach (var tile in tiles)
+        {
+            if (footprint.Intersects(tile))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Callers hold _lock.
+    private bool IsPlayerOfThisGame(GamePlayer player) =>
+        Players.TryGetValue(player.ClientId, out var current) && ReferenceEquals(current, player);
+
+    // Callers hold _lock.
+    private bool TryGetStep(GamePlayer player, GameDirection direction, out Footprint moved)
+    {
+        var index = GetIndex();
+        var footprint = player.Footprint;
+        var offsetX = direction.GetOffsetX();
+        var offsetY = direction.GetOffsetY();
+        if (!footprint.TryMove(offsetX, offsetY, out moved) || index.IsBlocked(moved, player))
+        {
+            return false;
+        }
+
+        if (!direction.IsDiagonal())
+        {
+            return true;
+        }
+
+        var isHorizontalBlocked = !footprint.TryMove(offsetX, 0, out var horizontal) || index.IsBlocked(horizontal, player);
+        var isVerticalBlocked = !footprint.TryMove(0, offsetY, out var vertical) || index.IsBlocked(vertical, player);
+        return !(isHorizontalBlocked && isVerticalBlocked);
+    }
+}

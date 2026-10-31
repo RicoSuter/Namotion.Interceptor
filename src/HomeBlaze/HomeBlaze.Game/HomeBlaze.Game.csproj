@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <!-- S8970: Sonar reads Razor-generated code as nullable-disabled, but the compiler reports CS8618/CS8625 without the null-forgiving operator; .editorconfig sections do not reach source-generated Razor files. -->
+        <NoWarn>$(NoWarn);S8970</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Game.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Installation\HomeBlaze.Installation.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Storage.Abstractions\HomeBlaze.Storage.Abstractions.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+        <PackageReference Include="MudBlazor" />
+        <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+        <PackageReference Include="System.Reactive" />
+    </ItemGroup>
+
+</Project>

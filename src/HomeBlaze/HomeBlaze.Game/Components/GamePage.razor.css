@@ -1,0 +1,219 @@
+/* The negative margins cancel the side padding of the main content (px-4), so the game fills the page edge to edge. */
+.game-layout {
+    display: flex;
+    height: calc(100dvh - var(--mud-appbar-height));
+    max-height: 100%;
+    margin: 0 -16px;
+    gap: 0;
+}
+
+.game-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.game-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    outline: none;
+    touch-action: none;
+}
+
+.game-message {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.game-panel {
+    flex: 0 0 240px;
+    /* Keeps the first heading clear of the page's floating edit button. */
+    padding: 56px 12px 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-left: 1px solid var(--mud-palette-divider);
+    background: var(--mud-palette-surface);
+}
+
+.game-panel h5 {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--mud-palette-text-secondary);
+}
+
+.game-panel section {
+    margin-bottom: 16px;
+}
+
+.game-panel-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.game-panel .game-position {
+    flex: 1 1 120px;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+/* Shown on touch devices and narrow viewports only; game-input.js handles the presses. */
+.game-pad {
+    display: none;
+    grid-template-columns: repeat(3, 52px);
+    grid-template-rows: repeat(3, 52px);
+    gap: 4px;
+    margin-left: auto;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+@media (pointer: coarse), (max-width: 959.98px) {
+    .game-pad {
+        display: grid;
+    }
+}
+
+.game-pad-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    place-self: center;
+    padding: 0;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 8px;
+    background: var(--mud-palette-background-gray);
+    color: var(--mud-palette-text-primary);
+    cursor: pointer;
+    touch-action: none;
+}
+
+.game-pad-diagonal,
+.game-pad-turn {
+    width: 44px;
+    height: 44px;
+}
+
+.game-pad-button svg {
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+}
+
+.game-pad-diagonal svg,
+.game-pad-turn svg {
+    width: 22px;
+    height: 22px;
+}
+
+.game-pad-button[data-game-move="north-east"] svg { transform: rotate(45deg); }
+.game-pad-button[data-game-move="east"] svg { transform: rotate(90deg); }
+.game-pad-button[data-game-move="south-east"] svg { transform: rotate(135deg); }
+.game-pad-button[data-game-move="south"] svg { transform: rotate(180deg); }
+.game-pad-button[data-game-move="south-west"] svg { transform: rotate(225deg); }
+.game-pad-button[data-game-move="west"] svg { transform: rotate(270deg); }
+.game-pad-button[data-game-move="north-west"] svg { transform: rotate(315deg); }
+
+.game-pad-button.game-pad-held {
+    background: var(--mud-palette-action-default-hover);
+    border-color: var(--mud-palette-primary);
+}
+
+.game-pad-turn[aria-pressed="true"] {
+    background: var(--mud-palette-primary);
+    border-color: var(--mud-palette-primary);
+    color: var(--mud-palette-primary-text);
+}
+
+.game-nearby {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+}
+
+.game-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 959.98px) {
+    .game-layout {
+        flex-direction: column;
+        height: auto;
+    }
+
+    .game-stage {
+        height: 60dvh;
+    }
+
+    .game-panel {
+        flex: 0 0 auto;
+        padding-top: 12px;
+        border-left: none;
+        border-top: 1px solid var(--mud-palette-divider);
+    }
+}
+
+.game-target-title {
+    margin: 6px 0 4px;
+}
+
+::deep .game-action {
+    margin: 2px 4px 2px 0;
+}
+
+.game-key {
+    display: inline-block;
+    min-width: 16px;
+    margin-right: 6px;
+    padding: 0 3px;
+    border-radius: 3px;
+    font-size: 10px;
+    text-align: center;
+    background: rgba(255, 255, 255, .25);
+}
+
+.game-panel .game-voice {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+}
+
+.game-voice-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+::deep .game-voice-message {
+    margin: -8px 0 16px;
+}
+
+.game-nearby-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.game-nearby-icon {
+    display: inline-flex;
+    color: var(--mud-palette-text-secondary);
+}
+
+.game-nearby-dimmed {
+    opacity: .5;
+}

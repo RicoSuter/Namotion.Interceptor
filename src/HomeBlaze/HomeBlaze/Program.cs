@@ -148,6 +148,7 @@ typeProvider
     .AddAssembly(typeof(HistoryChart).Assembly)                                             // HomeBlaze.History.Blazor
     .AddAssembly(typeof(HomeBlaze.Installation.HomeBlazeInstallation).Assembly)             // HomeBlaze.Installation
     .AddAssembly(typeof(HomeBlaze.Installation.Blazor.InstallationWidget).Assembly)         // HomeBlaze.Installation.Blazor
+    .AddAssembly(typeof(HomeBlaze.Game.Game).Assembly)                                      // HomeBlaze.Game
     .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
     .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly)                                  // Namotion.Devices.Luxtronik.HomeBlaze
     .AddAssembly(typeof(SonosSystem).Assembly)                                              // Namotion.Devices.Sonos

@@ -1,0 +1,1071 @@
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(Game))]
+@implements ISubjectComponent
+@implements IAsyncDisposable
+@using System.Reactive.Concurrency
+@using System.Reactive.Linq
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Operations
+@using HomeBlaze.Game.View
+@using HomeBlaze.Game.Voice
+@using HomeBlaze.Services
+@using HomeBlaze.Services.Clients
+@using Microsoft.Extensions.Logging
+@using Namotion.Interceptor.Registry
+@using Namotion.Interceptor.Tracking
+@inject IJSRuntime JsRuntime
+@inject CurrentClientConnection CurrentConnection
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+@inject ILogger<GamePage> Logger
+
+<div class="game-layout">
+    <div class="game-stage">
+        <canvas @ref="_canvas" class="game-canvas" data-testid="game-canvas"></canvas>
+        @if (_error is not null)
+        {
+            <div class="game-message"><MudAlert Severity="Severity.Error" data-testid="game-error">@_error</MudAlert></div>
+        }
+        else if (!_isStarted)
+        {
+            <div class="game-message"><MudProgressCircular Indeterminate="true" /></div>
+        }
+        else if (_player is null)
+        {
+            <div class="game-message"><MudAlert Severity="Severity.Info" data-testid="game-joining">@JoiningMessage</MudAlert></div>
+        }
+    </div>
+    <aside @ref="_panel" class="game-panel" data-testid="game-panel">
+        <div class="game-panel-top">
+            <section class="game-position">
+                <h5>Position</h5>
+                <div data-testid="game-position">@_positionText</div>
+            </section>
+            <section class="game-voice">
+                <h5>Voice</h5>
+                <div class="game-voice-buttons">
+                    @* Native titles instead of popover tooltips: at the panel's edge a popover overflowed the page, and after a tap
+                       on touch devices it stayed open over the neighboring button. The span keeps the title on a disabled button. *@
+                    <span title="@MicrophoneTooltip">
+                        <MudIconButton Icon="@(_isMicrophoneOn ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
+                                       Variant="Variant.Filled"
+                                       Color="@(_isMicrophoneOn ? Color.Primary : Color.Default)"
+                                       Size="Size.Small" Disabled="@IsMicrophoneDisabled"
+                                       aria-label="Microphone" aria-pressed="@(_isMicrophoneOn ? "true" : "false")" aria-keyshortcuts="M"
+                                       data-game-voice data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
+                    </span>
+                    <span title="@AudioTooltip">
+                        <MudIconButton Icon="@(_isAudioOn ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
+                                       Variant="Variant.Filled"
+                                       Color="@(_isAudioOn ? Color.Primary : Color.Default)"
+                                       Size="Size.Small" Disabled="@IsAudioDisabled"
+                                       aria-label="Speaker" aria-pressed="@(_isAudioOn ? "true" : "false")" aria-keyshortcuts="N"
+                                       data-game-voice data-testid="game-audio" OnClick="ToggleAudioAsync" />
+                    </span>
+                </div>
+            </section>
+            @* game-input.js handles the presses without a round trip, and sets aria-pressed on the turn button itself. *@
+            <div @ref="_pad" class="game-pad" data-testid="game-pad">
+                @foreach (var button in PadButtons)
+                {
+                    if (button.Move is { } move)
+                    {
+                        <button type="button" tabindex="-1" class="@(button.IsDiagonal ? "game-pad-button game-pad-diagonal" : "game-pad-button")"
+                                data-game-move="@move" aria-label="@button.Label" data-testid="game-pad-@move">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)Icons.Material.Filled.KeyboardArrowUp)</svg>
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" tabindex="-1" class="game-pad-button game-pad-turn"
+                                data-game-turn aria-label="@button.Label" title="@button.Label" data-testid="game-pad-turn">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)Icons.Material.Filled.RotateRight)</svg>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+        @if (VoiceMessage is { } voiceMessage)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="game-voice-message" data-testid="game-voice-message">@voiceMessage</MudAlert>
+        }
+        @if (_targets.Count > 0)
+        {
+            <section data-testid="game-looking-at">
+                <h5>Looking at</h5>
+                @foreach (var target in _targets)
+                {
+                    <div class="game-target-title" data-testid="game-target-title">@target.Title</div>
+                    @foreach (var action in target.Actions)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="game-action"
+                                   Disabled="_isInvoking" data-testid="game-target-action"
+                                   OnClick="@(() => InvokeActionAsync(target.Subject, action.Method))">
+                            @if (action.Key > 0)
+                            {
+                                <span class="game-key">@action.Key</span>
+                            }
+                            @action.Method.Title
+                        </MudButton>
+                    }
+                }
+            </section>
+        }
+        <section>
+            <h5>Actions</h5>
+            @foreach (var method in _gameActions)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="game-action"
+                           Disabled="@(_isInvoking || _player is null)" data-testid="game-action"
+                           OnClick="@(() => InvokeActionAsync(Game!, method))">@method.Title</MudButton>
+            }
+        </section>
+        <section>
+            <h5>Nearby</h5>
+            @foreach (var player in _nearby)
+            {
+                <div class="@(player.IsSelf || _isAudioOn ? "game-nearby" : "game-nearby game-nearby-dimmed")" data-testid="game-nearby-player">
+                    <span class="game-dot" style="background: @player.Color"></span>
+                    <span class="game-nearby-title">@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
+                    @if (!player.IsMicrophoneOn)
+                    {
+                        <span class="game-nearby-icon" title="Microphone off" data-testid="game-nearby-microphone-off">
+                            <MudIcon Icon="@Icons.Material.Filled.MicOff" Size="Size.Small" />
+                        </span>
+                    }
+                    @if (!player.IsAudioOn)
+                    {
+                        <span class="game-nearby-icon" title="Speaker off" data-testid="game-nearby-audio-off">
+                            <MudIcon Icon="@Icons.Material.Filled.VolumeOff" Size="Size.Small" />
+                        </span>
+                    }
+                </div>
+            }
+        </section>
+    </aside>
+</div>
+
+@code {
+    private const string JoiningMessage = "Joining the game…";
+    private const string ModulePath = "./_content/HomeBlaze.Game/game.js";
+    private const string VoiceModulePath = "./_content/HomeBlaze.Game/game-voice.js";
+    private const string InsecureMessage = "Voice needs HTTPS";
+    private const string ResumeMessage = "Tap the microphone or speaker to resume";
+    private const string MicrophoneEndedMessage = "The microphone was disconnected";
+    private const string NotConnectedMessage = "Voice is not available while you are not connected";
+    private const string NoPosition = "–";
+    private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
+
+    // In the order of the pad's 3 by 3 grid; the middle one toggles turning only.
+    private static readonly PadButton[] PadButtons =
+    [
+        new("north-west", "Move north west", true), new("north", "Move north", false), new("north-east", "Move north east", true),
+        new("west", "Move west", false), new(null, "Turn only", false), new("east", "Move east", false),
+        new("south-west", "Move south west", true), new("south", "Move south", false), new("south-east", "Move south east", true),
+    ];
+
+    private static int _lastViewId;
+
+    // Identifies this page's view in the module, which the pages of a tab share.
+    private readonly int _viewId = Interlocked.Increment(ref _lastViewId);
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly GameViewTracker _tracker = new();
+    private ElementReference _canvas;
+    private ElementReference _pad;
+    private ElementReference _panel;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<GamePage>? _reference;
+    private IDisposable? _subscription;
+    private GamePlayer? _player;
+    private bool _isStarted;
+    private bool _isDisposed;
+    private string? _error;
+    private int _isFlushScheduled;
+    private string _positionText = NoPosition;
+    private IReadOnlyList<NearbyEntry> _nearby = [];
+    // The player and the player ids of the volume table row that _nearby shows.
+    private GamePlayer? _nearbyPlayer;
+    private string[] _nearbyPlayerIds = [];
+    private int _isVolumeTableChanged;
+    private IReadOnlyList<TargetEntry> _targets = [];
+    private IReadOnlyList<MethodMetadata> _gameActions = [];
+    private bool _isInvoking;
+    private bool _isViewBroken;
+    private IJSObjectReference? _voiceModule;
+    // Null until game-voice.js answered, false where the browser offers no voice.
+    private bool? _isVoiceSupported;
+    private bool _isMicrophoneOn;
+    private bool _isAudioOn;
+    private bool _isAudioSuspended;
+    private bool _isResumeTried;
+    private bool _isCaptureEnded;
+    private bool _isVoiceBusy;
+    private string? _voiceError;
+    private IDisposable? _sinkRegistration;
+    private int _pendingSends;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Game? Game => Subject as Game;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Game is not { } game)
+        {
+            return;
+        }
+
+        try
+        {
+            _reference = DotNetObjectReference.Create(this);
+            var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", _lifetime.Token, ModulePath);
+            if (_isDisposed)
+            {
+                // DisposeAsync found no module to release.
+                await module.DisposeAsync();
+                return;
+            }
+
+            _module = module;
+            var options = new { viewId = _viewId, pad = _pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = "./_content/HomeBlaze.Game/" };
+            var result = await module.InvokeAsync<StartResult>("start", _lifetime.Token, _canvas, _reference, options);
+            if (_isDisposed)
+            {
+                // DisposeAsync has asked the module to drop the view, which the start then releases.
+                return;
+            }
+
+            if (!result.IsStarted)
+            {
+                _error = result.Error ?? "The game could not be started.";
+                StateHasChanged();
+                return;
+            }
+
+            _isStarted = true;
+            _subscription = ((IInterceptorSubject)game).Context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Where(change => change.Property.Subject is GameObject || ReferenceEquals(change.Property.Subject, game))
+                .Subscribe(_ => ScheduleFlush());
+            game.VolumeTableChanged += OnVolumeTableChanged;
+            await FlushAsync();
+            await StartVoiceAsync();
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
+        {
+            // The page went away while the game was starting.
+        }
+        catch (JSException exception)
+        {
+            if (!_isDisposed)
+            {
+                _error = $"The game could not be started: {exception.Message}";
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Moves the player of this page; returns null while the page has none, which the browser treats as an unanswered step.
+    /// </summary>
+    [JSInvokable]
+    public StepResult? Step(int sequence, int direction, bool turnOnly)
+    {
+        if (Game is not { } game || _player is not { } player)
+        {
+            return null;
+        }
+
+        var result = game.TryMove(player, (GameDirection)direction, turnOnly);
+        return new StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing);
+    }
+
+    /// <summary>
+    /// Invokes the target action with the zero-based number key index, as the panel numbers them.
+    /// </summary>
+    [JSInvokable]
+    public Task InvokeTargetAction(int index)
+    {
+        foreach (var target in _targets)
+        {
+            foreach (var action in target.Actions)
+            {
+                if (action.Key == index + 1)
+                {
+                    return InvokeActionAsync(target.Subject, action.Method);
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Passes a frame of this page's microphone to the mixer, which drops it unless this page is the microphone page.
+    /// </summary>
+    [JSInvokable]
+    public void ReceiveMicrophoneFrame(byte[] frame)
+    {
+        if (Game is { } game && _player is { } player)
+        {
+            game.VoiceMixer.Receive(player.ClientId, _viewId, frame);
+        }
+    }
+
+    /// <summary>
+    /// Toggles the microphone from the M key.
+    /// </summary>
+    [JSInvokable]
+    public Task ToggleMicrophone() => ToggleMicrophoneAsync();
+
+    /// <summary>
+    /// Toggles the speaker from the N key.
+    /// </summary>
+    [JSInvokable]
+    public Task ToggleAudio() => ToggleAudioAsync();
+
+    /// <summary>
+    /// Turns the microphone off after the browser lost its track, as when the device was unplugged.
+    /// </summary>
+    [JSInvokable]
+    public Task OnCaptureEnded()
+    {
+        _isCaptureEnded = true;
+        return StopEndedCaptureAsync();
+    }
+
+    /// <summary>
+    /// Shows whether the browser suspended the audio context, which only a click resumes.
+    /// </summary>
+    [JSInvokable]
+    public void OnAudioStateChanged(bool isSuspended)
+    {
+        _isAudioSuspended = isSuspended;
+        _isResumeTried &= isSuspended;
+        StateHasChanged();
+    }
+
+    // Stays enabled while a toggle runs, so the button keeps the focus; the toggle ignores clicks meanwhile. Without a
+    // player, a button stays enabled only to turn off what is still on.
+    private bool IsMicrophoneDisabled => _isVoiceSupported != true || (_player is null && !_isMicrophoneOn);
+
+    private bool IsAudioDisabled => _isVoiceSupported != true || (_player is null && !_isAudioOn);
+
+    private string? VoiceMessage => _isAudioSuspended && (_isAudioOn || _isMicrophoneOn) ? ResumeMessage : _voiceError;
+
+    private string MicrophoneTooltip => (_isVoiceSupported, _isMicrophoneOn) switch
+    {
+        (false, _) => InsecureMessage,
+        (_, true) => "Turn the microphone off (M)",
+        _ => "Turn the microphone on (M)"
+    };
+
+    private string AudioTooltip => (_isVoiceSupported, _isAudioOn) switch
+    {
+        (false, _) => InsecureMessage,
+        (_, true) => "Turn the speaker off (N)",
+        _ => "Turn the speaker on (N)"
+    };
+
+    // Voice is optional: a browser that cannot load it keeps the game and leaves the buttons disabled.
+    private async Task StartVoiceAsync()
+    {
+        try
+        {
+            var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", _lifetime.Token, VoiceModulePath);
+            if (_isDisposed)
+            {
+                await module.DisposeAsync();
+                return;
+            }
+
+            _voiceModule = module;
+            _isVoiceSupported = await module.InvokeAsync<bool>("initialize", _lifetime.Token, _viewId, _reference, CreateVoiceOptions());
+        }
+        catch (JSException exception)
+        {
+            Logger.LogDebug(exception, "The voice of the game could not be loaded");
+        }
+
+        if (!_isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private object CreateVoiceOptions() => new
+    {
+        element = _panel,
+        sampleRate = GameVoiceSettings.SampleRate,
+        frameSamples = GameVoiceSettings.SamplesPerFrame,
+        bufferStartSamples = ToSamples(GameVoiceSettings.PlaybackBufferStart),
+        bufferMaximumSamples = ToSamples(GameVoiceSettings.PlaybackBufferMaximum),
+        bufferGrowthSamples = GameVoiceSettings.BufferGrowth * GameVoiceSettings.SamplesPerFrame,
+        bufferHeadroomSamples = GameVoiceSettings.TrimHeadroom * GameVoiceSettings.SamplesPerFrame,
+        bufferShrinkDelaySeconds = GameVoiceSettings.BufferShrinkDelay.TotalSeconds,
+        trimWindowSeconds = GameVoiceSettings.TrimWindow.TotalSeconds,
+        rampSeconds = GameVoiceSettings.PlaybackRamp.TotalSeconds,
+    };
+
+    private static int ToSamples(TimeSpan duration) => (int)Math.Round(duration.TotalSeconds * GameVoiceSettings.SampleRate);
+
+    private bool CanToggleVoice() => !_isDisposed && !_isVoiceBusy && _isVoiceSupported == true;
+
+    // Turning off works without a player, so a page that lost its player can still stop a live capture.
+    private async Task ToggleMicrophoneAsync()
+    {
+        if (!CanToggleVoice() || _voiceModule is not { } module || Game is not { } game)
+        {
+            return;
+        }
+
+        if (await TryResumeAsync(module, _isMicrophoneOn))
+        {
+            return;
+        }
+
+        if (_isMicrophoneOn)
+        {
+            await RunVoiceToggleAsync(() => StopMicrophoneAsync(module, game, _player));
+        }
+        else if (_player is { } player)
+        {
+            await RunVoiceToggleAsync(() => StartMicrophoneAsync(module, game, player));
+        }
+    }
+
+    private async Task ToggleAudioAsync()
+    {
+        if (!CanToggleVoice() || _voiceModule is not { } module || Game is not { } game)
+        {
+            return;
+        }
+
+        if (await TryResumeAsync(module, _isAudioOn))
+        {
+            return;
+        }
+
+        if (_isAudioOn)
+        {
+            await RunVoiceToggleAsync(() => StopAudioAsync(module, game, _player));
+        }
+        else if (_player is { } player)
+        {
+            await RunVoiceToggleAsync(() => StartAudioAsync(module, game, player));
+        }
+    }
+
+    // The click already resumed the audio where the browser allows it, so the first tap on a toggle that is on only asks
+    // once more; a second tap turns it off, also when the browser keeps the audio suspended.
+    private async Task<bool> TryResumeAsync(IJSObjectReference module, bool isOn)
+    {
+        if (!isOn || !_isAudioSuspended || _isResumeTried)
+        {
+            return false;
+        }
+
+        _isResumeTried = true;
+        await RunVoiceToggleAsync(() => TryInvokeVoiceAsync(module, "resume", GameVoiceSettings.BrowserCallTimeout));
+        return true;
+    }
+
+    private async Task RunVoiceToggleAsync(Func<Task> toggle)
+    {
+        _isVoiceBusy = true;
+        try
+        {
+            _voiceError = null;
+            StateHasChanged();
+            await toggle();
+        }
+        finally
+        {
+            _isVoiceBusy = false;
+        }
+
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        // A volume table change that arrived during the toggle left the synchronization to the next flush.
+        if (Volatile.Read(ref _isVolumeTableChanged) == 1)
+        {
+            ScheduleFlush();
+        }
+
+        StateHasChanged();
+        await StopEndedCaptureAsync();
+    }
+
+    // A capture that ended while a toggle ran waits for RunVoiceToggleAsync, which calls this again once it is done.
+    private async Task StopEndedCaptureAsync()
+    {
+        if (!_isCaptureEnded || !CanToggleVoice() || _voiceModule is not { } module || Game is not { } game)
+        {
+            return;
+        }
+
+        _isCaptureEnded = false;
+        if (_isMicrophoneOn)
+        {
+            await RunVoiceToggleAsync(async () =>
+            {
+                await StopMicrophoneAsync(module, game, _player);
+                _voiceError = MicrophoneEndedMessage;
+            });
+        }
+    }
+
+    // The game hears the page only once the browser captures.
+    private async Task StartMicrophoneAsync(IJSObjectReference module, Game game, GamePlayer player)
+    {
+        var result = await TryStartVoiceAsync(module, "startCapture", GameVoiceSettings.CaptureStartTimeout);
+        if (!result.IsStarted)
+        {
+            _voiceError = GetMicrophoneError(result.Error);
+            await StopUnansweredStartAsync(module, result, "stopCapture");
+            return;
+        }
+
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (game.SetMicrophone(new GameCaller(player), _viewId, isOn: true))
+        {
+            _isMicrophoneOn = true;
+            return;
+        }
+
+        _voiceError = NotConnectedMessage;
+        await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
+    }
+
+    // Without a player, the game already turned the voice of the page's former player off.
+    private async Task StopMicrophoneAsync(IJSObjectReference module, Game game, GamePlayer? player)
+    {
+        _isMicrophoneOn = false;
+        if (player is not null)
+        {
+            game.SetMicrophone(new GameCaller(player), _viewId, isOn: false);
+        }
+
+        await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
+    }
+
+    private async Task StartAudioAsync(IJSObjectReference module, Game game, GamePlayer player)
+    {
+        var result = await TryStartVoiceAsync(module, "startPlayback", GameVoiceSettings.BrowserCallTimeout);
+        if (!result.IsStarted)
+        {
+            _voiceError = "The speaker could not be started";
+            await StopUnansweredStartAsync(module, result, "stopPlayback");
+            return;
+        }
+
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        var registration = game.VoiceMixer.RegisterSink(player.ClientId, new VoiceSink(this));
+        if (game.SetAudio(new GameCaller(player), _viewId, isOn: true))
+        {
+            _sinkRegistration = registration;
+            _isAudioOn = true;
+            return;
+        }
+
+        registration.Dispose();
+        _voiceError = NotConnectedMessage;
+        await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
+    }
+
+    private async Task StopAudioAsync(IJSObjectReference module, Game game, GamePlayer? player)
+    {
+        _isAudioOn = false;
+        if (player is not null)
+        {
+            game.SetAudio(new GameCaller(player), _viewId, isOn: false);
+        }
+
+        _sinkRegistration?.Dispose();
+        _sinkRegistration = null;
+        await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
+    }
+
+    // A start without an answer from the browser may still succeed there later, which the stop prevents.
+    private Task StopUnansweredStartAsync(IJSObjectReference module, VoiceStartResult result, string stopIdentifier) =>
+        result.Error is null ? TryInvokeVoiceAsync(module, stopIdentifier, GameVoiceSettings.BrowserCallTimeout) : Task.CompletedTask;
+
+    private static string GetMicrophoneError(string? error) => error switch
+    {
+        "denied" => "Microphone access was denied",
+        "not-found" => "No microphone was found",
+        _ => "The microphone could not be started"
+    };
+
+    // Voice never breaks the page: a call that fails only leaves the voice of this page off. A result without an error
+    // means the browser did not answer.
+    private async Task<VoiceStartResult> TryStartVoiceAsync(IJSObjectReference module, string identifier, TimeSpan timeout)
+    {
+        if (_isDisposed)
+        {
+            return new VoiceStartResult(false, null);
+        }
+
+        try
+        {
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            cancellation.CancelAfter(timeout);
+            return await module.InvokeAsync<VoiceStartResult>(identifier, cancellation.Token, _viewId);
+        }
+        catch (JSException exception)
+        {
+            Logger.LogDebug(exception, "The voice call {Identifier} failed", identifier);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
+        {
+            // The page went away or the browser did not answer in time.
+        }
+
+        return new VoiceStartResult(false, null);
+    }
+
+    // After the page went away, disposing the module stops everything in the browser.
+    private async Task TryInvokeVoiceAsync(IJSObjectReference module, string identifier, TimeSpan timeout)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        try
+        {
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            cancellation.CancelAfter(timeout);
+            await module.InvokeVoidAsync(identifier, cancellation.Token, _viewId);
+        }
+        catch (JSException exception)
+        {
+            Logger.LogDebug(exception, "The voice call {Identifier} failed", identifier);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
+        {
+            // The page went away or the browser did not answer in time.
+        }
+    }
+
+    // Called on the voice loop: hands the frame to the renderer and drops it while too many sends to the browser are pending.
+    private void SendVoiceFrame(byte[] frame)
+    {
+        if (_isDisposed || _voiceModule is not { } module)
+        {
+            return;
+        }
+
+        if (Interlocked.Increment(ref _pendingSends) > GameVoiceSettings.MaximumPendingSends)
+        {
+            Interlocked.Decrement(ref _pendingSends);
+            return;
+        }
+
+        _ = PlayAsync(module, frame);
+    }
+
+    private async Task PlayAsync(IJSObjectReference module, byte[] frame)
+    {
+        try
+        {
+            // JS interop with byte arrays runs on the circuit's dispatcher, not on the voice loop. The timeout releases
+            // the pending send of a call that a lost connection never answers.
+            await InvokeAsync(() => module.InvokeVoidAsync("play", GameVoiceSettings.PlayTimeout, _viewId, frame).AsTask());
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException
+            || (exception is JSException && _isDisposed))
+        {
+            // The page went away, or the frame was lost.
+        }
+        catch (Exception exception)
+        {
+            Logger.LogDebug(exception, "Playing a voice frame failed");
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _pendingSends);
+        }
+    }
+
+    // Removes only this page's share of the player's toggles; the other pages of the player keep theirs.
+    private void StopVoiceInGame()
+    {
+        _sinkRegistration?.Dispose();
+        _sinkRegistration = null;
+        if (Game is { } game && _player is { } player)
+        {
+            var caller = new GameCaller(player);
+            game.SetMicrophone(caller, _viewId, isOn: false);
+            game.SetAudio(caller, _viewId, isOn: false);
+        }
+    }
+
+    private async Task InvokeActionAsync(IInterceptorSubject owner, MethodMetadata method)
+    {
+        if (_isDisposed || _isInvoking || Game is not { } game || _player is not { } player)
+        {
+            return;
+        }
+
+        // The target may have moved since the panel rendered.
+        if (owner is GameObject target && !game.GetTargetObjects(player).Contains(target))
+        {
+            return;
+        }
+
+        _isInvoking = true;
+        // A number key reaches this without the re-render a click gets.
+        StateHasChanged();
+        try
+        {
+            var services = new GameCallerServiceProvider(ServiceProvider, new GameCaller(player));
+            await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token);
+        }
+        finally
+        {
+            _isInvoking = false;
+        }
+
+        await FlushAsync();
+    }
+
+    // Called inside the writes of the object graph, so it never blocks.
+    private void ScheduleFlush()
+    {
+        if (Interlocked.Exchange(ref _isFlushScheduled, 1) == 0)
+        {
+            _ = FlushLaterAsync();
+        }
+    }
+
+    private async Task FlushLaterAsync()
+    {
+        try
+        {
+            await Task.Delay(FlushDelay, _lifetime.Token);
+            Volatile.Write(ref _isFlushScheduled, 0);
+            await InvokeAsync(FlushAsync);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
+        {
+            // The page went away.
+        }
+    }
+
+    // The panel keeps following the game after the view broke, so that a stale sink does not keep playing.
+    private async Task FlushAsync()
+    {
+        if (_isDisposed || Game is not { } game || _module is not { } module)
+        {
+            return;
+        }
+
+        _player = CurrentConnection.Connection?.ClientId is { } clientId && game.Players.TryGetValue(clientId, out var player) ? player : null;
+        var hasViewChanged = await TryUpdateViewAsync(game, module);
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        await RefreshPanelAsync(game, hasViewChanged);
+        if (!_isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    // Returns whether the browser received a change of the view.
+    private async Task<bool> TryUpdateViewAsync(Game game, IJSObjectReference module)
+    {
+        if (_isViewBroken)
+        {
+            return false;
+        }
+
+        var update = game.UpdateView(_tracker, _player);
+        return !update.IsEmpty && await TryApplyUpdateAsync(module, update);
+    }
+
+    // Nearby follows both the view, which carries the toggles, and the volume table.
+    private async Task RefreshPanelAsync(Game game, bool hasViewChanged)
+    {
+        var isVolumeTableChanged = Interlocked.Exchange(ref _isVolumeTableChanged, 0) == 1;
+        if (hasViewChanged)
+        {
+            RefreshPosition();
+        }
+
+        if (hasViewChanged || isVolumeTableChanged)
+        {
+            RefreshNearby(game, hasViewChanged);
+        }
+
+        RefreshActions(game);
+        if (isVolumeTableChanged)
+        {
+            await SynchronizeVoiceAsync(game);
+        }
+    }
+
+    // Raised on the voice loop, so it only schedules a flush.
+    private void OnVolumeTableChanged()
+    {
+        Volatile.Write(ref _isVolumeTableChanged, 1);
+        ScheduleFlush();
+    }
+
+    // Another page of the player took the microphone over, or a disconnect turned the toggles of every page off.
+    private async Task SynchronizeVoiceAsync(Game game)
+    {
+        if ((!_isMicrophoneOn && !_isAudioOn) || _voiceModule is not { } module)
+        {
+            return;
+        }
+
+        if (_isVoiceBusy)
+        {
+            // RunVoiceToggleAsync schedules the next flush once the running toggle ended.
+            Volatile.Write(ref _isVolumeTableChanged, 1);
+            return;
+        }
+
+        var (isMicrophonePage, isAudioPage) = _player is { } player ? game.GetVoicePages(player, _viewId) : (false, false);
+        var isMicrophoneLost = _isMicrophoneOn && !isMicrophonePage;
+        var isAudioLost = _isAudioOn && !isAudioPage;
+        if (isMicrophoneLost || isAudioLost)
+        {
+            await RunVoiceToggleAsync(() => StopLostVoiceAsync(module, game, isMicrophoneLost, isAudioLost));
+        }
+    }
+
+    private async Task StopLostVoiceAsync(IJSObjectReference module, Game game, bool isMicrophoneLost, bool isAudioLost)
+    {
+        if (isMicrophoneLost)
+        {
+            await StopMicrophoneAsync(module, game, _player);
+        }
+
+        if (isAudioLost)
+        {
+            await StopAudioAsync(module, game, _player);
+        }
+    }
+
+    // Returns false when the page went away or the view cannot take updates anymore.
+    private async Task<bool> TryApplyUpdateAsync(IJSObjectReference module, GameViewUpdate update)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("applyUpdate", _lifetime.Token, _viewId, update);
+            return !_isDisposed;
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException)
+        {
+            // The page went away.
+            return false;
+        }
+        catch (JSException)
+        {
+            // The module dropped the view or broke, so every later update would fail too.
+            _isViewBroken = true;
+            _subscription?.Dispose();
+            return false;
+        }
+    }
+
+    private void RefreshPosition()
+    {
+        GameViewObject? self = null;
+        foreach (var view in _tracker.Known)
+        {
+            if (view.IsSelf)
+            {
+                self = view;
+                break;
+            }
+        }
+
+        _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
+    }
+
+    // The own player and the players it hears, by the same rule that mixes the voices. A new table with the same players
+    // keeps the list, because their toggles and titles reach it through the view.
+    private void RefreshNearby(Game game, bool hasViewChanged)
+    {
+        if (_player is not { } player)
+        {
+            _nearby = [];
+            _nearbyPlayer = null;
+            _nearbyPlayerIds = [];
+            return;
+        }
+
+        var row = game.VolumeTable.GetRow(player.ClientId);
+        if (!hasViewChanged && HasSameNearbyPlayers(player, row))
+        {
+            return;
+        }
+
+        var players = game.Players;
+        var playerIds = new string[row.Length];
+        var nearby = new List<NearbyEntry>(row.Length + 1) { CreateNearbyEntry(player, isSelf: true) };
+        for (var index = 0; index < row.Length; index++)
+        {
+            playerIds[index] = row[index].PlayerId;
+            if (players.TryGetValue(row[index].PlayerId, out var other))
+            {
+                nearby.Add(CreateNearbyEntry(other, isSelf: false));
+            }
+        }
+
+        nearby.Sort(static (first, second) => first.IsSelf != second.IsSelf
+            ? second.IsSelf.CompareTo(first.IsSelf)
+            : StringComparer.CurrentCulture.Compare(first.Title, second.Title));
+        _nearby = nearby;
+        _nearbyPlayer = player;
+        _nearbyPlayerIds = playerIds;
+    }
+
+    private bool HasSameNearbyPlayers(GamePlayer player, ReadOnlySpan<GameVolumeEntry> row)
+    {
+        if (!ReferenceEquals(player, _nearbyPlayer) || row.Length != _nearbyPlayerIds.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < row.Length; index++)
+        {
+            if (row[index].PlayerId != _nearbyPlayerIds[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
+        new(player.Title ?? string.Empty, _tracker.GetPlayerColor(player), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
+
+    private void RefreshActions(Game game)
+    {
+        _gameActions = GetOperations(game);
+        if (_player is not { } player)
+        {
+            _targets = [];
+            return;
+        }
+
+        var key = 0;
+        var targets = new List<TargetEntry>();
+        foreach (var target in game.GetTargetObjects(player))
+        {
+            var operations = GetOperations(target);
+            var actions = new List<ActionEntry>(operations.Count);
+            foreach (var method in operations)
+            {
+                actions.Add(new ActionEntry(key < 9 ? ++key : 0, method));
+            }
+
+            targets.Add(new TargetEntry(target, (target as ITitleProvider)?.Title ?? target.GetType().Name, actions));
+        }
+
+        _targets = targets;
+    }
+
+    // Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply.
+    private static IReadOnlyList<MethodMetadata> GetOperations(IInterceptorSubject subject)
+    {
+        if (subject.TryGetRegisteredSubject() is not { } registered)
+        {
+            return [];
+        }
+
+        return registered.GetAllMethods(ExclusionTarget.UserInterface)
+            .Where(method => method.Kind == MethodKind.Operation && (registered.TryGetProperty(method.PropertyName)?.IsMethodEnabled() ?? true))
+            .ToList();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        _subscription?.Dispose();
+        if (Game is { } game)
+        {
+            game.VolumeTableChanged -= OnVolumeTableChanged;
+        }
+
+        StopVoiceInGame();
+        try
+        {
+            await _lifetime.CancelAsync();
+            await DisposeVoiceModuleAsync();
+            if (_module is { } module)
+            {
+                await module.InvokeVoidAsync("dispose", _viewId);
+                await module.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException)
+        {
+            // The circuit is gone, and the browser with it, or the browser already dropped the module.
+        }
+        finally
+        {
+            _reference?.Dispose();
+            _lifetime.Dispose();
+        }
+    }
+
+    // Separate from the game module, so a voice module that the browser already dropped does not keep the game module.
+    private async Task DisposeVoiceModuleAsync()
+    {
+        if (_voiceModule is not { } voiceModule)
+        {
+            return;
+        }
+
+        try
+        {
+            await voiceModule.InvokeVoidAsync("dispose", _viewId);
+            await voiceModule.DisposeAsync();
+        }
+        catch (JSException exception)
+        {
+            Logger.LogDebug(exception, "Disposing the voice of the game failed");
+        }
+    }
+
+    public sealed record StepResult(int Sequence, bool IsAccepted, int X, int Y, int Facing);
+
+    private sealed record StartResult(bool IsStarted, string? Error);
+
+    private sealed record VoiceStartResult(bool IsStarted, string? Error);
+
+    private sealed record NearbyEntry(string Title, string Color, bool IsSelf, bool IsMicrophoneOn, bool IsAudioOn);
+
+    // The page's speaker as the mixer sees it.
+    private sealed class VoiceSink(GamePage page) : IGameVoiceSink
+    {
+        public void Send(byte[] frame) => page.SendVoiceFrame(frame);
+    }
+
+    private sealed record TargetEntry(IInterceptorSubject Subject, string Title, IReadOnlyList<ActionEntry> Actions);
+
+    private sealed record ActionEntry(int Key, MethodMetadata Method);
+
+    private sealed record PadButton(string? Move, string Label, bool IsDiagonal);
+}

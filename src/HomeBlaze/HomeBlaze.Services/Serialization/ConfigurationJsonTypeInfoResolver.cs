@@ -45,8 +45,9 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     {
         var typeInfo = base.GetTypeInfo(type, options);
 
-        // Set up polymorphism on IConfigurable and IInterceptorSubject base types
-        if (type == typeof(IConfigurable) || type == typeof(IInterceptorSubject))
+        // Set up polymorphism on IConfigurable and IInterceptorSubject base types, and on abstract configurable classes,
+        // which a property can only hold through one of their concrete subclasses.
+        if (type == typeof(IConfigurable) || type == typeof(IInterceptorSubject) || IsAbstractConfigurableClass(type))
         {
             typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
             {
@@ -55,9 +56,10 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
             };
 
-            // Register all IConfigurable implementations from TypeProvider
+            // Register all IConfigurable implementations from TypeProvider that the property can hold
             foreach (var derivedType in _typeProvider.Types
                 .Where(t => typeof(IConfigurable).IsAssignableFrom(t)
+                            && type.IsAssignableFrom(t)
                             && t is { IsAbstract: false, IsInterface: false }))
             {
                 typeInfo.PolymorphismOptions.DerivedTypes.Add(
@@ -117,4 +119,7 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 
         return typeInfo;
     }
+
+    private static bool IsAbstractConfigurableClass(Type type) =>
+        type is { IsClass: true, IsAbstract: true } && typeof(IConfigurable).IsAssignableFrom(type);
 }
