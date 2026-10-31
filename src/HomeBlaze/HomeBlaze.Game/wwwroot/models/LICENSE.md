@@ -1,3 +1,3 @@
-# RobotExpressive
+# Models
 
-Model by Tomás Laulhé (Quaternius, https://quaternius.com), with facial expression morph targets added by Don McCurdy. Released under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). Taken from https://github.com/mrdoob/three.js/tree/r170/examples/models/gltf/RobotExpressive.
+`Casual_2.glb` is the "Casual_2" character of the Ultimate Modular Men pack (February 2022) by Quaternius (https://quaternius.com/packs/ultimatemodularcharacters.html), released under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/) as stated by the `License.txt` shipped with the pack. It was taken from the pack's `Individual Characters/glTF/Casual_2.gltf`, mirrored with that `License.txt` at https://github.com/osman-1002/3D-3rd-Person-Godot-Game-With-GenAI-Integration/tree/108740bd2b28687f95584808f60180341cec64be/addons/Ultimate%20Modular%20Men-%20Feb%202022, and converted to GLB with glTF Transform, keeping only the `Idle_Neutral` and `Walk` animations.

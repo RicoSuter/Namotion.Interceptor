@@ -1,4 +1,4 @@
-// Draws the objects of the view: walls as brick boxes, players as animated robots. World coordinates are relative to an
+// Draws the objects of the view: walls as brick boxes, players as animated people. World coordinates are relative to an
 // integer origin near the own player, so the GPU's 32-bit floats stay precise anywhere in the int range. One unit is
 // one tile of 25 cm.
 const REBASE_DISTANCE = 2048;
@@ -12,7 +12,12 @@ const FADED_VISIBILITY = 0.3;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
 const IDLE_DELAY_STEPS = 0.75;
-const WALKING_SPEED_RATIO = 1.4;
+// Lets the feet of the walk cycle keep pace with one tile per step interval, about 1.4 m/s.
+const WALKING_SPEED_RATIO = 1.05;
+// The names in the model file; the shirt takes the player's color.
+const IDLE_ANIMATION = 'Idle_Neutral';
+const WALKING_ANIMATION = 'Walk';
+const SHIRT_MATERIAL = 'LightBrown';
 
 export async function createEntities(scene, options) {
     const BABYLON = window.BABYLON;
@@ -45,7 +50,7 @@ export async function createEntities(scene, options) {
     blobMaterial.alpha = 0.28;
 
     // Not added to the scene; every player instantiates its own copy.
-    const robot = await BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/RobotExpressive.glb`, scene);
+    const character = await BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/Casual_2.glb`, scene);
 
     async function createGroundMaterial() {
         // The border of each repeat draws the meter grid; half of the stroke lies outside, so each edge shows half of it.
@@ -137,8 +142,8 @@ export async function createEntities(scene, options) {
         const holder = new BABYLON.TransformNode(view.id, scene);
         holder.metadata = { kind: 'player' };
         const prefix = `${view.id}-`;
-        const instance = robot.instantiateModelsToScene(name => prefix + name, true);
-        // The root keeps the loader's handedness conversion, which leaves the robot looking north (+z).
+        const instance = character.instantiateModelsToScene(name => prefix + name, true);
+        // The root keeps the loader's handedness conversion, which leaves the character looking north (+z).
         const model = instance.rootNodes[0];
         model.parent = holder;
         const { min, max } = model.getHierarchyBoundingVectors(true);
@@ -149,13 +154,13 @@ export async function createEntities(scene, options) {
         const meshes = model.getChildMeshes(false);
         // Every player owns the materials cloned for it; the blob material is shared.
         const materials = [...new Set(meshes.map(mesh => mesh.material).filter(Boolean))];
-        const main = materials.find(material => material.name === `${prefix}Main`);
-        if (main) {
+        const shirt = materials.find(material => material.name === prefix + SHIRT_MATERIAL);
+        if (shirt) {
             const color = BABYLON.Color3.FromHexString(view.color);
-            if ('albedoColor' in main) {
-                main.albedoColor = color.toLinearSpace();
+            if ('albedoColor' in shirt) {
+                shirt.albedoColor = color.toLinearSpace();
             } else {
-                main.diffuseColor = color;
+                shirt.diffuseColor = color;
             }
         }
 
@@ -173,8 +178,8 @@ export async function createEntities(scene, options) {
         materials.push(createLabel(view, holder));
 
         const find = name => instance.animationGroups.find(group => group.name === prefix + name);
-        const idle = find('Idle');
-        const walking = find('Walking');
+        const idle = find(IDLE_ANIMATION);
+        const walking = find(WALKING_ANIMATION);
         for (const group of instance.animationGroups) {
             group.stop();
         }
