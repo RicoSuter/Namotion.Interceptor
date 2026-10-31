@@ -342,12 +342,20 @@ public class GamePageTests
         public static async Task<MediaBrowser> LaunchAsync()
         {
             var playwright = await Playwright.CreateAsync();
-            var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            try
             {
-                Headless = true,
-                Args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
-            });
-            return new MediaBrowser(playwright, browser);
+                var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                {
+                    Headless = true,
+                    Args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+                });
+                return new MediaBrowser(playwright, browser);
+            }
+            catch
+            {
+                playwright.Dispose();
+                throw;
+            }
         }
 
         public async ValueTask DisposeAsync()

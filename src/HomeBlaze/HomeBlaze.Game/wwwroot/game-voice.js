@@ -1,11 +1,22 @@
+import { getVoiceKeyMethod } from './game-input.js';
+
 // The pages of a tab share this module, so each one owns its voice by the id it passes.
 const voices = new Map();
 const WORKLET_URL = new URL('./game-voice-worklet.js', import.meta.url).href;
+const VOICE_BUTTONS = '[data-game-voice]';
 const STARTED = { isStarted: true, error: null };
 const NOT_STARTED = { isStarted: false, error: 'failed' };
+const IS_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
-/** Encodes the 16-bit samples of a frame as little-endian bytes; the one place in JavaScript to change for another codec. */
+/**
+ * Encodes the 16-bit samples of a frame as little-endian bytes; the one place in JavaScript to change for another codec.
+ * The result may share the buffer of the samples, which the caller must not change afterwards.
+ */
 export function encodeFrame(samples) {
+    if (IS_LITTLE_ENDIAN) {
+        return new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+    }
+
     const bytes = new Uint8Array(samples.length * 2);
     const view = new DataView(bytes.buffer);
     for (let index = 0; index < samples.length; index++) {
@@ -26,7 +37,10 @@ export function decodeFrame(frame) {
     return samples;
 }
 
-/** Prepares the voice of the view; returns false where the browser offers no microphone or audio worklet, as on plain HTTP. */
+/**
+ * Prepares the voice of the view; returns false where the browser offers no microphone or audio worklet, as on plain
+ * HTTP. Clicks on the elements with data-game-voice inside options.element and the voice keys unlock the audio.
+ */
 export function initialize(viewId, dotNet, options) {
     dispose(viewId);
     const isSupported = window.isSecureContext
@@ -59,7 +73,7 @@ export function stopPlayback(viewId) {
     voices.get(viewId)?.stopPlayback();
 }
 
-/** Resumes a suspended audio context; browsers allow it only from a click. */
+/** Resumes a suspended audio context; strict browsers allow it only inside a click, which unlock() covers. */
 export function resume(viewId) {
     voices.get(viewId)?.resume();
 }
@@ -100,44 +114,75 @@ class GameVoice {
     constructor(dotNet, options) {
         this.dotNet = dotNet;
         this.options = options;
-        this.contextLoading = null;
+        this.root = options.element instanceof Element ? options.element : null;
         this.context = null;
+        this.workletLoading = null;
         this.capture = null;
         this.playback = null;
+        // Increased by every stop, so a start that a stop overtook while it waited gives up.
+        this.captureGeneration = 0;
+        this.playbackGeneration = 0;
+        this.pendingStarts = 0;
         this.sentFrames = 0;
         this.receivedFrames = 0;
         this.isDisposed = false;
+        this.onClick = event => {
+            if (event.target instanceof Element && event.target.closest(VOICE_BUTTONS)) {
+                this.tryUnlock();
+            }
+        };
+        this.onKeyDown = event => {
+            if (getVoiceKeyMethod(event)) {
+                this.tryUnlock();
+            }
+        };
+        // Capture phase, so the audio unlocks inside the user's action before the page hears of it.
+        this.root?.addEventListener('click', this.onClick, true);
+        window.addEventListener('keydown', this.onKeyDown, true);
     }
 
-    // Created on the first click of either button, because browsers start audio only from a user action.
-    async ensureContext() {
-        this.contextLoading ??= this.createContext();
-        try {
-            this.context = await this.contextLoading;
-        } catch (error) {
-            this.contextLoading = null;
-            throw error;
+    // Strict browsers such as Safari start and resume audio only synchronously inside a user action, while the page
+    // asks for it only after a round trip to the server.
+    unlock() {
+        if (this.isDisposed) {
+            return;
+        }
+
+        if (!this.context) {
+            this.context = new AudioContext();
+            this.context.onstatechange = () => this.reportState();
         }
 
         this.resume();
-        return this.context;
     }
 
-    async createContext() {
-        const context = new AudioContext();
+    tryUnlock() {
         try {
-            await context.audioWorklet.addModule(WORKLET_URL);
+            this.unlock();
+        } catch {
+            // The start reports the failure when the page asks for it.
+        }
+    }
+
+    async ensureContext() {
+        if (this.isDisposed) {
+            throw new Error('The voice was disposed.');
+        }
+
+        this.unlock();
+        const context = this.context;
+        this.workletLoading ??= context.audioWorklet.addModule(WORKLET_URL);
+        try {
+            await this.workletLoading;
         } catch (error) {
-            context.close().catch(() => { });
+            this.workletLoading = null;
             throw error;
         }
 
         if (this.isDisposed) {
-            context.close().catch(() => { });
             throw new Error('The voice was disposed while it started.');
         }
 
-        context.onstatechange = () => this.reportState();
         return context;
     }
 
@@ -145,6 +190,14 @@ class GameVoice {
         const context = this.context;
         if (context && context.state !== 'running' && context.state !== 'closed') {
             context.resume().then(() => this.reportState(), () => this.reportState());
+        }
+    }
+
+    // An idle context would keep the audio device busy.
+    suspendWhenIdle() {
+        const context = this.context;
+        if (!this.capture && !this.playback && this.pendingStarts === 0 && context?.state === 'running') {
+            context.suspend().catch(() => { });
         }
     }
 
@@ -156,18 +209,29 @@ class GameVoice {
     }
 
     async startCapture() {
+        this.pendingStarts++;
+        try {
+            return await this.tryStartCapture();
+        } finally {
+            this.pendingStarts--;
+            this.suspendWhenIdle();
+        }
+    }
+
+    async tryStartCapture() {
+        const generation = this.captureGeneration;
         let stream = null;
         try {
             const context = await this.ensureContext();
             stream = await navigator.mediaDevices.getUserMedia({
                 audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
             });
-            if (this.isDisposed) {
+            if (this.isDisposed || generation !== this.captureGeneration) {
                 stopTracks(stream);
                 return NOT_STARTED;
             }
 
-            this.stopCapture();
+            this.removeCapture();
             const source = context.createMediaStreamSource(stream);
             const node = new AudioWorkletNode(context, 'game-voice-capture', {
                 numberOfInputs: 1,
@@ -191,11 +255,17 @@ class GameVoice {
 
     send(samples) {
         this.sentFrames++;
-        this.options.element?.setAttribute('data-voice-sent-frames', String(this.sentFrames));
+        this.root?.setAttribute('data-voice-sent-frames', String(this.sentFrames));
         this.dotNet.invokeMethodAsync('ReceiveMicrophoneFrame', encodeFrame(samples)).catch(() => { });
     }
 
     stopCapture() {
+        this.captureGeneration++;
+        this.removeCapture();
+        this.suspendWhenIdle();
+    }
+
+    removeCapture() {
         const capture = this.capture;
         if (!capture) {
             return;
@@ -210,9 +280,20 @@ class GameVoice {
     }
 
     async startPlayback() {
+        this.pendingStarts++;
+        try {
+            return await this.tryStartPlayback();
+        } finally {
+            this.pendingStarts--;
+            this.suspendWhenIdle();
+        }
+    }
+
+    async tryStartPlayback() {
+        const generation = this.playbackGeneration;
         try {
             const context = await this.ensureContext();
-            if (this.isDisposed) {
+            if (generation !== this.playbackGeneration) {
                 return NOT_STARTED;
             }
 
@@ -234,7 +315,6 @@ class GameVoice {
                 this.playback.connect(context.destination);
             }
 
-            this.reportState();
             return STARTED;
         } catch {
             return NOT_STARTED;
@@ -242,14 +322,15 @@ class GameVoice {
     }
 
     stopPlayback() {
+        this.playbackGeneration++;
         const playback = this.playback;
-        if (!playback) {
-            return;
+        if (playback) {
+            this.playback = null;
+            playback.port.postMessage('stop');
+            playback.disconnect();
         }
 
-        this.playback = null;
-        playback.port.postMessage('stop');
-        playback.disconnect();
+        this.suspendWhenIdle();
     }
 
     play(frame) {
@@ -260,11 +341,13 @@ class GameVoice {
         const samples = decodeFrame(frame);
         this.playback.port.postMessage(samples, [samples.buffer]);
         this.receivedFrames++;
-        this.options.element?.setAttribute('data-voice-received-frames', String(this.receivedFrames));
+        this.root?.setAttribute('data-voice-received-frames', String(this.receivedFrames));
     }
 
     dispose() {
         this.isDisposed = true;
+        this.root?.removeEventListener('click', this.onClick, true);
+        window.removeEventListener('keydown', this.onKeyDown, true);
         this.stopCapture();
         this.stopPlayback();
         this.context?.close().catch(() => { });

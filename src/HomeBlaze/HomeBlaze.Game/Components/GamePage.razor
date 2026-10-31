@@ -49,16 +49,16 @@
                                        Variant="@(_isMicrophoneOn ? Variant.Filled : Variant.Text)"
                                        Color="@(_isMicrophoneOn ? Color.Primary : Color.Default)"
                                        Size="Size.Small" Disabled="@IsVoiceDisabled"
-                                       aria-label="@MicrophoneTooltip" aria-pressed="@(_isMicrophoneOn ? "true" : "false")"
-                                       data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
+                                       aria-label="Microphone" aria-pressed="@(_isMicrophoneOn ? "true" : "false")" aria-keyshortcuts="M"
+                                       data-game-voice data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
                     </MudTooltip>
                     <MudTooltip Text="@AudioTooltip">
                         <MudIconButton Icon="@(_isAudioOn ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
                                        Variant="@(_isAudioOn ? Variant.Filled : Variant.Text)"
                                        Color="@(_isAudioOn ? Color.Primary : Color.Default)"
                                        Size="Size.Small" Disabled="@IsVoiceDisabled"
-                                       aria-label="@AudioTooltip" aria-pressed="@(_isAudioOn ? "true" : "false")"
-                                       data-testid="game-audio" OnClick="ToggleAudioAsync" />
+                                       aria-label="Speaker" aria-pressed="@(_isAudioOn ? "true" : "false")" aria-keyshortcuts="N"
+                                       data-game-voice data-testid="game-audio" OnClick="ToggleAudioAsync" />
                     </MudTooltip>
                 </div>
             </section>
@@ -137,6 +137,7 @@
     private const string VoiceModulePath = "./_content/HomeBlaze.Game/game-voice.js";
     private const string InsecureMessage = "Voice needs HTTPS";
     private const string ResumeMessage = "Tap the speaker to resume";
+    private const string NotConnectedMessage = "Voice is not available while you are not connected";
     private const string NoPosition = "–";
     private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
 
@@ -177,6 +178,7 @@
     private bool _isMicrophoneOn;
     private bool _isAudioOn;
     private bool _isAudioSuspended;
+    private bool _isResumeTried;
     private bool _isVoiceBusy;
     private string? _voiceError;
     private IDisposable? _sinkRegistration;
@@ -309,10 +311,12 @@
     public void OnAudioStateChanged(bool isSuspended)
     {
         _isAudioSuspended = isSuspended;
+        _isResumeTried &= isSuspended;
         StateHasChanged();
     }
 
-    private bool IsVoiceDisabled => _isVoiceSupported != true || _isVoiceBusy || _player is null;
+    // Stays enabled while a toggle runs, so the button keeps the focus; the toggle ignores clicks meanwhile.
+    private bool IsVoiceDisabled => _isVoiceSupported != true || _player is null;
 
     private string? VoiceMessage => _isAudioSuspended && (_isAudioOn || _isMicrophoneOn) ? ResumeMessage : _voiceError;
 
@@ -388,9 +392,12 @@
             return;
         }
 
-        if (_isAudioOn && _isAudioSuspended)
+        // The click already resumed the audio where the browser allows it; a second tap turns the speaker off, also
+        // when the browser keeps it suspended.
+        if (_isAudioOn && _isAudioSuspended && !_isResumeTried)
         {
-            await TryInvokeVoiceAsync(module, "resume");
+            _isResumeTried = true;
+            await RunVoiceToggleAsync(() => TryInvokeVoiceAsync(module, "resume", GameVoiceSettings.BrowserCallTimeout));
             return;
         }
 
@@ -400,10 +407,10 @@
     private async Task RunVoiceToggleAsync(Func<Task> toggle)
     {
         _isVoiceBusy = true;
-        _voiceError = null;
-        StateHasChanged();
         try
         {
+            _voiceError = null;
+            StateHasChanged();
             await toggle();
         }
         finally
@@ -420,52 +427,62 @@
     // The game hears the page only once the browser captures.
     private async Task StartMicrophoneAsync(IJSObjectReference module, Game game, GamePlayer player)
     {
-        var result = await TryStartVoiceAsync(module, "startCapture");
+        var result = await TryStartVoiceAsync(module, "startCapture", GameVoiceSettings.CaptureStartTimeout);
         if (!result.IsStarted)
         {
             _voiceError = GetMicrophoneError(result.Error);
+            await StopUnansweredStartAsync(module, result, "stopCapture");
             return;
         }
 
-        if (!_isDisposed && game.SetMicrophone(new GameCaller(player), _viewId, isOn: true))
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (game.SetMicrophone(new GameCaller(player), _viewId, isOn: true))
         {
             _isMicrophoneOn = true;
             return;
         }
 
-        await TryInvokeVoiceAsync(module, "stopCapture");
+        _voiceError = NotConnectedMessage;
+        await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
     }
 
     private async Task StopMicrophoneAsync(IJSObjectReference module, Game game, GamePlayer player)
     {
         _isMicrophoneOn = false;
         game.SetMicrophone(new GameCaller(player), _viewId, isOn: false);
-        await TryInvokeVoiceAsync(module, "stopCapture");
+        await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
     }
 
     private async Task StartAudioAsync(IJSObjectReference module, Game game, GamePlayer player)
     {
-        var result = await TryStartVoiceAsync(module, "startPlayback");
+        var result = await TryStartVoiceAsync(module, "startPlayback", GameVoiceSettings.BrowserCallTimeout);
         if (!result.IsStarted)
         {
             _voiceError = "The speaker could not be started";
+            await StopUnansweredStartAsync(module, result, "stopPlayback");
             return;
         }
 
-        if (!_isDisposed)
+        if (_isDisposed)
         {
-            var registration = game.VoiceMixer.RegisterSink(player.ClientId, new VoiceSink(this));
-            if (game.SetAudio(new GameCaller(player), _viewId, isOn: true))
-            {
-                _sinkRegistration = registration;
-                _isAudioOn = true;
-                return;
-            }
-
-            registration.Dispose();
+            return;
         }
 
-        await TryInvokeVoiceAsync(module, "stopPlayback");
+        var registration = game.VoiceMixer.RegisterSink(player.ClientId, new VoiceSink(this));
+        if (game.SetAudio(new GameCaller(player), _viewId, isOn: true))
+        {
+            _sinkRegistration = registration;
+            _isAudioOn = true;
+            return;
+        }
+
+        registration.Dispose();
+        _voiceError = NotConnectedMessage;
+        await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
     }
 
     private async Task StopAudioAsync(IJSObjectReference module, Game game, GamePlayer player)
@@ -474,8 +491,12 @@
         game.SetAudio(new GameCaller(player), _viewId, isOn: false);
         _sinkRegistration?.Dispose();
         _sinkRegistration = null;
-        await TryInvokeVoiceAsync(module, "stopPlayback");
+        await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
     }
+
+    // A start without an answer from the browser may still succeed there later, which the stop prevents.
+    private Task StopUnansweredStartAsync(IJSObjectReference module, VoiceStartResult result, string stopIdentifier) =>
+        result.Error is null ? TryInvokeVoiceAsync(module, stopIdentifier, GameVoiceSettings.BrowserCallTimeout) : Task.CompletedTask;
 
     private static string GetMicrophoneError(string? error) => error switch
     {
@@ -484,12 +505,20 @@
         _ => "The microphone could not be started"
     };
 
-    // Voice never breaks the page: a call that fails only leaves the voice of this page off.
-    private async Task<VoiceStartResult> TryStartVoiceAsync(IJSObjectReference module, string identifier)
+    // Voice never breaks the page: a call that fails only leaves the voice of this page off. A result without an error
+    // means the browser did not answer.
+    private async Task<VoiceStartResult> TryStartVoiceAsync(IJSObjectReference module, string identifier, TimeSpan timeout)
     {
+        if (_isDisposed)
+        {
+            return new VoiceStartResult(false, null);
+        }
+
         try
         {
-            return await module.InvokeAsync<VoiceStartResult>(identifier, _lifetime.Token, _viewId);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            cancellation.CancelAfter(timeout);
+            return await module.InvokeAsync<VoiceStartResult>(identifier, cancellation.Token, _viewId);
         }
         catch (JSException exception)
         {
@@ -497,17 +526,25 @@
         }
         catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
         {
-            // The page went away.
+            // The page went away or the browser did not answer in time.
         }
 
         return new VoiceStartResult(false, null);
     }
 
-    private async Task TryInvokeVoiceAsync(IJSObjectReference module, string identifier)
+    // After the page went away, disposing the module stops everything in the browser.
+    private async Task TryInvokeVoiceAsync(IJSObjectReference module, string identifier, TimeSpan timeout)
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         try
         {
-            await module.InvokeVoidAsync(identifier, _lifetime.Token, _viewId);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            cancellation.CancelAfter(timeout);
+            await module.InvokeVoidAsync(identifier, cancellation.Token, _viewId);
         }
         catch (JSException exception)
         {
@@ -515,7 +552,7 @@
         }
         catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
         {
-            // The page went away.
+            // The page went away or the browser did not answer in time.
         }
     }
 
@@ -540,8 +577,14 @@
     {
         try
         {
-            // JS interop with byte arrays runs on the circuit's dispatcher, not on the voice loop.
-            await InvokeAsync(() => module.InvokeVoidAsync("play", _lifetime.Token, _viewId, frame).AsTask());
+            // JS interop with byte arrays runs on the circuit's dispatcher, not on the voice loop. The timeout releases
+            // the pending send of a call that a lost connection never answers.
+            await InvokeAsync(() => module.InvokeVoidAsync("play", GameVoiceSettings.PlayTimeout, _viewId, frame).AsTask());
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException
+            || (exception is JSException && _isDisposed))
+        {
+            // The page went away, or the frame was lost.
         }
         catch (Exception exception)
         {
@@ -730,12 +773,7 @@
         try
         {
             await _lifetime.CancelAsync();
-            if (_voiceModule is { } voiceModule)
-            {
-                await voiceModule.InvokeVoidAsync("dispose", _viewId);
-                await voiceModule.DisposeAsync();
-            }
-
+            await DisposeVoiceModuleAsync();
             if (_module is { } module)
             {
                 await module.InvokeVoidAsync("dispose", _viewId);
@@ -750,6 +788,25 @@
         {
             _reference?.Dispose();
             _lifetime.Dispose();
+        }
+    }
+
+    // Separate from the game module, so a voice module that the browser already dropped does not keep the game module.
+    private async Task DisposeVoiceModuleAsync()
+    {
+        if (_voiceModule is not { } voiceModule)
+        {
+            return;
+        }
+
+        try
+        {
+            await voiceModule.InvokeVoidAsync("dispose", _viewId);
+            await voiceModule.DisposeAsync();
+        }
+        catch (JSException exception)
+        {
+            Logger.LogDebug(exception, "Disposing the voice of the game failed");
         }
     }
 

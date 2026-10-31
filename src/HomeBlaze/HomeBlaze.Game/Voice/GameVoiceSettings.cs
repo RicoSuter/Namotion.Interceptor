@@ -72,4 +72,19 @@ internal static class GameVoiceSettings
     /// Shortest time between two rebuilds of the volume table.
     /// </summary>
     public static readonly TimeSpan VolumeTableInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Time after which a frame sent to a page counts as lost and no longer as pending.
+    /// </summary>
+    public static readonly TimeSpan PlayTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Time a page waits for the browser to start its microphone, which includes the user answering the permission prompt.
+    /// </summary>
+    public static readonly TimeSpan CaptureStartTimeout = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Time a page waits for any other voice call to the browser.
+    /// </summary>
+    public static readonly TimeSpan BrowserCallTimeout = TimeSpan.FromSeconds(10);
 }
