@@ -7,6 +7,8 @@ export async function createEntities(scene, options) {
     const BABYLON = window.BABYLON;
     const entities = new Map();
     const targetMarkers = [];
+    // Reused by every frame's animate, so the render loop does not allocate.
+    const selfPosition = { x: 0, z: 0 };
     let originX = null;
     let originY = null;
     let selfId = null;
@@ -80,6 +82,21 @@ export async function createEntities(scene, options) {
         entity.mesh.rotation.y = facing * Math.PI / 4;
     }
 
+    function disposeEntity(entity) {
+        const material = entity.mesh.material;
+        entity.mesh.dispose();
+        // Every player has its own material; the wall material is shared.
+        if (entity.view.kind === 'player') {
+            material?.dispose();
+        }
+    }
+
+    function hideTarget() {
+        for (const marker of targetMarkers) {
+            marker.setEnabled(false);
+        }
+    }
+
     function hasShapeChanged(previous, view) {
         return previous.kind !== view.kind || previous.width !== view.width || previous.depth !== view.depth
             || previous.height !== view.height || previous.color !== view.color;
@@ -96,7 +113,10 @@ export async function createEntities(scene, options) {
 
             let entity = entities.get(view.id);
             if (!entity || hasShapeChanged(entity.view, view)) {
-                entity?.mesh.dispose();
+                if (entity) {
+                    disposeEntity(entity);
+                }
+
                 entity = { view, mesh: createMesh(view), tween: null };
                 entities.set(view.id, entity);
                 place(entity, view.x, view.y);
@@ -118,10 +138,15 @@ export async function createEntities(scene, options) {
         },
 
         remove(id) {
-            entities.get(id)?.mesh.dispose();
-            entities.delete(id);
+            const entity = entities.get(id);
+            if (entity) {
+                disposeEntity(entity);
+                entities.delete(id);
+            }
+
             if (id === selfId) {
                 selfId = null;
+                hideTarget();
             }
         },
 
@@ -167,8 +192,9 @@ export async function createEntities(scene, options) {
 
             targetMarkers.forEach((marker, index) => {
                 const tile = tiles[index];
-                marker.setEnabled(Boolean(tile) && originX !== null);
-                if (tile && originX !== null) {
+                const isVisible = Boolean(tile) && originX !== null && selfId !== null;
+                marker.setEnabled(isVisible);
+                if (isVisible) {
                     marker.position.copyFromFloats(tile.x - originX + 0.5, 0.03, tile.y - originY + 0.5);
                 }
             });
@@ -182,7 +208,7 @@ export async function createEntities(scene, options) {
                 }
 
                 const progress = Math.min(1, (now - tween.start) / tween.duration);
-                entity.mesh.position = BABYLON.Vector3.Lerp(tween.from, tween.to, progress);
+                BABYLON.Vector3.LerpToRef(tween.from, tween.to, progress, entity.mesh.position);
                 if (progress >= 1) {
                     entity.tween = null;
                 }
@@ -196,7 +222,9 @@ export async function createEntities(scene, options) {
             // The ground follows in whole meters, so its grid stays on the tiles.
             ground.position.x = Math.round((self.mesh.position.x + originX) / 4) * 4 - originX;
             ground.position.z = Math.round((self.mesh.position.z + originY) / 4) * 4 - originY;
-            return { x: self.mesh.position.x, z: self.mesh.position.z };
+            selfPosition.x = self.mesh.position.x;
+            selfPosition.z = self.mesh.position.z;
+            return selfPosition;
         },
 
         afterCameraMoved() {

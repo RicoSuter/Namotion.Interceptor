@@ -14,7 +14,7 @@
         <canvas @ref="_canvas" class="game-canvas" data-testid="game-canvas"></canvas>
         @if (_error is not null)
         {
-            <MudAlert Severity="Severity.Error" Class="game-message" data-testid="game-error">@_error</MudAlert>
+            <div class="game-message"><MudAlert Severity="Severity.Error" data-testid="game-error">@_error</MudAlert></div>
         }
         else if (!_isStarted)
         {
@@ -22,7 +22,7 @@
         }
         else if (_player is null)
         {
-            <MudAlert Severity="Severity.Info" Class="game-message" data-testid="game-joining">@JoiningMessage</MudAlert>
+            <div class="game-message"><MudAlert Severity="Severity.Info" data-testid="game-joining">@JoiningMessage</MudAlert></div>
         }
     </div>
     <aside class="game-panel" data-testid="game-panel">
@@ -49,6 +49,10 @@
     private const string NoPosition = "–";
     private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
 
+    private static int _lastViewId;
+
+    // Identifies this page's view in the module, which the pages of a tab share.
+    private readonly int _viewId = Interlocked.Increment(ref _lastViewId);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly GameViewTracker _tracker = new();
     private ElementReference _canvas;
@@ -57,6 +61,7 @@
     private IDisposable? _subscription;
     private GamePlayer? _player;
     private bool _isStarted;
+    private bool _isDisposed;
     private string? _error;
     private int _isFlushScheduled;
     private string _positionText = NoPosition;
@@ -77,9 +82,23 @@
         try
         {
             _reference = DotNetObjectReference.Create(this);
-            _module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", _lifetime.Token, ModulePath);
-            var options = new { stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = "./_content/HomeBlaze.Game/" };
-            var result = await _module.InvokeAsync<StartResult>("start", _lifetime.Token, _canvas, _reference, options);
+            var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", _lifetime.Token, ModulePath);
+            if (_isDisposed)
+            {
+                // DisposeAsync found no module to release.
+                await module.DisposeAsync();
+                return;
+            }
+
+            _module = module;
+            var options = new { viewId = _viewId, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = "./_content/HomeBlaze.Game/" };
+            var result = await module.InvokeAsync<StartResult>("start", _lifetime.Token, _canvas, _reference, options);
+            if (_isDisposed)
+            {
+                // DisposeAsync has asked the module to drop the view, which the start then releases.
+                return;
+            }
+
             if (!result.IsStarted)
             {
                 _error = result.Error ?? "The game could not be started.";
@@ -94,9 +113,17 @@
                 .Subscribe(_ => ScheduleFlush());
             await FlushAsync();
         }
-        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException)
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
         {
             // The page went away while the game was starting.
+        }
+        catch (JSException exception)
+        {
+            if (!_isDisposed)
+            {
+                _error = $"The game could not be started: {exception.Message}";
+                StateHasChanged();
+            }
         }
     }
 
@@ -140,7 +167,7 @@
 
     private async Task FlushAsync()
     {
-        if (Game is not { } game || _module is null)
+        if (_isDisposed || Game is not { } game || _module is null)
         {
             return;
         }
@@ -149,7 +176,11 @@
         var update = game.UpdateView(_tracker, _player);
         if (!update.IsEmpty)
         {
-            await _module.InvokeVoidAsync("applyUpdate", _lifetime.Token, update);
+            await _module.InvokeVoidAsync("applyUpdate", _lifetime.Token, _viewId, update);
+            if (_isDisposed)
+            {
+                return;
+            }
         }
 
         var self = _tracker.Known.FirstOrDefault(view => view.IsSelf);
@@ -164,23 +195,26 @@
 
     public async ValueTask DisposeAsync()
     {
+        _isDisposed = true;
         _subscription?.Dispose();
-        await _lifetime.CancelAsync();
-        if (_module is not null)
+        try
         {
-            try
+            await _lifetime.CancelAsync();
+            if (_module is { } module)
             {
-                await _module.InvokeVoidAsync("dispose");
-                await _module.DisposeAsync();
-            }
-            catch (JSDisconnectedException)
-            {
-                // The circuit is gone, and the browser with it.
+                await module.InvokeVoidAsync("dispose", _viewId);
+                await module.DisposeAsync();
             }
         }
-
-        _reference?.Dispose();
-        _lifetime.Dispose();
+        catch (Exception exception) when (exception is JSDisconnectedException or JSException)
+        {
+            // The circuit is gone, and the browser with it, or the browser already dropped the module.
+        }
+        finally
+        {
+            _reference?.Dispose();
+            _lifetime.Dispose();
+        }
     }
 
     public sealed record StepResult(int Sequence, bool IsAccepted, int X, int Y, int Facing);
