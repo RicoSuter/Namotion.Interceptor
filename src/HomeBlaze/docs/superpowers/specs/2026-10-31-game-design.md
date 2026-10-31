@@ -121,10 +121,10 @@ Moving is not an operation. The page calls the internal `Game.TryMove(GamePlayer
 Rules, all enforced on the server under the game's lock:
 
 - A step moves the footprint by one tile in the facing direction, 25 cm.
-- Every attempt sets `Facing`, also when the step is blocked. `turnOnly` (Shift) only turns.
+- Every attempt sets `Facing`, also when the step is blocked. `turnOnly` (Shift) only turns. A save is requested only when the position or facing changed.
 - A step is refused when any tile the footprint newly covers holds a blocking object, wall or player.
 - A diagonal step is refused when both of its orthogonal steps would be refused, so players cannot squeeze between corner-touching blockers.
-- A token bucket per player refills one token per `StepInterval` with a burst of 3. A refused step leaves the position unchanged.
+- A token bucket per player refills one token per `StepInterval` with a burst of 3, and a second one limits turns the same way. A refused step or turn leaves the player unchanged.
 - A step that would leave the `int` range is refused, checked with `long` arithmetic.
 - The target area is the footprint shifted one tile in the facing direction, minus the footprint itself: the 2 tiles in front when facing straight, the 3 tiles around the front corner when facing diagonally.
 
@@ -135,7 +135,9 @@ One lock in `Game` guards moves, building, demolishing and reconciling. The game
 - a chunk index of 16 by 16 tile chunks to the objects whose footprint intersects them, for radius queries;
 - a tile to blocking objects lookup covering every tile of each footprint, for occupancy.
 
-The game's own changes update both incrementally. Changes from outside the game only mark the index stale, and the next use rebuilds it under the lock. They are a replaced `Objects` or `Players`, a changed X, Y, Width, Depth or `IsConnected` of an object of the game, and an applied configuration, for example through the configuration editor or a reload. Two blocking objects on one tile, possible through hand edits, simply leave the tile blocked.
+The game's own changes update both incrementally. Changes from outside the game only mark the index stale, and the next use rebuilds it under the lock. They are a replaced `Objects` or `Players`, a changed X, Y, Width, Depth or `IsConnected` of an object of the game, and an applied configuration, for example through the configuration editor or a reload. Two blocking objects on one tile, possible through hand edits, simply leave the tile blocked. An object whose width, depth or height is outside 1 to 1024, possible in a loaded file that skips the range validation, is left out of the index, so it neither blocks nor renders.
+
+Change observers run while the change observable holds its own lock, which every write under the game's lock waits for, so they mark the index stale without taking the game's lock. An outside replacement of `Objects` or `Players` happens without the game's lock, so it is recorded under the lock as pending, and the game's copy-on-write of either collection starts from it instead of a stale copy, as the installation does for its clients. An outside replacement of `Players` also signals the loop to reconcile, so reloaded players of connected clients join right away.
 
 ## Actions and interaction
 
@@ -149,7 +151,7 @@ Operations of the first version:
 
 - `Game.BuildWallAsync`: places a new default `Wall`, 4 by 1 tiles, across the actor's facing direction directly in front of the actor, centered on its footprint. Refuses without actor, when the actor faces diagonally, or when any of the tiles is blocked. The wall gets a generated unique name.
 - `Wall.DemolishAsync`: removes the wall from its parent game, found with `TryGetFirstParent<Game>()`, and saves the game. It needs no actor.
-- `GamePlayer.SendMessageAsync`: sends a notification with the title "Message from {sender}", or "Message" without an actor, through the client directory to the open tabs of the player's client. Refuses when the player's client is unknown or not connected.
+- `GamePlayer.SendMessageAsync`: sends a notification with the title "Message from {sender}", or "Message" without an actor, through the client directory to the open tabs of the player's client. Refuses when the player's client is unknown or not connected, when the message is longer than 500 characters, or when the sending player sent a message less than a second ago.
 
 ## Persistence
 
@@ -157,8 +159,8 @@ Operations of the first version:
 - Building and demolishing write immediately.
 - Joins, moves and turns of players are coalesced into one write by the game's loop, at most every 5 seconds, and pending changes are written in `StopAsync`.
 - Anonymous players are written like any other but dropped on load by reconciling, the same way the installation drops unnamed clients without a circuit.
-- A failed write logs a warning; the game keeps running.
-- `ApplyConfigurationAsync` marks the index stale, which the next use rebuilds; the loop reconciles the players.
+- A failed write logs a warning and stays pending, so the loop's next flush tries again; the game keeps running. A final write that `StopAsync` cancels logs a warning.
+- `ApplyConfigurationAsync` marks the index stale, which the next use rebuilds, and signals the loop to reconcile the players.
 
 ## Page, rendering and synchronization
 
@@ -185,7 +187,7 @@ Operations of the first version:
 - Loads `babylon.js` and `babylonjs.loaders.min.js` from `_content/HomeBlaze.Game/lib/babylonjs/` once per tab through a loader that fetches each script and runs it with the page's global AMD `define` shadowed. The app hosts an AMD loader (Monaco), which would otherwise make Babylon's UMD build register as an anonymous AMD module instead of setting `window.BABYLON`. It creates the engine on the canvas and disposes everything when the page goes away.
 - Combines held keys (arrow keys and WASD) into one of 8 directions, W plus D giving north east, and repeats once per `StepInterval` while held. Shift turns only. The number keys 1 to 9 invoke the numbered actions. Each step calls .NET through a `DotNetObjectReference`.
 - Ignores keys while focus is in an input field or a MudBlazor dialog is open.
-- Predicts the own player's steps against the objects it knows nearby and moves immediately. Each step carries an increasing sequence number, which the page echoes with the server's verdict. When the server refuses a step, the browser resets to the server's position and replays the pending steps sent after it (client-side prediction with server reconciliation).
+- Predicts the own player's steps against the objects it knows nearby and moves immediately. Each step carries an increasing sequence number, which the page echoes with the server's verdict. When the server refuses a step, the browser resets to the server's position and replays the pending steps sent after it (client-side prediction with server reconciliation). When the own player leaves the view or stops being the own player, the prediction and the pending steps are dropped, so the next own player starts from the server's position.
 - Moves other players, and the own player on a correction, with a tween over one `StepInterval` from the old to the new position, so their walking looks even despite network jitter, and plays the walk animation while the tween runs.
 
 ### Synchronization
@@ -246,15 +248,16 @@ All tests live in `HomeBlaze.Game.Tests`, named `When<Condition>_Then<ExpectedBe
 
 Unit tests:
 
-- Movement: blocked step refused but turns; a step blocked by only one tile of the footprint refused; diagonal squeeze refused; turn only; token bucket refuses the 4th quick step within one `StepInterval` (`FakeTimeProvider`); steps past `int.MaxValue` and `int.MinValue` refused.
+- Movement: blocked step refused but turns; a step blocked by only one tile of the footprint refused; diagonal squeeze refused; turn only; token bucket refuses the 4th quick step or turn within one `StepInterval` (`FakeTimeProvider`); a blocked step without a turn requests no save; steps past `int.MaxValue` and `int.MinValue` refused.
 - Target area for straight and diagonal facing.
 - Spawning at 0,0 and at the nearest free position for the whole footprint.
 - Reconciling against a fake `IGameClientDirectory`: anonymous client gets a player that disappears on disconnect; named client's player stays while offline and does not block; a reconnecting player on a blocked tile moves to the nearest free tile; renaming keeps the player; forgetting removes it; without an installation the players are kept.
-- Chunk index: radius queries, objects spanning several chunks, incremental updates, rebuild after an outside change.
-- View diffs: objects entering and leaving the radius as the own player or they move.
-- Operations: `BuildWallAsync` builds across the facing direction, refuses a blocked tile, diagonal facing and a missing actor; `DemolishAsync` removes the wall; `SendMessageAsync` reaches the other client with the sender's name through the fake directory.
+- Chunk index: radius queries, objects spanning several chunks, incremental updates, rebuild after an outside change, objects with sizes outside the range left out.
+- View diffs: objects entering and leaving the radius as the own player or they move; an unchanged view allocates nothing.
+- Loop: a signal after a won housekeeping delay still reconciles promptly; an outside move of an object while the game holds its lock does not wait for the game; an outside replacement of `Players` and an applied configuration reconcile the players.
+- Operations: `BuildWallAsync` builds across the facing direction, refuses a blocked tile, diagonal facing and a missing actor; `DemolishAsync` removes the wall; `SendMessageAsync` reaches the other client with the sender's name through the fake directory, and refuses a too long message and a second message within a second.
 - Actor resolution and the service provider wrapper.
-- Persistence: anonymous players dropped on load, coalesced position writes, pending writes on stop, a failing write that does not throw.
+- Persistence: anonymous players dropped on load, coalesced position writes, pending writes on stop, a failing write that does not throw and is retried by the next flush, a canceled stop that does not throw.
 - Serialization: walls keep their type and footprint through a round trip of a game.
 
 E2E tests, marked `Category=Integration`, use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through an own collection definition, with headless Chromium rendering WebGL through SwiftShader. They assert the side panel, not canvas pixels. The circuits of closed browser contexts stay connected for minutes, so the players of earlier tests may still stand in a new game. The tests therefore read where their own player joined, move the other players far away, and assert positions relative to the join position:
