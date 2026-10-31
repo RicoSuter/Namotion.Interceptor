@@ -90,7 +90,7 @@ internal sealed class GameViewTracker
     private bool IsUnchanged(GameViewObject known, GameObject gameObject, bool isSelf) =>
         HasSameFootprint(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSameLook(known, gameObject);
 
-    // A cached visual is the same instance, so the comparison stops at the reference and allocates nothing.
+    // A cached visual is the same instance, so the reference check spares the value comparison; neither allocates.
     private bool HasSameLook(GameViewObject known, GameObject gameObject) =>
         HasSamePassage(known, gameObject) && HasSameLabel(known, gameObject) && Equals(known.Visual, GetVisual(gameObject));
 
@@ -120,7 +120,7 @@ internal sealed class GameViewTracker
     private static GameVisual? GetVisual(GameObject gameObject) => gameObject is GamePlayer ? null : gameObject.Visual;
 
     private static IReadOnlyList<GameViewPart> GetParts(GameObject gameObject, GameVisual? visual, ILogger logger) =>
-        visual is null ? [] : GameViewPart.FromVisual(GameVisualValidator.GetValidVisual(gameObject, visual, logger));
+        gameObject is GamePlayer ? [] : GameViewPart.FromVisual(GameVisualValidator.GetValidVisual(gameObject, visual, logger));
 
     private static string GetKind(GameObject gameObject) => gameObject switch
     {

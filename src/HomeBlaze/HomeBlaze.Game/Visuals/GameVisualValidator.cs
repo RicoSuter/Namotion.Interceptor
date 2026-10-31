@@ -1,5 +1,5 @@
 using System.Buffers;
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.Visuals;
@@ -10,8 +10,10 @@ namespace HomeBlaze.Game.Visuals;
 internal static class GameVisualValidator
 {
     private const int MaximumAnimationLength = 64;
+    private const int MaximumUrlLength = 512;
     private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdefABCDEF");
-    private static readonly ConcurrentDictionary<Type, bool> WarnedTypes = new();
+    // Weak keys, so that a plugin type is not kept alive after its load context is unloaded.
+    private static readonly ConditionalWeakTable<Type, object> WarnedTypes = new();
 
     /// <summary>
     /// Gets the visual when it is valid, else the default box of the object, warning once per object type and process.
@@ -23,12 +25,12 @@ internal static class GameVisualValidator
             return visual;
         }
 
-        if (WarnedTypes.TryAdd(gameObject.GetType(), true))
+        if (WarnedTypes.TryAdd(gameObject.GetType(), new object()))
         {
             logger.LogWarning("The visual of {Type} is invalid, so its objects show as gray boxes", gameObject.GetType().FullName);
         }
 
-        return GameVisual.Box(gameObject.Width, gameObject.Height, gameObject.Depth);
+        return gameObject.DefaultVisual;
     }
 
     private static bool IsValid(GameVisual visual)
@@ -73,8 +75,12 @@ internal static class GameVisualValidator
 
     private static bool IsValidAnimation(string? animation) => animation is null || animation.Length <= MaximumAnimationLength;
 
+    // A percent sign is rejected because the browser decodes %2e%2e to a parent segment after the ".." check.
     private static bool IsAssetUrl(string? url) =>
-        url is null || (url.StartsWith(GameAssets.ContentPrefix, StringComparison.Ordinal) && !url.Contains("..", StringComparison.Ordinal));
+        url is null || (url.Length <= MaximumUrlLength && url.StartsWith(GameAssets.ContentPrefix, StringComparison.Ordinal) && !HasForbiddenText(url));
+
+    private static bool HasForbiddenText(string url) =>
+        url.Contains("..", StringComparison.Ordinal) || url.Contains('%', StringComparison.Ordinal);
 
     private static bool IsValidSize(GameVisualVector size) => IsInRange(size) && size.X >= 0 && size.Y >= 0 && size.Z >= 0;
 

@@ -14,6 +14,8 @@ public class GameVisualValidatorTests
         "pivot" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Pivot = new GameVisualPoint(2000, 0) },
         "rotation" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Rotation = double.NaN },
         "texture" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Texture = "https://example.com/bricks.jpg" },
+        "encoded-texture" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Texture = "_content/A/%2e%2e/secret.jpg" },
+        "long-texture" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Texture = "_content/A/" + new string('a', 512) },
         "parent-texture" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Texture = "_content/A/../../secret.jpg" },
         "model" => new GameVisualPart { Shape = GameVisualShape.Model, Size = new GameVisualVector(1, 1, 1), Model = "models/tree.glb" },
         "missing-model" => new GameVisualPart { Shape = GameVisualShape.Model, Size = new GameVisualVector(1, 1, 1) },
@@ -51,6 +53,8 @@ public class GameVisualValidatorTests
     [InlineData("rotation")]
     [InlineData("texture")]
     [InlineData("parent-texture")]
+    [InlineData("encoded-texture")]
+    [InlineData("long-texture")]
     [InlineData("model")]
     [InlineData("missing-model")]
     [InlineData("color")]
