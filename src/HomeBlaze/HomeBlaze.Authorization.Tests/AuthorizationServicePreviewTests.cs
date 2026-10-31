@@ -364,6 +364,25 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         Assert.NotNull(_service.GetPathPatternWarning("/Folder/Items[1]/Kitchen"));
     }
 
+    [Fact]
+    public void WhenADictionaryEntryMovesToAnotherKey_ThenTheWarningFollows()
+    {
+        // Arrange
+        var withKitchen = new TestRoot { Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() } };
+        var other = new TestRoot();
+        var folder = new TestRoot { Children = new Dictionary<string, IInterceptorSubject> { ["A"] = withKitchen, ["B"] = other } };
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Folder"] = folder };
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/A/Kitchen"));
+        Assert.Null(_service.GetPathPatternWarning("/Folder/B/Kitchen"));
+
+        // Act: the same subjects swapped between the keys, which attaches and detaches nothing.
+        folder.Children = new Dictionary<string, IInterceptorSubject> { ["A"] = other, ["B"] = withKitchen };
+
+        // Assert
+        Assert.Null(_service.GetPathPatternWarning("/Folder/A/Kitchen"));
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/B/Kitchen"));
+    }
+
     private void AddAuthorization(params (string Name, Role Role)[] roles)
     {
         var authorization = new Authorization
