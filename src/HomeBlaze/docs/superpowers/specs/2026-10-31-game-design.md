@@ -13,7 +13,7 @@ In scope for the first version:
 - One `Game` subject that is a page, with players and objects as children.
 - One player per installation client, bound to that client; only that client moves it.
 - Movement in 8 directions, one tile per step, with blocking.
-- A `GameObject` base subject with a footprint of several tiles, and one object type, `Wall`.
+- A `GameObject` base subject with a footprint of several tiles, and two object types, `Wall` and `Door`.
 - Interaction: the operations of the objects in front of the player, and the operations of the game, invoked through the usual operation flow.
 - Rendering with Babylon.js, an animated CC0 character model, walls of 2.5 m.
 - Unit and E2E tests.
@@ -72,6 +72,15 @@ GameObject (abstract) : IConfigurable
 Wall : GameObject
   Width, Depth, Height default to 4, 1, 10                 a segment 1 m long, 25 cm thick, 2.5 m tall
   [Operation] DemolishAsync(CancellationToken)
+
+Door : GameObject
+  Width, Depth, Height default to 4, 1, 10                 fills a wall opening; Width 1, Depth 4 in a north-south wall
+  [Configuration] bool IsOpen                              false by default
+  override bool IsBlocking => !IsOpen
+  [Derived] bool Open_IsEnabled => !IsOpen                 the IsEnabled attributes of the two operations
+  [Derived] bool Close_IsEnabled => IsOpen
+  [Operation] OpenAsync(CancellationToken)
+  [Operation] CloseAsync(CancellationToken)
 
 GamePlayer : GameObject
   Width, Depth, Height default to 2, 2, 7                  50 by 50 cm footprint, 175 cm tall
@@ -134,7 +143,7 @@ One lock in `Game` guards moves, building, demolishing and reconciling. The game
 - a chunk index of 16 by 16 tile chunks to the objects whose footprint intersects them, for radius queries;
 - a tile to blocking objects lookup covering every tile of each footprint, for occupancy.
 
-The game's own changes update both incrementally. Changes from outside the game only mark the index stale, and the next use rebuilds it under the lock. They are a replaced `Objects` or `Players`, a changed X, Y, Width, Depth or `IsConnected` of an object of the game, and an applied configuration, for example through the configuration editor or a reload. Two blocking objects on one tile, possible through hand edits, simply leave the tile blocked. An object whose width, depth or height is outside 1 to 1024, possible in a loaded file that skips the range validation, is left out of the index, so it neither blocks nor renders.
+The game's own changes update both incrementally. Changes from outside the game only mark the index stale, and the next use rebuilds it under the lock. They are a replaced `Objects` or `Players`, a changed X, Y, Width, Depth, `IsConnected` or `IsOpen` of an object of the game, and an applied configuration, for example through the configuration editor or a reload. Two blocking objects on one tile, possible through hand edits, simply leave the tile blocked. An object whose width, depth or height is outside 1 to 1024, possible in a loaded file that skips the range validation, is left out of the index, so it neither blocks nor renders.
 
 Change observers run while the change observable holds its own lock, which every write under the game's lock waits for, so they mark the index stale without taking the game's lock. An outside replacement of `Objects` or `Players` happens without the game's lock, so it is recorded under the lock as pending, and the game's copy-on-write of either collection starts from it instead of a stale copy, as the installation does for its clients. An outside replacement of `Players` also signals the loop to reconcile, so reloaded players of connected clients join right away.
 
@@ -142,7 +151,7 @@ Change observers run while the change observable holds its own lock, which every
 
 - The side panel's "Looking at" section shows the operations of the objects in the own player's target area, grouped by object and numbered 1 to 9 across all of them for the keyboard.
 - The side panel's "Actions" section shows the operations of the `Game`.
-- All operations are offered, except those whose `ExcludeFrom` includes `ExclusionTarget.UserInterface`.
+- All operations are offered, except those whose `ExcludeFrom` includes `ExclusionTarget.UserInterface` and those that are disabled through their `KnownAttributes.IsEnabled` attribute (`IsMethodEnabled`). Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply.
 - Invoking goes through `OperationInvoker.InvokeAsync`, so parameters open the usual `MethodParameterDialog`, `RequiresConfirmation` opens `MethodConfirmationDialog`, errors and results open their usual dialogs, exactly as in the subject browser.
 - Before invoking, the page checks that the object is still in the target area. While a dialog is open the keyboard does not move the player, so the target cannot change during a dialog.
 
@@ -150,12 +159,13 @@ Operations of the first version:
 
 - `Game.BuildWallAsync`: places a new default `Wall`, 4 by 1 tiles, across the actor's facing direction directly in front of the actor, centered on its footprint. Refuses without actor, when the actor faces diagonally, or when any of the tiles is blocked. The wall gets a generated unique name.
 - `Wall.DemolishAsync`: removes the wall from its parent game, found with `TryGetFirstParent<Game>()`, and saves the game. It needs no actor.
+- `Door.OpenAsync` and `Door.CloseAsync`: set `IsOpen` through `Game.SetDoorOpenAsync` under the game's lock, update the index and save the game like building does. They need no actor. Only the applicable one is enabled; invoking the other anyway refuses with "The door is already open." or "The door is already closed.". Closing refuses with "Someone is in the way of the door." while another blocking object covers a tile of the door.
 - `GamePlayer.SendMessageAsync`: sends a notification with the title "Message from {sender}", or "Message" without an actor, through the client directory to the open tabs of the player's client. Refuses when the player's client is unknown or not connected, when the message is longer than 500 characters, or when the sending player sent a message less than a second ago.
 
 ## Persistence
 
 - The game writes its configuration through `IConfigurationWriter` of its parent, as the installation does.
-- Building and demolishing write immediately.
+- Building, demolishing, opening and closing write immediately.
 - Joins, moves and turns of players are coalesced into one write by the game's loop, at most every 5 seconds, and pending changes are written in `StopAsync`.
 - Anonymous players are written like any other but dropped on load by reconciling, the same way the installation drops unnamed clients without a circuit.
 - A failed write logs a warning and stays pending, so the loop's next flush tries again; the game keeps running. A final write that `StopAsync` cancels logs a warning.
@@ -192,7 +202,7 @@ Operations of the first version:
 
 ### Synchronization
 
-- First, a snapshot of every object whose footprint lies within 200 tiles (50 m) in each direction of the own player: id, kind, X, Y, Width, Depth, Height, facing, title and whether it is the own player.
+- First, a snapshot of every object whose footprint lies within 200 tiles (50 m) in each direction of the own player: id, kind (`player`, `wall`, `door` or `object`), X, Y, Width, Depth, Height, facing, title, color, whether it blocks, whether it is an open door and whether it is the own player.
 - Then additions, moves and removals in batches, at most about 20 per second. The page observes property changes of the game and its objects, and each flush asks the game for the diff of the objects within the radius, computed with the chunk index.
 - Change observers run synchronously inside the writes of the object graph, so the page's handler only schedules a flush; calls to JS happen when the batch is flushed.
 - Coordinates travel as absolute integers, which JS numbers hold exactly. JS subtracts an integer origin near the own player, rebased when the player gets 2048 tiles away from it, before anything reaches the GPU, so the world renders sharply near `int.MaxValue` despite 32-bit floats on the GPU.
@@ -203,6 +213,7 @@ Operations of the first version:
 - One world unit is one tile, 25 cm. A perspective camera 28 tiles above and 30 tiles south of the point it looks at, about 43 degrees down, follows the own player smoothly. Fog fades the world out between 110 and 230 tiles.
 - The ground is one plane that follows the player in whole meters, with a repeating grass texture and a faint grid line every 4 tiles (1 m). The target area is marked tile by tile.
 - Walls are individual boxes of their footprint and height with a brick texture, not thin instances, so every face scales its UVs and the texture keeps its size on every wall length. The texture repeats every 8 by 4 tiles. Walls between the camera and the own player's head, found by a segment-box test, fade to semi-transparent.
+- Doors are a brick lintel over the opening from 8.4 tiles to the full height and a wooden panel, 8.4 tiles tall, as long as the opening and 0.3 tiles thick, hinged at the west or south end of the opening. Opening or closing swings it by 90 degrees over 300 ms. The lintel and the panel fade like walls, and the client's prediction follows the door's `isBlocking`.
 - Players are the animated glTF character with `Idle_Neutral` and `Walk` animations, scaled to the height of the player, rotated to their facing, with the shirt tinted with a color derived from the client id and labeled with their title. There are no shadow maps; a soft blob under each player and the lit wall faces give the depth.
 
 ## Assets
@@ -255,10 +266,11 @@ Unit tests:
 - Chunk index: radius queries, objects spanning several chunks, incremental updates, rebuild after an outside change, objects with sizes outside the range left out.
 - View diffs: objects entering and leaving the radius as the own player or they move; an unchanged view allocates nothing.
 - Loop: a signal after a won housekeeping delay still reconciles promptly; an outside move of an object while the game holds its lock does not wait for the game; an outside replacement of `Players` and an applied configuration reconcile the players.
-- Operations: `BuildWallAsync` builds across the facing direction, refuses a blocked tile, diagonal facing and a missing actor; `DemolishAsync` removes the wall; `SendMessageAsync` reaches the other client with the sender's name through the fake directory, and refuses a too long message and a second message within a second.
+- Operations: `BuildWallAsync` builds across the facing direction, refuses a blocked tile, diagonal facing and a missing actor; `DemolishAsync` removes the wall; a closed door blocks, an opened one lets a player walk through and is saved, closing refuses with a player in the doorway, the wrong operation is disabled and refuses, an outside change of `IsOpen` reaches the index; `SendMessageAsync` reaches the other client with the sender's name through the fake directory, and refuses a too long message and a second message within a second.
 - Actor resolution and the service provider wrapper.
 - Persistence: anonymous players dropped on load, coalesced position writes, pending writes on stop, a failing write that does not throw and is retried by the next flush, a canceled stop that does not throw.
-- Serialization: walls keep their type and footprint through a round trip of a game.
+- Serialization: walls keep their type and footprint, doors also their open state, through a round trip of a game.
+- View: a door's kind, open state and blocking reach the view when it opens.
 
 E2E tests, marked `Category=Integration`, use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through an own collection definition, with headless Chromium rendering WebGL through SwiftShader. They assert the side panel, not canvas pixels. The circuits of closed browser contexts stay connected for minutes, so the players of earlier tests may still stand in a new game. The tests therefore read where their own player joined, move the other players far away, and assert positions relative to the join position:
 
@@ -267,6 +279,7 @@ E2E tests, marked `Category=Integration`, use `PlaywrightFixture` from `HomeBlaz
 - On a phone viewport with touch, tapping the east pad button moves the player one tile east.
 - Walking into a wall keeps the position and shows the wall under "Looking at".
 - Build a wall from "Actions", then demolish it from "Looking at".
+- A closed door in front of the player shows "Door" with only "Open" under "Looking at"; the number key 1 opens it, and the player then steps through.
 - With two browser contexts, each lists the other under "Nearby", and "Send message" opens the notification dialog in the other context.
 
 The Connector Tester and benchmarks do not apply.
