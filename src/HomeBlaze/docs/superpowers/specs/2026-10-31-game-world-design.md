@@ -2,7 +2,7 @@
 
 Adds trees with wind, walls with a chosen size and material, and a new demo world with a larger house and a small forest to `HomeBlaze.Game`. The design makes game objects extensible: an object type, its actions and its look use only the public API of the game core, so object types can later move into their own libraries.
 
-This document is a working spec for the game pull request (#876); the voice branch merges it. Before the pull request is ready, its content moves into `src/HomeBlaze/HomeBlaze.Game/README.md` and the file is deleted.
+This document is a working spec for the game pull request (#876), which also contains voice. Before the pull request is ready, its content moves into `src/HomeBlaze/HomeBlaze.Game/README.md` and the file is deleted.
 
 ## Goals
 
@@ -76,9 +76,9 @@ Moving `Wall` and `Door` changes their `$type` to `HomeBlaze.Game.Objects.Walls.
 
 ## Objects
 
-- `Wall`: `[Configuration] WallMaterial Material` (`Bricks`, `Concrete`, `Wood`, default `Bricks`), configurable `Width`, `Depth`, `Height` as today, `IsMovementBlocking` true. `Visual`: one box with the material's texture.
+- `Wall`: `[Configuration] WallMaterial Material` (`Bricks`, `Concrete`, `Wood`, default `Bricks`), configurable `Width`, `Depth`, `Height` as today, `IsMovementBlocking` and `IsSoundBlocking` true. `Visual`: one box with the material's texture.
 - `Door`: behavior as today (`IsOpen`, the "Open" and "Close" operations, refused while the doorway is occupied). `Visual`: a brick lintel above the opening and a wooden leaf with its pivot at the hinge, rotated 0 or 90 degrees by `IsOpen`.
-- `Tree`: `[Configuration] int Variant`, `int Rotation`, `int Scale` (percent); fixed footprint 2 x 2 like players (sizes not configurable), `IsMovementBlocking` true. On the voice branch, which adds `IsSoundBlocking`, trees keep its default `false`. `Visual`: one `Model` part with the variant's model, rotation and scale, effect `Wind`, height from the variant table. A variant outside the table falls back to variant 0.
+- `Tree`: `[Configuration] int Variant`, `int Rotation`, `int Scale` (percent); fixed footprint 2 x 2 like players (sizes not configurable), `IsMovementBlocking` true, `IsSoundBlocking` false. `Visual`: one `Model` part with the variant's model, rotation and scale, effect `Wind`, height from the variant table. A variant outside the table falls back to variant 0.
 - Tree models: 5 to 8 CC0 models (Quaternius or Kenney nature packs), each a small `.glb`, with a table of model file and height per variant in `Tree`.
 
 ## Remembered parameters
@@ -108,7 +108,7 @@ Unit tests (`HomeBlaze.Game.Tests`, `HomeBlaze.Components.Tests`):
 - Validation fallback for oversized parts, too many parts and foreign URLs.
 - `GameAssets.Url` uses the assembly name.
 - `Door.Visual` follows `IsOpen`; `Wall.Visual` follows `Material`.
-- `Tree` blocks movement, has a fixed size, falls back to variant 0.
+- `Tree` blocks movement but not sound, has a fixed size, falls back to variant 0.
 - `WallTool` builds the requested wall in the facing direction and refuses blocked or diagonal placement; ranges are enforced on the server.
 - `TreeTool` picks a random variant only without one, sets rotation and scale within range, refuses blocked placement.
 - Walls with `Material` and trees save and load; tools save and load with `$type`.
@@ -118,7 +118,7 @@ Unit tests (`HomeBlaze.Game.Tests`, `HomeBlaze.Components.Tests`):
 E2E (`HomeBlaze.Game.Tests`):
 
 - "Build wall" through the dialog with concrete and length 8 creates that wall; the second invocation shows the fields prefilled.
-- "Plant tree" creates a tree in front of the player; the player cannot walk into it.
+- "Plant tree" creates a tree in front of the player; the player cannot walk into it, and voice passes it.
 - Opening and closing a door still works.
 - The existing game E2E tests keep passing.
 
