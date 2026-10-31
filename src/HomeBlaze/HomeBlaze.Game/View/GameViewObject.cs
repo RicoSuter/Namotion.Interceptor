@@ -20,7 +20,6 @@ internal sealed record GameViewObject(
     string Title,
     string Color,
     bool IsMovementBlocking,
-    bool IsOpen,
     bool IsSelf,
     bool IsMicrophoneOn,
     bool IsAudioOn,
@@ -28,7 +27,5 @@ internal sealed record GameViewObject(
     IReadOnlyList<GameViewPart> Parts)
 {
     public const string PlayerKind = "player";
-    public const string WallKind = "wall";
-    public const string DoorKind = "door";
     public const string ObjectKind = "object";
 }

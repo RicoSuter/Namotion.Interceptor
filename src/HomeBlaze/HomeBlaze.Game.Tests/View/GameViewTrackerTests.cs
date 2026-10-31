@@ -24,9 +24,10 @@ public class GameViewTrackerTests
         var self = Assert.Single(update.Upserted, view => view.IsSelf);
         Assert.Equal(GameViewObject.PlayerKind, self.Kind);
         Assert.Equal((0, 0, 2, 2, 7), (self.X, self.Y, self.Width, self.Depth, self.Height));
-        var wall = Assert.Single(update.Upserted, view => view.Kind == GameViewObject.WallKind);
+        var wall = Assert.Single(update.Upserted, view => view.Kind == GameViewObject.ObjectKind);
         Assert.Equal((-20, 8, 19), (wall.X, wall.Y, wall.Width));
         Assert.True(wall.IsMovementBlocking);
+        Assert.Equal(19d, Assert.Single(wall.Parts).Width);
         Assert.Empty(update.Removed);
     }
 
@@ -103,23 +104,22 @@ public class GameViewTrackerTests
     }
 
     [Fact]
-    public async Task WhenADoorOpens_ThenItIsUpsertedOpenAndNotBlocking()
+    public async Task WhenADoorOpens_ThenItIsUpsertedNotBlockingWithItsLeafTurned()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var door = _context.AddDoor(-1, 2);
         var first = _context.Game.UpdateView(_tracker, player);
-        var closed = Assert.Single(first.Upserted, view => view.Kind == GameViewObject.DoorKind);
+        var closed = Assert.Single(first.Upserted, view => !view.IsSelf);
 
         // Act
         await door.OpenAsync(CancellationToken.None);
         var update = _context.Game.UpdateView(_tracker, player);
 
         // Assert
-        Assert.Equal(("Door", false, true), (closed.Title, closed.IsOpen, closed.IsMovementBlocking));
+        Assert.Equal(("Door", true, 0d), (closed.Title, closed.IsMovementBlocking, closed.Parts[1].Rotation));
         var open = Assert.Single(update.Upserted);
-        Assert.Equal((closed.Id, GameViewObject.DoorKind, true, false), (open.Id, open.Kind, open.IsOpen, open.IsMovementBlocking));
-        Assert.Equal(GameColors.Door, open.Color);
+        Assert.Equal((closed.Id, GameViewObject.ObjectKind, false, -90d), (open.Id, open.Kind, open.IsMovementBlocking, open.Parts[1].Rotation));
     }
 
     [Fact]

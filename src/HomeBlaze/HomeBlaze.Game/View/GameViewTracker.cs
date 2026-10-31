@@ -104,7 +104,7 @@ internal sealed class GameViewTracker
         known.IsMicrophoneOn == IsMicrophoneOn(gameObject) && known.IsAudioOn == IsAudioOn(gameObject);
 
     private static bool HasSamePassage(GameViewObject known, GameObject gameObject) =>
-        known.IsMovementBlocking == gameObject.IsMovementBlocking && known.IsOpen == IsOpen(gameObject);
+        known.IsMovementBlocking == gameObject.IsMovementBlocking;
 
     private bool HasSameLabel(GameViewObject known, GameObject gameObject) =>
         known.Title == GetTitle(gameObject) && known.Color == GetColor(gameObject);
@@ -113,7 +113,7 @@ internal sealed class GameViewTracker
     {
         var visual = GetVisual(gameObject);
         return new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
-            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsMovementBlocking, IsOpen(gameObject), isSelf,
+            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsMovementBlocking, isSelf,
             IsMicrophoneOn(gameObject), IsAudioOn(gameObject), visual, GetParts(gameObject, visual, logger));
     }
 
@@ -122,17 +122,10 @@ internal sealed class GameViewTracker
     private static IReadOnlyList<GameViewPart> GetParts(GameObject gameObject, GameVisual? visual, ILogger logger) =>
         gameObject is GamePlayer ? [] : GameViewPart.FromVisual(GameVisualValidator.GetValidVisual(gameObject, visual, logger));
 
-    private static string GetKind(GameObject gameObject) => gameObject switch
-    {
-        GamePlayer => GameViewObject.PlayerKind,
-        Wall => GameViewObject.WallKind,
-        Door => GameViewObject.DoorKind,
-        _ => GameViewObject.ObjectKind
-    };
+    private static string GetKind(GameObject gameObject) =>
+        gameObject is GamePlayer ? GameViewObject.PlayerKind : GameViewObject.ObjectKind;
 
     private static int GetFacing(GameObject gameObject) => gameObject is GamePlayer player ? (int)player.Facing : 0;
-
-    private static bool IsOpen(GameObject gameObject) => gameObject is Door { IsOpen: true };
 
     private static bool IsMicrophoneOn(GameObject gameObject) => gameObject is GamePlayer { IsMicrophoneOn: true };
 
@@ -141,12 +134,8 @@ internal sealed class GameViewTracker
     private static string GetTitle(GameObject gameObject) =>
         (gameObject as ITitleProvider)?.Title ?? string.Empty;
 
-    private string GetColor(GameObject gameObject) => gameObject switch
-    {
-        GamePlayer player => GetPlayerColor(player),
-        Door => GameColors.Door,
-        _ => GameColors.Wall
-    };
+    // Other objects take their colors from their visual.
+    private string GetColor(GameObject gameObject) => gameObject is GamePlayer player ? GetPlayerColor(player) : string.Empty;
 
     /// <summary>
     /// Gets the color of the player, the one its view object carries.

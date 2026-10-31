@@ -130,6 +130,57 @@ public class GameDoorTests
     }
 
     [Fact]
+    public void WhenADoorOpens_ThenItsLeafTurnsAQuarterAroundTheHinge()
+    {
+        // Arrange
+        var door = new Door();
+        var closed = door.Visual;
+
+        // Act
+        door.IsOpen = true;
+        var open = door.Visual;
+
+        // Assert
+        Assert.Equal(2, closed.Parts.Length);
+        var lintel = closed.Parts[0];
+        Assert.Equal(new GameVisualVector(0, Door.LeafHeight, 0), lintel.Offset);
+        Assert.Equal(new GameVisualVector(4, 10 - Door.LeafHeight, 1), lintel.Size);
+        var leaf = closed.Parts[1];
+        Assert.Equal(new GameVisualPoint(0, 0.5), leaf.Pivot);
+        Assert.Equal(new GameVisualVector(4, Door.LeafHeight, 0.3), leaf.Size);
+        Assert.Equal(0, leaf.Rotation);
+        Assert.Equal(-90, open.Parts[1].Rotation);
+    }
+
+    [Fact]
+    public void WhenADoorRunsNorthToSouth_ThenItsLeafHangsAtTheSouthEnd()
+    {
+        // Arrange
+        var door = new Door { Width = 1, Depth = 4 };
+
+        // Act
+        var leaf = door.Visual.Parts[1];
+
+        // Assert
+        Assert.Equal(new GameVisualPoint(0.5, 0), leaf.Pivot);
+        Assert.Equal(new GameVisualVector(0.3, Door.LeafHeight, 4), leaf.Size);
+        Assert.Equal(new GameVisualVector(0.35, 0, 0), leaf.Offset);
+    }
+
+    [Fact]
+    public void WhenADoorIsNoTallerThanItsLeaf_ThenItHasNoLintel()
+    {
+        // Arrange
+        var door = new Door { Height = 8 };
+
+        // Act
+        var part = Assert.Single(door.Visual.Parts);
+
+        // Assert
+        Assert.Equal(new GameVisualVector(4, 8, 0.3), part.Size);
+    }
+
+    [Fact]
     public async Task WhenTheDoorIsNotPartOfAGame_ThenOpeningIsRefused()
     {
         // Arrange

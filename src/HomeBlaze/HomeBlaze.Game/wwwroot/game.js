@@ -156,7 +156,8 @@ class GameView {
         const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.5, -1, 0.7), this.scene);
         sun.intensity = 0.75;
 
-        this.entities = await createEntities(this.scene, this.options);
+        // The canvas carries the part and model counts for tests and diagnosis.
+        this.entities = await createEntities(this.scene, { ...this.options, statsElement: this.canvas });
         this.input = createInput(this.dotNet, this.options, this.entities);
 
         this.engine.runRenderLoop(() => this.render());

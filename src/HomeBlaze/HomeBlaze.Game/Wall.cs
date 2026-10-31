@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.Visuals;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Game;
@@ -16,6 +17,8 @@ namespace HomeBlaze.Game;
 [InterceptorSubject]
 public partial class Wall : GameObject, ITitleProvider, IIconProvider
 {
+    private readonly GameVisualCache<(int Width, int Height, int Depth)> _visual = new();
+
     /// <summary>
     /// The length of a built wall in tiles, 1 m.
     /// </summary>
@@ -43,6 +46,9 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
     public string? IconName => "ViewColumn";
 
     public override bool IsSoundBlocking => true;
+
+    public override GameVisual Visual => _visual.Get((Width, Height, Depth),
+        static size => new GameVisual([WallTextures.CreateBricks(default, new GameVisualVector(size.Width, size.Height, size.Depth))]));
 
     public Wall()
     {
