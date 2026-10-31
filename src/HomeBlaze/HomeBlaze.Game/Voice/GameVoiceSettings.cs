@@ -39,10 +39,11 @@ internal static class GameVoiceSettings
     public const int BufferGrowth = 1;
 
     /// <summary>
-    /// Frames a buffer may hold beyond its current target before it drops the oldest audio, which absorbs bursts of
-    /// frames that the network delivers together. A buffer always drops beyond its maximum.
+    /// Frames by which the lowest level of a buffer over <see cref="TrimWindow"/> may exceed its target before the
+    /// buffer drops the excess down to the target. Bursts and gaps pass through without a drop, because only a level
+    /// that stays high for a whole window is standing delay.
     /// </summary>
-    public const int TrimHeadroom = 3;
+    public const int TrimHeadroom = 1;
 
     /// <summary>
     /// Sends to a page in flight beyond which new frames to it are dropped.
@@ -68,6 +69,11 @@ internal static class GameVoiceSettings
     /// Largest buffer the browser grows to.
     /// </summary>
     public static readonly TimeSpan PlaybackBufferMaximum = TimeSpan.FromMilliseconds(120);
+
+    /// <summary>
+    /// Time over which a buffer watches its lowest level before it decides whether to drop standing delay.
+    /// </summary>
+    public static readonly TimeSpan TrimWindow = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Length of the fade with which the browser's playback leaves and enters silence and smooths a dropped stretch of

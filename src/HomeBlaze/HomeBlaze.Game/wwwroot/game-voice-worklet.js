@@ -70,8 +70,10 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.growthSamples = settings.bufferGrowthSamples;
         this.headroomSamples = settings.bufferHeadroomSamples;
         this.shrinkDelay = settings.bufferShrinkDelaySeconds;
+        this.trimWindow = settings.trimWindowSeconds;
         this.targetSamples = this.startSamples;
-        this.capacity = this.maximumSamples + settings.frameSamples;
+        // Room for bursts above the largest target; only beyond it does arrival drop audio.
+        this.capacity = 2 * this.maximumSamples;
         this.ring = new Float32Array(this.capacity);
         this.readIndex = 0;
         this.available = 0;
@@ -79,6 +81,8 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.isPlaying = false;
         this.isStopped = false;
         this.lastDry = currentTime;
+        this.windowStart = currentTime;
+        this.windowMinimum = Infinity;
         // Output samples at the context rate over which a step in the output is blended out.
         this.rampSamples = Math.max(1, Math.round(settings.rampSeconds * sampleRate));
         this.rampRemaining = 0;
@@ -97,14 +101,10 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         };
     }
 
-    // Keeps the delay near the target: drops the oldest audio beyond the headroom above it, and beyond the maximum.
     enqueue(samples) {
-        const limit = Math.min(this.maximumSamples, this.targetSamples + this.headroomSamples);
-        const excess = this.available + samples.length - limit;
+        const excess = this.available + samples.length - this.capacity;
         if (excess > 0) {
-            this.skip(excess);
-            this.trims++;
-            this.startRamp();
+            this.drop(excess);
         }
 
         // A frame larger than the ring keeps only its newest samples.
@@ -130,6 +130,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
             this.lastOutput = value;
         }
 
+        // Arrivals land only between two calls, so the level after a call is the lowest it reached.
+        this.windowMinimum = Math.min(this.windowMinimum, this.available);
+        this.trimAtWindowEnd();
         this.shrinkWhenSteady();
         this.report();
         return !this.isStopped;
@@ -150,6 +153,27 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.fraction -= consumed;
         this.skip(consumed);
         return value;
+    }
+
+    // The lowest level over a window is the delay that bursts of arrival or of rendering did not cause, so dropping
+    // down to the target there removes standing delay without cutting into a burst that the following gap consumes.
+    trimAtWindowEnd() {
+        if (currentTime - this.windowStart < this.trimWindow) {
+            return;
+        }
+
+        if (this.windowMinimum > this.targetSamples + this.headroomSamples) {
+            this.drop(this.windowMinimum - this.targetSamples);
+        }
+
+        this.windowStart = currentTime;
+        this.windowMinimum = Infinity;
+    }
+
+    drop(count) {
+        this.skip(count);
+        this.trims++;
+        this.startRamp();
     }
 
     // Starting, running dry and dropping audio each make the output jump, which clicks; the ramp glides from the last

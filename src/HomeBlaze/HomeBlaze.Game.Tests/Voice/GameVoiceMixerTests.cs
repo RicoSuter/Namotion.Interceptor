@@ -163,16 +163,15 @@ public class GameVoiceMixerTests
         }
 
         // Act
-        const int kept = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom;
-        for (var index = 0; index <= kept; index++)
+        for (var index = 0; index <= GameVoiceSettings.ServerQueueMaximum; index++)
         {
             _mixer.Mix(table);
         }
 
         // Assert
-        // The queue keeps the newest frames it accepted, its start size plus the headroom, and the refused one never plays.
+        // The queue keeps every frame it accepted, and the refused one never plays.
         var samples = _sink.Frames.Select(frame => (int)VoiceFrames.ReadSample(frame, 0));
-        Assert.Equal(Enumerable.Range(GameVoiceSettings.ServerQueueMaximum - kept + 1, kept), samples);
+        Assert.Equal(Enumerable.Range(1, GameVoiceSettings.ServerQueueMaximum), samples);
     }
 
     [Fact]

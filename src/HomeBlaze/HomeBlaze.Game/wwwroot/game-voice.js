@@ -330,6 +330,7 @@ class GameVoice {
                         bufferGrowthSamples: options.bufferGrowthSamples,
                         bufferHeadroomSamples: options.bufferHeadroomSamples,
                         bufferShrinkDelaySeconds: options.bufferShrinkDelaySeconds,
+                        trimWindowSeconds: options.trimWindowSeconds,
                         rampSeconds: options.rampSeconds,
                     },
                 });
