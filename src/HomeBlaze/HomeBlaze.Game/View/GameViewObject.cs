@@ -16,7 +16,9 @@ internal sealed record GameViewObject(
     string Color,
     bool IsBlocking,
     bool IsOpen,
-    bool IsSelf)
+    bool IsSelf,
+    bool IsMicrophoneOn,
+    bool IsAudioOn)
 {
     public const string PlayerKind = "player";
     public const string WallKind = "wall";

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Clients;
+using HomeBlaze.Game.Voice;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -64,6 +65,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _clients = clients ?? new InstallationClientDirectory(() => ((IInterceptorSubject)this).Context);
         _timeProvider = timeProvider;
         _logger = logger;
+        _voiceMixer = new GameVoiceMixer(timeProvider, logger);
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
         Objects = new Dictionary<string, GameObject>();
