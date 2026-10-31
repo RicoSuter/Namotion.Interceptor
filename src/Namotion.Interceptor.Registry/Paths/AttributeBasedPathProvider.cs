@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -46,6 +47,21 @@ public class AttributeBasedPathProvider : PathProviderBase
     /// </remarks>
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
         => FindPathAttribute(property.ReflectionAttributes, out _)?.Path;
+
+    /// <inheritdoc />
+    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        // A derived provider may override the members this answers in one scan. Checked per call rather than cached in
+        // a field: a devirtualized call folds the check and its fallback away.
+        if (GetType() != typeof(AttributeBasedPathProvider))
+        {
+            return base.TryGetIncludedPropertySegment(property, out segment);
+        }
+
+        var attribute = FindPathAttribute(property.ReflectionAttributes, out var hasInlinePaths);
+        segment = attribute is not null ? attribute.Path ?? property.BrowseName : hasInlinePaths ? property.BrowseName : null;
+        return segment is not null;
+    }
 
     // Indexed rather than enumerated: this runs for every property of a subject on each segment lookup, and an
     // interface enumerator would allocate per call.

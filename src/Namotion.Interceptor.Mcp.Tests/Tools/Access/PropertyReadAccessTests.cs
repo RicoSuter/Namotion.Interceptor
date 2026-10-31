@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -165,5 +166,34 @@ public class PropertyReadAccessTests
     private sealed class PropertiesWithoutAttributesPathProvider : PathProviderBase
     {
         public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => !property.IsAttribute;
+    }
+
+    public static TheoryData<string, string> CyclicAttributeCalls => new()
+    {
+        { "get_property", JsonSerializer.Serialize(new { path = "First" }) },
+        { "get_property", JsonSerializer.Serialize(new { path = "Second" }) },
+        { "set_property", JsonSerializer.Serialize(new { path = "First", value = "Changed" }) },
+        { "browse", JsonSerializer.Serialize(new { format = "json", depth = 0, includeProperties = true, includeAttributes = true }) }
+    };
+
+    [Theory]
+    [MemberData(nameof(CyclicAttributeCalls))]
+    public async Task WhenAttributesBelongToEachOtherInACycle_ThenAnAllowAllPolicyAnswersAsWithoutAPolicy(string toolName, string input)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new TestCyclicAttributes(context) { Name = "Cycle", First = "A", Second = "B" };
+        var allowAll = new TestAccessPolicy((_, _) => true);
+        var request = JsonSerializer.Deserialize<JsonElement>(input);
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(subject, CreateConfiguration(policy: null), toolName, request);
+        var withPolicy = await McpToolCaller.CallAsync(subject, CreateConfiguration(allowAll), toolName, request);
+
+        // Assert
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+        Assert.Equal("A", subject.First);
     }
 }

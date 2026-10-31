@@ -1,0 +1,269 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Mcp.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Interceptor.Mcp.Abstractions
+{
+    public interface IMcpAccessPolicy
+    {
+        bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action);
+    }
+    public interface IMcpSubjectEnricher
+    {
+        System.Collections.Generic.IDictionary<string, object?> GetSubjectEnrichments(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject);
+    }
+    public interface IMcpToolProvider
+    {
+        System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools();
+    }
+    public interface IMcpTypeProvider
+    {
+        System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.Abstractions.McpTypeInfo> GetTypes();
+    }
+    public static class McpAccessActions
+    {
+        public const string Read = "read";
+        public const string Write = "write";
+    }
+    public class McpTypeInfo : System.IEquatable<Namotion.Interceptor.Mcp.Abstractions.McpTypeInfo>
+    {
+        public McpTypeInfo(string Name, string? Description, bool IsInterface, System.Type Type) { }
+        public string? Description { get; init; }
+        public bool IsInterface { get; init; }
+        public string Name { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public System.Type Type { get; init; }
+    }
+}
+namespace Namotion.Interceptor.Mcp.Extensions
+{
+    public static class ServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithSubjectRegistryTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Mcp.McpServerConfiguration configuration) { }
+        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithSubjectRegistryTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, System.Func<System.IServiceProvider, Namotion.Interceptor.Mcp.McpServerConfiguration> configurationFactory) { }
+    }
+}
+namespace Namotion.Interceptor.Mcp
+{
+    public class McpServerConfiguration
+    {
+        public McpServerConfiguration() { }
+        public Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy? AccessPolicy { get; init; }
+        public System.Type[] ExcludeTypes { get; init; }
+        public bool IsReadOnly { get; init; }
+        public int MaxDepth { get; init; }
+        public int MaxSubjectsPerResponse { get; init; }
+        public string PathPrefix { get; init; }
+        public required Namotion.Interceptor.Registry.Paths.IPathProvider PathProvider { get; init; }
+        public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpSubjectEnricher> SubjectEnrichers { get; init; }
+        public System.Collections.Generic.IDictionary<string, string> ToolDescriptionAdditions { get; init; }
+        public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider> ToolProviders { get; init; }
+        public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpTypeProvider> TypeProviders { get; init; }
+    }
+    public static class McpServerConfigurationExtensions
+    {
+        public static bool IsAllowed(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Property",
+                "Index"})]
+        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetReadableProperty(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, string path) { }
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetReadableSubject(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, string path) { }
+    }
+    public sealed class McpToolAnnotations : System.IEquatable<Namotion.Interceptor.Mcp.McpToolAnnotations>
+    {
+        public McpToolAnnotations() { }
+        public bool? DestructiveHint { get; init; }
+        public bool? IdempotentHint { get; init; }
+        public bool? OpenWorldHint { get; init; }
+        public bool? ReadOnlyHint { get; init; }
+        public static Namotion.Interceptor.Mcp.McpToolAnnotations Destructive { get; }
+        public static Namotion.Interceptor.Mcp.McpToolAnnotations ReadOnly { get; }
+    }
+    public static class McpToolDispatcher
+    {
+        public static System.Threading.Tasks.ValueTask<ModelContextProtocol.Protocol.CallToolResult> CallToolAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> tools, ModelContextProtocol.Protocol.CallToolRequestParams parameters, Microsoft.Extensions.Logging.ILogger? logger, System.Threading.CancellationToken cancellationToken) { }
+        public static ModelContextProtocol.Protocol.ListToolsResult ListTools(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> tools) { }
+    }
+    public class McpToolInfo
+    {
+        public McpToolInfo() { }
+        [System.Diagnostics.CodeAnalysis.SetsRequiredMembers]
+        public McpToolInfo(Namotion.Interceptor.Mcp.McpToolInfo source) { }
+        public Namotion.Interceptor.Mcp.McpToolAnnotations? Annotations { get; init; }
+        public required string Description { get; init; }
+        public required System.Func<System.Text.Json.JsonElement, System.Threading.CancellationToken, System.Threading.Tasks.Task<object?>> Handler { get; init; }
+        public required System.Text.Json.JsonElement InputSchema { get; init; }
+        public required string Name { get; init; }
+    }
+    public static class McpToolInfoExtensions
+    {
+        public static Microsoft.Extensions.AI.AIFunction ToAIFunction(this Namotion.Interceptor.Mcp.McpToolInfo tool) { }
+    }
+}
+namespace Namotion.Interceptor.Mcp.Models
+{
+    public class BrowseResult
+    {
+        public BrowseResult() { }
+        [System.Text.Json.Serialization.JsonPropertyName("omittedCount")]
+        public int OmittedCount { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("result")]
+        public required Namotion.Interceptor.Mcp.Models.SubjectNode Result { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("subjectCount")]
+        public int SubjectCount { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("truncated")]
+        public bool Truncated { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("warnings")]
+        public System.Collections.Generic.IReadOnlyList<string>? Warnings { get; init; }
+    }
+    public sealed class McpMethodParameter : System.IEquatable<Namotion.Interceptor.Mcp.Models.McpMethodParameter>
+    {
+        public McpMethodParameter() { }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("description")]
+        public string? Description { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("enum")]
+        public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("format")]
+        public string? Format { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [System.Text.Json.Serialization.JsonPropertyName("nullable")]
+        public bool IsNullable { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public required string Name { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("schema")]
+        public System.Text.Json.JsonElement? Schema { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("type")]
+        public required string Type { get; init; }
+        public static Namotion.Interceptor.Mcp.Models.McpMethodParameter Create(string name, System.Type type, bool isNullable = false, string? description = null) { }
+    }
+    public class PropertyAttribute : System.IEquatable<Namotion.Interceptor.Mcp.Models.PropertyAttribute>
+    {
+        public PropertyAttribute(string Name, object? Value) { }
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
+        public string Name { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public object? Value { get; init; }
+    }
+    public class ScalarProperty : Namotion.Interceptor.Mcp.Models.SubjectNodeProperty, System.IEquatable<Namotion.Interceptor.Mcp.Models.ScalarProperty>
+    {
+        public ScalarProperty(object? Value, string Type, bool IsWritable = false, System.Collections.Generic.List<Namotion.Interceptor.Mcp.Models.PropertyAttribute>? Attributes = null) { }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("attributes")]
+        public System.Collections.Generic.List<Namotion.Interceptor.Mcp.Models.PropertyAttribute>? Attributes { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [System.Text.Json.Serialization.JsonPropertyName("isWritable")]
+        public bool IsWritable { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("type")]
+        public string Type { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public object? Value { get; init; }
+    }
+    public class SearchResult
+    {
+        public SearchResult() { }
+        [System.Text.Json.Serialization.JsonPropertyName("results")]
+        public required System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Mcp.Models.SubjectNode> Results { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("subjectCount")]
+        public int SubjectCount { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("truncated")]
+        public bool Truncated { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("warnings")]
+        public System.Collections.Generic.IReadOnlyList<string>? Warnings { get; init; }
+    }
+    public class SubjectCollectionProperty : Namotion.Interceptor.Mcp.Models.SubjectNodeProperty, System.IEquatable<Namotion.Interceptor.Mcp.Models.SubjectCollectionProperty>
+    {
+        public SubjectCollectionProperty(System.Collections.Generic.List<Namotion.Interceptor.Mcp.Models.SubjectNode>? Children = null, int? Count = default, string? ItemType = null, bool IsCollapsed = false) { }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("children")]
+        public System.Collections.Generic.List<Namotion.Interceptor.Mcp.Models.SubjectNode>? Children { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("count")]
+        public int? Count { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [System.Text.Json.Serialization.JsonPropertyName("isCollapsed")]
+        public bool IsCollapsed { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("itemType")]
+        public string? ItemType { get; init; }
+    }
+    public class SubjectDictionaryProperty : Namotion.Interceptor.Mcp.Models.SubjectNodeProperty, System.IEquatable<Namotion.Interceptor.Mcp.Models.SubjectDictionaryProperty>
+    {
+        public SubjectDictionaryProperty(System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Mcp.Models.SubjectNode>? Children = null, int? Count = default, string? ItemType = null, bool IsCollapsed = false) { }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("children")]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Mcp.Models.SubjectNode>? Children { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("count")]
+        public int? Count { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [System.Text.Json.Serialization.JsonPropertyName("isCollapsed")]
+        public bool IsCollapsed { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("itemType")]
+        public string? ItemType { get; init; }
+    }
+    public class SubjectNode
+    {
+        public SubjectNode() { }
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.Dictionary<string, object?>? Enrichments { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("interfaces")]
+        public string[]? Interfaces { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("methods")]
+        public string[]? Methods { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("$path")]
+        public string? Path { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("properties")]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Mcp.Models.SubjectNodeProperty>? Properties { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("$type")]
+        public string? Type { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(Namotion.Interceptor.Mcp.Models.ScalarProperty), "value")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(Namotion.Interceptor.Mcp.Models.SubjectCollectionProperty), "collection")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(Namotion.Interceptor.Mcp.Models.SubjectDictionaryProperty), "dictionary")]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(Namotion.Interceptor.Mcp.Models.SubjectObjectProperty), "object")]
+    [System.Text.Json.Serialization.JsonPolymorphic(TypeDiscriminatorPropertyName="kind")]
+    public abstract class SubjectNodeProperty : System.IEquatable<Namotion.Interceptor.Mcp.Models.SubjectNodeProperty>
+    {
+        protected SubjectNodeProperty() { }
+    }
+    public class SubjectObjectProperty : Namotion.Interceptor.Mcp.Models.SubjectNodeProperty, System.IEquatable<Namotion.Interceptor.Mcp.Models.SubjectObjectProperty>
+    {
+        public SubjectObjectProperty(Namotion.Interceptor.Mcp.Models.SubjectNode? Child, bool IsCollapsed = false) { }
+        [System.Text.Json.Serialization.JsonPropertyName("child")]
+        public Namotion.Interceptor.Mcp.Models.SubjectNode? Child { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [System.Text.Json.Serialization.JsonPropertyName("isCollapsed")]
+        public bool IsCollapsed { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("itemType")]
+        public string? ItemType { get; init; }
+    }
+}
+namespace Namotion.Interceptor.Mcp.Tools
+{
+    public static class JsonSchemaTypeMapper
+    {
+        public static string? ToJsonSchemaType(System.Type? type) { }
+    }
+    public class McpToolFactory
+    {
+        public McpToolFactory(Namotion.Interceptor.IInterceptorSubject rootSubject, Namotion.Interceptor.Mcp.McpServerConfiguration configuration) { }
+        public McpToolFactory(System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Mcp.McpServerConfiguration configuration) { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> CreateTools() { }
+    }
+    public static class McpValueConverter
+    {
+        public static object? Deserialize(System.Text.Json.JsonElement value, System.Type type) { }
+    }
+}

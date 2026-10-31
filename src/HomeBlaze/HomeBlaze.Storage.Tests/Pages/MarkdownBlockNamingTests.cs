@@ -12,7 +12,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// The configuration of a block is named by the property names of its type: on the head line, in the json
 /// block at every depth, and in what is written back.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownBlockNamingTests
 {
     private const string PanelType = $"{Namespace}.TestPanel";

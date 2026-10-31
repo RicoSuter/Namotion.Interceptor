@@ -7,6 +7,7 @@ using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -385,6 +387,30 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         Assert.Equal("Grows with the freezer log.", propertyNotes.GetProperty("value").GetProperty("notes").GetString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenNotesBelongToAConfigurationProperty_ThenTheyAreNotSearched(bool isAgent)
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync(
+        [
+            ("Docs/Gateway.json", $$"""{ "$type": "{{typeof(MarkdownSearchSecretDevice).FullName}}" }"""),
+            ("Docs/Gateway.metadata.json", """{ "notes": "The freezer gateway.", "$properties": { "Host": { "notes": "The freezer host." } } }""")
+        ]);
+        var tool = CreateTool(services, root, isAgent);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        var matches = result.GetProperty("pages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["/Storage/Docs/Gateway", "/Storage/Notes.md"],
+            matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.All(matches, match => Assert.False(match.TryGetProperty("property", out _)));
+    }
+
     [Fact]
     public async Task WhenThePathIsGiven_ThenOnlyNotesInOrUnderItAreSearched()
     {
@@ -606,6 +632,29 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
 
         // Assert
         Assert.Same(McpToolAnnotations.ReadOnly, tool.Annotations);
+    }
+
+    [Fact]
+    public async Task WhenAPagesFirstParentIsOutsideTheToolRoot_ThenItsPathGoesThroughTheParentInsideIt()
+    {
+        // Arrange
+        // The page got the storage first, which the tool root below does not hold.
+        var (graphRoot, services) = await CreateGraphAsync([]);
+        var page = ((IInterceptorSubject)graphRoot).Context.GetService<ISubjectRegistry>().KnownSubjects.Values
+            .Select(subject => subject.Subject)
+            .OfType<MarkdownFile>()
+            .Single(file => file.Name == "Notes.md");
+        var toolRoot = new AgentTestRoot(((IInterceptorSubject)graphRoot).Context)
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["Page"] = page }
+        };
+        var tool = CreateTool(services, toolRoot, isAgent: false);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Page"], result.GetProperty("pages").EnumerateArray().Select(match => match.GetProperty("path").GetString()));
     }
 
     private async Task<McpToolInfo> CreateToolAsync(params (string Path, string Content)[] additionalFiles)

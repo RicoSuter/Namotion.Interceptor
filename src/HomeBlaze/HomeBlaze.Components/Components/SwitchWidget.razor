@@ -20,6 +20,12 @@
     var offProperty = ValueReader.ResolveProperty(PathResolver, widget, off);
     var valueMap = ValueReader.ResolveMap(PathResolver, widget, map, out var mapError);
     var label = _label.Render(widget.Label, PathResolver, widget, path, TimeZone, out var labelError);
+    if (string.IsNullOrEmpty(label))
+    {
+        // Written empty, the label hides the label of a tile; empty from a missing value, it leaves it to the property.
+        label = widget.Label is "" ? "" : null;
+    }
+
     var subtitle = _subtitle.Render(widget.Subtitle, PathResolver, widget, path, TimeZone, out var subtitleError);
     if (string.IsNullOrEmpty(subtitle))
     {

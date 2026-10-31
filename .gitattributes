@@ -64,3 +64,6 @@
 
 # Verify
 *.verified.txt text eol=lf working-tree-encoding=UTF-8
+
+# Golden HTML is compared byte for byte with what the browser renders
+src/HomeBlaze/HomeBlaze.E2E.Tests/Golden/*.html text eol=lf

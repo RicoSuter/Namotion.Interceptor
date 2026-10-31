@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Tests.Context;
@@ -88,6 +89,150 @@ public class ContextServiceResolutionTests
         Assert.Same(duplicate0, services[1]);
         Assert.Same(duplicate1, services[2]);
     }
+
+    [Fact]
+    public void WhenSubjectContextsFallBackToSameContext_ThenGetServicesReturnsSameArrayInstance()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new MarkerService());
+        var first = new Car(context);
+        var second = new Car(context);
+
+        // Act
+        var firstServices = ((IInterceptorSubject)first).Context.GetServices<MarkerService>();
+        var secondServices = ((IInterceptorSubject)second).Context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(ImmutableCollectionsMarshal.AsArray(firstServices), ImmutableCollectionsMarshal.AsArray(secondServices));
+        Assert.Same(ImmutableCollectionsMarshal.AsArray(context.GetServices<MarkerService>()), ImmutableCollectionsMarshal.AsArray(firstServices));
+    }
+
+    [Fact]
+    public void WhenSubjectContextsFallBackToDifferentContexts_ThenGetServicesReturnsDifferentArrayInstances()
+    {
+        // Arrange
+        var service = new MarkerService();
+        var firstContext = InterceptorSubjectContext.Create();
+        var secondContext = InterceptorSubjectContext.Create();
+        firstContext.AddService(service);
+        secondContext.AddService(service);
+        var first = new Car(firstContext);
+        var second = new Car(secondContext);
+
+        // Act
+        var firstServices = ((IInterceptorSubject)first).Context.GetServices<MarkerService>();
+        var secondServices = ((IInterceptorSubject)second).Context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(service, Assert.Single(firstServices));
+        Assert.Same(service, Assert.Single(secondServices));
+        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(firstServices), ImmutableCollectionsMarshal.AsArray(secondServices));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenFallbackContextGainsService_ThenGetServicesReturnsNewArrayInstance(bool contextHasOwnServices)
+    {
+        // Arrange
+        var service = new MarkerService();
+        var fallback = InterceptorSubjectContext.Create();
+        fallback.AddService(service);
+        IInterceptorSubjectContext context;
+        if (contextHasOwnServices)
+        {
+            context = InterceptorSubjectContext.Create();
+            context.AddService(new object());
+            context.AddFallbackContext(fallback);
+        }
+        else
+        {
+            context = ((IInterceptorSubject)new Car(fallback)).Context;
+        }
+
+        var servicesBefore = context.GetServices<MarkerService>();
+
+        // Act
+        fallback.AddService(new object());
+        var servicesAfter = context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(service, Assert.Single(servicesBefore));
+        Assert.Same(service, Assert.Single(servicesAfter));
+        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
+    }
+
+    public enum ContextStateChange
+    {
+        OwnServiceAdded,
+        FallbackContextAdded,
+        FallbackContextRemoved
+    }
+
+    [Theory]
+    [InlineData(ContextStateChange.OwnServiceAdded)]
+    [InlineData(ContextStateChange.FallbackContextAdded)]
+    [InlineData(ContextStateChange.FallbackContextRemoved)]
+    public void WhenContextStateChanges_ThenGetServicesReturnsNewArrayInstance(ContextStateChange change)
+    {
+        // Arrange
+        var service = new MarkerService();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(service);
+        var fallback = InterceptorSubjectContext.Create();
+        fallback.AddService(new object());
+        if (change == ContextStateChange.FallbackContextRemoved)
+        {
+            context.AddFallbackContext(fallback);
+        }
+
+        var servicesBefore = context.GetServices<MarkerService>();
+
+        // Act
+        switch (change)
+        {
+            case ContextStateChange.OwnServiceAdded:
+                context.AddService(new object());
+                break;
+            case ContextStateChange.FallbackContextAdded:
+                context.AddFallbackContext(fallback);
+                break;
+            case ContextStateChange.FallbackContextRemoved:
+                context.RemoveFallbackContext(fallback);
+                break;
+        }
+
+        var servicesAfter = context.GetServices<MarkerService>();
+
+        // Assert
+        Assert.Same(service, Assert.Single(servicesBefore));
+        Assert.Same(service, Assert.Single(servicesAfter));
+        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
+    }
+
+    [Fact]
+    public void WhenFallbackContextIsRemoved_ThenTheOthersAreListedInOrderAndEarlierSnapshotIsUnchanged()
+    {
+        // Arrange
+        var first = InterceptorSubjectContext.Create();
+        var second = InterceptorSubjectContext.Create();
+        var third = InterceptorSubjectContext.Create();
+        var context = InterceptorSubjectContext.Create();
+        context.AddFallbackContext(first);
+        context.AddFallbackContext(second);
+        context.AddFallbackContext(third);
+        var snapshot = context.FallbackContexts;
+
+        // Act
+        context.RemoveFallbackContext(second);
+
+        // Assert
+        Assert.Equal(new IInterceptorSubjectContext[] { first, third }, context.FallbackContexts);
+        Assert.Equal(new IInterceptorSubjectContext[] { first, second, third }, snapshot);
+    }
+
+    private sealed class MarkerService;
 
     private interface IOrderedTestService { }
 

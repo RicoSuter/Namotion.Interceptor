@@ -15,15 +15,37 @@
     scroll-margin-top: calc(var(--mud-appbar-height) + 0.5rem);
 }
 
-/* The blocks of a page are 1rem apart, from each other and from the text around them. */
-.markdown-content > ::deep .subject-component-wrapper {
-    margin: 1rem 0;
+/* The gap between the blocks of a page, 1rem, which the rules below call the 1rem. Edited inline on a touch screen it is
+   1.5rem, so that the button of an insert line, as high as the gap, has the target size of 24 pixels (see the insert line
+   in SubjectComponent.razor.css of HomeBlaze.Components). */
+.markdown-content {
+    --block-gap: 1rem;
 }
 
-/* A widget that shows nothing, such as a ValueMap, takes no space, in view mode as in edit mode (see
-   SubjectComponent.razor.css of HomeBlaze.Components). */
+@media (pointer: coarse) {
+    .markdown-content-inline {
+        --block-gap: 1.5rem;
+    }
+}
+
+/* The blocks of a page are 1rem apart, from each other and from the text around them. */
+.markdown-content > ::deep .subject-component-wrapper {
+    margin: var(--block-gap) 0;
+}
+
+/* A widget that shows nothing, such as a ValueMap on a viewed page, takes no space (see SubjectComponent.razor.css of
+   HomeBlaze.Components). Edited inline, it shows a chip in its place. */
 .markdown-content ::deep .subject-component-wrapper:empty {
     display: none;
+}
+
+/* In the preview next to the editor, every block of text stands in a wrapper that a click reveals (see MarkdownContentView),
+   and the text stands where a viewed page shows it. The wrapper takes no margin, also as a block of a container, so that
+   the margins of its text collapse through it, and the rules below that space the text of a viewed page give the text in
+   the wrapper the same margins. */
+.markdown-content ::deep .subject-component-wrapper.revealable.text-block,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block {
+    margin: 0;
 }
 
 /* The content of a container: a card body, a tab, an expansion panel, a layout cell, an alert or a Responsive. Its blocks
@@ -35,18 +57,25 @@
     display: flow-root;
 }
 
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > * {
-    margin-top: 1rem;
-    margin-bottom: 1rem;
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
+    margin-top: var(--block-gap);
+    margin-bottom: var(--block-gap);
 }
 
 /* A heading is closer to the text below it than to the block above it. A heading that ends the content keeps its 1rem,
-   which the box at the end cancels. */
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child) {
+   which the box at the end cancels. Edited inline, a heading stands in the wrapper of its block of text and keeps the 1rem
+   of a block (see below). */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6):not(:last-child),
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > :is(h1, h2, h3, h4, h5, h6):not(:last-child),
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:not(:last-child) > .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child {
     margin-bottom: 0.5rem;
 }
 
-.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + * {
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > :is(h1, h2, h3, h4, h5, h6) + *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > :is(h1, h2, h3, h4, h5, h6) + *,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child) + .subject-component-wrapper.revealable.text-block > .markdown-text > :first-child,
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block:has(> .markdown-text > :is(h1, h2, h3, h4, h5, h6):last-child) + :not(.subject-component-wrapper.revealable.text-block) {
     margin-top: 0.5rem;
 }
 
@@ -59,11 +88,21 @@
 }
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::before {
-    margin-bottom: -1rem;
+    margin-bottom: calc(-1 * var(--block-gap));
 }
 
 .markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment::after {
-    margin-top: -1rem;
+    margin-top: calc(-1 * var(--block-gap));
+}
+
+/* Edited inline, the content of a container also keeps 1rem inside its edges, so that every item of an edited content is at
+   least 1rem from the next one and from the edges: the button of an insert line is 1rem high and centered on its line,
+   which takes no room, and fits there without covering a block, also where a container clips its content. The gaps stay
+   while no line shows, so that the page does not move when the selection shows or hides the lines. The content of a grid
+   cell or a canvas node fills its place and never has lines. */
+.markdown-content-inline ::deep :is(.mud-card-content, .layout-cell, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment {
+    padding-block: var(--block-gap);
+    box-sizing: border-box;
 }
 
 /* The blocks of a card footer, such as buttons, stand in a row, and the footer padding is the space at its edges. */
@@ -74,7 +113,8 @@
     gap: 8px;
 }
 
-.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > * {
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > *,
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper.revealable.text-block > .markdown-text > * {
     margin: 0;
 }
 
@@ -89,7 +129,7 @@
    the page. The box takes the margins of the table, so the spacing rules above apply to it as to any block. */
 .markdown-content ::deep .markdown-table {
     overflow-x: auto;
-    margin: 1rem 0;
+    margin: var(--block-gap) 0;
 }
 
 .markdown-content ::deep .markdown-table > table {
@@ -101,4 +141,61 @@
    that is still too wide scrolls in its box. */
 .markdown-content ::deep :not(pre) > code {
     overflow-wrap: break-word;
+}
+
+/* An insert line in the row of a card footer stands between two blocks of the row and takes none of its gap: the margins
+   are half of the gap of the row above on each side and change with it. The gap is narrower than the button, which stands
+   above the row, in the padding between the row and the body of the card: the line is as high as the row, so that its
+   top is the top of the row. */
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .block-insert-line {
+    align-self: stretch;
+    height: auto;
+    margin: 0 -4px;
+}
+
+.markdown-content ::deep .card-widget > .mud-card-actions > .subject-component-wrapper > .markdown-fragment > .block-insert-line > .block-insert-line-bar {
+    right: auto;
+    top: -12px;
+    transform: translate(-50%, -50%);
+}
+
+/* Empty content that is edited inline, such as a new item of a list, is a box with the button of its one insert line in the
+   middle, drawn in the color of the lines (see MarkdownContentView). Its line stands in the flow of the box and has no
+   strokes, unlike a line between blocks, which takes no room. */
+.markdown-content ::deep .content-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    border: 1px dashed rgba(var(--mud-palette-primary-rgb), 0.7);
+    border-radius: 4px;
+}
+
+.markdown-content ::deep .content-placeholder > .block-insert-line {
+    height: auto;
+}
+
+.markdown-content ::deep .content-placeholder > .block-insert-line > .block-insert-line-bar {
+    position: static;
+    transform: none;
+}
+
+.markdown-content ::deep .content-placeholder > .block-insert-line > .block-insert-line-bar::before,
+.markdown-content ::deep .content-placeholder > .block-insert-line > .block-insert-line-bar::after {
+    display: none;
+}
+
+/* A block of text that is edited inline stands in a wrapper (see MarkdownTextWidget). On the page the wrapper takes the 1rem
+   of a block, and a larger margin of its text, such as the one above a title, collapses with it. In a container the
+   wrapper takes the margins of a block from the rules above and the text takes none. The preview next to the editor
+   spaces its text as a viewed page does, see the rules of the preview near the top of this file. */
+.markdown-content ::deep :is(.mud-card-content, .layout-cell, .grid-cell-content, .canvas-node-content, .mud-alert-message, .responsive-widget) > .subject-component-wrapper > .markdown-fragment > .subject-component-wrapper:not(.revealable) > .markdown-text > * {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* The title of a page that is edited inline makes room for the button of the page menu, as the title does above. */
+.markdown-content > ::deep .subject-component-wrapper:nth-child(1 of :has(> .markdown-text > h1)) > .markdown-text > h1 {
+    padding-right: 3rem;
 }

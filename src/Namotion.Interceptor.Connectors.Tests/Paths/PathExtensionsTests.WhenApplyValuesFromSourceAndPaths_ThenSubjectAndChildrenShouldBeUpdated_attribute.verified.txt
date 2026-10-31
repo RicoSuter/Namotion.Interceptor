@@ -69,7 +69,8 @@
       },
       firstName: {
         Kind: Value,
-        Value: Father,
+        Value: NewFather,
+        Timestamp: {Scrubbed},
         Attributes: {
           maxLength: {
             Kind: Value,
@@ -85,7 +86,7 @@
       },
       fullName: {
         Kind: Value,
-        Value: Father 
+        Value: NewFather 
       },
       lastName: {
         Kind: Value
@@ -145,7 +146,8 @@
       },
       firstName: {
         Kind: Value,
-        Value: Child1,
+        Value: NewChild1,
+        Timestamp: {Scrubbed},
         Attributes: {
           maxLength: {
             Kind: Value,
@@ -161,7 +163,7 @@
       },
       fullName: {
         Kind: Value,
-        Value: Child1 
+        Value: NewChild1 
       },
       lastName: {
         Kind: Value
@@ -221,7 +223,8 @@
       },
       firstName: {
         Kind: Value,
-        Value: Child3,
+        Value: NewChild3,
+        Timestamp: {Scrubbed},
         Attributes: {
           maxLength: {
             Kind: Value,
@@ -237,7 +240,7 @@
       },
       fullName: {
         Kind: Value,
-        Value: Child3 
+        Value: NewChild3 
       },
       lastName: {
         Kind: Value

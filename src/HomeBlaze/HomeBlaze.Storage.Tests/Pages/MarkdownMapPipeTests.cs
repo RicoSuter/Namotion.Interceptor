@@ -4,7 +4,6 @@ using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownMapPipeTests
 {
     private static readonly string Namespace = typeof(TestMeter).Namespace!;

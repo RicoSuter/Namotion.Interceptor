@@ -21,4 +21,9 @@ public sealed record SubjectSetupOptions
     /// How the dialog asks for the name, or null when the created subject has no name of its own.
     /// </summary>
     public SubjectNameOptions? NameField { get; init; }
+
+    /// <summary>
+    /// The type to create, which skips the picker and has no way back to it, or null to pick the type in the dialog.
+    /// </summary>
+    public Type? Type { get; init; }
 }

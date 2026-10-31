@@ -94,9 +94,13 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         configuration.Validate();
     }
 
-    private bool IsPropertyIncluded(PropertyReference propertyReference) =>
-        propertyReference.TryGetRegisteredProperty() is { } property &&
-        _configuration.Mapper.TryGetMapping(property, _subject, out _);
+    /// <summary>
+    /// Whether a change of the property is published: it holds no subjects and has a topic, read from the topic cache
+    /// the publish uses.
+    /// </summary>
+    internal bool IsPropertyIncluded(PropertyReference propertyReference) =>
+        propertyReference.TryGetRegisteredProperty() is { CanContainSubjects: false } property &&
+        TryGetTopicForProperty(propertyReference, property).Topic is not null;
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -484,6 +488,13 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         }
 
         var entry = (topic, resolvedMapping);
+
+        // A property without a topic can gain one when its subject gets another parent without a detach, which
+        // evicts nothing, so only topics are cached.
+        if (topic is null)
+        {
+            return entry;
+        }
 
         // Add first, then validate (guarantees no memory leak)
         if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))

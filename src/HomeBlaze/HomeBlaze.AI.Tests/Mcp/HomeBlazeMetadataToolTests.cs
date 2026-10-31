@@ -465,6 +465,28 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal(["Docs/Device|", "Docs/Pump.json|"], GetMatches(result));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenMetadataBelongsToAConfigurationProperty_ThenSearchMetadataLeavesItOutAndSetMetadataRefusesIt(bool isAgent)
+    {
+        // Arrange
+        WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
+        WriteFile("Docs/Device.metadata.json", """{ "$properties": { "Host": { "tags": ["floor-2"] } } }""");
+        var (tools, _) = await CreateToolsAsync(isAgent);
+
+        // Act
+        var search = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+        var set = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Device", property = "Host", values = new { comment = "x" } }
+        });
+
+        // Assert
+        Assert.Empty(GetMatches(search));
+        Assert.Equal("The subject has no property 'Host'.", set.GetProperty("error").GetString());
+    }
+
     [Fact]
     public async Task WhenARoleHidesABranchOrTheMetadataOfASubject_ThenSearchMetadataLeavesThemOut()
     {

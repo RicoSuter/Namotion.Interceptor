@@ -1,0 +1,423 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.AI.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.E2E.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.AI.Agents
+{
+    public sealed class AgentBackendTool : System.IEquatable<HomeBlaze.AI.Agents.AgentBackendTool>
+    {
+        public AgentBackendTool(string Name, string Summary, bool LoadsWebContent) { }
+        public bool LoadsWebContent { get; init; }
+        public string Name { get; init; }
+        public string Summary { get; init; }
+        public static HomeBlaze.AI.Agents.AgentBackendTool WebFetch { get; }
+        public static HomeBlaze.AI.Agents.AgentBackendTool WebSearch { get; }
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentBackendTool> WebTools { get; }
+    }
+    public enum AgentEffort
+    {
+        Low = 0,
+        Medium = 1,
+        High = 2,
+        ExtraHigh = 3,
+        Max = 4,
+    }
+    public enum AgentFailureKind
+    {
+        Transient = 0,
+        UsageLimit = 1,
+        Configuration = 2,
+    }
+    public sealed class AgentMemory
+    {
+        public const int MaxEntries = 200;
+        public const int MaxKeyLength = 128;
+        public const int MaxSize = 8192;
+        public const int MaxValueLength = 1000;
+        public const string ToolName = "update_memory";
+        public AgentMemory(string? filePath, System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger? logger = null) { }
+        public event System.Action? Changed;
+        public Namotion.Interceptor.Mcp.McpToolInfo CreateUpdateTool() { }
+        public HomeBlaze.AI.Agents.AgentMemorySnapshot GetSnapshot() { }
+        public System.Threading.Tasks.Task LoadAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<HomeBlaze.AI.Agents.AgentMemoryUpdateResult> UpdateAsync(System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentMemoryChange> changes, System.Threading.CancellationToken cancellationToken) { }
+        public static string? ValidateKey(string key, out string normalizedKey) { }
+    }
+    public sealed class AgentMemoryChange : System.IEquatable<HomeBlaze.AI.Agents.AgentMemoryChange>
+    {
+        public AgentMemoryChange(string Key, string? Value) { }
+        public string Key { get; init; }
+        public string? Value { get; init; }
+        public static HomeBlaze.AI.Agents.AgentMemoryChange Remove(string key) { }
+        public static HomeBlaze.AI.Agents.AgentMemoryChange Set(string key, string value) { }
+    }
+    public sealed class AgentMemoryEntry : System.IEquatable<HomeBlaze.AI.Agents.AgentMemoryEntry>
+    {
+        public AgentMemoryEntry(string Key, string Value, System.DateTimeOffset Updated) { }
+        public string Key { get; init; }
+        public System.DateTimeOffset Updated { get; init; }
+        public string Value { get; init; }
+    }
+    public sealed class AgentMemorySnapshot
+    {
+        public static readonly HomeBlaze.AI.Agents.AgentMemorySnapshot Empty;
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.AI.Agents.AgentMemoryEntry> Entries { get; }
+        public int Size { get; }
+        public HomeBlaze.AI.Agents.AgentMemoryEntry? TryGetEntry(string key) { }
+    }
+    public sealed class AgentMemoryUpdateResult : System.IEquatable<HomeBlaze.AI.Agents.AgentMemoryUpdateResult>
+    {
+        public AgentMemoryUpdateResult(string? Error, System.Collections.Immutable.ImmutableArray<string> Applied, HomeBlaze.AI.Agents.AgentMemorySnapshot Snapshot) { }
+        public System.Collections.Immutable.ImmutableArray<string> Applied { get; init; }
+        public string? Error { get; init; }
+        public HomeBlaze.AI.Agents.AgentMemorySnapshot Snapshot { get; init; }
+        public bool Succeeded { get; }
+    }
+    public sealed class AgentRateLimit : System.IEquatable<HomeBlaze.AI.Agents.AgentRateLimit>
+    {
+        public AgentRateLimit(string Status, double? FiveHourUtilization, System.DateTimeOffset? FiveHourResetsAt, double? SevenDayUtilization, System.DateTimeOffset? SevenDayResetsAt) { }
+        public System.DateTimeOffset? FiveHourResetsAt { get; init; }
+        public double? FiveHourUtilization { get; init; }
+        public System.DateTimeOffset? SevenDayResetsAt { get; init; }
+        public double? SevenDayUtilization { get; init; }
+        public string Status { get; init; }
+    }
+    public static class AgentServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeAgents(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+    public sealed class AgentServices
+    {
+        public AgentServices(HomeBlaze.AI.Agents.IAgentToolSource toolSource, HomeBlaze.AI.Agents.AgentTurnTokenRegistry tokenRegistry, HomeBlaze.AI.Agents.IAgentEndpointAddress endpointAddress, System.TimeProvider timeProvider, HomeBlaze.Authorization.AuthorizationService authorizationService) { }
+        public HomeBlaze.Authorization.AuthorizationService AuthorizationService { get; }
+        public HomeBlaze.AI.Agents.IAgentEndpointAddress EndpointAddress { get; }
+        public System.TimeProvider TimeProvider { get; }
+        public HomeBlaze.AI.Agents.AgentTurnTokenRegistry TokenRegistry { get; }
+        public HomeBlaze.AI.Agents.IAgentToolSource ToolSource { get; }
+    }
+    public sealed class AgentTextDelta : HomeBlaze.AI.Agents.AgentTurnUpdate, System.IEquatable<HomeBlaze.AI.Agents.AgentTextDelta>
+    {
+        public AgentTextDelta(string Text) { }
+        public string Text { get; init; }
+    }
+    public sealed class AgentTimeline
+    {
+        public AgentTimeline(string? filePath, int capacity = 500) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentTimelineEntry> Entries { get; }
+        public System.Threading.Tasks.Task AppendAsync(HomeBlaze.AI.Agents.AgentTimelineEntry entry, System.Threading.CancellationToken cancellationToken) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentTimelineEntry> GetFindingsSinceLastReply() { }
+        public System.DateTimeOffset? GetLastBackgroundRunTime() { }
+        public System.DateTimeOffset? GetLastQuietRunTime() { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentTimelineEntry> GetRecentBackgroundResults(int count) { }
+        public System.Threading.Tasks.Task LoadAsync(System.Threading.CancellationToken cancellationToken) { }
+        public static bool IsBackgroundRun(HomeBlaze.AI.Agents.AgentTimelineEntry entry) { }
+    }
+    public sealed class AgentTimelineEntry : System.IEquatable<HomeBlaze.AI.Agents.AgentTimelineEntry>
+    {
+        public AgentTimelineEntry() { }
+        public System.TimeSpan? Duration { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? FinalText { get; init; }
+        public bool IsQuiet { get; init; }
+        public required HomeBlaze.AI.Agents.AgentTimelineEntryKind Kind { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string ResultText { get; }
+        public string Text { get; init; }
+        public required System.DateTimeOffset Timestamp { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentToolCall> ToolCalls { get; init; }
+        public string? Trigger { get; init; }
+        public HomeBlaze.AI.Agents.AgentUsage? Usage { get; init; }
+    }
+    public enum AgentTimelineEntryKind
+    {
+        User = 0,
+        Assistant = 1,
+        BackgroundRun = 2,
+        Error = 3,
+        Divider = 4,
+    }
+    public sealed class AgentToolCall : System.IEquatable<HomeBlaze.AI.Agents.AgentToolCall>
+    {
+        public AgentToolCall(string Name, string Arguments, string ResultPreview, bool IsError) { }
+        public string Arguments { get; init; }
+        public bool IsError { get; init; }
+        public string Name { get; init; }
+        public string ResultPreview { get; init; }
+    }
+    public sealed class AgentToolCallCompleted : HomeBlaze.AI.Agents.AgentTurnUpdate, System.IEquatable<HomeBlaze.AI.Agents.AgentToolCallCompleted>
+    {
+        public AgentToolCallCompleted(HomeBlaze.AI.Agents.AgentToolCall Call) { }
+        public HomeBlaze.AI.Agents.AgentToolCall Call { get; init; }
+    }
+    public sealed class AgentToolSet
+    {
+        public const string EditPageLayoutPermission = "edit_page_layout";
+        public static readonly System.Collections.Generic.IReadOnlyList<string> DefaultAllowedTools;
+        public static readonly System.Collections.Generic.IReadOnlyList<string> StateChangingTools;
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentToolCall> Calls { get; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> Tools { get; }
+        public void RecordBackendCall(string name, string arguments, string result, bool isError) { }
+        public static bool CanEditPageLayout(System.Collections.Generic.IReadOnlyCollection<string> allowedTools) { }
+        public static HomeBlaze.AI.Agents.AgentToolSet Create(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> availableTools, System.Collections.Generic.IReadOnlyCollection<string> allowedTools, Namotion.Interceptor.Mcp.McpToolInfo memoryTool, int maxToolCalls, System.IProgress<HomeBlaze.AI.Agents.AgentTurnUpdate>? progress) { }
+        public static bool HasMarkdownTool(System.Collections.Generic.IReadOnlyCollection<string> allowedTools) { }
+        public static bool IsReadOnly(System.Collections.Generic.IReadOnlyCollection<string> allowedTools) { }
+        public static bool WritesPages(string toolName) { }
+    }
+    public static class AgentTriggers
+    {
+        public const string Change = "change";
+        public const string Manual = "manual";
+        public const string Poll = "poll";
+    }
+    public sealed class AgentTurnException : System.Exception
+    {
+        public AgentTurnException(HomeBlaze.AI.Agents.AgentFailureKind kind, string message, System.DateTimeOffset? retryAfter = default, System.Exception? innerException = null) { }
+        public HomeBlaze.AI.Agents.AgentFailureKind Kind { get; }
+        public System.DateTimeOffset? RetryAfter { get; }
+    }
+    public enum AgentTurnKind
+    {
+        Background = 0,
+        Chat = 1,
+    }
+    public sealed class AgentTurnRequest : System.IEquatable<HomeBlaze.AI.Agents.AgentTurnRequest>
+    {
+        public AgentTurnRequest(HomeBlaze.AI.Agents.AgentTurnKind Kind, string SystemPrompt, string UserMessage, string? Model, HomeBlaze.AI.Agents.AgentEffort? Effort, HomeBlaze.AI.Agents.AgentToolSet Tools) { }
+        public System.Collections.Generic.IReadOnlyList<string> BackendTools { get; init; }
+        public HomeBlaze.AI.Agents.AgentEffort? Effort { get; init; }
+        public HomeBlaze.AI.Agents.AgentTurnKind Kind { get; init; }
+        public string? Model { get; init; }
+        public string SystemPrompt { get; init; }
+        public HomeBlaze.AI.Agents.AgentToolSet Tools { get; init; }
+        public string UserMessage { get; init; }
+    }
+    public sealed class AgentTurnResult : System.IEquatable<HomeBlaze.AI.Agents.AgentTurnResult>
+    {
+        public AgentTurnResult(string Text, HomeBlaze.AI.Agents.AgentUsage? Usage, HomeBlaze.AI.Agents.AgentRateLimit? RateLimit) { }
+        public string FinalText { get; init; }
+        public HomeBlaze.AI.Agents.AgentRateLimit? RateLimit { get; init; }
+        public string Text { get; init; }
+        public HomeBlaze.AI.Agents.AgentUsage? Usage { get; init; }
+    }
+    public sealed class AgentTurnTokenRegistry
+    {
+        public AgentTurnTokenRegistry() { }
+        public bool TryGetToolSet(string token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.AI.Agents.AgentToolSet? toolSet) { }
+    }
+    public abstract class AgentTurnUpdate : System.IEquatable<HomeBlaze.AI.Agents.AgentTurnUpdate>
+    {
+        protected AgentTurnUpdate() { }
+    }
+    public sealed class AgentUsage : System.IEquatable<HomeBlaze.AI.Agents.AgentUsage>
+    {
+        public AgentUsage(long InputTokens, long OutputTokens, long CacheReadInputTokens, long CacheCreationInputTokens) { }
+        public long CacheCreationInputTokens { get; init; }
+        public long CacheReadInputTokens { get; init; }
+        public long InputTokens { get; init; }
+        public long OutputTokens { get; init; }
+    }
+    public interface IAgentEndpointAddress
+    {
+        System.Uri? GetAgentEndpoint();
+    }
+    public interface IAgentToolSource
+    {
+        System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(bool isReadOnly, Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy accessPolicy);
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public abstract class LlmAgentBase : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const string AnsweringStatusMessage = "Answering";
+        public const string BackgroundRunStatusMessage = "Running";
+        public const string CancelledText = "Cancelled before a reply.";
+        public const string NotRunningText = "The agent is not running.";
+        public const string WaitingStatusMessage = "Waiting for the previous turn to finish";
+        public static readonly System.TimeSpan MaximumTurnTimeout;
+        protected LlmAgentBase(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger logger, System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentBackendTool>? supportedBackendTools = null) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] AllowedTools { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.AI.Agents.AgentEffort? BackgroundEffort { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? BackgroundModel { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public HomeBlaze.AI.Agents.AgentEffort? Effort { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State("Usage (5 hours)", Position=8)]
+        public double? FiveHourUsage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string? IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Instructions { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool IsBusy { get; }
+        public bool IsStorageLoaded { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Last Activity", Position=5)]
+        public System.DateTimeOffset? LastActivityTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Last Analysis", Position=4)]
+        public string? LastAnalysis { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Last Background Run", Position=6)]
+        public System.DateTimeOffset? LastRunTime { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxToolCallsPerTurn { get; set; }
+        public HomeBlaze.AI.Agents.AgentMemory Memory { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan MinRunInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Model { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan? PollInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.List<string> Roles { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State("Background Runs", Position=7)]
+        public int RunCount { get; }
+        protected HomeBlaze.AI.Agents.AgentServices Services { get; }
+        [HomeBlaze.Abstractions.Attributes.State("Usage (7 days)", Position=9)]
+        public double? SevenDayUsage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? StatusMessage { get; }
+        public string StreamingText { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentBackendTool> SupportedBackendTools { get; }
+        public HomeBlaze.AI.Agents.AgentTimeline Timeline { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan TurnTimeout { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] WatchPaths { get; set; }
+        protected string WorkingDirectory { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public event System.Action? StateChanged;
+        protected System.Threading.Tasks.Task AppendDividerAsync(string text) { }
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected abstract System.Threading.Tasks.Task<HomeBlaze.AI.Agents.AgentTurnResult> ExecuteTurnAsync(HomeBlaze.AI.Agents.AgentTurnRequest request, System.IProgress<HomeBlaze.AI.Agents.AgentTurnUpdate> progress, System.Threading.CancellationToken cancellationToken);
+        public System.TimeSpan GetEffectiveMinRunInterval() { }
+        public System.TimeSpan? GetEffectiveTurnTimeout() { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected int GetModelRoundLimit() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="RestartAlt", Position=2, RequiresConfirmation=true, Title="New Conversation")]
+        public System.Threading.Tasks.Task NewConversationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected virtual System.Threading.Tasks.Task OnChatTurnCompletedAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected virtual System.Threading.Tasks.Task OnStartingAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected System.Threading.Tasks.Task<T?> ReadSessionAsync<T>(System.Func<string, T?> parse, System.Threading.CancellationToken cancellationToken)
+            where T :  class { }
+        protected abstract System.Threading.Tasks.Task ResetSessionAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PlayArrow", Position=1, Title="Run Now")]
+        public void RunNow() { }
+        public System.Threading.Tasks.Task SendMessageAsync(string text, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        protected System.Threading.Tasks.Task WriteSessionAsync(string? content, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace HomeBlaze.AI.Agents.Anthropic
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("AI")]
+    [System.ComponentModel.Description("AI agent using the Anthropic API with an API key.")]
+    public class AnthropicAgent : HomeBlaze.AI.Agents.LlmAgentBase, Namotion.Interceptor.IInterceptorSubject
+    {
+        public AnthropicAgent(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.AI.Agents.Anthropic.AnthropicAgent> logger) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string? ApiKey { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int HistoryTokenBudget { get; set; }
+        protected virtual System.Net.Http.HttpClient HttpClient { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int MaxTokens { get; set; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        protected virtual Microsoft.Extensions.AI.IChatClient CreateChatClient(string apiKey) { }
+        protected override System.Threading.Tasks.Task<HomeBlaze.AI.Agents.AgentTurnResult> ExecuteTurnAsync(HomeBlaze.AI.Agents.AgentTurnRequest request, System.IProgress<HomeBlaze.AI.Agents.AgentTurnUpdate> progress, System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task OnChatTurnCompletedAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task OnStartingAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ResetSessionAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace HomeBlaze.AI.Agents.ClaudeCli
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("AI")]
+    [System.ComponentModel.Description("AI agent running on your Claude subscription through the locally installed claude" +
+        " CLI.")]
+    public class ClaudeCliAgent : HomeBlaze.AI.Agents.LlmAgentBase, Namotion.Interceptor.IInterceptorSubject
+    {
+        public ClaudeCliAgent(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.AI.Agents.ClaudeCli.ClaudeCliAgent> logger) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string CliPath { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? FallbackModel { get; set; }
+        public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        protected override System.Threading.Tasks.Task<HomeBlaze.AI.Agents.AgentTurnResult> ExecuteTurnAsync(HomeBlaze.AI.Agents.AgentTurnRequest request, System.IProgress<HomeBlaze.AI.Agents.AgentTurnUpdate> progress, System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task OnStartingAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override System.Threading.Tasks.Task ResetSessionAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace HomeBlaze.AI.Mcp
+{
+    public sealed class AllowAllMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
+    {
+        public static HomeBlaze.AI.Mcp.AllowAllMcpAccessPolicy Instance { get; }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+    }
+    public sealed class AuthorizationMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
+    {
+        public AuthorizationMcpAccessPolicy(Namotion.Interceptor.Authorization.AuthorizationPolicy policy, Microsoft.Extensions.Logging.ILogger? logger = null, string? clientName = null) { }
+        public Namotion.Interceptor.Authorization.AuthorizationPolicy Policy { get; }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+    }
+    public class HomeBlazeMarkdownSearchToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
+    {
+        public const string SearchMarkdownToolName = "search_markdown";
+        public System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools() { }
+    }
+    public class HomeBlazeMarkdownToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
+    {
+        public const string CreateMarkdownToolName = "create_markdown";
+        public const string EditMarkdownToolName = "edit_markdown";
+        public const string WriteMarkdownToolName = "write_markdown";
+        public static System.Collections.Generic.IReadOnlyList<string> ToolNames { get; }
+        public System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools() { }
+    }
+    public class HomeBlazeMcpToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
+    {
+        public const string InvokeOperationToolName = "invoke_operation";
+        public const string InvokeQueryToolName = "invoke_query";
+        public System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools() { }
+    }
+    public static class McpToolProviderServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeMcpToolProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<HomeBlaze.AI.McpToolProviderContext, Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider> create) { }
+    }
+    public class StateAttributePathProvider : Namotion.Interceptor.Registry.Paths.PathProviderBase
+    {
+        public StateAttributePathProvider() { }
+        public override char PathSeparator { get; }
+        public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public override Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment) { }
+        public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
+}
+namespace HomeBlaze.AI
+{
+    public static class McpBuilderExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IMcpServerBuilder WithHomeBlazeMcpTools(this Microsoft.Extensions.DependencyInjection.IMcpServerBuilder builder, bool isReadOnly = true) { }
+    }
+    public readonly struct McpToolProviderContext : System.IEquatable<HomeBlaze.AI.McpToolProviderContext>
+    {
+        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider, bool IsReadOnly, Namotion.Interceptor.Mcp.McpServerConfiguration Configuration) { }
+        public Namotion.Interceptor.Mcp.McpServerConfiguration Configuration { get; init; }
+        public bool IsReadOnly { get; init; }
+        public Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; init; }
+        public System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider { get; init; }
+        public System.IServiceProvider Services { get; init; }
+    }
+}

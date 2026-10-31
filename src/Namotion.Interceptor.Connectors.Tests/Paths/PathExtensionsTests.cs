@@ -311,15 +311,12 @@ public class PathExtensionsTests
         Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
     }
 
-    // Multi-segment round-trip tests use DefaultPathProvider only because
-    // AttributeBasedPathProvider can't resolve intermediate segments without [Path] attributes.
-
-    [Fact]
-    public void WhenRoundTrip_DirectChild_ResolvesBackToSameProperty()
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRoundTrip_DirectChild_ResolvesBackToSameProperty(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
-        var pathProvider = DefaultPathProvider.Instance;
         var originalProperty = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!;
         var path = originalProperty.TryGetPath(pathProvider, null)!;
 
@@ -327,17 +324,15 @@ public class PathExtensionsTests
         var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
 
         // Assert
-        Assert.NotNull(resolvedProperty);
-        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
-        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+        Assert.Same(originalProperty, resolvedProperty);
     }
 
-    [Fact]
-    public void WhenRoundTrip_ListIndexed_ResolvesBackToSameProperty()
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRoundTrip_ListIndexed_ResolvesBackToSameProperty(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
-        var pathProvider = DefaultPathProvider.Instance;
         var originalProperty = person.TryGetRegisteredProperty(p => p.Children[1].FirstName)!;
         var path = originalProperty.TryGetPath(pathProvider, null)!;
 
@@ -345,17 +340,15 @@ public class PathExtensionsTests
         var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
 
         // Assert
-        Assert.NotNull(resolvedProperty);
-        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
-        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+        Assert.Same(originalProperty, resolvedProperty);
     }
 
-    [Fact]
-    public void WhenRoundTrip_DictionaryKeyed_ResolvesBackToSameProperty()
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRoundTrip_DictionaryKeyed_ResolvesBackToSameProperty(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
-        var pathProvider = DefaultPathProvider.Instance;
         var originalProperty = person.TryGetRegisteredProperty(p => p.Relationships!["boss"].FirstName)!;
         var path = originalProperty.TryGetPath(pathProvider, null)!;
 
@@ -363,17 +356,15 @@ public class PathExtensionsTests
         var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
 
         // Assert
-        Assert.NotNull(resolvedProperty);
-        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
-        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+        Assert.Same(originalProperty, resolvedProperty);
     }
 
-    [Fact]
-    public void WhenRoundTrip_DeeplyNested_ResolvesBackToSameProperty()
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRoundTrip_DeeplyNested_ResolvesBackToSameProperty(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
-        var pathProvider = DefaultPathProvider.Instance;
         var originalProperty = person.TryGetRegisteredProperty(p => p.Father!.Mother!.FirstName)!;
         var path = originalProperty.TryGetPath(pathProvider, null)!;
 
@@ -381,9 +372,7 @@ public class PathExtensionsTests
         var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
 
         // Assert
-        Assert.NotNull(resolvedProperty);
-        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
-        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+        Assert.Same(originalProperty, resolvedProperty);
     }
 
     [Theory]
@@ -599,11 +588,11 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenPropertyIsExcludedByProvider_ThenConnectorsResolverIgnoresItAndRegistryResolverFindsIt()
+    public void WhenPropertyIsExcludedByProvider_ThenItIsNotResolved()
     {
         // Arrange
         var person = CreateTestGraph();
-        var pathProvider = new ExcludingLastNamePathProvider();
+        var pathProvider = new ExcludingPathProvider(nameof(Person.LastName));
 
         // Act
         var (connectorsProperty, _) = person.TryGetPropertyFromPath("LastName", pathProvider);
@@ -611,7 +600,25 @@ public class PathExtensionsTests
 
         // Assert
         Assert.Null(connectorsProperty);
-        Assert.NotNull(registryResult);
+        Assert.Null(registryResult);
+    }
+
+    [Fact]
+    public void WhenHoldingPropertyIsExcludedByProvider_ThenNoPathIsBuiltOrResolvedThroughIt()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+        var timestamp = DateTimeOffset.UtcNow;
+
+        // Act
+        var path = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!.TryGetPath(pathProvider, null);
+        var applied = person.UpdatePropertyValueFromPath("Father.FirstName", timestamp, "Changed", pathProvider, source: null);
+
+        // Assert
+        Assert.Null(path);
+        Assert.False(applied);
+        Assert.Equal("Father", person.Father!.FirstName);
     }
 
     [Fact]
@@ -673,8 +680,8 @@ public class PathExtensionsTests
         return person;
     }
 
-    private sealed class ExcludingLastNamePathProvider : PathProviderBase
+    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != nameof(Person.LastName);
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
 }

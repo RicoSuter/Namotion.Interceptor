@@ -121,3 +121,60 @@ public partial class TestDeviceList
         Devices = [];
     }
 }
+
+/// <summary>
+/// A subject equal to every other instance of its type, so only a comparison by reference tells two apart.
+/// </summary>
+[InterceptorSubject]
+public partial class TestEqualItem
+{
+    public partial string Name { get; set; }
+
+    public TestEqualItem()
+    {
+        Name = string.Empty;
+    }
+
+    public override bool Equals(object? obj) => obj is TestEqualItem;
+
+    public override int GetHashCode() => 0;
+}
+
+/// <summary>
+/// A subject holding one device through an attribute of <see cref="Name"/> and another through a property.
+/// </summary>
+[InterceptorSubject]
+public partial class TestAttributedRoom
+{
+    public partial string Name { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Name), "Spare")]
+    public partial TestDevice? Name_Spare { get; set; }
+
+    public partial TestDevice? Device { get; set; }
+
+    public TestAttributedRoom()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Two attributes that belong to each other, so neither belongs to a property that is no attribute.
+/// </summary>
+[InterceptorSubject]
+public partial class TestCyclicAttributes
+{
+    public partial string Name { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Second), "First")]
+    public partial string? First { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(First), "Second")]
+    public partial string? Second { get; set; }
+
+    public TestCyclicAttributes()
+    {
+        Name = string.Empty;
+    }
+}

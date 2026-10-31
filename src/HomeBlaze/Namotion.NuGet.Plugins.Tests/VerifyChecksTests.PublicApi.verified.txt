@@ -1,0 +1,194 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.NuGet.Plugins.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.NuGet.Plugins.Configuration
+{
+    public class HostDependencyResolver
+    {
+        public System.Collections.Generic.IReadOnlyDictionary<string, NuGet.Versioning.NuGetVersion> Dependencies { get; }
+        public bool Contains(string packageName) { }
+        public NuGet.Versioning.NuGetVersion? GetVersion(string packageName) { }
+        public static Namotion.NuGet.Plugins.Configuration.HostDependencyResolver FromAssemblies(System.Collections.Generic.IEnumerable<System.Reflection.Assembly> assemblies) { }
+        public static Namotion.NuGet.Plugins.Configuration.HostDependencyResolver FromAssemblies([System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Name",
+                "Version"})] params System.ValueTuple<string, System.Version>[] assemblies) { }
+        public static Namotion.NuGet.Plugins.Configuration.HostDependencyResolver FromDepsJson() { }
+        public static Namotion.NuGet.Plugins.Configuration.HostDependencyResolver FromDepsJson(System.Reflection.Assembly assembly) { }
+        public static Namotion.NuGet.Plugins.Configuration.HostDependencyResolver FromDepsJson(string depsJsonPath) { }
+    }
+    public class NuGetFeed
+    {
+        public NuGetFeed(string name, string url, string? apiKey = null) { }
+        public string? ApiKey { get; }
+        public string Name { get; }
+        public string Url { get; }
+        public static Namotion.NuGet.Plugins.Configuration.NuGetFeed NuGetOrg { get; }
+    }
+    public class NuGetPluginLoaderOptions
+    {
+        public NuGetPluginLoaderOptions() { }
+        public string? CacheDirectory { get; set; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Configuration.NuGetFeed> Feeds { get; set; }
+        public Namotion.NuGet.Plugins.Configuration.HostDependencyResolver? HostDependencies { get; set; }
+        public string? HostIdentifier { get; set; }
+        public bool IncludePrerelease { get; set; }
+        public System.Func<string, bool>? IsHostPackage { get; set; }
+    }
+    public class NuGetPluginReference : System.IEquatable<Namotion.NuGet.Plugins.Configuration.NuGetPluginReference>
+    {
+        public NuGetPluginReference(string PackageName, string? Version = null) { }
+        public string PackageName { get; init; }
+        public string? Version { get; init; }
+    }
+}
+namespace Namotion.NuGet.Plugins.Loading
+{
+    public class NuGetPlugin : System.IDisposable
+    {
+        public System.Collections.Generic.IReadOnlyList<System.Reflection.Assembly> Assemblies { get; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.NuGetPluginDependency> Dependencies { get; }
+        public Namotion.NuGet.Plugins.NuGetPackageMetadata Metadata { get; }
+        public System.Xml.Linq.XDocument? Nuspec { get; }
+        public string PackageName { get; }
+        public string PackageVersion { get; }
+        public System.Text.Json.JsonElement? PluginManifest { get; }
+        public void Dispose() { }
+        public System.Collections.Generic.IEnumerable<System.Type> GetTypes(System.Func<System.Type, bool> predicate) { }
+        public System.Collections.Generic.IEnumerable<System.Type> GetTypes<T>() { }
+    }
+    public class NuGetPluginLoader : System.IDisposable
+    {
+        public NuGetPluginLoader(Namotion.NuGet.Plugins.Configuration.NuGetPluginLoaderOptions options, Microsoft.Extensions.Logging.ILogger<Namotion.NuGet.Plugins.Loading.NuGetPluginLoader>? logger = null) { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Loading.NuGetPlugin> LoadedPlugins { get; }
+        public void Dispose() { }
+        public System.Collections.Generic.IEnumerable<System.Type> GetTypes(System.Func<System.Type, bool> predicate) { }
+        public System.Collections.Generic.IEnumerable<System.Type> GetTypes<T>() { }
+        public System.Threading.Tasks.Task<Namotion.NuGet.Plugins.NuGetPluginLoadResult> LoadPluginsAsync(System.Collections.Generic.IEnumerable<Namotion.NuGet.Plugins.Configuration.NuGetPluginReference> plugins, System.Threading.CancellationToken cancellationToken) { }
+        public bool UnloadPlugin(Namotion.NuGet.Plugins.Loading.NuGetPlugin plugin) { }
+    }
+}
+namespace Namotion.NuGet.Plugins
+{
+    public enum NuGetDependencyClassification
+    {
+        Host = 0,
+        Entry = 1,
+        Isolated = 2,
+    }
+    public class NuGetPackageMetadata : System.IEquatable<Namotion.NuGet.Plugins.NuGetPackageMetadata>
+    {
+        public NuGetPackageMetadata() { }
+        public string Authors { get; init; }
+        public string Description { get; init; }
+        public string? IconUrl { get; init; }
+        public string? LicenseUrl { get; init; }
+        public string? ProjectUrl { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Tags { get; init; }
+        public string Title { get; init; }
+    }
+    public static class NuGetPackageNameMatcher
+    {
+        public static bool IsMatch(string packageName, string pattern) { }
+        public static bool IsMatchAny(string packageName, System.Collections.Generic.IReadOnlyList<string> patterns) { }
+    }
+    public abstract class NuGetPluginConflict : System.IEquatable<Namotion.NuGet.Plugins.NuGetPluginConflict>
+    {
+        protected NuGetPluginConflict(string PackageName) { }
+        public string PackageName { get; init; }
+    }
+    public class NuGetPluginDependency : System.IEquatable<Namotion.NuGet.Plugins.NuGetPluginDependency>
+    {
+        public NuGetPluginDependency() { }
+        public required Namotion.NuGet.Plugins.NuGetDependencyClassification Classification { get; init; }
+        public required string PackageName { get; init; }
+        public required string Version { get; init; }
+    }
+    public class NuGetPluginFailure : System.IEquatable<Namotion.NuGet.Plugins.NuGetPluginFailure>
+    {
+        public NuGetPluginFailure(string PackageName, string Reason, System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.NuGetPluginConflict>? Conflicts = null, System.Exception? Exception = null) { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.NuGetPluginConflict>? Conflicts { get; init; }
+        public System.Exception? Exception { get; init; }
+        public string PackageName { get; init; }
+        public string Reason { get; init; }
+    }
+    public class NuGetPluginHostConflict : Namotion.NuGet.Plugins.NuGetPluginConflict, System.IEquatable<Namotion.NuGet.Plugins.NuGetPluginHostConflict>
+    {
+        public NuGetPluginHostConflict(string PackageName, string RequiredVersion, string HostVersion, string PluginName) { }
+        public string HostVersion { get; init; }
+        public string PluginName { get; init; }
+        public string RequiredVersion { get; init; }
+    }
+    public class NuGetPluginLoadResult : System.IEquatable<Namotion.NuGet.Plugins.NuGetPluginLoadResult>
+    {
+        public NuGetPluginLoadResult(System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Loading.NuGetPlugin> LoadedPlugins, System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.NuGetPluginFailure> Failures) { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.NuGetPluginFailure> Failures { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Loading.NuGetPlugin> LoadedPlugins { get; init; }
+        public bool Success { get; }
+    }
+    public class NuGetPluginRangeConflict : Namotion.NuGet.Plugins.NuGetPluginConflict, System.IEquatable<Namotion.NuGet.Plugins.NuGetPluginRangeConflict>
+    {
+        public NuGetPluginRangeConflict(string PackageName, [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "PluginName",
+                "VersionRange"})] System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, string>> PluginRanges) { }
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "PluginName",
+                "VersionRange"})]
+        public System.Collections.Generic.IReadOnlyList<System.ValueTuple<string, string>> PluginRanges { get; init; }
+    }
+    public static class NuGetVersionCompatibility
+    {
+        public static System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.NuGetPluginHostConflict> FindConflicts(System.Collections.Generic.IReadOnlyDictionary<string, NuGet.Versioning.NuGetVersion> pluginDependencies, Namotion.NuGet.Plugins.Configuration.HostDependencyResolver hostResolver, string pluginName) { }
+        public static bool IsCompatible(NuGet.Versioning.NuGetVersion required, NuGet.Versioning.NuGetVersion available) { }
+    }
+    public class PackageNotFoundException : System.Exception
+    {
+        public PackageNotFoundException(string packageName, string? packageVersion) { }
+        public PackageNotFoundException(string packageName, string? packageVersion, System.Exception innerException) { }
+        public string PackageName { get; }
+        public string? PackageVersion { get; }
+    }
+}
+namespace Namotion.NuGet.Plugins.Repository
+{
+    public class CompositeNuGetPackageRepository : Namotion.NuGet.Plugins.Repository.INuGetPackageRepository
+    {
+        public CompositeNuGetPackageRepository(System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Repository.INuGetPackageRepository> repositories) { }
+        public System.Threading.Tasks.Task<Namotion.NuGet.Plugins.Repository.NuGetPackageDownload> DownloadPackageAsync(string packageName, string? packageVersion, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Namotion.NuGet.Plugins.Repository.NuGetPackage>> SearchPackagesAsync(string searchTerm, int take, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public interface INuGetPackageRepository
+    {
+        System.Threading.Tasks.Task<Namotion.NuGet.Plugins.Repository.NuGetPackageDownload> DownloadPackageAsync(string packageName, string? packageVersion, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Namotion.NuGet.Plugins.Repository.NuGetPackage>> SearchPackagesAsync(string searchTerm, int take, System.Threading.CancellationToken cancellationToken);
+    }
+    public class NuGetPackage : System.IEquatable<Namotion.NuGet.Plugins.Repository.NuGetPackage>
+    {
+        public NuGetPackage(string PackageName, string PackageVersion, string? Title = null, string? Description = null, string? Authors = null) { }
+        public string? Authors { get; init; }
+        public string? Description { get; init; }
+        public string PackageName { get; init; }
+        public string PackageVersion { get; init; }
+        public string? Title { get; init; }
+    }
+    public class NuGetPackageDownload : System.IAsyncDisposable, System.IDisposable
+    {
+        public NuGetPackageDownload(Namotion.NuGet.Plugins.Repository.NuGetPackage package, System.IO.Stream stream) { }
+        public Namotion.NuGet.Plugins.Repository.NuGetPackage Package { get; }
+        public System.IO.Stream Stream { get; }
+        public void Dispose() { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+    }
+    public class NuGetPackageRepository : Namotion.NuGet.Plugins.Repository.INuGetPackageRepository
+    {
+        public NuGetPackageRepository(Namotion.NuGet.Plugins.Configuration.NuGetFeed feed, bool includePrerelease = false, Microsoft.Extensions.Logging.ILogger? logger = null) { }
+        public System.Threading.Tasks.Task<Namotion.NuGet.Plugins.Repository.NuGetPackageDownload> DownloadPackageAsync(string packageName, string? packageVersion, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Namotion.NuGet.Plugins.Repository.NuGetPackage>> SearchPackagesAsync(string searchTerm, int take, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace Namotion.NuGet.Plugins.Resolution
+{
+    public class DependencyGraphResolver
+    {
+        public DependencyGraphResolver(System.Collections.Generic.IReadOnlyList<Namotion.NuGet.Plugins.Configuration.NuGetFeed> feeds, Namotion.NuGet.Plugins.Configuration.HostDependencyResolver? hostDependencies = null, System.Func<string, bool>? isHostPackage = null, bool includePrerelease = false, Microsoft.Extensions.Logging.ILogger? logger = null) { }
+    }
+}
