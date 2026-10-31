@@ -33,7 +33,10 @@ internal sealed class GameVolumeTable
     public ReadOnlySpan<GameVolumeEntry> GetRow(string playerId) =>
         _rows.TryGetValue(playerId, out var row) ? row : ReadOnlySpan<GameVolumeEntry>.Empty;
 
-    private static GameVolumeTable Create(Dictionary<string, List<GameVolumeEntry>> rows)
+    /// <summary>
+    /// Creates a table from the given rows, copying them.
+    /// </summary>
+    internal static GameVolumeTable Create(Dictionary<string, List<GameVolumeEntry>> rows)
     {
         var arrays = new Dictionary<string, GameVolumeEntry[]>(rows.Count);
         foreach (var (playerId, row) in rows)

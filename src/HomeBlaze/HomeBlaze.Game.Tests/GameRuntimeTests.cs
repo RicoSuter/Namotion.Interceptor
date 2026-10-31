@@ -1,5 +1,4 @@
 using HomeBlaze.Game.Tests.Testing;
-using HomeBlaze.Game.World;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -132,7 +131,7 @@ public class GameRuntimeTests
             var player = game.Players["tab-1"];
 
             // The clock stands still, so these steps use up the burst and the armed step is refused without a write of its own.
-            for (var step = 0; step < StepRateLimiter.Burst; step++)
+            for (var step = 0; step < Game.StepBurst; step++)
             {
                 game.TryMove(player, GameDirection.East, turnOnly: false);
             }
