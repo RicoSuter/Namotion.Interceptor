@@ -65,6 +65,54 @@ public class GameRuntimeTests
     }
 
     [Fact]
+    public async Task WhenPlayersAreReplacedFromOutsideWhileRunning_ThenThePlayersAreReconciled()
+    {
+        // Arrange
+        _context.Clients.Set("tab-1", isNamed: false, isConnected: true);
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Game.Players.ContainsKey("tab-1"), message: "The first pass did not run");
+            _context.Clients.Set("kitchen", isNamed: true, isConnected: true);
+
+            // Act
+            _context.Game.Players = new Dictionary<string, GamePlayer>(_context.Game.Players) { ["kitchen"] = new GamePlayer { X = 40 } };
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Game.Players.TryGetValue("kitchen", out var kitchen) && kitchen.IsConnected,
+                timeout: TimeSpan.FromSeconds(2), message: "The replaced players were not reconciled");
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheConfigurationIsApplied_ThenThePlayersAreReconciled()
+    {
+        // Arrange
+        _context.Clients.Set("tab-1", isNamed: false, isConnected: true);
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Game.Players.ContainsKey("tab-1"), message: "The first pass did not run");
+            _context.Clients.Set("tab-2", isNamed: false, isConnected: true);
+
+            // Act
+            await _context.Game.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Game.Players.ContainsKey("tab-2"), timeout: TimeSpan.FromSeconds(2),
+                message: "Applying the configuration did not reconcile the players");
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenAnObjectIsMovedWhileTheGameHoldsItsLock_ThenTheMoveDoesNotWaitForTheGame()
     {
         // Arrange

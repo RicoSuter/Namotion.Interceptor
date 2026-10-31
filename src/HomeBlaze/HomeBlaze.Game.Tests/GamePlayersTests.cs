@@ -138,6 +138,24 @@ public class GamePlayersTests
     }
 
     [Fact]
+    public void WhenPlayersAreReplacedFromOutside_ThenTheNextReconcileKeepsTheirEntries()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.Clients.Set("kitchen", isNamed: true, isConnected: false);
+        var kitchen = new GamePlayer { X = 40, Y = -8 };
+        _context.Game.Players = new Dictionary<string, GamePlayer> { ["tab-1"] = player, ["kitchen"] = kitchen };
+
+        // Act
+        _context.Game.ReconcilePlayers();
+
+        // Assert
+        Assert.Same(player, _context.Game.Players["tab-1"]);
+        Assert.Same(kitchen, _context.Game.Players["kitchen"]);
+        Assert.Equal((40, -8), (kitchen.X, kitchen.Y));
+    }
+
+    [Fact]
     public void WhenALoadedAnonymousPlayerHasNoClient_ThenItIsDropped()
     {
         // Arrange
