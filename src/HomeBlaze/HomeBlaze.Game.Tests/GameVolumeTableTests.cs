@@ -79,6 +79,30 @@ public class GameVolumeTableTests
     }
 
     [Fact]
+    public void WhenAPlayerGoesOffline_ThenItsRowAndEntriesLeaveTheTable()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        _context.Game.UpdateVolumeTable();
+        var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
+        _context.Clients.Set("tab-2", isNamed: false, isConnected: false);
+        _context.Game.ReconcilePlayers();
+        _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
+
+        // Act
+        var isRebuilt = _context.Game.UpdateVolumeTable();
+
+        // Assert
+        var table = _context.Game.VolumeTable;
+        Assert.Equal(0.75f, before);
+        Assert.True(isRebuilt);
+        Assert.False(table.HasRow("tab-2"));
+        Assert.Null(FindVolume(table, "tab-1", "tab-2"));
+        Assert.Null(FindVolume(table, "tab-2", "tab-1"));
+    }
+
+    [Fact]
     public void WhenAPlayerStepsBehindAWall_ThenThePairLeavesTheTable()
     {
         // Arrange

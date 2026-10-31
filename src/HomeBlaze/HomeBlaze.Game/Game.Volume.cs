@@ -11,17 +11,21 @@ public partial class Game
     // Guarded by _lock: set by the voice toggles, which do not change the index.
     private bool _isVolumeTableDirty = true;
 
+    // Guarded by _lock: scratch space of the rebuild.
+    private readonly List<GameObject> _volumeCandidates = [];
+
     // Guarded by _lock: the index version and the time of the last rebuild.
     private long _volumeTableIndexVersion = -1;
     private long? _lastVolumeTableRebuild;
 
     /// <summary>
-    /// For every connected player, the players it hears and how loud.
+    /// For every connected player, the players it hears and how loud. A published table never changes, so a reader
+    /// captures it once per use and works with that one.
     /// </summary>
     internal GameVolumeTable VolumeTable => _volumeTable;
 
     /// <summary>
-    /// Raised after a new <see cref="VolumeTable"/> was published, outside the game's lock; handlers must not block.
+    /// Raised after a new <see cref="VolumeTable"/> was published, outside the game's lock; handlers must not block or throw.
     /// </summary>
     internal event Action? VolumeTableChanged;
 
@@ -53,7 +57,7 @@ public partial class Game
                 return false;
             }
 
-            _volumeTable = GameVolumeTable.Build(Players, index);
+            _volumeTable = GameVolumeTable.Build(Players, index, _volumeCandidates);
             _isVolumeTableDirty = false;
             _volumeTableIndexVersion = index.Version;
             _lastVolumeTableRebuild = now;
