@@ -7,68 +7,6 @@ public class GameActionsTests
     private readonly GameTestContext _context = new();
 
     [Fact]
-    public async Task WhenAPlayerBuildsAWall_ThenItStandsInFrontAndIsWritten()
-    {
-        // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-
-        // Act
-        await _context.Game.BuildWallAsync(new GameCaller(player), CancellationToken.None);
-
-        // Assert
-        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal((-1, 2, 4, 1, 10), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Height));
-        Assert.Equal(1, _context.Root.WriteCount);
-        Assert.Same(wall, Assert.Single(_context.Game.GetTargetObjects(player)));
-    }
-
-    [Fact]
-    public async Task WhenObjectsWereReplacedFromOutside_ThenBuildingAWallKeepsThem()
-    {
-        // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        var existing = new Wall { X = 20, Y = 20 };
-        _context.Game.Objects = new Dictionary<string, GameObject> { ["loaded"] = existing };
-
-        // Act
-        await _context.Game.BuildWallAsync(new GameCaller(player), CancellationToken.None);
-
-        // Assert
-        Assert.Equal(2, _context.Game.Objects.Count);
-        Assert.Same(existing, _context.Game.Objects["loaded"]);
-    }
-
-    [Fact]
-    public async Task WhenSomethingIsInTheWay_ThenBuildingIsRefused()
-    {
-        // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.AddWall(1, 2, width: 1, depth: 1);
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _context.Game.BuildWallAsync(new GameCaller(player), CancellationToken.None));
-        Assert.Single(_context.Game.Objects);
-    }
-
-    [Fact]
-    public async Task WhenThePlayerFacesDiagonally_ThenBuildingIsRefused()
-    {
-        // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.TryMove(player, GameDirection.NorthEast, turnOnly: true);
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _context.Game.BuildWallAsync(new GameCaller(player), CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task WhenThereIsNoActor_ThenBuildingIsRefused()
-    {
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _context.Game.BuildWallAsync(null, CancellationToken.None));
-    }
-
-    [Fact]
     public void WhenTheCallerIsAPlayerOfAnotherGame_ThenThereIsNoActor()
     {
         // Arrange

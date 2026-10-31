@@ -23,7 +23,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     private const string LeafColor = "#8b5a2b";
     private const double OpenRotation = -90;
 
-    private readonly GameVisualCache<(int Width, int Depth, int Height, bool IsOpen)> _visual = new();
+    private readonly GameVisualCache<(int Width, int Depth, int Height, bool IsOpen, WallMaterial Material)> _visual = new();
 
     /// <summary>
     /// The height of the door leaf in tiles, 2.1 m; a lintel of the wall fills the opening above it.
@@ -55,6 +55,12 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     [Configuration]
     public partial bool IsOpen { get; set; }
 
+    /// <summary>
+    /// The material of the lintel above the leaf, the one of the wall around the door.
+    /// </summary>
+    [Configuration]
+    public partial WallMaterial Material { get; set; }
+
     public string? Title => "Door";
 
     public string? IconName => "DoorFront";
@@ -63,8 +69,8 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
 
     public override bool IsSoundBlocking => !IsOpen;
 
-    public override GameVisual Visual => _visual.Get((Width, Depth, Height, IsOpen),
-        static state => CreateVisual(state.Width, state.Depth, state.Height, state.IsOpen));
+    public override GameVisual Visual => _visual.Get((Width, Depth, Height, IsOpen, Material),
+        static state => CreateVisual(state.Width, state.Depth, state.Height, state.IsOpen, state.Material));
 
     [Derived]
     [PropertyAttribute("Open", KnownAttributes.IsEnabled)]
@@ -80,6 +86,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         Depth = 1;
         Height = DefaultHeight;
         IsOpen = false;
+        Material = WallMaterial.Bricks;
     }
 
     /// <exception cref="InvalidOperationException">The door is already open or not part of a game.</exception>
@@ -108,7 +115,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
             IsOpen = false;
         }, cancellationToken);
 
-    private static GameVisual CreateVisual(int width, int depth, int height, bool isOpen)
+    private static GameVisual CreateVisual(int width, int depth, int height, bool isOpen, WallMaterial material)
     {
         var leafHeight = Math.Min(LeafHeight, height);
         var leaf = CreateLeaf(width, depth, leafHeight, isOpen ? OpenRotation : 0);
@@ -117,7 +124,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
             return new GameVisual([leaf]);
         }
 
-        var lintel = WallTextures.CreateBricks(new GameVisualVector(0, leafHeight, 0), new GameVisualVector(width, height - leafHeight, depth));
+        var lintel = WallTextures.CreateBox(material, new GameVisualVector(0, leafHeight, 0), new GameVisualVector(width, height - leafHeight, depth));
         return new GameVisual([lintel, leaf]);
     }
 

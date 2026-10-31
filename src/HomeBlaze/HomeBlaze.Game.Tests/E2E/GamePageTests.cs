@@ -120,16 +120,19 @@ public class GamePageTests
     {
         // Arrange
         await using var world = await GameWorld.CreateAsync(_fixture);
+        world.Game.Tools = new Dictionary<string, GameTool> { ["wall-tool"] = new WallTool() };
         var (page, player) = await world.JoinAsync();
 
         // Act
         await page.GetByTestId("game-action").Filter(new() { HasText = "Build wall" }).ClickAsync(new() { Timeout = Timeout });
+        await page.Locator(".mud-dialog").GetByRole(AriaRole.Button, new() { Name = "Execute" }).ClickAsync(new() { Timeout = Timeout });
         await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 1, message: "The wall was not built");
         var wall = Assert.IsType<Wall>(Assert.Single(world.Game.Objects.Values));
         await page.GetByTestId("game-target-action").Filter(new() { HasText = "Demolish" }).ClickAsync(new() { Timeout = Timeout });
 
         // Assert
-        Assert.Equal(player.Y + GamePlayer.Size, wall.Y);
+        // A default wall of 4 tiles stands across the facing, centered on the player.
+        Assert.Equal((player.X - 1, player.Y + GamePlayer.Size), (wall.X, wall.Y));
         await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 0, message: "The wall was not demolished");
         await Expect(page.GetByTestId("game-looking-at")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }

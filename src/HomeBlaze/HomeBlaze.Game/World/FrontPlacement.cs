@@ -1,0 +1,50 @@
+namespace HomeBlaze.Game.World;
+
+internal static class FrontPlacement
+{
+    /// <summary>
+    /// Gets the footprint of an object <paramref name="across"/> tiles wide across the facing direction and
+    /// <paramref name="along"/> tiles deep along it, starting on the tile right in front of the actor and centered on the
+    /// actor's center across the facing (an odd remainder goes east or north); returns false for a diagonal facing or a
+    /// footprint outside the <see cref="int"/> range.
+    /// </summary>
+    public static bool TryGetFootprint(Footprint actor, GameDirection facing, int across, int along, out Footprint footprint)
+    {
+        if (!Enum.IsDefined(facing) || facing.IsDiagonal())
+        {
+            footprint = default;
+            return false;
+        }
+
+        var isNorthOrSouth = facing is GameDirection.North or GameDirection.South;
+        var sizeX = isNorthOrSouth ? across : along;
+        var sizeY = isNorthOrSouth ? along : across;
+        return TryCreate(GetX(actor, facing, along, sizeX), GetY(actor, facing, along, sizeY), sizeX, sizeY, out footprint);
+    }
+
+    private static long GetX(Footprint actor, GameDirection facing, int along, int sizeX) => facing switch
+    {
+        GameDirection.East => actor.Right + 1,
+        GameDirection.West => (long)actor.X - along,
+        _ => (long)actor.X + (actor.Width - sizeX) / 2
+    };
+
+    private static long GetY(Footprint actor, GameDirection facing, int along, int sizeY) => facing switch
+    {
+        GameDirection.North => actor.Top + 1,
+        GameDirection.South => (long)actor.Y - along,
+        _ => (long)actor.Y + (actor.Depth - sizeY) / 2
+    };
+
+    private static bool TryCreate(long x, long y, int sizeX, int sizeY, out Footprint footprint)
+    {
+        if (x < int.MinValue || y < int.MinValue || x + sizeX - 1 > int.MaxValue || y + sizeY - 1 > int.MaxValue)
+        {
+            footprint = default;
+            return false;
+        }
+
+        footprint = new Footprint((int)x, (int)y, sizeX, sizeY);
+        return true;
+    }
+}

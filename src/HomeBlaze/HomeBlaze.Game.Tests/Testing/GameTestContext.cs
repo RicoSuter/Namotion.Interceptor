@@ -64,4 +64,13 @@ internal sealed class GameTestContext
         Game.RequestIndexRebuild();
         return gameObject;
     }
+
+    /// <summary>
+    /// Adds the tool to the game under the name.
+    /// </summary>
+    public T AddTool<T>(string name, T tool) where T : GameTool
+    {
+        Game.Tools = new Dictionary<string, GameTool>(Game.Tools) { [name] = tool };
+        return tool;
+    }
 }

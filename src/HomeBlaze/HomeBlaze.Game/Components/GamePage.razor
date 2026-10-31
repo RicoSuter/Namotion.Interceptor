@@ -89,6 +89,16 @@
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="game-voice-message" data-testid="game-voice-message">@voiceMessage</MudAlert>
         }
+        @* The operations of the game and its tools come first, so they keep their place while targets come and go. *@
+        <section>
+            <h5>Actions</h5>
+            @foreach (var action in _actions)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="game-action"
+                           Disabled="@(_isInvoking || _player is null)" data-testid="game-action"
+                           OnClick="@(() => InvokeActionAsync(action.Subject, action.Method))">@action.Method.Title</MudButton>
+            }
+        </section>
         @if (_targets.Count > 0)
         {
             <section data-testid="game-looking-at">
@@ -111,15 +121,6 @@
                 }
             </section>
         }
-        <section>
-            <h5>Actions</h5>
-            @foreach (var method in _gameActions)
-            {
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="game-action"
-                           Disabled="@(_isInvoking || _player is null)" data-testid="game-action"
-                           OnClick="@(() => InvokeActionAsync(Game!, method))">@method.Title</MudButton>
-            }
-        </section>
         <section>
             <h5>Nearby</h5>
             @foreach (var player in _nearby)
@@ -188,7 +189,7 @@
     private string[] _nearbyPlayerIds = [];
     private int _isVolumeTableChanged;
     private IReadOnlyList<TargetEntry> _targets = [];
-    private IReadOnlyList<MethodMetadata> _gameActions = [];
+    private IReadOnlyList<GameAction> _actions = [];
     private bool _isInvoking;
     private bool _isViewBroken;
     private IJSObjectReference? _voiceModule;
@@ -962,7 +963,7 @@
 
     private void RefreshActions(Game game)
     {
-        _gameActions = GetOperations(game);
+        _actions = GetGameActions(game);
         if (_player is not { } player)
         {
             _targets = [];
@@ -984,6 +985,27 @@
         }
 
         _targets = targets;
+    }
+
+    // The operations of the game, then those of its tools ordered by name.
+    private static List<GameAction> GetGameActions(Game game)
+    {
+        var actions = new List<GameAction>();
+        AddActions(actions, game);
+        foreach (var (_, tool) in game.Tools.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            AddActions(actions, tool);
+        }
+
+        return actions;
+    }
+
+    private static void AddActions(List<GameAction> actions, IInterceptorSubject subject)
+    {
+        foreach (var method in GetOperations(subject))
+        {
+            actions.Add(new GameAction(subject, method));
+        }
     }
 
     // Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply.
@@ -1066,6 +1088,8 @@
     private sealed record TargetEntry(IInterceptorSubject Subject, string Title, IReadOnlyList<ActionEntry> Actions);
 
     private sealed record ActionEntry(int Key, MethodMetadata Method);
+
+    private sealed record GameAction(IInterceptorSubject Subject, MethodMetadata Method);
 
     private sealed record PadButton(string? Move, string Label, bool IsDiagonal);
 }
