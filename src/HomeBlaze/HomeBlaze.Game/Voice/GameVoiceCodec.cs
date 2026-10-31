@@ -14,9 +14,14 @@ internal static class GameVoiceCodec
     /// bytes, or the samples have room for less than a frame.</exception>
     public static void Decode(ReadOnlySpan<byte> frame, Span<short> samples)
     {
-        if (frame.Length != GameVoiceSettings.FrameBytes || samples.Length < GameVoiceSettings.SamplesPerFrame)
+        if (frame.Length != GameVoiceSettings.FrameBytes)
         {
             throw new ArgumentException($"A frame has exactly {GameVoiceSettings.FrameBytes} bytes.", nameof(frame));
+        }
+
+        if (samples.Length < GameVoiceSettings.SamplesPerFrame)
+        {
+            throw new ArgumentException($"The samples need room for {GameVoiceSettings.SamplesPerFrame} samples.", nameof(samples));
         }
 
         for (var index = 0; index < GameVoiceSettings.SamplesPerFrame; index++)

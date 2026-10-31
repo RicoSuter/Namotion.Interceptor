@@ -88,24 +88,31 @@ internal sealed class GameVoiceMixer
     /// <summary>
     /// Takes one frame from every playing speaker and sends every listener with sinks the sum of the frames of the
     /// speakers in its row of the table, scaled by their volume and without its own; sends nothing to a listener that
-    /// hears no frame. Exceptions of sinks are logged.
+    /// hears no frame. Exceptions of sinks are logged. Must not run concurrently with itself.
     /// </summary>
     public void Mix(GameVolumeTable table)
     {
-        TakeFrames();
-        if (_frames.Count == 0)
+        try
         {
-            return;
-        }
+            TakeFrames();
+            if (_frames.Count == 0)
+            {
+                return;
+            }
 
-        foreach (var (listenerId, sinks) in _listeners)
+            foreach (var (listenerId, sinks) in _listeners)
+            {
+                MixFor(listenerId, sinks, table);
+            }
+        }
+        finally
         {
-            MixFor(listenerId, sinks, table);
+            ReleaseFrames();
         }
     }
 
-    // Copies the frames out under the lock, so summing and sending run outside it.
-    private void TakeFrames()
+    // Clears the scratch state, so sinks unregistered meanwhile are not kept alive until the next tick.
+    private void ReleaseFrames()
     {
         foreach (var frame in _frames.Values)
         {
@@ -114,6 +121,11 @@ internal sealed class GameVoiceMixer
 
         _frames.Clear();
         _listeners.Clear();
+    }
+
+    // Copies the frames out under the lock, so summing and sending run outside it.
+    private void TakeFrames()
+    {
         lock (_lock)
         {
             foreach (var (playerId, speaker) in _speakers)
@@ -208,16 +220,37 @@ internal sealed class GameVoiceMixer
                 return;
             }
 
-            var remaining = Array.FindAll(sinks, candidate => !ReferenceEquals(candidate, sink));
-            if (remaining.Length == 0)
+            var index = IndexOfReference(sinks, sink);
+            if (index < 0)
+            {
+                return;
+            }
+
+            if (sinks.Length == 1)
             {
                 _sinks.Remove(playerId);
+                return;
             }
-            else
+
+            // A new array, because a running tick may still iterate the old one outside the lock.
+            var remaining = new IGameVoiceSink[sinks.Length - 1];
+            sinks.AsSpan(0, index).CopyTo(remaining);
+            sinks.AsSpan(index + 1).CopyTo(remaining.AsSpan(index));
+            _sinks[playerId] = remaining;
+        }
+    }
+
+    private static int IndexOfReference(IGameVoiceSink[] sinks, IGameVoiceSink sink)
+    {
+        for (var index = 0; index < sinks.Length; index++)
+        {
+            if (ReferenceEquals(sinks[index], sink))
             {
-                _sinks[playerId] = remaining;
+                return index;
             }
         }
+
+        return -1;
     }
 
     private sealed class Speaker(int microphonePageId, TimeProvider timeProvider)
