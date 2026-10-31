@@ -1,7 +1,9 @@
+/* The negative margins cancel the padding of the main content (px-4, pt-4), so the game fills the page edge to edge. */
 .game-layout {
     display: flex;
     height: calc(100dvh - var(--mud-appbar-height));
     max-height: 100%;
+    margin: -16px -16px 0;
     gap: 0;
 }
 
