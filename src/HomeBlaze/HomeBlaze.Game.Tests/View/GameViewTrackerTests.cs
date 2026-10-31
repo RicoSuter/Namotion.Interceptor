@@ -138,4 +138,19 @@ public class GameViewTrackerTests
         Assert.True(view.IsMicrophoneOn);
         Assert.False(view.IsAudioOn);
     }
+
+    [Fact]
+    public void WhenThePlayerColorIsRequested_ThenItIsTheColorOfItsViewObject()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var view = Assert.Single(_context.Game.UpdateView(_tracker, player).Upserted);
+
+        // Act
+        var color = _tracker.GetPlayerColor(player);
+
+        // Assert
+        Assert.Equal(view.Color, color);
+        Assert.Equal(GameColors.FromId("tab-1"), color);
+    }
 }

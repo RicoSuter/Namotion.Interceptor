@@ -4,7 +4,8 @@ namespace HomeBlaze.Game.View;
 
 /// <summary>
 /// Remembers what one page knows and turns the objects in view into the changes it lacks. Not thread-safe: the game
-/// calls it under its lock, the page reads <see cref="Known"/> on its own render thread between updates.
+/// calls it under its lock, the page reads <see cref="Known"/> and <see cref="GetPlayerColor"/> on its own render
+/// thread between updates.
 /// </summary>
 internal sealed class GameViewTracker
 {
@@ -124,13 +125,18 @@ internal sealed class GameViewTracker
     private static string GetTitle(GameObject gameObject) =>
         (gameObject as ITitleProvider)?.Title ?? string.Empty;
 
-    private string GetColor(GameObject gameObject)
+    private string GetColor(GameObject gameObject) => gameObject switch
     {
-        if (gameObject is not GamePlayer player)
-        {
-            return gameObject is Door ? GameColors.Door : GameColors.Wall;
-        }
+        GamePlayer player => GetPlayerColor(player),
+        Door => GameColors.Door,
+        _ => GameColors.Wall
+    };
 
+    /// <summary>
+    /// Gets the color of the player, the one its view object carries.
+    /// </summary>
+    public string GetPlayerColor(GamePlayer player)
+    {
         if (!_playerColors.TryGetValue(player.ClientId, out var color))
         {
             color = GameColors.FromId(player.ClientId);

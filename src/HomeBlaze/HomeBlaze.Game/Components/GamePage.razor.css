@@ -201,3 +201,18 @@
 ::deep .game-voice-message {
     margin: -8px 0 16px;
 }
+
+.game-nearby-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.game-nearby-icon {
+    display: inline-flex;
+    color: var(--mud-palette-text-secondary);
+}
+
+.game-nearby-dimmed {
+    opacity: .5;
+}
