@@ -35,6 +35,9 @@ internal static class HearingRange
     /// <summary>
     /// Gets the area that every footprint of a player who may hear a player with this footprint intersects.
     /// </summary>
+    /// <remarks>
+    /// The footprint must have a width and depth from 1 to <see cref="GameObject.MaximumSize"/>; the index holds no others.
+    /// </remarks>
     public static Footprint GetArea(Footprint footprint)
     {
         var minimumX = Math.Max(int.MinValue, (long)footprint.X - HearingRadius);

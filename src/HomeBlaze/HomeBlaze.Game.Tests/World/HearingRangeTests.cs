@@ -176,6 +176,22 @@ public class HearingRangeTests
     }
 
     [Fact]
+    public void WhenALineInNegativeCoordinatesPassesNextToAWall_ThenTheVoicePasses()
+    {
+        // Arrange
+        // The line from -19, -19 to -11, -10 passes at height -14.5 over the right edge of this tile, half a tile below it.
+        _index.AddOrUpdate(new Wall { X = -16, Y = -14, Width = 1, Depth = 1 });
+        var first = CreatePlayer("a", -20, -20);
+        var second = CreatePlayer("b", -12, -11);
+
+        // Act
+        var volume = HearingRange.GetVolume(first, second, _index);
+
+        // Assert
+        Assert.Equal(1 - Math.Sqrt(145) / HearingRange.HearingRadius, volume, 6);
+    }
+
+    [Fact]
     public void WhenAWallOverlapsAPlayer_ThenItDoesNotBlockThatPlayersVoice()
     {
         // Arrange
