@@ -217,7 +217,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     [InlineData("Kitchen/Lights")]
     [InlineData("Lights[0]")]
     [InlineData("Lights]")]
-    public void WhenACustomRoleNameHasAPathCharacter_ThenItIsUnavailableWithAStatusAndOtherRolesStillCompile(string name)
+    public async Task WhenACustomRoleNameHasAPathCharacter_ThenItIsUnavailableWithAStatusAndOtherRolesStillCompile(string name)
     {
         // Arrange
         var invalid = new Role { Allow = [ReadPlain()] };
@@ -231,10 +231,12 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, invalidResult.Policy);
         Assert.Equal($"Role '{name}' is unavailable: {expectedStatus}", invalidResult.Error);
-        Assert.Equal(expectedStatus, invalid.Status);
         Assert.Equal(expectedStatus, _service.GetUnavailableRoles()[name]);
         Assert.DoesNotContain(name, _service.GetRoleNames());
         Assert.Null(goodResult.Error);
+
+        // A refresh started by the arrangement can build the snapshot the policy is read from and write the statuses after.
+        await AsyncTestHelpers.WaitUntilAsync(() => invalid.Status == expectedStatus, message: "The status should name the invalid character.");
     }
 
     [Theory]
