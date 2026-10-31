@@ -57,7 +57,9 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     public override bool IsVisible => IsConnected;
 
     // Not intercepted: runtime state of the movement, created by the game under its lock.
-    internal StepRateLimiter? RateLimiter { get; set; }
+    internal StepRateLimiter? StepRateLimiter { get; set; }
+
+    internal StepRateLimiter? TurnRateLimiter { get; set; }
 
     public GamePlayer()
     {
