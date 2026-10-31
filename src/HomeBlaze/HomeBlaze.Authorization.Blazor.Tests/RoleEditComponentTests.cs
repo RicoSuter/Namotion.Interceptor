@@ -1,4 +1,5 @@
 using Bunit;
+using HomeBlaze.Authorization.Tests;
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -643,11 +644,12 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenTheRoleHasAStatus_ThenItIsShownAsAnError()
+    public async Task WhenTheRoleHasAStatus_ThenItIsShownAsAnError()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
         role.Includes = ["Ghost"];
+        await StatusAssert.NotNullAsync(() => role.Status);
 
         // Act
         var component = RenderEditor(role);
@@ -669,11 +671,12 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenTheRoleHasAWarning_ThenItIsShownAsAWarning()
+    public async Task WhenTheRoleHasAWarning_ThenItIsShownAsAWarning()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
         role.Deny = [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }];
+        await StatusAssert.NotNullAsync(() => role.Warning);
 
         // Act
         var component = RenderEditor(role);

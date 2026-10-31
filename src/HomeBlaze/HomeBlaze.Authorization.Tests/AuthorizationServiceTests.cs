@@ -234,9 +234,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Equal(expectedStatus, _service.GetUnavailableRoles()[name]);
         Assert.DoesNotContain(name, _service.GetRoleNames());
         Assert.Null(goodResult.Error);
-
-        // A refresh started by the arrangement can build the snapshot the policy is read from and write the statuses after.
-        await AsyncTestHelpers.WaitUntilAsync(() => invalid.Status == expectedStatus, message: "The status should name the invalid character.");
+        await StatusAssert.EqualAsync(expectedStatus, () => invalid.Status);
     }
 
     [Theory]
@@ -567,8 +565,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         update.Dispose();
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => role.Status is not null);
-        Assert.Contains("'Custom'", role.Status);
+        await StatusAssert.ContainsAsync("'Custom'", () => role.Status);
     }
 
     [Fact]

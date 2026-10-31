@@ -1,4 +1,5 @@
 using Bunit;
+using HomeBlaze.Authorization.Tests;
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -70,10 +71,12 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     }
 
     [Fact]
-    public void WhenARoleHasAWarning_ThenItsStatusIconIsAWarningThatNamesIt()
+    public async Task WhenARoleHasAWarning_ThenItsStatusIconIsAWarningThatNamesIt()
     {
         // Arrange
-        _graph.GetRole("Kitchen").Deny = [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }];
+        var kitchen = _graph.GetRole("Kitchen");
+        kitchen.Deny = [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }];
+        await StatusAssert.NotNullAsync(() => kitchen.Warning);
 
         // Act
         var component = RenderEditor(_graph.Authorization);
@@ -87,13 +90,15 @@ public sealed class AuthorizationEditComponentTests : BunitContext, IAsyncLifeti
     }
 
     [Fact]
-    public void WhenSeveralAuthorizationsExist_ThenTheStatusAndTheErrorOfEachRoleAreShown()
+    public async Task WhenSeveralAuthorizationsExist_ThenTheStatusAndTheErrorOfEachRoleAreShown()
     {
         // Arrange
         _graph.Root.Children = new Dictionary<string, IInterceptorSubject>(_graph.Root.Children)
         {
             ["Other"] = new Authorization()
         };
+        await StatusAssert.NotNullAsync(() => _graph.Authorization.Status);
+        await StatusAssert.NotNullAsync(() => _graph.GetRole("Kitchen").Status);
 
         // Act
         var component = RenderEditor(_graph.Authorization);

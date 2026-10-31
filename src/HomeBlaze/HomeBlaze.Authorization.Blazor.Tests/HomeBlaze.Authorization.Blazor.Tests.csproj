@@ -24,6 +24,11 @@
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Authorization.Blazor\HomeBlaze.Authorization.Blazor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Compile Include="..\HomeBlaze.Authorization.Tests\StatusAssert.cs" Link="StatusAssert.cs" />
     </ItemGroup>
 
 </Project>

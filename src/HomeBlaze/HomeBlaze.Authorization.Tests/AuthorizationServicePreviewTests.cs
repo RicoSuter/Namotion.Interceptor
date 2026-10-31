@@ -179,13 +179,14 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     }
 
     [Fact]
-    public void WhenAPreviewIsCompiled_ThenThePoliciesAndStatusesOfTheSavedRolesDoNotChange()
+    public async Task WhenAPreviewIsCompiled_ThenThePoliciesAndStatusesOfTheSavedRolesDoNotChange()
     {
         // Arrange
         var good = new Role { Allow = [ReadPlain()] };
         var bad = new Role { Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }] };
         AddAuthorization(("Good", good), ("Bad", bad));
         var goodBefore = _service.GetPolicy(["Good"]);
+        await StatusAssert.NotNullAsync(() => bad.Status);
         var badStatusBefore = bad.Status;
 
         // Act
@@ -196,8 +197,9 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
         Assert.NotNull(badPreview.Error);
         Assert.Null(fixedPreview.Error);
         Assert.Same(goodBefore.Policy, _service.GetPolicy(["Good"]).Policy);
+
+        // Read right away rather than awaited: the statuses were final before the previews, so a change would show here.
         Assert.Null(good.Status);
-        Assert.NotNull(badStatusBefore);
         Assert.Equal(badStatusBefore, bad.Status);
         Assert.NotNull(_service.GetPolicy(["Bad"]).Error);
     }
