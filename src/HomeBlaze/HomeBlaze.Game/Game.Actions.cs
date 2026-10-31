@@ -1,7 +1,4 @@
-using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
-using HomeBlaze.Game.Objects.Buildings;
-using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game;
 
@@ -27,33 +24,6 @@ public partial class Game
         {
             return IsPlayerOfThisGame(caller.Player) ? caller.Player : null;
         }
-    }
-
-    [Operation(Title = "Build wall", Icon = "AddBox", Position = 1,
-        Description = "Builds a wall segment of 1 m across the direction you face, right in front of you.")]
-    public async Task BuildWallAsync([FromServices] GameCaller? caller, CancellationToken cancellationToken)
-    {
-        lock (_lock)
-        {
-            var actor = ResolveActor(caller) ?? throw new InvalidOperationException("Only a player in the game can build a wall.");
-            if (!WallPlacement.TryGetFootprint(actor.Footprint, actor.Facing, out var footprint))
-            {
-                throw new InvalidOperationException("Face north, east, south or west to build a wall.");
-            }
-
-            var index = GetIndex();
-            if (index.IsBlocked(footprint, ignored: null))
-            {
-                throw new InvalidOperationException("Something is in the way of the wall.");
-            }
-
-            var wall = new Wall { X = footprint.X, Y = footprint.Y, Width = footprint.Width, Depth = footprint.Depth };
-            var objects = CurrentObjects;
-            ReplaceObjects(new Dictionary<string, GameObject>(objects) { [CreateObjectName(objects, "wall")] = wall });
-            index.AddOrUpdate(wall);
-        }
-
-        await WriteOrRequestSaveAsync(cancellationToken);
     }
 
     /// <exception cref="InvalidOperationException">The sender sent a message less than <see cref="MessageInterval"/> ago.</exception>

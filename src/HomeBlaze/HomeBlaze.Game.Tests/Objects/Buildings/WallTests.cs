@@ -46,4 +46,35 @@ public class WallTests
         // Assert
         Assert.Equal(new GameVisualVector(1, 4, 12), Assert.Single(wall.Visual.Parts).Size);
     }
+
+    [Theory]
+    [InlineData(WallMaterial.Bricks, "bricks.jpg", 8)]
+    [InlineData(WallMaterial.Concrete, "concrete.jpg", 10)]
+    [InlineData(WallMaterial.Wood, "wood.jpg", 6)]
+    public void WhenTheMaterialIsSet_ThenTheWallShowsItsTexture(WallMaterial material, string file, double scale)
+    {
+        // Arrange
+        var wall = new Wall();
+
+        // Act
+        wall.Material = material;
+
+        // Assert
+        var part = Assert.Single(wall.Visual.Parts);
+        Assert.Equal($"_content/HomeBlaze.Game/objects/buildings/textures/{file}", part.Texture);
+        Assert.Equal(scale, part.TextureScale);
+    }
+
+    [Fact]
+    public void WhenADoorHasAMaterial_ThenItsLintelShowsIt()
+    {
+        // Arrange
+        var door = new Door { Material = WallMaterial.Wood };
+
+        // Act
+        var lintel = door.Visual.Parts[0];
+
+        // Assert
+        Assert.Equal("_content/HomeBlaze.Game/objects/buildings/textures/wood.jpg", lintel.Texture);
+    }
 }

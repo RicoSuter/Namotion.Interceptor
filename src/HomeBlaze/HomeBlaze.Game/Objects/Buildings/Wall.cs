@@ -17,7 +17,7 @@ namespace HomeBlaze.Game.Objects.Buildings;
 [InterceptorSubject]
 public partial class Wall : GameObject, ITitleProvider, IIconProvider
 {
-    private readonly GameVisualCache<(int Width, int Height, int Depth)> _visual = new();
+    private readonly GameVisualCache<(int Width, int Height, int Depth, WallMaterial Material)> _visual = new();
 
     /// <summary>
     /// The length of a built wall in tiles, 1 m.
@@ -41,20 +41,24 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
     [Range(1, MaximumSize)]
     public override partial int Height { get; set; }
 
+    [Configuration]
+    public partial WallMaterial Material { get; set; }
+
     public string? Title => "Wall";
 
     public string? IconName => "ViewColumn";
 
     public override bool IsSoundBlocking => true;
 
-    public override GameVisual Visual => _visual.Get((Width, Height, Depth),
-        static size => new GameVisual([WallTextures.CreateBricks(default, new GameVisualVector(size.Width, size.Height, size.Depth))]));
+    public override GameVisual Visual => _visual.Get((Width, Height, Depth, Material),
+        static state => new GameVisual([WallTextures.CreateBox(state.Material, default, new GameVisualVector(state.Width, state.Height, state.Depth))]));
 
     public Wall()
     {
         Width = DefaultLength;
         Depth = 1;
         Height = DefaultHeight;
+        Material = WallMaterial.Bricks;
     }
 
     /// <exception cref="InvalidOperationException">The wall is not part of a game.</exception>

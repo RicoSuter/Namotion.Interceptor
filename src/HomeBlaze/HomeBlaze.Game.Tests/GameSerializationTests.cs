@@ -10,7 +10,7 @@ public class GameSerializationTests
     public GameSerializationTests()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(Game), typeof(Wall), typeof(Door), typeof(GamePlayer)]);
+        typeProvider.AddTypes([typeof(Game), typeof(Wall), typeof(Door), typeof(GamePlayer), typeof(WallTool)]);
         var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         _serializer = new ConfigurableSubjectSerializer(typeProvider, services);
     }
@@ -135,6 +135,52 @@ public class GameSerializationTests
         Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Buildings.Door\"", json);
         var door = Assert.IsType<Door>(loaded.Objects["door-1"]);
         Assert.Equal((3, -4, 1, 4, 10, true), (door.X, door.Y, door.Width, door.Depth, door.Height, door.IsOpen));
+    }
+
+    [Fact]
+    public void WhenAWallWithAMaterialRoundTrips_ThenItKeepsTheMaterial()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Objects = new Dictionary<string, GameObject> { ["wall-1"] = new Wall { Material = WallMaterial.Concrete } }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+        var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        Assert.Contains("\"material\": \"Concrete\"", json);
+        Assert.Equal(WallMaterial.Concrete, Assert.IsType<Wall>(loaded.Objects["wall-1"]).Material);
+    }
+
+    [Fact]
+    public void WhenToolsRoundTrip_ThenTheyKeepTheirType()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Tools = new Dictionary<string, GameTool> { ["wall-tool"] = new WallTool() }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+        var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Buildings.WallTool\"", json);
+        Assert.IsType<WallTool>(loaded.Tools["wall-tool"]);
+    }
+
+    [Fact]
+    public void WhenAGameWithoutToolsIsLoaded_ThenItHasNone()
+    {
+        // Act
+        var game = Assert.IsType<Game>(_serializer.Deserialize("""{ "$type": "HomeBlaze.Game.Game", "tools": null }"""));
+
+        // Assert
+        Assert.Empty(game.Tools);
     }
 
     [Fact]

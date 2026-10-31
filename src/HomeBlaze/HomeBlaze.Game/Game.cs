@@ -2,6 +2,7 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Clients;
+using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.Voice;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -50,6 +51,12 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     [Configuration]
     public partial Dictionary<string, GameObject> Objects { get; set; }
 
+    /// <summary>
+    /// The tools by name, whose operations the game page offers every player; the game never changes them.
+    /// </summary>
+    [Configuration]
+    public partial Dictionary<string, GameTool> Tools { get; set; }
+
     [Derived]
     public string? Title => string.IsNullOrEmpty(Name) ? "Game" : Name;
 
@@ -69,6 +76,12 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
         Objects = new Dictionary<string, GameObject>();
+        Tools = new Dictionary<string, GameTool>();
+    }
+
+    partial void OnToolsChanging(ref Dictionary<string, GameTool> newValue, ref bool cancel)
+    {
+        newValue ??= new Dictionary<string, GameTool>();
     }
 
     // Set before Players changes, so a player reachable through Players always knows its client.
