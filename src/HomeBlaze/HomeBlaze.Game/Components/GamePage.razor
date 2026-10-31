@@ -48,7 +48,7 @@
                         <MudIconButton Icon="@(_isMicrophoneOn ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
                                        Variant="@(_isMicrophoneOn ? Variant.Filled : Variant.Text)"
                                        Color="@(_isMicrophoneOn ? Color.Primary : Color.Default)"
-                                       Size="Size.Small" Disabled="@IsVoiceDisabled"
+                                       Size="Size.Small" Disabled="@IsMicrophoneDisabled"
                                        aria-label="Microphone" aria-pressed="@(_isMicrophoneOn ? "true" : "false")" aria-keyshortcuts="M"
                                        data-game-voice data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
                     </MudTooltip>
@@ -56,7 +56,7 @@
                         <MudIconButton Icon="@(_isAudioOn ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
                                        Variant="@(_isAudioOn ? Variant.Filled : Variant.Text)"
                                        Color="@(_isAudioOn ? Color.Primary : Color.Default)"
-                                       Size="Size.Small" Disabled="@IsVoiceDisabled"
+                                       Size="Size.Small" Disabled="@IsAudioDisabled"
                                        aria-label="Speaker" aria-pressed="@(_isAudioOn ? "true" : "false")" aria-keyshortcuts="N"
                                        data-game-voice data-testid="game-audio" OnClick="ToggleAudioAsync" />
                     </MudTooltip>
@@ -180,6 +180,9 @@
     private int _isFlushScheduled;
     private string _positionText = NoPosition;
     private IReadOnlyList<NearbyEntry> _nearby = [];
+    // The player and the player ids of the volume table row that _nearby shows.
+    private GamePlayer? _nearbyPlayer;
+    private string[] _nearbyPlayerIds = [];
     private int _isVolumeTableChanged;
     private IReadOnlyList<TargetEntry> _targets = [];
     private IReadOnlyList<MethodMetadata> _gameActions = [];
@@ -329,8 +332,11 @@
         StateHasChanged();
     }
 
-    // Stays enabled while a toggle runs, so the button keeps the focus; the toggle ignores clicks meanwhile.
-    private bool IsVoiceDisabled => _isVoiceSupported != true || (_player is null && !_isMicrophoneOn && !_isAudioOn);
+    // Stays enabled while a toggle runs, so the button keeps the focus; the toggle ignores clicks meanwhile. Without a
+    // player, a button stays enabled only to turn off what is still on.
+    private bool IsMicrophoneDisabled => _isVoiceSupported != true || (_player is null && !_isMicrophoneOn);
+
+    private bool IsAudioDisabled => _isVoiceSupported != true || (_player is null && !_isAudioOn);
 
     private string? VoiceMessage => _isAudioSuspended && (_isAudioOn || _isMicrophoneOn) ? ResumeMessage : _voiceError;
 
@@ -707,22 +713,38 @@
         }
     }
 
+    // The panel keeps following the game after the view broke, so that a stale sink does not keep playing.
     private async Task FlushAsync()
     {
-        if (_isDisposed || _isViewBroken || Game is not { } game || _module is not { } module)
+        if (_isDisposed || Game is not { } game || _module is not { } module)
         {
             return;
         }
 
         _player = CurrentConnection.Connection?.ClientId is { } clientId && game.Players.TryGetValue(clientId, out var player) ? player : null;
-        var update = game.UpdateView(_tracker, _player);
-        if (!update.IsEmpty && !await TryApplyUpdateAsync(module, update))
+        var hasViewChanged = await TryUpdateViewAsync(game, module);
+        if (_isDisposed)
         {
             return;
         }
 
-        await RefreshPanelAsync(game, hasViewChanged: !update.IsEmpty);
-        StateHasChanged();
+        await RefreshPanelAsync(game, hasViewChanged);
+        if (!_isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    // Returns whether the browser received a change of the view.
+    private async Task<bool> TryUpdateViewAsync(Game game, IJSObjectReference module)
+    {
+        if (_isViewBroken)
+        {
+            return false;
+        }
+
+        var update = game.UpdateView(_tracker, _player);
+        return !update.IsEmpty && await TryApplyUpdateAsync(module, update);
     }
 
     // Nearby follows both the view, which carries the toggles, and the volume table.
@@ -736,15 +758,14 @@
 
         if (hasViewChanged || isVolumeTableChanged)
         {
-            RefreshNearby(game);
+            RefreshNearby(game, hasViewChanged);
         }
 
+        RefreshActions(game);
         if (isVolumeTableChanged)
         {
             await SynchronizeVoiceAsync(game);
         }
-
-        RefreshActions(game);
     }
 
     // Raised on the voice loop, so it only schedules a flush.
@@ -828,20 +849,31 @@
         _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
     }
 
-    // The own player and the players it hears, by the same rule that mixes the voices.
-    private void RefreshNearby(Game game)
+    // The own player and the players it hears, by the same rule that mixes the voices. A new table with the same players
+    // keeps the list, because their toggles and titles reach it through the view.
+    private void RefreshNearby(Game game, bool hasViewChanged)
     {
         if (_player is not { } player)
         {
             _nearby = [];
+            _nearbyPlayer = null;
+            _nearbyPlayerIds = [];
+            return;
+        }
+
+        var row = game.VolumeTable.GetRow(player.ClientId);
+        if (!hasViewChanged && HasSameNearbyPlayers(player, row))
+        {
             return;
         }
 
         var players = game.Players;
-        var nearby = new List<NearbyEntry> { CreateNearbyEntry(player, isSelf: true) };
-        foreach (var entry in game.VolumeTable.GetRow(player.ClientId))
+        var playerIds = new string[row.Length];
+        var nearby = new List<NearbyEntry>(row.Length + 1) { CreateNearbyEntry(player, isSelf: true) };
+        for (var index = 0; index < row.Length; index++)
         {
-            if (players.TryGetValue(entry.PlayerId, out var other))
+            playerIds[index] = row[index].PlayerId;
+            if (players.TryGetValue(row[index].PlayerId, out var other))
             {
                 nearby.Add(CreateNearbyEntry(other, isSelf: false));
             }
@@ -851,6 +883,26 @@
             ? second.IsSelf.CompareTo(first.IsSelf)
             : StringComparer.CurrentCulture.Compare(first.Title, second.Title));
         _nearby = nearby;
+        _nearbyPlayer = player;
+        _nearbyPlayerIds = playerIds;
+    }
+
+    private bool HasSameNearbyPlayers(GamePlayer player, ReadOnlySpan<GameVolumeEntry> row)
+    {
+        if (!ReferenceEquals(player, _nearbyPlayer) || row.Length != _nearbyPlayerIds.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < row.Length; index++)
+        {
+            if (row[index].PlayerId != _nearbyPlayerIds[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
