@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Game.Voice;
 using HomeBlaze.Installation;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
@@ -17,6 +19,10 @@ public class GamePageTests
 {
     private const int Timeout = 30000;
     private const string SelfSuffix = " (you)";
+    private const string ReceivedFramesAttribute = "data-voice-received-frames";
+    private const string SentFramesAttribute = "data-voice-sent-frames";
+    private const string TrimmedAttribute = "data-voice-trimmed";
+    private const string UnderrunsAttribute = "data-voice-underruns";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -178,7 +184,153 @@ public class GamePageTests
         await Expect(second.GetByTestId("client-notification-message")).ToHaveTextAsync("Hello from the game", new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheTalkersFramesWithoutTrimming()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+
+        // One meter east of the listener, well within the hearing range.
+        talkerPlayer.X = listenerPlayer.X + 4;
+        talkerPlayer.Y = listenerPlayer.Y;
+
+        // Act
+        await TurnOnVoiceAsync(talker);
+        await TurnOnVoiceAsync(listener);
+
+        // Assert
+        await WaitForCounterAsync(talker, SentFramesAttribute, 25);
+        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 100);
+        // Headless Chromium renders audio in callbacks of 4096 samples (about 85 ms), which the lowest level over a window
+        // absorbs. One trim is allowed because a stall of the test machine can leave standing delay that a window drops.
+        await Expect(listener.GetByTestId("game-panel")).ToHaveAttributeAsync(UnderrunsAttribute, new Regex("^[0-9]+$"), new() { Timeout = Timeout });
+        Assert.InRange(await ReadCounterAsync(listener, TrimmedAttribute), 0, 1);
+    }
+
+    [Fact]
+    public async Task WhenTheTalkerMovesOutOfRange_ThenNearbyDropsItAndItsFramesStop()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        talkerPlayer.X = listenerPlayer.X + 4;
+        talkerPlayer.Y = listenerPlayer.Y;
+        await TurnOnVoiceAsync(talker);
+        await TurnOnVoiceAsync(listener);
+        var talkerEntry = listener.GetByTestId("game-nearby-player").Filter(new() { HasText = talkerPlayer.Title });
+        await Expect(talkerEntry).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Expect(talkerEntry.GetByTestId("game-nearby-microphone-off")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
+
+        // Act
+        // 25 m east: beyond the hearing range of 10 m, but still within the view of 50 m.
+        talkerPlayer.X = listenerPlayer.X + 100;
+
+        // Assert
+        await Expect(talkerEntry).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        var received = await ReadCounterAsync(listener, ReceivedFramesAttribute);
+        var sent = await ReadCounterAsync(talker, SentFramesAttribute);
+        await WaitForCounterAsync(talker, SentFramesAttribute, sent + 50);
+        Assert.InRange(await ReadCounterAsync(listener, ReceivedFramesAttribute), received, received + GameVoiceSettings.MaximumPendingSends);
+    }
+
+    [Fact]
+    public async Task WhenAnotherPageOfThePlayerTakesTheMicrophoneOver_ThenThePageTurnsItsMicrophoneOff()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var microphone = page.GetByTestId("game-microphone");
+        await microphone.ClickAsync(new() { Timeout = Timeout });
+        await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+
+        // Act
+        // Page ids count up from 1, so no page of the server has this one.
+        Assert.True(world.Game.SetMicrophone(new GameCaller(player), pageId: -1, isOn: true));
+
+        // Assert
+        await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
+        Assert.True(player.IsMicrophoneOn);
+    }
+
+    [Fact]
+    public async Task WhenThePageLosesItsSpeakerInTheGame_ThenThePageTurnsItsSpeakerOff()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var audio = page.GetByTestId("game-audio");
+        await audio.ClickAsync(new() { Timeout = Timeout });
+        await Expect(audio).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+        var pageId = Assert.Single(player.AudioPageIds!);
+
+        // Act
+        Assert.True(world.Game.SetAudio(new GameCaller(player), pageId, isOn: false));
+
+        // Assert
+        await Expect(audio).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
+        Assert.False(player.IsAudioOn);
+    }
+
+    [Fact]
+    public async Task WhenAPageWithVoiceOnCloses_ThenItsTogglesDropAndTheListenerKeepsItsSpeaker()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        talkerPlayer.X = listenerPlayer.X + 4;
+        talkerPlayer.Y = listenerPlayer.Y;
+        await TurnOnVoiceAsync(talker);
+        await TurnOnVoiceAsync(listener);
+        var isTalkerOn = talkerPlayer.IsMicrophoneOn && talkerPlayer.IsAudioOn;
+
+        // Act
+        await talker.CloseAsync();
+
+        // Assert
+        Assert.True(isTalkerOn);
+        await AsyncTestHelpers.WaitUntilAsync(() => !talkerPlayer.IsMicrophoneOn && !talkerPlayer.IsAudioOn,
+            message: "The toggles of the closed page stayed on");
+        // The listener's page heard of the change once Nearby no longer shows the talker with its microphone on.
+        var talkerWithMicrophone = listener.GetByTestId("game-nearby-player")
+            .Filter(new() { HasText = talkerPlayer.Title, HasNot = listener.GetByTestId("game-nearby-microphone-off") });
+        await Expect(talkerWithMicrophone).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Expect(listener.GetByTestId("game-audio")).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+        Assert.True(listenerPlayer.IsAudioOn);
+    }
+
     private static string FormatPosition(int x, int y, string facing) => $"X {x} · Y {y} · facing {facing}";
+
+    private static BrowserNewContextOptions CreateMicrophoneContext() => new() { Permissions = ["microphone"] };
+
+    private static async Task TurnOnVoiceAsync(IPage page)
+    {
+        foreach (var testId in new[] { "game-microphone", "game-audio" })
+        {
+            var button = page.GetByTestId(testId);
+            await button.ClickAsync(new() { Timeout = Timeout });
+            await Expect(button).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+        }
+    }
+
+    // game-voice.js counts the frames on the panel, which Playwright polls without a fixed wait.
+    private static Task WaitForCounterAsync(IPage page, string attribute, int minimum) =>
+        page.WaitForFunctionAsync(
+            "([attribute, minimum]) => Number(document.querySelector('[data-testid=\"game-panel\"]')?.getAttribute(attribute) ?? 0) >= minimum",
+            new object[] { attribute, minimum },
+            new() { Timeout = Timeout });
+
+    private static async Task<int> ReadCounterAsync(IPage page, string attribute) =>
+        int.Parse(await page.GetByTestId("game-panel").GetAttributeAsync(attribute) ?? "0", CultureInfo.InvariantCulture);
 
     private static ILocatorAssertions Expect(ILocator locator) => Assertions.Expect(locator);
 
@@ -220,9 +372,11 @@ public class GamePageTests
         /// Opens the game in a new browser context, which is a new client, waits until its player joined, and moves the
         /// players of earlier tests far away so that they cannot block it.
         /// </summary>
-        public async Task<(IPage Page, GamePlayer Player)> JoinAsync(BrowserNewContextOptions? options = null)
+        /// <param name="options">The options of the browser context, or null for the defaults.</param>
+        /// <param name="browser">The browser to open the game in, or null for the shared one.</param>
+        public async Task<(IPage Page, GamePlayer Player)> JoinAsync(BrowserNewContextOptions? options = null, IBrowser? browser = null)
         {
-            var context = await _fixture.Browser.NewContextAsync(options);
+            var context = await (browser ?? _fixture.Browser).NewContextAsync(options);
             _contexts.Add(context);
             var page = await context.NewPageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{_gameName}");
@@ -272,6 +426,47 @@ public class GamePageTests
 
             _fixture.RemoveSubjectFromRoot(_gameName, Game);
             _fixture.RemoveSubjectFromRoot(_installationName, _installation);
+        }
+    }
+
+    /// <summary>
+    /// A Chromium whose microphone is a test tone and that grants it without a dialog; the shared browser has neither.
+    /// </summary>
+    private sealed class MediaBrowser : IAsyncDisposable
+    {
+        private readonly IPlaywright _playwright;
+
+        private MediaBrowser(IPlaywright playwright, IBrowser browser)
+        {
+            _playwright = playwright;
+            Browser = browser;
+        }
+
+        public IBrowser Browser { get; }
+
+        public static async Task<MediaBrowser> LaunchAsync()
+        {
+            var playwright = await Playwright.CreateAsync();
+            try
+            {
+                var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                {
+                    Headless = true,
+                    Args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+                });
+                return new MediaBrowser(playwright, browser);
+            }
+            catch
+            {
+                playwright.Dispose();
+                throw;
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Browser.CloseAsync();
+            _playwright.Dispose();
         }
     }
 }

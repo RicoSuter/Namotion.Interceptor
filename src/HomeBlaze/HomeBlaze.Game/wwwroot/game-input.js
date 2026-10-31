@@ -39,6 +39,18 @@ export function isInputBlocked() {
     return document.querySelector('.mud-dialog-container') !== null;
 }
 
+const VOICE_KEYS = new Map([['m', 'ToggleMicrophone'], ['n', 'ToggleAudio']]);
+
+/** The page method that the voice key of the event toggles, or null; ignores repeats, shortcuts and typing. */
+export function getVoiceKeyMethod(event) {
+    if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || typeof event.key !== 'string') {
+        return null;
+    }
+
+    const method = VOICE_KEYS.get(event.key.toLowerCase());
+    return method && !isInputBlocked() ? method : null;
+}
+
 // The index in DIRECTIONS of the held names such as 'north', or -1 when they cancel out or none is held.
 function toDirection(isHeld) {
     const offsetX = (isHeld('east') ? 1 : 0) - (isHeld('west') ? 1 : 0);
@@ -225,6 +237,12 @@ export function createInput(dotNet, options, entities) {
                 event.preventDefault();
                 dotNet.invokeMethodAsync('InvokeTargetAction', number - 1).catch(() => { });
             }
+        }
+
+        const voiceMethod = getVoiceKeyMethod(event);
+        if (voiceMethod) {
+            event.preventDefault();
+            dotNet.invokeMethodAsync(voiceMethod).catch(() => { });
         }
     }
 

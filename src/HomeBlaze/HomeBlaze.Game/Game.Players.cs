@@ -21,6 +21,7 @@ public partial class Game
         lock (_lock)
         {
             SynchronizePlayerSet(clients);
+            ReleaseVoiceOfReplacedPlayers();
 
             var index = GetIndex();
             foreach (var client in clients)
@@ -91,6 +92,11 @@ public partial class Game
         var isJoining = client.IsConnected && !player.IsConnected;
         player.ClientTitle = client.Title;
         player.IsConnected = client.IsConnected;
+        if (!client.IsConnected)
+        {
+            ResetVoice(player);
+        }
+
         if (isJoining)
         {
             var position = SpawnFinder.FindFreePosition(player.Footprint, area => !index.IsBlocked(area, player));

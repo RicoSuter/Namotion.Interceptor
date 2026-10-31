@@ -13,15 +13,22 @@ internal sealed class GameWorldIndex
 
     public int Count => _entries.Count;
 
+    /// <summary>
+    /// Increases with every change of the indexed objects, so a reader can tell whether anything moved, appeared,
+    /// disappeared or changed its movement blocking, sound blocking or visibility since it last looked.
+    /// </summary>
+    public long Version { get; private set; }
+
     public void Clear()
     {
         _chunks.Clear();
         _entries.Clear();
+        Version++;
     }
 
     /// <summary>
-    /// Adds the object, or moves it to its current footprint and blocking and visibility state; leaves out an object
-    /// with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
+    /// Adds the object, or moves it to its current footprint and its movement blocking, sound blocking and visibility
+    /// state; leaves out an object with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
     /// </summary>
     public void AddOrUpdate(GameObject gameObject)
     {
@@ -32,7 +39,7 @@ internal sealed class GameWorldIndex
             return;
         }
 
-        var entry = new Entry(gameObject.Footprint, gameObject.IsMovementBlocking, gameObject.IsVisible);
+        var entry = new Entry(gameObject.Footprint, gameObject.IsMovementBlocking, gameObject.IsSoundBlocking, gameObject.IsVisible);
         if (_entries.TryGetValue(gameObject, out var existing))
         {
             if (existing == entry)
@@ -45,6 +52,7 @@ internal sealed class GameWorldIndex
 
         _entries[gameObject] = entry;
         AddToChunks(gameObject, entry.Footprint);
+        Version++;
     }
 
     public void Remove(GameObject gameObject)
@@ -52,6 +60,7 @@ internal sealed class GameWorldIndex
         if (_entries.Remove(gameObject, out var existing))
         {
             RemoveFromChunks(gameObject, existing.Footprint);
+            Version++;
         }
     }
 
@@ -99,10 +108,57 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private static bool HasValidSize(GameObject gameObject) =>
+    /// <summary>
+    /// Whether an object whose <see cref="GameObject.IsSoundBlocking"/> is true covers the tile, whether visible or not.
+    /// </summary>
+    public bool IsSoundBlocked(long x, long y)
+    {
+        if (!_chunks.TryGetValue((x >> ChunkShift, y >> ChunkShift), out var objects))
+        {
+            return false;
+        }
+
+        foreach (var gameObject in objects)
+        {
+            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Contains(x, y))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Adds the footprint of each object that stops sound by <see cref="IsSoundBlocked"/> and covers a tile of the area
+    /// to <paramref name="results"/>, once.
+    /// </summary>
+    public void QuerySoundBlocking(Footprint area, List<Footprint> results)
+    {
+        _found.Clear();
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        {
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
+            {
+                if (_chunks.TryGetValue((chunkX, chunkY), out var objects))
+                {
+                    AddSoundBlockingIntersecting(objects, area, results);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the width, depth and height of the object are from 1 to <see cref="GameObject.MaximumSize"/>, which the
+    /// index requires.
+    /// </summary>
+    internal static bool HasValidSize(GameObject gameObject) =>
         IsValidSize(gameObject.Width) && IsValidSize(gameObject.Depth) && IsValidSize(gameObject.Height);
 
-    private static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
+    /// <summary>
+    /// Whether the size is from 1 to <see cref="GameObject.MaximumSize"/>.
+    /// </summary>
+    internal static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
 
     private bool IsBlockedByAny(List<GameObject> objects, Footprint area, GameObject? ignored)
     {
@@ -128,6 +184,24 @@ internal sealed class GameWorldIndex
                 results.Add(gameObject);
             }
         }
+    }
+
+    private void AddSoundBlockingIntersecting(List<GameObject> objects, Footprint area, List<Footprint> results)
+    {
+        foreach (var gameObject in objects)
+        {
+            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Intersects(area) && _found.Add(gameObject))
+            {
+                results.Add(footprint);
+            }
+        }
+    }
+
+    private bool TryGetSoundBlockingFootprint(GameObject gameObject, out Footprint footprint)
+    {
+        var entry = _entries[gameObject];
+        footprint = entry.Footprint;
+        return entry.IsSoundBlocking;
     }
 
     private void AddToChunks(GameObject gameObject, Footprint footprint)
@@ -161,5 +235,5 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private readonly record struct Entry(Footprint Footprint, bool IsMovementBlocking, bool IsVisible);
+    private readonly record struct Entry(Footprint Footprint, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
 }

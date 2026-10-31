@@ -1,5 +1,5 @@
 using HomeBlaze.Game.Tests.Testing;
-using HomeBlaze.Game.World;
+using HomeBlaze.Game.Voice;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -132,7 +132,7 @@ public class GameRuntimeTests
             var player = game.Players["tab-1"];
 
             // The clock stands still, so these steps use up the burst and the armed step is refused without a write of its own.
-            for (var step = 0; step < StepRateLimiter.Burst; step++)
+            for (var step = 0; step < Game.StepBurst; step++)
             {
                 game.TryMove(player, GameDirection.East, turnOnly: false);
             }
@@ -202,6 +202,35 @@ public class GameRuntimeTests
 
             // Assert
             Assert.True(result.IsAccepted);
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheGameRuns_ThenTheVoiceLoopMixesEveryFrameDuration()
+    {
+        // Arrange
+        var talker = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 20);
+        var sink = new RecordingVoiceSink();
+        using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
+        _context.Game.SetMicrophone(new GameCaller(talker), pageId: 1, isOn: true);
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+                _context.TimeProvider.Advance(GameVoiceSettings.FrameDuration);
+                return sink.Count > 0;
+            }, message: "The voice loop did not mix the frame");
+
+            // Assert
+            Assert.Equal(200, VoiceFrames.ReadLastSample(sink.Frames[0]));
         }
         finally
         {

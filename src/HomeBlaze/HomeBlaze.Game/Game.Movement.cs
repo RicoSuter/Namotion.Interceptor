@@ -10,6 +10,12 @@ internal readonly record struct MoveResult(bool IsAccepted, int X, int Y, GameDi
 public partial class Game
 {
     /// <summary>
+    /// The steps, and separately the turns, a player may take at once after a pause; one more each
+    /// <see cref="StepInterval"/>.
+    /// </summary>
+    internal const int StepBurst = 3;
+
+    /// <summary>
     /// Turns the player toward <paramref name="direction"/> and, unless <paramref name="turnOnly"/>, steps one tile that
     /// way when the step is allowed; the caller must pass only the player of its own client.
     /// </summary>
@@ -23,8 +29,8 @@ public partial class Game
             }
 
             var rateLimiter = turnOnly
-                ? player.TurnRateLimiter ??= new StepRateLimiter(_timeProvider)
-                : player.StepRateLimiter ??= new StepRateLimiter(_timeProvider);
+                ? player.TurnRateLimiter ??= new RateLimiter(_timeProvider, StepInterval, StepBurst)
+                : player.StepRateLimiter ??= new RateLimiter(_timeProvider, StepInterval, StepBurst);
             if (!rateLimiter.TryTake())
             {
                 return new MoveResult(false, player.X, player.Y, player.Facing);

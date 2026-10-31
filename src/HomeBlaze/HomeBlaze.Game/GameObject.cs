@@ -52,6 +52,11 @@ public abstract partial class GameObject : IConfigurable
     public virtual bool IsMovementBlocking => true;
 
     /// <summary>
+    /// Whether the object stops sound; unlike <see cref="IsMovementBlocking"/>, which is about movement.
+    /// </summary>
+    public virtual bool IsSoundBlocking => false;
+
+    /// <summary>
     /// Whether players see this object.
     /// </summary>
     public virtual bool IsVisible => true;

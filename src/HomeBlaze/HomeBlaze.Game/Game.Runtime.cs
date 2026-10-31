@@ -40,6 +40,22 @@ public partial class Game
 
         RequestIndexRebuild();
 
+        // Stopped together with the housekeeping loop, also when that one ends on an unexpected exception.
+        using var voiceStopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var voiceLoop = RunVoiceLoopAsync(voiceStopping.Token);
+        try
+        {
+            await RunHousekeepingLoopAsync(stoppingToken);
+        }
+        finally
+        {
+            await voiceStopping.CancelAsync();
+            await voiceLoop;
+        }
+    }
+
+    private async Task RunHousekeepingLoopAsync(CancellationToken stoppingToken)
+    {
         // One wait outlives the passes that a delay ends; a new wait per pass would leave the old one queued to take the next signal.
         Task? signalTask = null;
         while (!stoppingToken.IsCancellationRequested)
@@ -113,7 +129,7 @@ public partial class Game
     private static bool IsFootprintProperty(string name) =>
         name is nameof(GameObject.X) or nameof(GameObject.Y) or nameof(GameObject.Width) or nameof(GameObject.Depth);
 
-    // The properties that IsMovementBlocking or IsVisible follow.
+    // The properties that IsMovementBlocking, IsSoundBlocking or IsVisible follow.
     private static bool IsStateProperty(string name) =>
         name is nameof(GamePlayer.IsConnected) or nameof(Door.IsOpen);
 

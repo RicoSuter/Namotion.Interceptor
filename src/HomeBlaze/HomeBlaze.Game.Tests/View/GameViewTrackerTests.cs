@@ -121,4 +121,36 @@ public class GameViewTrackerTests
         Assert.Equal((closed.Id, GameViewObject.DoorKind, true, false), (open.Id, open.Kind, open.IsOpen, open.IsMovementBlocking));
         Assert.Equal(GameColors.Door, open.Color);
     }
+
+    [Fact]
+    public void WhenAPlayerTurnsItsMicrophoneOn_ThenItsViewIsUpdated()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.Game.UpdateView(_tracker, player);
+
+        // Act
+        _context.Game.SetMicrophone(new GameCaller(player), pageId: 1, isOn: true);
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        var view = Assert.Single(update.Upserted);
+        Assert.True(view.IsMicrophoneOn);
+        Assert.False(view.IsAudioOn);
+    }
+
+    [Fact]
+    public void WhenThePlayerColorIsRequested_ThenItIsTheColorOfItsViewObject()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var view = Assert.Single(_context.Game.UpdateView(_tracker, player).Upserted);
+
+        // Act
+        var color = _tracker.GetPlayerColor(player);
+
+        // Assert
+        Assert.Equal(view.Color, color);
+        Assert.Equal(GameColors.FromId("tab-1"), color);
+    }
 }
