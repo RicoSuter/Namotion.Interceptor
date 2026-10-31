@@ -26,7 +26,7 @@ public sealed class SubjectTransactionConflictException : SubjectTransactionExce
     /// Gets the properties whose landed value changed since the transaction wrote them, including properties it wrote
     /// with their unchanged value (see <see cref="TransactionCheckMode.Deferred"/>), and, with either
     /// <see cref="TransactionConflictBehavior"/>, the written properties whose subject left the transaction's context
-    /// (detached or moved to a context that does not resolve the transaction's interceptor). Such a property conflicts
+    /// (detached or moved to another context). Such a property conflicts
     /// again on retry until its subject is attached to the context again outside the transaction (a write inside it is
     /// only captured), or the transaction is disposed.
     /// </summary>

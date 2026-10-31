@@ -311,30 +311,18 @@ internal static class SubjectPropertyChangeOperations
     }
 
     /// <summary>
-    /// Detects the changes whose subject's context no longer resolves <paramref name="interceptor"/>. Returns their
+    /// Detects the changes whose subject is no longer attached to <paramref name="context"/>. Returns their
     /// properties, or null when there are none.
     /// </summary>
     internal static List<PropertyReference>? DetectSubjectsOutsideContext(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        SubjectTransactionInterceptor interceptor)
+        IInterceptorSubjectContext context)
     {
         List<PropertyReference>? conflictingProperties = null;
-        IInterceptorSubjectContext? resolvingContext = null;
         foreach (ref readonly var change in changes)
         {
             // A subject that left the context since the write would take the value without the context's handlers.
-            var subjectContext = change.Property.Subject.TryGetContext();
-            if (subjectContext is not null && ReferenceEquals(subjectContext, resolvingContext))
-            {
-                continue;
-            }
-
-            if (subjectContext is not null &&
-                SubjectTransactionInterceptor.ResolvesInterceptor(subjectContext.GetServices<SubjectTransactionInterceptor>(), interceptor))
-            {
-                resolvingContext = subjectContext;
-            }
-            else
+            if (!ReferenceEquals(change.Property.Subject.TryGetContext(), context))
             {
                 conflictingProperties ??= [];
                 conflictingProperties.Add(change.Property);

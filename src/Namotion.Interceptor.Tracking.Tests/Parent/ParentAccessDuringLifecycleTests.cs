@@ -59,8 +59,7 @@ public class ParentAccessDuringLifecycleTests
     [Fact]
     public void WhenOnlyLifecycleIsConfigured_ThenParentsAreAvailableDuringAttach()
     {
-        // Arrange: parent state is owned by the lifecycle rather than by an opt-in handler. This
-        // is a deliberate behavior change: on master this configuration returned empty parents.
+        // Arrange: parent state is owned by the lifecycle, so no further configuration is needed.
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();

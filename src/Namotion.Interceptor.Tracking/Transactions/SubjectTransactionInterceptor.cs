@@ -170,7 +170,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     /// Records a write of the landed value, which the equality check drops as unchanged, for the commit check when
     /// <paramref name="transaction"/>, the current flow's transaction, captures and <see cref="SubjectTransaction.RecordsCheckOnlyEntries"/> (see
     /// <see cref="SubjectTransaction.RecordCheckOnly{TProperty}"/>). Otherwise, and for a derived property or a
-    /// subject whose context does not route through the transaction's interceptor, the write stays dropped.
+    /// subject of another context, the write stays dropped.
     /// </summary>
     internal static void RecordUnchangedWrite<TProperty>(SubjectTransaction transaction, ref PropertyWriteContext<TProperty> context)
     {
@@ -181,21 +181,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        var subjectContext = context.Property.Subject.TryGetContext();
-        if (subjectContext is null)
-        {
-            return;
-        }
-
-        var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
-        if (!ContainsByReference(subjectInterceptors, transaction.Interceptor))
-        {
-            return;
-        }
-
-        // A commit that starts meanwhile drops the write instead of failing it. An entry recorded without the handlers
-        // of its context, after a skipped inclusion and a failed commit, would escape their check, so drop it here.
-        if (!transaction.IncludeHandlersOf(subjectContext, subjectInterceptors, skipWhileCommitting: true))
+        if (!ReferenceEquals(context.Property.Subject.TryGetContext(), transaction.Context))
         {
             return;
         }
@@ -289,35 +275,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     {
         throw new InvalidOperationException(
             $"Cannot modify property '{property.Metadata.Name}': Transaction is bound to a different context.");
-    }
-
-    /// <summary>
-    /// Returns whether <paramref name="interceptors"/> contains <paramref name="target"/> by reference.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool ResolvesInterceptor(
-        ImmutableArray<SubjectTransactionInterceptor> interceptors,
-        SubjectTransactionInterceptor target)
-    {
-        return interceptors.Length == 1
-            ? ReferenceEquals(interceptors[0], target)
-            : ContainsByReference(interceptors, target);
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    internal static bool ContainsByReference(
-        ImmutableArray<SubjectTransactionInterceptor> interceptors,
-        SubjectTransactionInterceptor target)
-    {
-        for (var index = 0; index < interceptors.Length; index++)
-        {
-            if (ReferenceEquals(interceptors[index], target))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

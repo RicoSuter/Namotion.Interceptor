@@ -316,14 +316,6 @@ public class OwnershipChangeStreamTests
     /// is held through a different property than the one being written, so the retention rule does
     /// not reach it: it is released by the cascade from the dropped subject and re-attached by the
     /// addition pass, and the committed graph is correct either way.
-    ///
-    /// Master does the same thing. Measured at 0418410c with <c>WithContextInheritance()</c>, which is
-    /// the configuration whose attach descends into the subtree the way <c>WithLifecycle()</c> does
-    /// here, master publishes five changes for this shape too, differing only in the detach order:
-    /// <c>G detached, C detached, S detached, G attached, C attached</c>, deepest first where the
-    /// sequence below is top-down. Master under a bare <c>WithLifecycle()</c> publishes two changes
-    /// instead, but that is not a comparable configuration: it never attached the subtree at all, and
-    /// the grandchild is left with reference count zero afterwards.
     /// </summary>
     [Fact]
     public void WhenAReparentTargetIsAlreadyOwned_ThenTheWholeChainDetachesAndReattaches()
