@@ -26,22 +26,24 @@ const FALLBACK_COLOR = '#8d8577';
 const WIND_STRENGTH = 0.0015;
 const WIND_SPEED = 1.7;
 const GUST_SPEED = 0.37;
+const TWO_PI = Math.PI * 2;
 // Runs after the vertex is in world space; finalWorld[3] is the mesh's world position, which spreads the phase so that
 // neighboring trees do not sway in step.
 const WIND_SHADER = `
 #ifdef GAME_WIND
     float gameWindHeight = max(worldPos.y - finalWorld[3].y, 0.0);
     float gameWindPhase = finalWorld[3].x * 0.13 + finalWorld[3].z * 0.07;
-    float gameWindSway = sin(gameWindTime * ${toGlsl(WIND_SPEED)} + gameWindPhase) * 0.7
-        + sin(gameWindTime * ${toGlsl(GUST_SPEED)} + gameWindPhase * 0.5) * 0.3;
+    float gameWindSway = sin(gameWindSwayPhase + gameWindPhase) * 0.7 + sin(gameWindGustPhase + gameWindPhase * 0.5) * 0.3;
     float gameWindBend = gameWindHeight * gameWindHeight * ${toGlsl(WIND_STRENGTH)} * gameWindSway;
     worldPos.x += gameWindBend;
     worldPos.z += gameWindBend * 0.4;
 #endif
 `;
 
-// Seconds of the render clock, which the wind shader reads; the views of a tab share it.
-let windTime = 0;
+// The phases of the sway and the gust in radians, which the wind shader reads; the views of a tab share them. They wrap
+// on the CPU, because a 32-bit float of the raw clock loses precision after hours.
+let windSwayPhase = 0;
+let windGustPhase = 0;
 let WindPlugin = null;
 
 function toGlsl(value) {
@@ -67,13 +69,17 @@ function getWindPlugin() {
 
         getUniforms() {
             return {
-                ubo: [{ name: 'gameWindTime', size: 1, type: 'float' }],
-                vertex: '#ifdef GAME_WIND\nuniform float gameWindTime;\n#endif\n',
+                ubo: [
+                    { name: 'gameWindSwayPhase', size: 1, type: 'float' },
+                    { name: 'gameWindGustPhase', size: 1, type: 'float' },
+                ],
+                vertex: '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\n#endif\n',
             };
         }
 
         bindForSubMesh(uniformBuffer) {
-            uniformBuffer.updateFloat('gameWindTime', windTime);
+            uniformBuffer.updateFloat('gameWindSwayPhase', windSwayPhase);
+            uniformBuffer.updateFloat('gameWindGustPhase', windGustPhase);
         }
 
         getCustomCode(shaderType) {
@@ -93,7 +99,7 @@ export async function createEntities(scene, options) {
     const models = new Map();
     const windMaterials = new Map();
     // Written to the canvas for tests and diagnosis.
-    const stats = { parts: 0, models: 0, failures: 0 };
+    const stats = { parts: 0, models: 0, failures: 0, faded: 0 };
     // Reused by every frame, so the render loop does not allocate.
     const selfPosition = { x: 0, z: 0 };
     const segment = { enter: 0, exit: 1 };
@@ -101,6 +107,8 @@ export async function createEntities(scene, options) {
     let originX = null;
     let originY = null;
     let selfId = null;
+    // Set by dispose, so that a model load finishing later does not touch the disposed scene.
+    let isViewDisposed = false;
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
     ground.material = await createGroundMaterial();
@@ -151,6 +159,7 @@ export async function createEntities(scene, options) {
             element.dataset.gameParts = String(stats.parts);
             element.dataset.gameModels = String(stats.models);
             element.dataset.gameModelFailures = String(stats.failures);
+            element.dataset.gameFaded = String(stats.faded);
         }
     }
 
@@ -252,7 +261,7 @@ export async function createEntities(scene, options) {
         const offset = new BABYLON.TransformNode(`${name}-offset`, scene);
         offset.parent = pivot;
         offset.position.copyFromFloats(part.x - part.px, part.y, part.z - part.pz);
-        const node = { part, pivot, offset, instance: null, state: null, glide: null };
+        const node = { part, pivot, offset, instance: null, meshes: null, state: null, glide: null };
         stats.parts++;
         if (part.k === 'model') {
             addModel(entity, node, name).catch(error => console.warn(`The model ${part.m} could not be shown: ${error?.message ?? error}`));
@@ -268,7 +277,7 @@ export async function createEntities(scene, options) {
 
     async function addModel(entity, node, name) {
         const container = await loadModel(node.part.m);
-        if (entity.isDisposed) {
+        if (entity.isDisposed || isViewDisposed) {
             return;
         }
 
@@ -307,6 +316,7 @@ export async function createEntities(scene, options) {
         playAnimation(instance, prefix, part.a);
         addMeshes(entity, meshes);
         node.instance = instance;
+        node.meshes = meshes;
         node.state = 'model';
         stats.models++;
     }
@@ -472,7 +482,7 @@ export async function createEntities(scene, options) {
         stats.parts--;
         if (node.state === 'model') {
             stats.models--;
-            disposeInstance(node.instance, []);
+            disposeInstance(node.instance, node.meshes);
         } else if (node.state === 'fallback') {
             stats.failures--;
         }
@@ -481,6 +491,10 @@ export async function createEntities(scene, options) {
     // Shared box, model and wind materials stay; the scene disposes them.
     function disposeEntity(entity) {
         entity.isDisposed = true;
+        if (entity.isFaded) {
+            stats.faded--;
+        }
+
         if (entity.instance) {
             disposeInstance(entity.instance, entity.meshes);
         }
@@ -553,6 +567,9 @@ export async function createEntities(scene, options) {
         for (const mesh of entity.meshes) {
             mesh.visibility = visibility;
         }
+
+        stats.faded += isFaded ? 1 : -1;
+        updateStats();
     }
 
     // What a glide cannot animate: a change of any of it rebuilds the object.
@@ -587,6 +604,7 @@ export async function createEntities(scene, options) {
                     fromOffset: node.offset.position.clone(),
                     toOffset: new BABYLON.Vector3(part.x - part.px, part.y, part.z - part.pz),
                     fromRotation: node.pivot.rotation.y,
+                    rotationDelta: getShortestTurn(node.pivot.rotation.y, part.r * RADIANS_PER_DEGREE),
                     toRotation: part.r * RADIANS_PER_DEGREE,
                     start: performance.now(),
                 };
@@ -597,14 +615,25 @@ export async function createEntities(scene, options) {
         entity.bounds = getBounds(parts);
     }
 
+    // The turn from one angle to another in radians, in -PI to PI, so that 170 to -170 degrees turns by 20 degrees.
+    function getShortestTurn(from, to) {
+        const turn = (to - from) % TWO_PI;
+        if (turn > Math.PI) {
+            return turn - TWO_PI;
+        }
+
+        return turn < -Math.PI ? turn + TWO_PI : turn;
+    }
+
     function animateGlide(node, now) {
         const glide = node.glide;
         const progress = Math.min(1, (now - glide.start) / GLIDE_MS);
         // Eases out, so a door leaf slows down before it stops.
         const eased = 1 - (1 - progress) * (1 - progress);
         BABYLON.Vector3.LerpToRef(glide.fromOffset, glide.toOffset, eased, node.offset.position);
-        node.pivot.rotation.y = glide.fromRotation + (glide.toRotation - glide.fromRotation) * eased;
+        node.pivot.rotation.y = glide.fromRotation + glide.rotationDelta * eased;
         if (progress >= 1) {
+            node.pivot.rotation.y = glide.toRotation;
             node.glide = null;
         }
     }
@@ -715,6 +744,7 @@ export async function createEntities(scene, options) {
 
         /** Releases what the scene does not own; call before disposing the scene. */
         dispose() {
+            isViewDisposed = true;
             character.dispose();
             for (const loading of models.values()) {
                 loading.then(container => container?.dispose());
@@ -775,7 +805,9 @@ export async function createEntities(scene, options) {
         },
 
         animate(now) {
-            windTime = now / 1000;
+            const seconds = now / 1000;
+            windSwayPhase = (seconds * WIND_SPEED) % TWO_PI;
+            windGustPhase = (seconds * GUST_SPEED) % TWO_PI;
             for (const entity of entities.values()) {
                 for (const node of entity.partNodes) {
                     if (node.glide) {
@@ -809,7 +841,8 @@ export async function createEntities(scene, options) {
             return selfPosition;
         },
 
-        // Fades the movement blocking objects between the camera and the own player's head.
+        // Fades the objects between the camera and the own player's head, including those that do not block movement, such
+        // as an open door whose lintel hides the head.
         afterCameraMoved(camera) {
             const self = entities.get(selfId);
             if (!self) {
@@ -822,7 +855,7 @@ export async function createEntities(scene, options) {
             const offsetZ = self.root.position.z - eye.z;
             for (const entity of entities.values()) {
                 if (entity.view.kind !== 'player') {
-                    setFaded(entity, entity.view.isMovementBlocking && crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ));
+                    setFaded(entity, crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ));
                 }
             }
         },

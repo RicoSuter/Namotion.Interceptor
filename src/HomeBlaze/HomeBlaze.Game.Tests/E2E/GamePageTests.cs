@@ -164,6 +164,28 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenAWallWithAnOpenDoorStandsBetweenTheCameraAndThePlayer_ThenTheDoorFades()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var (x, y) = (player.X, player.Y);
+
+        // Act
+        // South of the player, toward the camera: the lintel of the open door hides the head, the walls beside it do not.
+        world.Game.Objects = new Dictionary<string, GameObject>
+        {
+            ["left"] = new Wall { X = x - 5, Y = y - 3 },
+            ["door"] = new Door { X = x - 1, Y = y - 3, IsOpen = true },
+            ["right"] = new Wall { X = x + 3, Y = y - 3 }
+        };
+
+        // Assert
+        await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-parts", "4", new() { Timeout = Timeout });
+        await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-faded", "1", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTwoBrowsersPlay_ThenTheySeeEachOtherAndOneCanMessageTheOther()
     {
         // Arrange
