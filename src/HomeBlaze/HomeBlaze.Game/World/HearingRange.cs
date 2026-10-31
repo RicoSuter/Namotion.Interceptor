@@ -17,11 +17,6 @@ internal static class HearingRange
     /// </summary>
     public static double GetVolume(GamePlayer first, GamePlayer second, GameWorldIndex index)
     {
-        if (string.CompareOrdinal(first.ClientId, second.ClientId) > 0)
-        {
-            (first, second) = (second, first);
-        }
-
         var firstFootprint = first.Footprint;
         var secondFootprint = second.Footprint;
         var start = GetDoubledCenter(firstFootprint);
@@ -46,7 +41,11 @@ internal static class HearingRange
         var maximumX = Math.Min(int.MaxValue, footprint.Right + HearingRadius);
         var minimumY = Math.Max(int.MinValue, (long)footprint.Y - HearingRadius);
         var maximumY = Math.Min(int.MaxValue, footprint.Top + HearingRadius);
-        return new Footprint((int)minimumX, (int)minimumY, (int)(maximumX - minimumX + 1), (int)(maximumY - minimumY + 1));
+        return new Footprint(
+            (int)minimumX,
+            (int)minimumY,
+            (int)Math.Min(int.MaxValue, maximumX - minimumX + 1),
+            (int)Math.Min(int.MaxValue, maximumY - minimumY + 1));
     }
 
     // In half tiles, so the center of every footprint is a whole number and the walk stays exact.

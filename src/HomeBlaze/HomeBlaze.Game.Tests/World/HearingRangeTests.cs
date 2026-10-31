@@ -241,6 +241,54 @@ public class HearingRangeTests
     }
 
     [Fact]
+    public void WhenAWallStandsBetweenPlayersAtTheLowerIntLimit_ThenItBlocks()
+    {
+        // Arrange
+        _index.AddOrUpdate(new Wall { X = int.MinValue + 10, Y = int.MinValue, Width = 1, Depth = 4 });
+        var first = CreatePlayer("a", int.MinValue, int.MinValue);
+        var second = CreatePlayer("b", int.MinValue + 20, int.MinValue);
+
+        // Act
+        var volume = HearingRange.GetVolume(first, second, _index);
+
+        // Assert
+        Assert.Equal(0.0, volume);
+    }
+
+    [Fact]
+    public void WhenAWallStandsOnAVerticalLine_ThenItBlocks()
+    {
+        // Arrange
+        _index.AddOrUpdate(new Wall { X = -1, Y = 10, Width = 4, Depth = 1 });
+        var first = CreatePlayer("a", 0, 0);
+        var second = CreatePlayer("b", 0, 20);
+
+        // Act
+        var volume = HearingRange.GetVolume(first, second, _index);
+
+        // Assert
+        Assert.Equal(0.0, volume);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void WhenAVerticalLineRunsAlongTheFaceOfAWall_ThenTheWallBlocks(int wallX)
+    {
+        // Arrange
+        // The centers lie on the line between columns 0 and 1, which touches this wall in either column.
+        _index.AddOrUpdate(new Wall { X = wallX, Y = 10, Width = 1, Depth = 1 });
+        var first = CreatePlayer("a", 0, 0);
+        var second = CreatePlayer("b", 0, 20);
+
+        // Act
+        var volume = HearingRange.GetVolume(first, second, _index);
+
+        // Assert
+        Assert.Equal(0.0, volume);
+    }
+
+    [Fact]
     public void WhenThePlayersStandAtOppositeIntLimits_ThenTheyDoNotHearEachOther()
     {
         // Arrange
@@ -257,12 +305,19 @@ public class HearingRangeTests
     [Fact]
     public void WhenTheAreaOfAPlayerIsTaken_ThenItReachesTheRadiusBeyondTheFootprint()
     {
+        // Arrange
+        var footprint = new Footprint(0, 0, 2, 2);
+        var footprintAtTheLimits = new Footprint(int.MaxValue - 1, int.MinValue, 2, 2);
+        var hugeFootprint = new Footprint(int.MinValue, 0, int.MaxValue, 1);
+
         // Act
-        var area = HearingRange.GetArea(new Footprint(0, 0, 2, 2));
-        var clamped = HearingRange.GetArea(new Footprint(int.MaxValue - 1, int.MinValue, 2, 2));
+        var area = HearingRange.GetArea(footprint);
+        var clamped = HearingRange.GetArea(footprintAtTheLimits);
+        var huge = HearingRange.GetArea(hugeFootprint);
 
         // Assert
         Assert.Equal(new Footprint(-40, -40, 82, 82), area);
-        Assert.Equal(((long)int.MaxValue, (long)int.MinValue), (clamped.Right, (long)clamped.Y));
+        Assert.Equal(new Footprint(int.MaxValue - 41, int.MinValue, 42, 42), clamped);
+        Assert.Equal(new Footprint(int.MinValue, -40, int.MaxValue, 81), huge);
     }
 }

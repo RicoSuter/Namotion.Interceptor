@@ -6,6 +6,8 @@ namespace HomeBlaze.Game.Voice;
 /// </summary>
 internal static class GameVoiceSettings
 {
+    private const int FrameMilliseconds = 20;
+
     /// <summary>
     /// Samples per second of every frame.
     /// </summary>
@@ -14,7 +16,7 @@ internal static class GameVoiceSettings
     /// <summary>
     /// Samples in one frame of <see cref="FrameDuration"/>.
     /// </summary>
-    public const int SamplesPerFrame = SampleRate / 50;
+    public const int SamplesPerFrame = SampleRate * FrameMilliseconds / 1000;
 
     /// <summary>
     /// Bytes in one frame of 16-bit samples.
@@ -49,7 +51,7 @@ internal static class GameVoiceSettings
     /// <summary>
     /// Length of one frame.
     /// </summary>
-    public static readonly TimeSpan FrameDuration = TimeSpan.FromMilliseconds(20);
+    public static readonly TimeSpan FrameDuration = TimeSpan.FromMilliseconds(FrameMilliseconds);
 
     /// <summary>
     /// Audio the browser buffers before it plays.
