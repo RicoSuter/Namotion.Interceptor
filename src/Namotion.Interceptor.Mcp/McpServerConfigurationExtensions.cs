@@ -29,7 +29,7 @@ public static class McpServerConfigurationExtensions
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
         => McpVisibility.For(configuration, root.Subject)
             .GetResolutionPathProvider(configuration.ResolutionPathProvider)
-            .TryGetPropertyFromPath(root, path, includedPropertiesOnly: configuration.AccessPolicy is not null, createMissingSubject: null);
+            .TryGetPropertyFromPath(root, path);
 
     /// <summary>
     /// Resolves a subject path from <paramref name="root"/> as browse does: null when the path does not resolve or the
@@ -62,7 +62,7 @@ public static class McpServerConfigurationExtensions
     private static RegisteredSubject? TryResolveReadableSubject(
         PathProviderBase pathProvider, IMcpAccessPolicy policy, RegisteredSubject root, string path)
     {
-        if (pathProvider.TryGetPropertyFromPath(root, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+        if (pathProvider.TryGetPropertyFromPath(root, path) is not
             { } resolved)
         {
             return null;

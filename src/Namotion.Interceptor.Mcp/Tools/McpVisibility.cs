@@ -45,7 +45,7 @@ internal sealed class McpVisibility
 
     /// <summary>
     /// The configuration's listing provider, <paramref name="listingPathProvider"/>, restricted with a policy to
-    /// properties whose owner is shown, so a path resolved with <c>includedPropertiesOnly</c> passes shown subjects
+    /// properties whose owner is shown, so a path resolved with it passes shown subjects
     /// only. Without a policy, <paramref name="listingPathProvider"/> itself.
     /// </summary>
     public PathProviderBase GetListingPathProvider(PathProviderBase listingPathProvider) =>

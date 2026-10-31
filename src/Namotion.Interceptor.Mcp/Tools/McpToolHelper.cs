@@ -207,7 +207,7 @@ internal static class McpToolHelper
         string path,
         McpVisibility visibility)
     {
-        if (visibility.GetListingPathProvider(pathProvider).TryGetPropertyFromPath(subject, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+        if (visibility.GetListingPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;
@@ -219,8 +219,11 @@ internal static class McpToolHelper
     /// <summary>
     /// The path the tools write for the subject from <paramref name="rootSubject"/>, after the configuration's
     /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty, otherwise null
-    /// when the registry writes no path. With an <see cref="McpServerConfiguration.AccessPolicy"/> also null when a
-    /// property the path is written through is not readable.
+    /// when <see cref="McpServerConfiguration.PathProvider"/> does not let paths pass the property holding the subject
+    /// (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>) or the registry writes no path. The properties
+    /// above it are in the path whether the path provider includes them or not, as get_property and browse resolve.
+    /// With an <see cref="McpServerConfiguration.AccessPolicy"/> also null when no path exists through properties the
+    /// policy allows to read.
     /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject, McpServerConfiguration configuration, IInterceptorSubject rootSubject)
@@ -237,22 +240,16 @@ internal static class McpToolHelper
             return null;
         }
 
+        // The resolution provider writes the path provider's segments and includes every property, or with a policy
+        // exactly what the policy allows to read, the holding property too. The registry checks inclusion in the walk
+        // that writes the text, so a subject moved on it while a call runs cannot put the name of a hidden property
+        // into the text.
         var parent = parents[0];
-        var path = configuration.AccessPolicy is null
-            ? parent.Property.TryGetPath(configuration.ToolPathProvider, rootSubject, parent.Index)
-            : TryGetReadablePath(parent.Property, parent.Index, configuration, rootSubject);
+        var path = configuration.BasePathProvider.IsPropertyIncludedInPaths(parent.Property)
+            ? parent.Property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, parent.Index)
+            : null;
         return path is not null ? $"{pathPrefix}{path}" : null;
     }
-
-    // The chain is checked in the walk that writes the text, so a subject moved on it while a call runs cannot put the
-    // name of a hidden property into the text. The resolution provider writes the path provider's segments and
-    // includes exactly what the policy allows to read, the holding property too; the path provider's own inclusion
-    // applies to the holding property only, as without a policy.
-    private static string? TryGetReadablePath(
-        RegisteredSubjectProperty property, object? index, McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
-        configuration.PathProvider.IsPropertyIncluded(property)
-            ? property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, index, includedPropertiesOnly: true)
-            : null;
 
     private static ScalarProperty BuildScalarPropertyDto(
         RegisteredSubjectProperty property,
