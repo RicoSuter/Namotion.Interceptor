@@ -406,8 +406,8 @@ public static class PathExtensions
     /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> builds for
     /// <paramref name="property"/> is excluded by <paramref name="pathProvider"/> under the rule of
     /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>: the property itself or a property holding it up to the
-    /// root, an [InlinePaths] dictionary included. When a subject on the path has several parents and
-    /// <paramref name="rootSubject"/> is given, a property is excluded on every path that reaches the root.
+    /// root, an [InlinePaths] dictionary included. When a subject on the way has several parents and
+    /// <paramref name="rootSubject"/> is given, that is every path that reaches the root passes an excluded property.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="pathProvider">The path provider.</param>
@@ -418,9 +418,9 @@ public static class PathExtensions
     /// path exists because a given root is not reachable or the parent chain has a cycle.
     /// </returns>
     /// <remarks>
-    /// When a path exists, <c>TryGetPath</c> with the same provider and root returns null when this returns true. It
-    /// also returns null, while this returns false, when an [InlinePaths] key needs the explicit form while another
-    /// property's segment shadows the inline property.
+    /// When a path exists, <c>TryGetPath</c> with the same provider and root returns null exactly when this returns
+    /// true, except that it also returns null, while this returns false, when an [InlinePaths] key needs the explicit
+    /// form while another property's segment shadows the inline property.
     /// </remarks>
     public static bool IsAnyPropertyOnPathExcluded(
         this RegisteredSubjectProperty property,
