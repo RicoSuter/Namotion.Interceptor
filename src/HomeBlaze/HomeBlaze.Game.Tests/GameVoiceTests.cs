@@ -156,7 +156,7 @@ public class GameVoiceTests
     }
 
     [Fact]
-    public void WhenAnAnonymousPlayerLeaves_ThenItsFramesAreDropped()
+    public void WhenAnAnonymousPlayerLeaves_ThenItsQueuedAndLaterFramesAreDropped()
     {
         // Arrange
         var speaker = _context.AddConnectedPlayer("tab-1");
@@ -164,6 +164,8 @@ public class GameVoiceTests
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
         _context.Game.SetMicrophone(Caller(speaker), pageId: 1, isOn: true);
+        _context.Game.SetAudio(Caller(speaker), pageId: 1, isOn: true);
+        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
 
         // Act
         Disconnect("tab-1", isNamed: false);
@@ -173,7 +175,80 @@ public class GameVoiceTests
         // Assert
         Assert.False(_context.Game.Players.ContainsKey("tab-1"));
         Assert.False(speaker.IsMicrophoneOn);
+        Assert.False(speaker.IsAudioOn);
         Assert.Empty(sink.Frames);
+    }
+
+    [Fact]
+    public void WhenADisconnectedPlayerTurnsTheSpeakerOn_ThenItIsRefusedButTurningOffWorks()
+    {
+        // Arrange
+        var kitchen = _context.AddConnectedPlayer("kitchen", isNamed: true);
+        Disconnect("kitchen", isNamed: true);
+
+        // Act
+        var isTurnedOn = _context.Game.SetAudio(Caller(kitchen), pageId: 1, isOn: true);
+        var isTurnedOff = _context.Game.SetAudio(Caller(kitchen), pageId: 1, isOn: false);
+
+        // Assert
+        Assert.False(isTurnedOn);
+        Assert.True(isTurnedOff);
+        Assert.False(kitchen.IsAudioOn);
+    }
+
+    [Fact]
+    public void WhenPlayersAreReplacedFromOutsideWhileTheMicrophoneIsOn_ThenTheOldVoiceIsReleasedAndLaterFramesDropped()
+    {
+        // Arrange
+        var speaker = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        var sink = new RecordingVoiceSink();
+        using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
+        _context.Game.SetMicrophone(Caller(speaker), pageId: 1, isOn: true);
+        _context.Game.SetAudio(Caller(speaker), pageId: 1, isOn: true);
+        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+        var replacement = new GamePlayer { X = 0, Y = 0 };
+        _context.Game.Players = new Dictionary<string, GamePlayer>(_context.Game.Players) { ["tab-1"] = replacement };
+
+        // Act
+        _context.Game.ReconcilePlayers();
+        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+        Mix();
+        Disconnect("tab-1", isNamed: false);
+        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+        Mix();
+
+        // Assert
+        Assert.False(speaker.IsMicrophoneOn);
+        Assert.False(speaker.IsAudioOn);
+        Assert.False(replacement.IsMicrophoneOn);
+        Assert.Equal((false, false), _context.Game.GetVoicePages(speaker, 1));
+        Assert.Empty(sink.Frames);
+    }
+
+    [Fact]
+    public void WhenPlayersAreReplacedFromOutside_ThenTheNewInstanceKeepsItsOwnSpeaker()
+    {
+        // Arrange
+        var speaker = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        var sink = new RecordingVoiceSink();
+        using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
+        _context.Game.SetMicrophone(Caller(speaker), pageId: 1, isOn: true);
+        var replacement = new GamePlayer();
+        _context.Game.Players = new Dictionary<string, GamePlayer>(_context.Game.Players) { ["tab-1"] = replacement };
+        _context.Game.ReconcilePlayers();
+        replacement = _context.Game.Players["tab-1"];
+
+        // Act
+        _context.Game.SetMicrophone(Caller(replacement), pageId: 2, isOn: true);
+        _context.Game.VoiceMixer.Receive("tab-1", 2, VoiceFrames.Create(1000));
+        Mix();
+
+        // Assert
+        Assert.False(speaker.IsMicrophoneOn);
+        Assert.True(replacement.IsMicrophoneOn);
+        Assert.Single(sink.Frames);
     }
 
     [Fact]

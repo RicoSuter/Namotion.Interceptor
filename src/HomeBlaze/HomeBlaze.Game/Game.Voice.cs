@@ -6,6 +6,10 @@ public partial class Game
 {
     private readonly GameVoiceMixer _voiceMixer;
 
+    // Guarded by _lock: the players with a voice toggle on by client id, so that an outside replacement of Players
+    // finds the instances whose state and mixer speaker it orphaned.
+    private readonly Dictionary<string, GamePlayer> _voicePlayers = new();
+
     /// <summary>
     /// Mixes the voices of the players; a page passes it the frames of its microphone and registers its speaker.
     /// </summary>
@@ -41,6 +45,7 @@ public partial class Game
                 player.MicrophonePageId = page;
                 player.IsMicrophoneOn = page is not null;
                 _voiceMixer.SetMicrophonePage(player.ClientId, page);
+                TrackVoice(player);
                 _isVolumeTableDirty = true;
             }
 
@@ -63,11 +68,17 @@ public partial class Game
                 return false;
             }
 
+            if (!isOn && player.AudioPageIds is null)
+            {
+                return true;
+            }
+
             var pages = player.AudioPageIds ??= [];
             var isChanged = isOn ? pages.Add(pageId) : pages.Remove(pageId);
             if (isChanged && player.IsAudioOn != (pages.Count > 0))
             {
                 player.IsAudioOn = pages.Count > 0;
+                TrackVoice(player);
                 _isVolumeTableDirty = true;
             }
 
@@ -90,31 +101,63 @@ public partial class Game
     private bool CanSetVoice(GamePlayer player, bool isOn) =>
         IsPlayerOfThisGame(player) && (player.IsConnected || !isOn);
 
-    // Callers hold _lock. Turns the voice of a player off that disconnected or left the game.
+    // Callers hold _lock. Turns the voice of a player off that disconnected.
     private void ResetVoice(GamePlayer player)
+    {
+        if (!ClearVoice(player))
+        {
+            return;
+        }
+
+        _voiceMixer.SetMicrophonePage(player.ClientId, null);
+        _voicePlayers.Remove(player.ClientId);
+        _isVolumeTableDirty = true;
+    }
+
+    // Callers hold _lock. Returns whether the player had a voice toggle on.
+    private static bool ClearVoice(GamePlayer player)
     {
         if (player.MicrophonePageId is null && player.AudioPageIds is not { Count: > 0 })
         {
-            return;
+            return false;
         }
 
         player.MicrophonePageId = null;
         player.AudioPageIds?.Clear();
         player.IsMicrophoneOn = false;
         player.IsAudioOn = false;
-        _voiceMixer.SetMicrophonePage(player.ClientId, null);
-        _isVolumeTableDirty = true;
+        return true;
     }
 
-    // Callers hold _lock.
-    private void ResetVoiceOfRemovedPlayers(Dictionary<string, GamePlayer> current, Dictionary<string, GamePlayer> next)
+    // Callers hold _lock. Keeps the instance of a player listed while any toggle is on; the player is current.
+    private void TrackVoice(GamePlayer player)
     {
-        foreach (var (id, player) in current)
+        if (player.MicrophonePageId is not null || player.AudioPageIds is { Count: > 0 })
         {
-            if (!next.ContainsKey(id))
+            _voicePlayers[player.ClientId] = player;
+        }
+        else
+        {
+            _voicePlayers.Remove(player.ClientId);
+        }
+    }
+
+    // Callers hold _lock. Turns the voice off of every listed instance that Players no longer holds, because the player
+    // left or an outside assignment replaced it, and leaves the speaker of the instance that took its place alone.
+    private void ReleaseVoiceOfReplacedPlayers()
+    {
+        foreach (var (id, listed) in _voicePlayers)
+        {
+            CurrentPlayers.TryGetValue(id, out var current);
+            if (ReferenceEquals(current, listed))
             {
-                ResetVoice(player);
+                continue;
             }
+
+            ClearVoice(listed);
+            _voicePlayers.Remove(id);
+            _voiceMixer.SetMicrophonePage(id, current?.MicrophonePageId);
+            _isVolumeTableDirty = true;
         }
     }
 }
