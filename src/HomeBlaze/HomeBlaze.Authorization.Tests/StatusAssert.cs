@@ -4,9 +4,9 @@ using Namotion.Interceptor.Testing;
 namespace HomeBlaze.Authorization.Tests;
 
 /// <summary>
-/// Waits for a status or warning that <see cref="AuthorizationService"/> writes. The service writes them on the thread that
-/// built the snapshot, which can be a background rebuild started by an earlier change, so a policy call can return before
-/// they are written.
+/// Waits for a status, warning or <see cref="Role.UsedByAgents"/> count that <see cref="AuthorizationService"/> writes. The
+/// service writes them on the thread that built the snapshot, which can be a background rebuild started by an earlier change,
+/// so a policy call can return before they are written, and a pass that started earlier can still write an older value.
 /// </summary>
 internal static class StatusAssert
 {
@@ -15,6 +15,14 @@ internal static class StatusAssert
         Func<string?> actual,
         [CallerArgumentExpression(nameof(actual))] string expression = "") =>
         WaitAsync(value => value == expected, $"be {Format(expected)}", actual, expression);
+
+    public static Task EqualAsync(
+        int expected,
+        Func<int> actual,
+        [CallerArgumentExpression(nameof(actual))] string expression = "") =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => actual() == expected,
+            () => $"'{expression}' should be {expected}, but is {actual()}.");
 
     public static Task ContainsAsync(
         string expectedSubstring,
