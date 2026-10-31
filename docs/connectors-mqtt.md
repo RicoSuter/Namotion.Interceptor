@@ -211,6 +211,8 @@ public partial class Sensor
 
 A `[Path]` segment should not contain `/`. A property with `[Path("mqtt", "metrics/Humidity")]` is published to `home/living-room/metrics/Humidity`, but the MQTT server cannot resolve that topic back to the property, so values clients publish on it are not applied to the property (see [Path Syntax](registry.md#path-syntax)). For a nested topic, put the property on a child subject with its own segment.
 
+Every property holding a subject on the way to a mapped property needs a segment of its own: `[Path("mqtt", ...)]`, `[MqttTopic]`, or a fluent mapping on the type that declares it, such as `ForType<Room>().Map(r => r.Sensor, ...)`. The segments of every level must come from the same mapper as the leaf's mapping, so an attribute holding property above a fluent leaf, or the reverse, gives no topic. A property below a holding property without a segment has no topic, so neither the client nor the server publishes or subscribes it, because paths go only through [included properties](registry.md#included-properties). With `Room.Sensor` annotated as `[Path("mqtt", "sensor")]`, `Room.Sensor.Temperature` has the topic `home/living-room/sensor/Temperature`; without it, `Temperature` is neither published nor subscribed. An `[InlinePaths]` dictionary is included without an attribute. A property attribute (a property declared with `[PropertyAttribute]`) belongs to its property: with `[Path("mqtt", ...)]` or `[MqttTopic]` it has a topic only when the property it belongs to has a segment too, so an annotated attribute of an unannotated property is neither published nor subscribed (see [Included properties](registry.md#included-properties)).
+
 Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](registry.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to.
 
 ### [MqttTopic] attribute
@@ -232,7 +234,7 @@ public partial class Sensor
 }
 ```
 
-Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators.
+Multi-level topics are built by annotating each level of the object graph (parent reference properties carry their own segment), the same way `[Path]` composes nested paths; a property below an unannotated level is neither published nor subscribed. Because the path is split on the topic separator for reverse lookup (inbound messages), a single `[MqttTopic]` value should be one segment without embedded separators.
 
 Since `[MqttTopic]` already provides the `mqtt` `[Path]` segment for a property, use one attribute per property rather than combining `[Path]` and `[MqttTopic]` on the same property.
 
@@ -255,7 +257,7 @@ var fluentMapper = new MqttFluentMapperBuilder<Plant>()
     .Build('/');
 ```
 
-Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration.
+Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration. As with attributes, every property holding a subject on the way needs a segment, such as `Pump.Motor` and `Plant.Motors` above; a property below a holding property whose declaring type maps no segment for it is neither published nor subscribed.
 
 `ForType<T>()` registrations apply to all types derived from `T` and all types implementing `T` when `T` is an interface. The most specific registration wins.
 

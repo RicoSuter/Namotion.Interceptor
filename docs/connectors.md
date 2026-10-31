@@ -766,7 +766,7 @@ See the protocol-specific documentation for details on each connector's mapping 
 
 ### Path Providers
 
-Sources and servers map properties to external paths through a path provider. The path providers, the `[Path]` and `[InlinePaths]` attributes and the path syntax are described in [Paths](registry.md#paths).
+Sources and servers map properties to external paths through a path provider. The path providers, the `[Path]` and `[InlinePaths]` attributes and the path syntax are described in [Paths](registry.md#paths). Paths pass only properties the provider includes, so every property holding a subject on the way needs a mapping too (see [Included properties](registry.md#included-properties)).
 
 ### Updates
 

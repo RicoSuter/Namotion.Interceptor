@@ -13,6 +13,7 @@
 #   pwsh scripts/benchmark.ps1 -MemoryRandomization:$false  # Disable heap-layout randomization (on by default)
 #   pwsh scripts/benchmark.ps1 -BaseBranch performance/foo  # Compare against a non-master base
 #   pwsh scripts/benchmark.ps1 -Filter "*Write*" -Stash -Short
+#   pwsh scripts/benchmark.ps1 -Project src/Other.Benchmark/Other.Benchmark.csproj -LocalOnly  # Run another benchmark project
 #
 # Output: benchmark_YYYY-MM-DD_HHmmss.md in current directory
 
@@ -23,12 +24,11 @@ param(
     [switch]$LocalOnly,
     [int]$LaunchCount = 1,
     [bool]$MemoryRandomization = $true,
-    [string]$BaseBranch = "master"
+    [string]$BaseBranch = "master",
+    [string]$Project = "src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj"
 )
 
-# ============ CONFIGURATION ============
-$BenchmarkProject = "src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj"
-# =======================================
+$BenchmarkProject = $Project
 
 $ErrorActionPreference = "Stop"
 $ExtraArgs = @()
@@ -170,6 +170,14 @@ if (-not $LocalOnly) {
         Write-Error "Failed to checkout $BaseBranch"
         Restore-OriginalBranch
         Restore-Stash
+        exit 1
+    }
+
+    if (-not (Test-Path $BenchmarkProject)) {
+        # Restore first: under $ErrorActionPreference = "Stop", Write-Error ends the script before the restore would run.
+        Restore-OriginalBranch
+        Restore-Stash
+        Write-Error "$BenchmarkProject does not exist on $BaseBranch, so there is nothing to compare against. Run with -LocalOnly, or put the project on the base branch first."
         exit 1
     }
 

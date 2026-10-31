@@ -26,6 +26,8 @@ public class RegisteredSubject
     // in the getter so readers see fully built contents.
     private SubjectPropertyParent[]? _parentsSnapshot;
 
+    private bool _isAttached;
+
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
@@ -33,6 +35,18 @@ public class RegisteredSubject
     /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
     /// </summary>
     public int ReferenceCount => Subject.GetReferenceCount();
+
+    /// <summary>
+    /// Gets whether the subject is in the registry's graph through this instance: true from the registry's
+    /// registration of the subject until the registry removes the subject's last parent or unregisters it, both of
+    /// which happen only when the subject detaches. A subject without parents that is attached is therefore a root.
+    /// A subject attached again is registered as a new instance, so an instance never becomes attached again, and an
+    /// instance created outside the registry is never attached. Lock-free. A reader that combines it with
+    /// <see cref="Parents"/> must read <see cref="Parents"/> first and this property second: the registry clears it
+    /// before it removes the last parent, so a reader that sees the parents empty after a removal then sees it false,
+    /// while the opposite order can see it true and then the parents empty.
+    /// </summary>
+    public bool IsAttached => Volatile.Read(ref _isAttached);
 
     /// <summary>
     /// Gets the properties which reference this subject.
@@ -145,6 +159,10 @@ public class RegisteredSubject
                     this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
+    internal void MarkAttached() => Volatile.Write(ref _isAttached, true);
+
+    internal void MarkDetached() => Volatile.Write(ref _isAttached, false);
+
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
     {
         lock (_lock)
@@ -170,6 +188,12 @@ public class RegisteredSubject
         {
             if (_firstParent.Property == property)
             {
+                if (_additionalParents is null || _additionalParents.Count == 0)
+                {
+                    // Before the parents change, see IsAttached.
+                    MarkDetached();
+                }
+
                 PromoteFirstParentFromAdditional();
                 return;
             }
