@@ -13,10 +13,17 @@ internal sealed class GameWorldIndex
 
     public int Count => _entries.Count;
 
+    /// <summary>
+    /// Increases with every change of the indexed objects, so a reader can tell whether anything moved, appeared,
+    /// disappeared or changed its blocking since it last looked.
+    /// </summary>
+    public long Version { get; private set; }
+
     public void Clear()
     {
         _chunks.Clear();
         _entries.Clear();
+        Version++;
     }
 
     /// <summary>
@@ -45,6 +52,7 @@ internal sealed class GameWorldIndex
 
         _entries[gameObject] = entry;
         AddToChunks(gameObject, entry.Footprint);
+        Version++;
     }
 
     public void Remove(GameObject gameObject)
@@ -52,6 +60,7 @@ internal sealed class GameWorldIndex
         if (_entries.Remove(gameObject, out var existing))
         {
             RemoveFromChunks(gameObject, existing.Footprint);
+            Version++;
         }
     }
 
