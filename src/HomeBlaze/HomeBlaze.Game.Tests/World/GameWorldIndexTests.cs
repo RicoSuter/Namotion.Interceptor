@@ -118,4 +118,43 @@ public class GameWorldIndexTests
         // Assert
         Assert.Same(near, Assert.Single(results));
     }
+
+    [Theory]
+    [InlineData(0, 1, 1)]
+    [InlineData(GameObject.MaximumSize + 1, 1, 1)]
+    [InlineData(1, -4, 1)]
+    [InlineData(1, 1, 0)]
+    public void WhenAnObjectHasASizeOutsideTheRange_ThenItNeitherBlocksNorIsReturned(int width, int depth, int height)
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var wall = new Wall { X = 0, Y = 0, Width = width, Depth = depth, Height = height };
+        var results = new List<GameObject>();
+
+        // Act
+        index.AddOrUpdate(wall);
+        index.Query(new Footprint(-10, -10, 20, 20), results);
+
+        // Assert
+        Assert.False(index.IsBlocked(new Footprint(0, 0, 1, 1), ignored: null));
+        Assert.Empty(results);
+        Assert.Equal(0, index.Count);
+    }
+
+    [Fact]
+    public void WhenAnIndexedObjectGetsASizeOutsideTheRange_ThenItIsDropped()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var wall = new Wall { X = 0, Y = 0 };
+        index.AddOrUpdate(wall);
+
+        // Act
+        wall.Width = 0;
+        index.AddOrUpdate(wall);
+
+        // Assert
+        Assert.False(index.IsBlocked(new Footprint(0, 0, 1, 1), ignored: null));
+        Assert.Equal(0, index.Count);
+    }
 }

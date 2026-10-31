@@ -20,10 +20,18 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds the object, or moves it to its current footprint and blocking and visibility state.
+    /// Adds the object, or moves it to its current footprint and blocking and visibility state; leaves out an object
+    /// with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
     /// </summary>
     public void AddOrUpdate(GameObject gameObject)
     {
+        // A loaded configuration skips the range validation, and a huge footprint would fill the chunks.
+        if (!HasValidSize(gameObject))
+        {
+            Remove(gameObject);
+            return;
+        }
+
         var entry = new Entry(gameObject.Footprint, gameObject.IsBlocking, gameObject.IsVisible);
         if (_entries.TryGetValue(gameObject, out var existing))
         {
@@ -90,6 +98,11 @@ internal sealed class GameWorldIndex
             }
         }
     }
+
+    private static bool HasValidSize(GameObject gameObject) =>
+        IsValidSize(gameObject.Width) && IsValidSize(gameObject.Depth) && IsValidSize(gameObject.Height);
+
+    private static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
 
     private bool IsBlockedByAny(List<GameObject> objects, Footprint area, GameObject? ignored)
     {
