@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.Clients;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Game;
@@ -23,6 +26,8 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
     // Guards Players, Objects, the positions of their objects and the index, so that two players never take one tile.
     private readonly Lock _lock = new();
+    private readonly IGameClientDirectory _clients;
+    private readonly ILogger _logger;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -44,9 +49,15 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
     public string? IconName => "SportsEsports";
 
-    // Task 5 replaces this constructor with ones that take the clients and a logger, Task 6 adds the clock.
-    public Game()
+    public Game(ILogger<Game> logger)
+        : this(null, logger)
     {
+    }
+
+    internal Game(IGameClientDirectory? clients, ILogger logger)
+    {
+        _clients = clients ?? new InstallationClientDirectory(() => ((IInterceptorSubject)this).Context);
+        _logger = logger;
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
         Objects = new Dictionary<string, GameObject>();

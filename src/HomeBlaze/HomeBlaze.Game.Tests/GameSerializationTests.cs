@@ -48,7 +48,7 @@ public class GameSerializationTests
     public void WhenGameIsSerialized_ThenWallsCarryTheirType()
     {
         // Arrange
-        var game = new Game
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
         {
             Objects = new Dictionary<string, GameObject> { ["wall-1"] = new Wall { X = 1, Y = 2 } }
         };
