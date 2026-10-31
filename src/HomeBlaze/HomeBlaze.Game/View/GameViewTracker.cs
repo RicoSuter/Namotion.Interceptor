@@ -11,29 +11,50 @@ internal sealed class GameViewTracker
     /// </summary>
     public const int ViewRadius = 200;
 
+    private static readonly GameViewUpdate Empty = new([], []);
+
     private readonly Dictionary<GameObject, GameViewObject> _known = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<GameObject> _seen = new(ReferenceEqualityComparer.Instance);
     private readonly List<GameObject> _left = [];
+    private readonly Dictionary<string, string> _playerColors = new();
     private int _nextId;
 
     public IEnumerable<GameViewObject> Known => _known.Values;
 
     public GameViewUpdate Update(IReadOnlyList<GameObject> objects, GamePlayer? self)
     {
-        var upserted = new List<GameViewObject>();
+        var upserted = UpsertChanged(objects, self);
+        var removed = RemoveUnseen();
+        return upserted is null && removed is null ? Empty : new GameViewUpdate(upserted ?? [], removed ?? []);
+    }
+
+    // Returns null when nothing changed, so an unchanged view allocates nothing.
+    private List<GameViewObject>? UpsertChanged(IReadOnlyList<GameObject> objects, GamePlayer? self)
+    {
+        List<GameViewObject>? upserted = null;
         _seen.Clear();
-        foreach (var gameObject in objects)
+        for (var index = 0; index < objects.Count; index++)
         {
+            var gameObject = objects[index];
             _seen.Add(gameObject);
+            var isSelf = ReferenceEquals(gameObject, self);
             var known = _known.GetValueOrDefault(gameObject);
-            var view = CreateView(gameObject, known?.Id ?? $"o{++_nextId}", ReferenceEquals(gameObject, self));
-            if (view != known)
+            if (known is not null && IsUnchanged(known, gameObject, isSelf))
             {
-                _known[gameObject] = view;
-                upserted.Add(view);
+                continue;
             }
+
+            var view = CreateView(gameObject, known?.Id ?? $"o{++_nextId}", isSelf);
+            _known[gameObject] = view;
+            (upserted ??= []).Add(view);
         }
 
+        return upserted;
+    }
+
+    // Call after UpsertChanged, which collects the seen objects; returns null when every known object was seen.
+    private string[]? RemoveUnseen()
+    {
         _left.Clear();
         foreach (var gameObject in _known.Keys)
         {
@@ -43,23 +64,67 @@ internal sealed class GameViewTracker
             }
         }
 
-        var removed = new List<string>(_left.Count);
-        foreach (var gameObject in _left)
+        if (_left.Count == 0)
         {
-            removed.Add(_known[gameObject].Id);
-            _known.Remove(gameObject);
+            return null;
         }
 
-        return new GameViewUpdate(upserted, removed);
+        var removed = new string[_left.Count];
+        for (var index = 0; index < _left.Count; index++)
+        {
+            removed[index] = _known[_left[index]].Id;
+            _known.Remove(_left[index]);
+        }
+
+        return removed;
     }
 
-    private static GameViewObject CreateView(GameObject gameObject, string id, bool isSelf) => gameObject switch
+    private bool IsUnchanged(GameViewObject known, GameObject gameObject, bool isSelf) =>
+        HasSameFootprint(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSameLabel(known, gameObject);
+
+    private static bool HasSameFootprint(GameViewObject known, GameObject gameObject) =>
+        known.X == gameObject.X && known.Y == gameObject.Y && known.Width == gameObject.Width && known.Depth == gameObject.Depth;
+
+    private static bool HasSameState(GameViewObject known, GameObject gameObject, bool isSelf) =>
+        known.Height == gameObject.Height && known.IsBlocking == gameObject.IsBlocking && known.IsSelf == isSelf
+            && known.Facing == GetFacing(gameObject);
+
+    private bool HasSameLabel(GameViewObject known, GameObject gameObject) =>
+        known.Title == GetTitle(gameObject) && known.Color == GetColor(gameObject);
+
+    private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf) =>
+        new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
+            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsBlocking, isSelf);
+
+    private static string GetKind(GameObject gameObject) => gameObject switch
     {
-        GamePlayer player => new GameViewObject(id, GameViewObject.PlayerKind, player.X, player.Y, player.Width, player.Depth,
-            player.Height, (int)player.Facing, player.Title ?? string.Empty, GameColors.FromId(player.ClientId), player.IsBlocking, isSelf),
-        Wall wall => new GameViewObject(id, GameViewObject.WallKind, wall.X, wall.Y, wall.Width, wall.Depth,
-            wall.Height, 0, wall.Title ?? string.Empty, GameColors.Wall, wall.IsBlocking, false),
-        _ => new GameViewObject(id, GameViewObject.ObjectKind, gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth,
-            gameObject.Height, 0, string.Empty, GameColors.Wall, gameObject.IsBlocking, false)
+        GamePlayer => GameViewObject.PlayerKind,
+        Wall => GameViewObject.WallKind,
+        _ => GameViewObject.ObjectKind
     };
+
+    private static int GetFacing(GameObject gameObject) => gameObject is GamePlayer player ? (int)player.Facing : 0;
+
+    private static string GetTitle(GameObject gameObject) => gameObject switch
+    {
+        GamePlayer player => player.Title ?? string.Empty,
+        Wall wall => wall.Title ?? string.Empty,
+        _ => string.Empty
+    };
+
+    private string GetColor(GameObject gameObject)
+    {
+        if (gameObject is not GamePlayer player)
+        {
+            return GameColors.Wall;
+        }
+
+        if (!_playerColors.TryGetValue(player.ClientId, out var color))
+        {
+            color = GameColors.FromId(player.ClientId);
+            _playerColors[player.ClientId] = color;
+        }
+
+        return color;
+    }
 }

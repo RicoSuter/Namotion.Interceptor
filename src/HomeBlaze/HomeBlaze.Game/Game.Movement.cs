@@ -63,14 +63,32 @@ public partial class Game
                 return [];
             }
 
-            var candidates = new List<GameObject>();
-            GetIndex().Query(shifted, candidates);
-            return candidates
-                .Where(candidate => !ReferenceEquals(candidate, player) && tiles.Exists(tile => candidate.Footprint.Intersects(tile)))
-                .OrderBy(candidate => candidate.Y)
-                .ThenBy(candidate => candidate.X)
-                .ToList();
+            var targets = new List<GameObject>();
+            GetIndex().Query(shifted, targets);
+            for (var index = targets.Count - 1; index >= 0; index--)
+            {
+                if (ReferenceEquals(targets[index], player) || !IntersectsAny(targets[index].Footprint, tiles))
+                {
+                    targets.RemoveAt(index);
+                }
+            }
+
+            targets.Sort(static (first, second) => first.Y != second.Y ? first.Y.CompareTo(second.Y) : first.X.CompareTo(second.X));
+            return targets;
         }
+    }
+
+    private static bool IntersectsAny(Footprint footprint, List<Footprint> tiles)
+    {
+        foreach (var tile in tiles)
+        {
+            if (footprint.Intersects(tile))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Callers hold _lock.

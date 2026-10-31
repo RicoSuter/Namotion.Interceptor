@@ -191,4 +191,20 @@ public class GameMovementTests
         // Assert
         Assert.Same(wall, Assert.Single(targets));
     }
+
+    [Fact]
+    public void WhenSeveralObjectsStandInFront_ThenTheTargetsAreOrderedFromWestToEast()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var east = _context.AddWall(1, 2, width: 1, depth: 1);
+        var west = _context.AddWall(0, 2, width: 1, depth: 1);
+        _context.AddWall(5, 2, width: 1, depth: 1);
+
+        // Act
+        var targets = _context.Game.GetTargetObjects(player);
+
+        // Assert
+        Assert.Equal(new GameObject[] { west, east }, targets);
+    }
 }
