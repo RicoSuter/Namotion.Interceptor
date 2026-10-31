@@ -40,6 +40,22 @@ public partial class Game
 
         RequestIndexRebuild();
 
+        // Stopped together with the housekeeping loop, also when that one ends on an unexpected exception.
+        using var voiceStopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var voiceLoop = RunVoiceLoopAsync(voiceStopping.Token);
+        try
+        {
+            await RunHousekeepingLoopAsync(stoppingToken);
+        }
+        finally
+        {
+            await voiceStopping.CancelAsync();
+            await voiceLoop;
+        }
+    }
+
+    private async Task RunHousekeepingLoopAsync(CancellationToken stoppingToken)
+    {
         // One wait outlives the passes that a delay ends; a new wait per pass would leave the old one queued to take the next signal.
         Task? signalTask = null;
         while (!stoppingToken.IsCancellationRequested)

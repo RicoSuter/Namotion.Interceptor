@@ -1,4 +1,5 @@
 using HomeBlaze.Game.Voice;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game;
 
@@ -83,6 +84,40 @@ public partial class Game
             }
 
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the volume table when it is due and mixes one frame for every listener; logs instead of throwing, so
+    /// voice never stops the loop.
+    /// </summary>
+    internal void TickVoice()
+    {
+        try
+        {
+            UpdateVolumeTable();
+            _voiceMixer.Mix(_volumeTable);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "A voice tick of the game {Game} failed", Title);
+        }
+    }
+
+    // Ticks every frame duration until canceled.
+    private async Task RunVoiceLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(GameVoiceSettings.FrameDuration, _timeProvider);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                TickVoice();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The game stops.
         }
     }
 
