@@ -18,8 +18,8 @@ public partial class Game
         }
     }
 
-    // Callers hold _lock. Internal rather than private because the partial files of the next tasks call it.
-    internal GameWorldIndex GetIndex()
+    // Callers hold _lock.
+    private GameWorldIndex GetIndex()
     {
         if (_isIndexStale)
         {
