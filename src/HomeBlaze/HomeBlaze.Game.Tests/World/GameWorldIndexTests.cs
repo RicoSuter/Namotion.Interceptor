@@ -300,4 +300,24 @@ public class GameWorldIndexTests
         // Assert
         Assert.Equal(version, index.Version);
     }
+
+    [Fact]
+    public void WhenAWallGrowsToTwoMeters_ThenItsTilesBlockSound()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var wall = new Wall { X = 0, Y = 0, Height = 4 };
+        index.AddOrUpdate(wall);
+        var isBlockedBefore = index.IsSoundBlocked(0, 0);
+        var versionBefore = index.Version;
+
+        // Act
+        wall.Height = 8;
+        index.AddOrUpdate(wall);
+
+        // Assert
+        Assert.False(isBlockedBefore);
+        Assert.True(index.IsSoundBlocked(0, 0));
+        Assert.True(index.Version > versionBefore);
+    }
 }

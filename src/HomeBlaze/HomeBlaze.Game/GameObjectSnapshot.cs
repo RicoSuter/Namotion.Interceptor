@@ -37,7 +37,12 @@ internal sealed class GameObjectSnapshot
     {
         foreach (var (property, value) in _values)
         {
-            property.SetValue(value);
+            // An unchanged value is not written again, so a loaded value that validation rejects now, such as a size
+            // out of range, cannot throw from a restore and hide the exception that caused it.
+            if (!Equals(property.GetValue(), value))
+            {
+                property.SetValue(value);
+            }
         }
     }
 

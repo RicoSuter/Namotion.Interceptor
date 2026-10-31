@@ -156,6 +156,24 @@ public class GameSerializationTests
     }
 
     [Fact]
+    public void WhenADoorWithAMaterialRoundTrips_ThenItKeepsTheMaterial()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Objects = new Dictionary<string, GameObject> { ["door-1"] = new Door { Material = WallMaterial.Wood } }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+        var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        Assert.Contains("\"material\": \"Wood\"", json);
+        Assert.Equal(WallMaterial.Wood, Assert.IsType<Door>(loaded.Objects["door-1"]).Material);
+    }
+
+    [Fact]
     public void WhenToolsRoundTrip_ThenTheyKeepTheirType()
     {
         // Arrange

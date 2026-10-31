@@ -200,6 +200,46 @@ public class GameVolumeTableTests
         Assert.InRange(after.Value, 0.01f, 0.4f * 0.9f);
     }
 
+    [Theory]
+    [InlineData(4, 0.4f)]
+    [InlineData(8, null)]
+    public void WhenAWallStandsBetweenTwoPlayers_ThenOnlyATallWallBlocksTheVoice(int height, float? volume)
+    {
+        // Arrange
+        // Too long for the voice to go around within the hearing range.
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", y: 10);
+        _context.AddObject("wall", new Wall { X = -100, Y = 5, Width = 200, Height = height });
+
+        // Act
+        _context.Game.UpdateVolumeTable();
+
+        // Assert
+        Assert.Equal(volume, FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+        Assert.Equal(volume, FindVolume(_context.Game.VolumeTable, "tab-2", "tab-1"));
+    }
+
+    [Fact]
+    public async Task WhenALowWallBetweenTwoPlayersGrowsToTwoMeters_ThenThePairLeavesTheTable()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", y: 10);
+        var wall = _context.AddObject("wall", new Wall { X = -100, Y = 5, Width = 200, Height = 4 });
+        _context.Game.UpdateVolumeTable();
+        var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
+
+        // Act
+        await _context.Game.UpdateAsync(wall, () => wall.Height = 8, CancellationToken.None);
+        _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
+        var isRebuilt = _context.Game.UpdateVolumeTable();
+
+        // Assert
+        Assert.Equal(0.4f, before);
+        Assert.True(isRebuilt);
+        Assert.Null(FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+    }
+
     [Fact]
     public void WhenTheTableWasJustRebuilt_ThenAChangeWaitsForTheInterval()
     {

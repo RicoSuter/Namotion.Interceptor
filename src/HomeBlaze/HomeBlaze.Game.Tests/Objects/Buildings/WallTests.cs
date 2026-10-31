@@ -48,6 +48,18 @@ public class WallTests
     }
 
     [Theory]
+    [InlineData(4, false)]
+    [InlineData(8, true)]
+    public void WhenAWallHasAHeight_ThenOnlyAWallOfAtLeastTwoMetersBlocksSound(int height, bool isSoundBlocking)
+    {
+        // Act
+        var wall = new Wall { Height = height };
+
+        // Assert
+        Assert.Equal(isSoundBlocking, wall.IsSoundBlocking);
+    }
+
+    [Theory]
     [InlineData(WallMaterial.Bricks, "bricks.jpg", 8)]
     [InlineData(WallMaterial.Concrete, "concrete.jpg", 10)]
     [InlineData(WallMaterial.Wood, "wood.jpg", 6)]
@@ -63,6 +75,19 @@ public class WallTests
         var part = Assert.Single(wall.Visual.Parts);
         Assert.Equal($"_content/HomeBlaze.Game/objects/buildings/textures/{file}", part.Texture);
         Assert.Equal(scale, part.TextureScale);
+    }
+
+    [Fact]
+    public void WhenTheMaterialIsUnknown_ThenTheWallShowsBricks()
+    {
+        // Arrange
+        var wall = new Wall();
+
+        // Act
+        wall.Material = (WallMaterial)7;
+
+        // Assert
+        Assert.Equal("_content/HomeBlaze.Game/objects/buildings/textures/bricks.jpg", Assert.Single(wall.Visual.Parts).Texture);
     }
 
     [Fact]

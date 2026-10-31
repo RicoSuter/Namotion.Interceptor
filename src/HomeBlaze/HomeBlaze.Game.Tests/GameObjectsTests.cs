@@ -179,4 +179,105 @@ public class GameObjectsTests
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
         Assert.Equal(0, _context.Root.WriteCount);
     }
+
+    [Fact]
+    public async Task WhenAnObjectWithAnInvalidLoadedSizeThrowsInAChange_ThenTheOriginalExceptionSurfaces()
+    {
+        // Arrange
+        var wall = _context.AddObject("loaded", new Wall { X = 0, Y = 10, Height = GameObject.MaximumSize + 1 });
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => _context.Game.UpdateAsync(wall, () =>
+        {
+            wall.X = 5;
+            throw new InvalidOperationException("Not now.");
+        }, CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Not now.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal((0, GameObject.MaximumSize + 1), (wall.X, wall.Height));
+    }
+
+    [Fact]
+    public async Task WhenAnObjectIsRemoved_ThenPlayersWalkWhereItStood()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1", x: 0, y: 8);
+        var wall = _context.AddWall(-1, 10);
+
+        // Act
+        await _context.Game.RemoveAsync(wall, CancellationToken.None);
+        _context.TimeProvider.Advance(Game.StepInterval);
+        var step = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
+
+        // Assert
+        Assert.True(step.IsAccepted);
+    }
+
+    [Fact]
+    public async Task WhenAnObjectIsReplaced_ThenThePlayersMoveAgainstTheReplacements()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1", x: 3, y: 8);
+        var wall = _context.AddWall(0, 10, width: 10);
+        var door = new Door { X = 3, Y = 10, Width = 4, IsOpen = true };
+
+        // Act
+        await _context.Game.ReplaceAsync(wall,
+            [("wall", new Wall { X = 0, Y = 10, Width = 3 }), ("door", door), ("wall", new Wall { X = 7, Y = 10, Width = 3 })],
+            CancellationToken.None);
+        _context.TimeProvider.Advance(Game.StepInterval);
+        var throughDoor = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
+        _context.TimeProvider.Advance(Game.StepInterval);
+        var intoWall = _context.Game.TryMove(player, GameDirection.West, turnOnly: false);
+
+        // Assert
+        Assert.True(throughDoor.IsAccepted);
+        Assert.False(intoWall.IsAccepted);
+    }
+
+    [Fact]
+    public async Task WhenAReplacementHasAnEmptyPrefix_ThenReplacingIsRefused()
+    {
+        // Arrange
+        var wall = _context.AddWall(0, 10);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => _context.Game.ReplaceAsync(wall, [("", new Wall { X = 0, Y = 10 })], CancellationToken.None));
+
+        // Assert
+        Assert.Equal("replacements", Assert.IsType<ArgumentException>(exception).ParamName);
+        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+    }
+
+    [Fact]
+    public async Task WhenAReplacementHasAnInvalidSize_ThenReplacingIsRefused()
+    {
+        // Arrange
+        var wall = _context.AddWall(0, 10);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() =>
+            _context.Game.ReplaceAsync(wall, [("wall", new Wall { X = 0, Y = 10, Height = GameObject.MaximumSize + 1 })], CancellationToken.None));
+
+        // Assert
+        Assert.Equal("replacements", Assert.IsType<ArgumentException>(exception).ParamName);
+        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Equal(0, _context.Root.WriteCount);
+    }
+
+    [Fact]
+    public async Task WhenAForeignObjectIsReplaced_ThenReplacingIsRefused()
+    {
+        // Arrange
+        _context.AddWall(0, 10);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() =>
+            _context.Game.ReplaceAsync(new Wall(), [("wall", new Wall { X = 20, Y = 20 })], CancellationToken.None));
+
+        // Assert
+        Assert.Equal("The object is not part of this game.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Single(_context.Game.Objects);
+    }
 }

@@ -74,17 +74,17 @@ public partial class WallTool : GameTool, ITitleProvider, IIconProvider
     {
         if (length is < 1 or > MaximumLength)
         {
-            throw new ArgumentOutOfRangeException(nameof(length), length, $"A wall is 1 to {MaximumLength} tiles long.");
+            throw new ArgumentOutOfRangeException(nameof(length), $"A wall is 1 to {MaximumLength} tiles long.");
         }
 
         if (height is < 1 or > MaximumHeight)
         {
-            throw new ArgumentOutOfRangeException(nameof(height), height, $"A wall is 1 to {MaximumHeight} tiles tall.");
+            throw new ArgumentOutOfRangeException(nameof(height), $"A wall is 1 to {MaximumHeight} tiles tall.");
         }
 
         if (!Enum.IsDefined(material))
         {
-            throw new ArgumentOutOfRangeException(nameof(material), material, "The material is unknown.");
+            throw new ArgumentOutOfRangeException(nameof(material), "The material is unknown.");
         }
     }
 }

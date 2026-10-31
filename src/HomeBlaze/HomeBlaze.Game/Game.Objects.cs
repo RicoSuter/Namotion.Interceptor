@@ -13,6 +13,7 @@ public partial class Game
 
     /// <summary>
     /// Removes the object from <see cref="Objects"/> and saves the game.
+    /// Canceling only stops the write; the change stays applied and is saved later.
     /// </summary>
     /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>
     public async Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken)
@@ -35,6 +36,7 @@ public partial class Game
     /// Runs <paramref name="change"/> under the game's lock, updates the index and saves the game. When the change throws,
     /// or the object blocks movement afterwards and overlaps another movement blocking object, its configuration and state
     /// properties get back the values they had before.
+    /// Canceling only stops the write; the change stays applied and is saved later.
     /// </summary>
     /// <remarks>
     /// The change runs under the game's lock: it may only set properties of the object and must not call into the game.
@@ -61,6 +63,7 @@ public partial class Game
     /// <summary>
     /// Replaces the object by the replacements in one step under the game's lock, each under a new name of its prefix, a
     /// dash and 8 random hex digits, and saves the game; no other page sees an intermediate state.
+    /// Canceling only stops the write; the change stays applied and is saved later.
     /// </summary>
     /// <exception cref="ArgumentException">A name prefix is empty, a replacement is listed twice or already part of this
     /// game, or its size is outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
@@ -140,7 +143,7 @@ public partial class Game
                 throw new ArgumentException("A name prefix is empty.", nameof(replacements));
             }
 
-            ValidateNewObject(objects, replacement);
+            ValidateNewObject(objects, replacement, nameof(replacements));
             if (replacement.IsMovementBlocking && index.IsBlocked(replacement.Footprint, replaced))
             {
                 throw new InvalidOperationException(BlockedMessage);
@@ -172,17 +175,21 @@ public partial class Game
     private static bool AreBothMovementBlocking(GameObject first, GameObject second) =>
         first.IsMovementBlocking && second.IsMovementBlocking;
 
-    private static void ValidateNewObject(Dictionary<string, GameObject> objects, GameObject gameObject)
+    private static void ValidateNewObject(Dictionary<string, GameObject> objects, GameObject gameObject, string parameterName)
     {
-        ArgumentNullException.ThrowIfNull(gameObject);
+        if (gameObject is null)
+        {
+            throw new ArgumentNullException(parameterName);
+        }
+
         if (FindObjectName(objects, gameObject) is not null)
         {
-            throw new ArgumentException("The object is already part of this game.", nameof(gameObject));
+            throw new ArgumentException("The object is already part of this game.", parameterName);
         }
 
         if (!GameWorldIndex.HasValidSize(gameObject))
         {
-            throw new ArgumentException($"The width, depth and height of an object are from 1 to {GameObject.MaximumSize} tiles.", nameof(gameObject));
+            throw new ArgumentException($"The width, depth and height of an object are from 1 to {GameObject.MaximumSize} tiles.", parameterName);
         }
     }
 
