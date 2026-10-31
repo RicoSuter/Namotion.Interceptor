@@ -32,7 +32,7 @@ Every task follows these rules; reviewers check them.
 These resolve gaps or ambiguities of the spec; the README (Task 10) documents them.
 
 1. `Game.Place` is `Task PlaceAsync(GameCaller? caller, string namePrefix, GameObject gameObject, CancellationToken cancellationToken)` instead of `void Place(...)`, so placing writes immediately like every other action (README persistence rule) and the API matches `RemoveAsync`, `UpdateAsync` and `ReplaceAsync`. `GetPlacementInFront` and `PlaceAsync` take `GameCaller?` so tools pass their `[FromServices] GameCaller? caller` straight through.
-2. `GetPlacementInFront(caller, length, depth)` follows the spec literally: `length` runs along the facing direction, `depth` across it, centered on the player across the facing (for an odd size the extra tile goes east or north, as `WallPlacement` did). `WallTool` builds `GetPlacementInFront(caller, length, 1)`, so a wall now runs away from the player in the facing direction (the old "Build wall" stood across it). Switching to across is the one-line change `GetPlacementInFront(caller, 1, length)` in `WallTool`.
+2. `GetPlacementInFront(caller, across, along)` takes the extent across the facing direction first and the extent along it second. The footprint starts on the tile right in front of the player along the facing axis and is centered on the player's center across it (for an odd extent the extra half tile goes east or north, as `WallPlacement` did). `WallTool` calls `GetPlacementInFront(caller, across: length, along: 1)`, so a wall stands across the facing as today, a barrier in front of the player: a length of 40 reaches about 20 tiles to each side. Trees call it with `across: 2, along: 2`. (The user chose across; the spec wording was updated accordingly.)
 3. Generic refusal messages: "Only a player in the game can place objects.", "Face north, east, south or west to place objects." and "Something is in the way." (also for a footprint outside the `int` range). Closing a door with someone in the doorway now says "Something is in the way." instead of "Someone is in the way of the door.".
 4. Tool and door parameters are nullable (`int? length`, `int? height`, `WallMaterial? material`, `int? variant`, `int? width`): an empty dialog field means the default (4, 10, `Bricks`, random, 4). The dialog has no notion of parameter defaults, so this is how "default 4" reaches both the dialog and MCP. `[Range]` documents the limits; `MethodParameterDialog` does not enforce `[Range]`, the operations check again on the server.
 5. `OperationInvoker.InvokeAsync` gets a second optional parameter, `Action<IReadOnlyDictionary<string, object?>>? parametersEntered`, besides `initialValues`, because the page cannot see the dialog result otherwise ("the values are taken from the dialog result"). The page keys the remembered values by object type and operation (`$"{subject.GetType().FullName}.{method.PropertyName}"`), so "Add door" remembers its width across walls. Only parameters entered in one field (`InputKind.Simple`) are prefilled.
@@ -3282,15 +3282,15 @@ namespace HomeBlaze.Game.Tests.World;
 public class FrontPlacementTests
 {
     [Theory]
-    [InlineData(GameDirection.North, 0, 2, 1, 4)]
-    [InlineData(GameDirection.South, 0, -4, 1, 4)]
-    [InlineData(GameDirection.East, 2, 0, 4, 1)]
-    [InlineData(GameDirection.West, -4, 0, 4, 1)]
-    public void WhenFacingStraight_ThenTheFootprintRunsInTheFacingDirectionInFront(
+    [InlineData(GameDirection.North, -1, 2, 4, 1)]
+    [InlineData(GameDirection.South, -1, -1, 4, 1)]
+    [InlineData(GameDirection.East, 2, -1, 1, 4)]
+    [InlineData(GameDirection.West, -1, -1, 1, 4)]
+    public void WhenFacingStraight_ThenTheFootprintStandsAcrossTheFacingInFront(
         GameDirection facing, int x, int y, int width, int depth)
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), facing, length: 4, depth: 1, out var footprint);
+        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), facing, across: 4, along: 1, out var footprint);
 
         // Assert
         Assert.True(isPlaced);
@@ -3301,18 +3301,18 @@ public class FrontPlacementTests
     public void WhenTheFootprintIsAsWideAsThePlayer_ThenItIsCenteredInFront()
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), GameDirection.East, length: 2, depth: 2, out var footprint);
+        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), GameDirection.East, across: 2, along: 3, out var footprint);
 
         // Assert
         Assert.True(isPlaced);
-        Assert.Equal(new Footprint(2, 0, 2, 2), footprint);
+        Assert.Equal(new Footprint(2, 0, 3, 2), footprint);
     }
 
     [Fact]
     public void WhenFacingDiagonally_ThenNothingIsPlaced()
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), GameDirection.NorthEast, length: 4, depth: 1, out _);
+        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), GameDirection.NorthEast, across: 4, along: 1, out _);
 
         // Assert
         Assert.False(isPlaced);
@@ -3322,7 +3322,7 @@ public class FrontPlacementTests
     public void WhenTheFootprintWouldLeaveTheIntRange_ThenNothingIsPlaced()
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, int.MaxValue - 1, 2, 2), GameDirection.North, length: 1, depth: 1, out _);
+        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, int.MaxValue - 1, 2, 2), GameDirection.North, across: 1, along: 1, out _);
 
         // Assert
         Assert.False(isPlaced);
@@ -3342,11 +3342,11 @@ public class GamePlacementTests
     private readonly GameTestContext _context = new();
 
     [Theory]
-    [InlineData(GameDirection.North, 0, 2, 1, 4)]
-    [InlineData(GameDirection.East, 2, 0, 4, 1)]
-    [InlineData(GameDirection.South, 0, -4, 1, 4)]
-    [InlineData(GameDirection.West, -4, 0, 4, 1)]
-    public void WhenThePlayerFacesStraight_ThenThePlacementIsInFrontAlongTheFacing(
+    [InlineData(GameDirection.North, -3, 2, 8, 1)]
+    [InlineData(GameDirection.East, 2, -3, 1, 8)]
+    [InlineData(GameDirection.South, -3, -1, 8, 1)]
+    [InlineData(GameDirection.West, -1, -3, 1, 8)]
+    public void WhenThePlayerFacesStraight_ThenThePlacementStandsAcrossTheFacingInFront(
         GameDirection facing, int x, int y, int width, int depth)
     {
         // Arrange
@@ -3354,7 +3354,7 @@ public class GamePlacementTests
         _context.Game.TryMove(player, facing, turnOnly: true);
 
         // Act
-        var placement = _context.Game.GetPlacementInFront(new GameCaller(player), length: 4, depth: 1);
+        var placement = _context.Game.GetPlacementInFront(new GameCaller(player), across: 8, along: 1);
 
         // Assert
         Assert.Equal(new GamePlacement(x, y, width, depth, facing), placement);
@@ -3368,7 +3368,7 @@ public class GamePlacementTests
         _context.Game.TryMove(player, GameDirection.NorthEast, turnOnly: true);
 
         // Act
-        var exception = Record.Exception(() => _context.Game.GetPlacementInFront(new GameCaller(player), length: 4, depth: 1));
+        var exception = Record.Exception(() => _context.Game.GetPlacementInFront(new GameCaller(player), across: 4, along: 1));
 
         // Assert
         Assert.Equal("Face north, east, south or west to place objects.", Assert.IsType<InvalidOperationException>(exception).Message);
@@ -3378,7 +3378,7 @@ public class GamePlacementTests
     public void WhenThereIsNoActor_ThenThePlacementIsRefused()
     {
         // Act
-        var exception = Record.Exception(() => _context.Game.GetPlacementInFront(null, length: 4, depth: 1));
+        var exception = Record.Exception(() => _context.Game.GetPlacementInFront(null, across: 4, along: 1));
 
         // Assert
         Assert.Equal("Only a player in the game can place objects.", Assert.IsType<InvalidOperationException>(exception).Message);
@@ -3388,13 +3388,13 @@ public class GamePlacementTests
     [InlineData(0, 1)]
     [InlineData(1, 0)]
     [InlineData(GameObject.MaximumSize + 1, 1)]
-    public void WhenTheSizeIsOutOfRange_ThenThePlacementIsRefused(int length, int depth)
+    public void WhenTheSizeIsOutOfRange_ThenThePlacementIsRefused(int across, int along)
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => _context.Game.GetPlacementInFront(new GameCaller(player), length, depth));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _context.Game.GetPlacementInFront(new GameCaller(player), across, along));
     }
 
     [Fact]
@@ -3517,7 +3517,7 @@ public class WallToolTests
     }
 
     [Fact]
-    public async Task WhenAPlayerBuildsAWallWithoutParameters_ThenADefaultBrickWallRunsAwayInFront()
+    public async Task WhenAPlayerBuildsAWallWithoutParameters_ThenADefaultBrickWallStandsAcrossInFront()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -3527,17 +3527,17 @@ public class WallToolTests
 
         // Assert
         var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal((0, 2, 1, 4, 10, WallMaterial.Bricks), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Height, wall.Material));
+        Assert.Equal((-1, 2, 4, 1, 10, WallMaterial.Bricks), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Height, wall.Material));
         Assert.Equal(1, _context.Root.WriteCount);
         Assert.Same(wall, Assert.Single(_context.Game.GetTargetObjects(player)));
     }
 
     [Theory]
-    [InlineData(GameDirection.North, 0, 2, 1, 8)]
-    [InlineData(GameDirection.East, 2, 0, 8, 1)]
-    [InlineData(GameDirection.South, 0, -8, 1, 8)]
-    [InlineData(GameDirection.West, -8, 0, 8, 1)]
-    public async Task WhenThePlayerFacesADirection_ThenTheWallRunsThatWay(GameDirection facing, int x, int y, int width, int depth)
+    [InlineData(GameDirection.North, -3, 2, 8, 1)]
+    [InlineData(GameDirection.East, 2, -3, 1, 8)]
+    [InlineData(GameDirection.South, -3, -1, 8, 1)]
+    [InlineData(GameDirection.West, -1, -3, 1, 8)]
+    public async Task WhenThePlayerFacesADirection_ThenTheWallStandsAcrossItCenteredOnThePlayer(GameDirection facing, int x, int y, int width, int depth)
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -3562,7 +3562,7 @@ public class WallToolTests
 
         // Assert
         var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal((8, 12, WallMaterial.Concrete), (wall.Depth, wall.Height, wall.Material));
+        Assert.Equal((8, 12, WallMaterial.Concrete), (wall.Width, wall.Height, wall.Material));
     }
 
     [Theory]
@@ -3595,7 +3595,7 @@ public class WallToolTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.AddWall(0, 5, width: 1);
+        _context.AddWall(1, 2, width: 1);
 
         // Act
         var exception = await Record.ExceptionAsync(() => _tool.BuildWallAsync(null, null, null, new GameCaller(player), CancellationToken.None));
@@ -3810,11 +3810,12 @@ namespace HomeBlaze.Game.World;
 internal static class FrontPlacement
 {
     /// <summary>
-    /// Gets the footprint of an object <paramref name="length"/> tiles long in the facing direction and
-    /// <paramref name="depth"/> tiles across it, right in front of the actor and centered on it across the facing (an odd
-    /// remainder goes east or north); returns false for a diagonal facing or a footprint outside the <see cref="int"/> range.
+    /// Gets the footprint of an object <paramref name="across"/> tiles wide across the facing direction and
+    /// <paramref name="along"/> tiles deep along it, starting on the tile right in front of the actor and centered on the
+    /// actor's center across the facing (an odd remainder goes east or north); returns false for a diagonal facing or a
+    /// footprint outside the <see cref="int"/> range.
     /// </summary>
-    public static bool TryGetFootprint(Footprint actor, GameDirection facing, int length, int depth, out Footprint footprint)
+    public static bool TryGetFootprint(Footprint actor, GameDirection facing, int across, int along, out Footprint footprint)
     {
         if (!Enum.IsDefined(facing) || facing.IsDiagonal())
         {
@@ -3823,22 +3824,22 @@ internal static class FrontPlacement
         }
 
         var isNorthOrSouth = facing is GameDirection.North or GameDirection.South;
-        var sizeX = isNorthOrSouth ? depth : length;
-        var sizeY = isNorthOrSouth ? length : depth;
-        return TryCreate(GetX(actor, facing, length, sizeX), GetY(actor, facing, length, sizeY), sizeX, sizeY, out footprint);
+        var sizeX = isNorthOrSouth ? across : along;
+        var sizeY = isNorthOrSouth ? along : across;
+        return TryCreate(GetX(actor, facing, along, sizeX), GetY(actor, facing, along, sizeY), sizeX, sizeY, out footprint);
     }
 
-    private static long GetX(Footprint actor, GameDirection facing, int length, int sizeX) => facing switch
+    private static long GetX(Footprint actor, GameDirection facing, int along, int sizeX) => facing switch
     {
         GameDirection.East => actor.Right + 1,
-        GameDirection.West => (long)actor.X - length,
+        GameDirection.West => (long)actor.X - along,
         _ => (long)actor.X + (actor.Width - sizeX) / 2
     };
 
-    private static long GetY(Footprint actor, GameDirection facing, int length, int sizeY) => facing switch
+    private static long GetY(Footprint actor, GameDirection facing, int along, int sizeY) => facing switch
     {
         GameDirection.North => actor.Top + 1,
-        GameDirection.South => (long)actor.Y - length,
+        GameDirection.South => (long)actor.Y - along,
         _ => (long)actor.Y + (actor.Depth - sizeY) / 2
     };
 
@@ -3877,23 +3878,23 @@ public partial class Game
     internal const string DiagonalMessage = "Face north, east, south or west to place objects.";
 
     /// <summary>
-    /// Gets where an object of <paramref name="length"/> tiles along the facing direction and <paramref name="depth"/>
-    /// tiles across it fits right in front of the caller's player, centered on it across the facing. Does not check
-    /// whether the tiles are free; <see cref="PlaceAsync"/> does.
+    /// Gets where an object <paramref name="across"/> tiles wide across the facing direction and <paramref name="along"/>
+    /// tiles deep along it fits right in front of the caller's player, centered on the player's center across the facing.
+    /// Does not check whether the tiles are free; <see cref="PlaceAsync"/> does.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">A size is outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
     /// <exception cref="InvalidOperationException">The caller is not a player of this game, faces diagonally, or the
     /// footprint would leave the <see cref="int"/> range.</exception>
-    public GamePlacement GetPlacementInFront(GameCaller? caller, int length, int depth)
+    public GamePlacement GetPlacementInFront(GameCaller? caller, int across, int along)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(length, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(length, GameObject.MaximumSize);
-        ArgumentOutOfRangeException.ThrowIfLessThan(depth, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(depth, GameObject.MaximumSize);
+        ArgumentOutOfRangeException.ThrowIfLessThan(across, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(across, GameObject.MaximumSize);
+        ArgumentOutOfRangeException.ThrowIfLessThan(along, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(along, GameObject.MaximumSize);
         lock (_lock)
         {
             var actor = ResolveActor(caller) ?? throw new InvalidOperationException(NoActorMessage);
-            if (!FrontPlacement.TryGetFootprint(actor.Footprint, actor.Facing, length, depth, out var footprint))
+            if (!FrontPlacement.TryGetFootprint(actor.Footprint, actor.Facing, across, along, out var footprint))
             {
                 throw new InvalidOperationException(actor.Facing.IsDiagonal() ? DiagonalMessage : BlockedMessage);
             }
@@ -4287,7 +4288,7 @@ public partial class WallTool : GameTool, ITitleProvider, IIconProvider
     public string? IconName => "AddBox";
 
     /// <summary>
-    /// Builds a wall one tile thick that runs from the tile in front of the player in the direction it faces.
+    /// Builds a wall one tile thick right in front of the player, across the direction it faces and centered on it.
     /// </summary>
     /// <param name="length">The length in tiles, 1 to <see cref="MaximumLength"/>; null for <see cref="Wall.DefaultLength"/>.</param>
     /// <param name="height">The height in tiles, 1 to <see cref="MaximumHeight"/>; null for <see cref="Wall.DefaultHeight"/>.</param>
@@ -4298,7 +4299,7 @@ public partial class WallTool : GameTool, ITitleProvider, IIconProvider
     /// <exception cref="InvalidOperationException">There is no player, it faces diagonally, something is in the way, or
     /// the tool is not part of a game.</exception>
     [Operation(Title = "Build wall", Icon = "AddBox", Position = 1,
-        Description = "Builds a wall 25 cm thick in front of you, running in the direction you face. Empty fields build 1 m long, 2.5 m tall bricks.")]
+        Description = "Builds a wall 25 cm thick right in front of you, across the direction you face and centered on you. Empty fields build 1 m long, 2.5 m tall bricks.")]
     public Task BuildWallAsync(
         [Range(1, MaximumLength)] int? length,
         [Range(1, MaximumHeight)] int? height,
@@ -4312,7 +4313,7 @@ public partial class WallTool : GameTool, ITitleProvider, IIconProvider
         ValidateParameters(wallLength, wallHeight, wallMaterial);
 
         var game = GetGame();
-        var placement = game.GetPlacementInFront(caller, wallLength, 1);
+        var placement = game.GetPlacementInFront(caller, across: wallLength, along: 1);
         var wall = new Wall
         {
             X = placement.X,
@@ -4516,7 +4517,8 @@ In `src/HomeBlaze/HomeBlaze.Game.Tests/E2E/GamePageTests.cs` replace the test `W
         await page.GetByTestId("game-target-action").Filter(new() { HasText = "Demolish" }).ClickAsync(new() { Timeout = Timeout });
 
         // Assert
-        Assert.Equal((player.X, player.Y + GamePlayer.Size), (wall.X, wall.Y));
+        // A default wall of 4 tiles stands across the facing, centered on the player.
+        Assert.Equal((player.X - 1, player.Y + GamePlayer.Size), (wall.X, wall.Y));
         await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 0, message: "The wall was not demolished");
         await Expect(page.GetByTestId("game-looking-at")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
@@ -5001,7 +5003,7 @@ In `src/HomeBlaze/HomeBlaze.Game.Tests/E2E/GamePageTests.cs` add after `WhenAWal
 
         // Assert
         var wall = Assert.IsType<Wall>(Assert.Single(world.Game.Objects.Values));
-        Assert.Equal((player.X, player.Y + GamePlayer.Size, 1, 8, WallMaterial.Concrete), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Material));
+        Assert.Equal((player.X - 3, player.Y + GamePlayer.Size, 8, 1, WallMaterial.Concrete), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Material));
         await Expect(dialog.GetByLabel("Length", new() { Exact = true })).ToHaveValueAsync("8", new() { Timeout = Timeout });
         await Expect(dialog.GetByLabel("Material", new() { Exact = true })).ToHaveValueAsync("Concrete", new() { Timeout = Timeout });
     }
@@ -6005,7 +6007,7 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
         }
 
         var game = GetGame();
-        var placement = game.GetPlacementInFront(caller, Tree.Size, Tree.Size);
+        var placement = game.GetPlacementInFront(caller, across: Tree.Size, along: Tree.Size);
         var tree = new Tree
         {
             X = placement.X,
@@ -6545,7 +6547,7 @@ REPLACEMENTS = [
         "| `Game.BuildWallAsync` | Required | Places a default wall across the facing, right in front of and centered on the actor (`WallPlacement`), named `wall-` plus 8 random hex digits. Refuses diagonal facing and blocked tiles |\n"
         "| `Wall.DemolishAsync` | None | Removes the wall from its parent game |\n"
         "| `Door.OpenAsync`, `Door.CloseAsync` | None | `Game.SetDoorOpenAsync` under the lock. Refuses the current state, and refuses closing while another blocking object covers a door tile |",
-        "| `WallTool.BuildWallAsync` | Required | Builds a wall one tile thick running from the tile in front of the actor in the facing direction (`GetPlacementInFront`, `PlaceAsync`), named `wall-` plus 8 random hex digits. Refuses diagonal facing, blocked tiles and parameters out of range |\n"
+        "| `WallTool.BuildWallAsync` | Required | Builds a wall one tile thick right in front of the actor, across the facing and centered on it (`GetPlacementInFront`, `PlaceAsync`), named `wall-` plus 8 random hex digits. Refuses diagonal facing, blocked tiles and parameters out of range |\n"
         "| `TreeTool.PlantTreeAsync` | Required | Plants a tree of the given or a random variant, with random rotation and scale, on the 2 x 2 tiles in front of the actor, named `tree-` plus 8 random hex digits |\n"
         "| `Wall.DemolishAsync`, `Tree.DemolishAsync` | None | `Game.RemoveAsync` |\n"
         "| `Wall.AddDoorAsync` | Optional | Splits the wall into wall, door, wall through `Game.ReplaceAsync`, centered on the actor along the wall, or on the wall without one |\n"
@@ -6640,7 +6642,7 @@ Public object API on `Game`:
 
 | Member | Behavior |
 |---|---|
-| `GetPlacementInFront(caller, length, depth)` | Returns a `GamePlacement(X, Y, Width, Depth, Facing)` for an object `length` tiles along the facing direction and `depth` tiles across it, right in front of the caller's player and centered across the facing. Refuses without a player ("Only a player in the game can place objects."), when facing diagonally ("Face north, east, south or west to place objects.") and beyond the `int` range ("Something is in the way.") |
+| `GetPlacementInFront(caller, across, along)` | Returns a `GamePlacement(X, Y, Width, Depth, Facing)` for an object `across` tiles wide across the facing direction and `along` tiles deep along it, starting on the tile right in front of the caller's player and centered on the player's center across the facing. Refuses without a player ("Only a player in the game can place objects."), when facing diagonally ("Face north, east, south or west to place objects.") and beyond the `int` range ("Something is in the way.") |
 | `PlaceAsync(caller, namePrefix, gameObject, cancellationToken)` | Adds the object under the prefix, a dash and 8 random hex digits and saves; refuses without a player, and with "Something is in the way." when a movement blocking object covers one of its tiles |
 | `RemoveAsync(gameObject, cancellationToken)` | Removes an object of this game and saves |
 | `UpdateAsync(gameObject, change, cancellationToken)` | Runs `change` under `_lock`, updates the index and saves. When the change throws, or the object then blocks movement and overlaps another movement blocking object, `GameObjectSnapshot` restores its writable configuration and state properties through the registry, and the call throws ("Something is in the way." for the overlap). The change may only set properties of the object |
@@ -6651,7 +6653,7 @@ Objects:
 - `Wall`: `Material` picks the texture of its single box: bricks 2 m, concrete 2.5 m and wooden planks 1.5 m per repeat. "Add door" (`width` 2 to 8, default 4) splits a wall one tile thick into wall, door, wall, keeping material and height; the door is centered on the caller's player along the wall (on the wall without a player) and moved inward so that a wall tile remains on each side. It is disabled through `KnownAttributes.IsEnabled` below 4 tiles and refuses a width that does not fit with "This wall is too short for a door of N tiles; it fits up to M.".
 - `Door`: its visual is a lintel of its `Material` above 2.1 m and a wooden leaf with its pivot at the hinge, at the west end of an east-west door or the south end of a north-south one, turned by -90 degrees while open.
 - `Tree`: one wind-swayed model part from the variant table in `Tree` (model file and height per variant), on a fixed trunk of 2 x 2 tiles.
-- `WallTool` ("Build wall": `length` 1 to 40, default 4; `height` 1 to 20, default 10; `material`, default bricks) builds a wall running from the tile in front of the player in the facing direction. `TreeTool` ("Plant tree": `variant`, random when empty) plants a tree with random rotation and scale in front of the player.
+- `WallTool` ("Build wall": `length` 1 to 40, default 4; `height` 1 to 20, default 10; `material`, default bricks) builds a wall right in front of the player, across the facing and centered on it, so a length of 40 reaches about 20 tiles to each side. `TreeTool` ("Plant tree": `variant`, random when empty) plants a tree with random rotation and scale in front of the player.
 
 """
 
@@ -6711,7 +6713,7 @@ Edit `$SCRATCH/pr-body-876.md` (it exists; keep everything not mentioned here):
    - Object types under `Objects/` use only public and protected members of the core, and the core names no object type, so object types can move into libraries of their own.
    - `Game.UpdateAsync` undoes a refused change by restoring the object's writable configuration and state properties through the registry; other fields of the object are not restored.
    - A visual that fails validation (sizes beyond 1024 tiles, more than 16 parts, URLs outside `_content/`) shows as a gray box, and the server warns once per object type.
-   - `Game.GetPlacementInFront` places along the facing direction, so a wall of the wall tool runs away from the player.
+   - `Game.GetPlacementInFront(caller, across, along)` centers a footprint on the player across the facing direction, right in front of it; walls of the wall tool stand across the facing as before.
    ```
 
 3. Replace the `## Breaking changes` body by:
