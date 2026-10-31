@@ -72,6 +72,21 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenTheEastPadButtonIsTappedOnAPhone_ThenThePlayerStepsEast()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync(new() { ViewportSize = new() { Width = 390, Height = 844 }, HasTouch = true, IsMobile = true });
+        var (x, y) = (player.X, player.Y);
+
+        // Act
+        await page.GetByTestId("game-pad-east").TapAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x + 1, y, "E"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenWalkingIntoAWall_ThenThePositionStays()
     {
         // Arrange
@@ -178,9 +193,9 @@ public class GamePageTests
         /// Opens the game in a new browser context, which is a new client, waits until its player joined, and moves the
         /// players of earlier tests far away so that they cannot block it.
         /// </summary>
-        public async Task<(IPage Page, GamePlayer Player)> JoinAsync()
+        public async Task<(IPage Page, GamePlayer Player)> JoinAsync(BrowserNewContextOptions? options = null)
         {
-            var context = await _fixture.Browser.NewContextAsync();
+            var context = await _fixture.Browser.NewContextAsync(options);
             _contexts.Add(context);
             var page = await context.NewPageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{_gameName}");

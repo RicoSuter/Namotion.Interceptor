@@ -8,6 +8,10 @@ const KEYS = {
     ArrowRight: 'east', KeyD: 'east',
 };
 
+const PAD_BUTTONS = '[data-game-move], [data-game-turn]';
+const PAD_HELD_CLASS = 'game-pad-held';
+const PAD_RELEASE_EVENTS = ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'];
+
 const INT_MIN = -2147483648;
 const INT_MAX = 2147483647;
 
@@ -33,6 +37,13 @@ export function isInputBlocked() {
     }
 
     return document.querySelector('.mud-dialog-container') !== null;
+}
+
+// The index in DIRECTIONS of the held names such as 'north', or -1 when they cancel out or none is held.
+function toDirection(isHeld) {
+    const offsetX = (isHeld('east') ? 1 : 0) - (isHeld('west') ? 1 : 0);
+    const offsetY = (isHeld('north') ? 1 : 0) - (isHeld('south') ? 1 : 0);
+    return DIRECTIONS.findIndex(([x, y]) => x === offsetX && y === offsetY && (x !== 0 || y !== 0));
 }
 
 function intersects(x, y, width, depth, other) {
@@ -66,8 +77,13 @@ export function predictStep(state, direction, blockers) {
     return { ...state, x: x + offsetX, y: y + offsetY, facing: direction };
 }
 
+/** Handles the keyboard and, when options.pad is an element, the direction pad buttons inside it. */
 export function createInput(dotNet, options, entities) {
     const pressed = new Set();
+    // The pad buttons held, by pointer id, so several fingers combine like several keys.
+    const padPresses = new Map();
+    const pad = options.pad instanceof Element ? options.pad : null;
+    let isTurnMode = false;
     const pending = [];
     let isShiftHeld = false;
     let timer = null;
@@ -77,10 +93,22 @@ export function createInput(dotNet, options, entities) {
     // Counts the resets, so the answer to a step sent before one is dropped.
     let generation = 0;
 
+    function isHeld(name) {
+        if (pressed.has(name)) {
+            return true;
+        }
+
+        for (const press of padPresses.values()) {
+            if (press.names.includes(name)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     function heldDirection() {
-        const offsetX = (pressed.has('east') ? 1 : 0) - (pressed.has('west') ? 1 : 0);
-        const offsetY = (pressed.has('north') ? 1 : 0) - (pressed.has('south') ? 1 : 0);
-        return DIRECTIONS.findIndex(([x, y]) => x === offsetX && y === offsetY && (x !== 0 || y !== 0));
+        return toDirection(isHeld);
     }
 
     function show(state, animate) {
@@ -214,8 +242,74 @@ export function createInput(dotNet, options, entities) {
         }
     }
 
+    function onPadPointerDown(event) {
+        const button = event.target.closest(PAD_BUTTONS);
+        if (!button || !pad.contains(button) || event.button !== 0) {
+            return;
+        }
+
+        event.preventDefault();
+        if (button.hasAttribute('data-game-turn')) {
+            isTurnMode = !isTurnMode;
+            button.setAttribute('aria-pressed', String(isTurnMode));
+            return;
+        }
+
+        if (isInputBlocked()) {
+            return;
+        }
+
+        const names = button.dataset.gameMove.split('-');
+        if (isTurnMode) {
+            send(toDirection(name => names.includes(name)), true);
+            return;
+        }
+
+        releasePad(event.pointerId);
+        // Keeps the press while the finger drifts off the button, until it lifts.
+        try {
+            button.setPointerCapture(event.pointerId);
+        } catch {
+            // The pointer is already gone, which the release events report.
+        }
+
+        padPresses.set(event.pointerId, { button, names });
+        button.classList.add(PAD_HELD_CLASS);
+        if (timer === null) {
+            tick();
+        }
+    }
+
+    function releasePad(pointerId) {
+        const press = padPresses.get(pointerId);
+        if (!press) {
+            return;
+        }
+
+        padPresses.delete(pointerId);
+        press.button.classList.remove(PAD_HELD_CLASS);
+        if (heldDirection() < 0) {
+            stop();
+        }
+    }
+
+    function onPadRelease(event) {
+        releasePad(event.pointerId);
+    }
+
+    function onPadContextMenu(event) {
+        event.preventDefault();
+    }
+
+    function releaseAllPad() {
+        for (const pointerId of [...padPresses.keys()]) {
+            releasePad(pointerId);
+        }
+    }
+
     function onBlur() {
         pressed.clear();
+        releaseAllPad();
         isShiftHeld = false;
         stop();
     }
@@ -223,6 +317,14 @@ export function createInput(dotNet, options, entities) {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
+    if (pad) {
+        pad.querySelector('[data-game-turn]')?.setAttribute('aria-pressed', 'false');
+        pad.addEventListener('pointerdown', onPadPointerDown);
+        pad.addEventListener('contextmenu', onPadContextMenu);
+        for (const type of PAD_RELEASE_EVENTS) {
+            pad.addEventListener(type, onPadRelease);
+        }
+    }
 
     return {
         // The server's position wins only while no step is on the way; otherwise the step results reconcile.
@@ -252,6 +354,14 @@ export function createInput(dotNet, options, entities) {
             window.removeEventListener('keydown', onKeyDown);
             window.removeEventListener('keyup', onKeyUp);
             window.removeEventListener('blur', onBlur);
+            if (pad) {
+                releaseAllPad();
+                pad.removeEventListener('pointerdown', onPadPointerDown);
+                pad.removeEventListener('contextmenu', onPadContextMenu);
+                for (const type of PAD_RELEASE_EVENTS) {
+                    pad.removeEventListener(type, onPadRelease);
+                }
+            }
         },
     };
 }
