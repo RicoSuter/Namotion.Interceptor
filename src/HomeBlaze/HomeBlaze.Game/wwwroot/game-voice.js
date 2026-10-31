@@ -188,7 +188,8 @@ class GameVoice {
 
     resume() {
         const context = this.context;
-        if (context && context.state !== 'running' && context.state !== 'closed') {
+        // Not skipped while running: a suspend still in flight reads as running, and only a later resume overrides it.
+        if (context && context.state !== 'closed') {
             context.resume().then(() => this.reportState(), () => this.reportState());
         }
     }
