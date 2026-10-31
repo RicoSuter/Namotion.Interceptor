@@ -204,7 +204,7 @@ public class SubjectFilterExpressionTests
 
         // Assert
         Assert.True(parsed);
-        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance));
+        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance, McpVisibility.Unrestricted));
     }
 
     [Fact]
@@ -441,7 +441,7 @@ public class SubjectFilterExpressionTests
     {
         pathProvider ??= DefaultPathProvider.Instance;
         Assert.True(SubjectFilterExpression.TryParse(where, pathProvider.PathSeparator, out var expression, out _));
-        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider);
+        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider, McpVisibility.Unrestricted);
     }
 
     private sealed class SlashPathProvider : PathProviderBase

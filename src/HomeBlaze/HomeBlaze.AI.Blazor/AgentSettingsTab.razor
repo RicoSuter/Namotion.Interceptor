@@ -1,4 +1,6 @@
 @* Read-only sections; the edit dialog changes them. On phones each label sits above its value. *@
+@inject AuthorizationService AuthorizationService
+
 <div style="max-width: 56rem;" data-testid="agent-settings">
     <section class="mb-5">
         <MudText Typo="Typo.subtitle1" Class="mb-1" Style="font-weight: 500;">Instructions</MudText>
@@ -55,6 +57,21 @@
                     <text>none (memory only)</text>
                 }
             </text>)
+            @SettingRow("Roles", @<div data-testid="agent-settings-roles">
+                <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1">
+                    @foreach (var role in Agent.Roles)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">@role</MudChip>
+                    }
+                </MudStack>
+                @* From the policy rather than the status message, which shows the error only while the agent runs and is idle. *@
+                @if (AuthorizationService.GetPolicy(Agent.Roles).Error is { } rolesError)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error" HtmlTag="div" Class="mt-1" data-testid="agent-settings-roles-error">
+                        The agent is denied everything: @rolesError
+                    </MudText>
+                }
+            </div>)
         </MudGrid>
     </section>
 

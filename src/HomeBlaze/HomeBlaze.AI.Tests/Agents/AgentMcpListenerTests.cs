@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
+using HomeBlaze.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -14,7 +15,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Agents;
@@ -34,6 +38,8 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(_registry);
+        // The graph whose roles the authorization service of the agents reads.
+        builder.Services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
         builder.Services.AddHomeBlazeAgents();
         builder.Services.AddMcpServer(options => options.ServerInstructions = ExternalServerInstructions)
             .WithHttpTransport(options => options.Stateless = true)
@@ -266,6 +272,7 @@ public sealed class AgentMcpListenerTests : IAsyncLifetime
         Assert.Same(TimeProvider.System, services.TimeProvider);
         Assert.IsType<HomeBlazeAgentToolSource>(services.ToolSource);
         Assert.Same(_app.Services.GetRequiredService<AgentMcpListener>(), services.EndpointAddress);
+        Assert.Same(_app.Services.GetRequiredService<AuthorizationService>(), services.AuthorizationService);
     }
 
     [Fact]

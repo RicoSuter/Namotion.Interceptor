@@ -1,20 +1,22 @@
+using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
-using HomeBlaze.AI.Agents;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Metadata;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// The metadata that the tools let their clients find and agents change: SearchMetadata of a storage finds only the
-/// subjects and properties that the tools show, and for agents only those that SetMetadata lets them change, which no
-/// agent holds.
+/// The metadata that the tools let their clients find and change: SearchMetadata of a storage finds only the subjects
+/// and properties that the tools show and whose metadata the access policy allows to read, and SetMetadata changes only
+/// metadata of a subject or property that the tools show and that the access policy allows to write.
 /// </summary>
 internal static class AgentMetadataAccess
 {
@@ -23,11 +25,12 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage without those that <see cref="GetError"/> refuses, and no
-    /// match for a result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
+    /// Gets the first 100 matches of SearchMetadata of a storage that the tools show and whose metadata member the access
+    /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and no match for a
+    /// result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, bool forAgents, PathProviderBase pathProvider, Type[] excludeTypes)
+        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration, PathProviderBase pathProvider)
     {
         if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) || subject.Subject is not IMetadataStore)
         {
@@ -40,45 +43,122 @@ internal static class AgentMetadataAccess
         }
 
         return matches
-            .Where(match => GetError(subject, match.Path, match.Property, pathProvider, excludeTypes, forAgents) is null)
+            .Where(match => IsReadable(subject, match, configuration, pathProvider))
             .Take(MaxSearchMetadataMatches)
             .ToArray();
     }
 
     /// <summary>
-    /// Gets why the metadata at <paramref name="path"/> of the storage is not shown by the tools, or for agents why an agent
-    /// may not set it, or null when it is shown or may be set. The target is resolved as the tools resolve a path, so that
-    /// a subject or property hidden from them is refused as a missing one; for agents, an agent and a subject that an
-    /// agent holds through any parent are refused as well.
+    /// Gets why a call of an operation of a storage or folder with the given input arguments is refused, or null when it
+    /// is not: SetMetadata with arguments of another shape or for metadata that the tools do not let the caller change,
+    /// see <see cref="GetSetMetadataError"/> and <see cref="AgentOrderAccess.GetMetadataOrderError"/>, and SetOrder, see
+    /// <see cref="AgentOrderAccess.GetSetOrderError"/>. Other operations are not refused.
     /// </summary>
-    public static string? GetError(
-        RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes, bool forAgents)
+    public static string? GetOperationError(
+        RegisteredSubject subject, MethodMetadata method, object?[] arguments, McpServerConfiguration configuration,
+        PathProviderBase pathProvider, IInterceptorSubject root)
     {
-        if (TryGetVisibleTarget(storage, path, pathProvider, excludeTypes) is not { } target)
+        if (method.PropertyName == AgentOrderAccess.SetOrderMethodName && subject.Subject is IMetadataContainer)
+        {
+            return AgentOrderAccess.GetSetOrderError(subject, arguments, configuration, pathProvider, root);
+        }
+
+        if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
+        {
+            return null;
+        }
+
+        // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
+        // without looking at the path, so that a subject the tools do not show reads as a missing one.
+        if (arguments is not [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object } values, ..])
+        {
+            return HomeBlazeMcpConfigurationFactory.SetMetadataArgumentsMessage;
+        }
+
+        var propertyName = arguments[1] as string;
+        return GetSetMetadataError(subject, path, propertyName, configuration, pathProvider) ??
+            (propertyName is null && FluentStorageContainer.ResolveMetadataPath(subject.Subject, path) is { } target
+                ? AgentOrderAccess.GetMetadataOrderError(target, values, configuration, pathProvider, root)
+                : null);
+    }
+
+    /// <summary>
+    /// Gets why SetMetadata of the storage may not set the metadata at <paramref name="path"/>, or null when it may. The
+    /// target is resolved as the tools resolve a path, so that a subject or property hidden from them, by an excluded type
+    /// or by the access policy, is refused as a missing one; then the access policy must allow to write its metadata member.
+    /// </summary>
+    public static string? GetSetMetadataError(
+        RegisteredSubject storage, string path, string? propertyName, McpServerConfiguration configuration, PathProviderBase pathProvider)
+    {
+        if (TryGetVisibleTarget(storage, path, configuration) is not { } target)
         {
             return FluentStorageContainer.GetNoSubjectMessage(path);
         }
 
-        if (forAgents && target.Subject.TryGetFirstParentOrSelf<LlmAgentBase>() is not null)
-        {
-            return "Agents cannot change the metadata of agents.";
-        }
-
-        if (propertyName is not null && IsPropertyChecked(target.Subject) && !IsPropertyVisible(target, propertyName, pathProvider))
+        if (propertyName is not null && IsPropertyChecked(target.Subject) && !IsPropertyVisible(target, propertyName, configuration, pathProvider))
         {
             return FluentStorageContainer.GetNoPropertyMessage(propertyName);
         }
 
-        return null;
+        // A folder and the root of a storage have no metadata of properties, which the method refuses.
+        return propertyName is not null && target.Subject is FluentStorageContainer or VirtualFolder
+            ? null
+            : GetWriteError(target, path, propertyName, configuration);
     }
 
+    /// <summary>The refusal of SetMetadata for metadata that the access policy does not allow to write.</summary>
+    internal static string GetNotWritableMessage(string path, string? propertyName) => propertyName is null
+        ? $"Metadata of '{path}' is not writable. The access policy does not allow it."
+        : $"Metadata of property '{propertyName}' of '{path}' is not writable. The access policy does not allow it.";
+
+    private static string? GetWriteError(RegisteredSubject target, string path, string? propertyName, McpServerConfiguration configuration)
+    {
+        // A member that is added here and then refused keeps null, which is the same as no metadata: the tools do not
+        // show it and the next write sets it.
+        if (FluentStorageContainer.GetOrAddMetadataMember(target, propertyName) is { } member)
+        {
+            return configuration.IsAllowed(member, McpAccessActions.Write) ? null : GetNotWritableMessage(path, propertyName);
+        }
+
+        // Without a member, the property cannot have metadata, which the method refuses, or the subject attached again
+        // since it was resolved, so that the policy did not decide on it.
+        return propertyName is not null && ReferenceEquals(target.Subject.TryGetRegisteredSubject(), target)
+            ? null
+            : GetNotWritableMessage(path, propertyName);
+    }
+
+    // The match is shown, and its metadata member is readable at the path at which get_property reads it.
+    private static bool IsReadable(RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration, PathProviderBase pathProvider)
+    {
+        if (TryGetVisibleTarget(storage, match.Path, configuration) is not { } target ||
+            (match.Property is not null && IsPropertyChecked(target.Subject) && !IsPropertyVisible(target, match.Property, configuration, pathProvider)))
+        {
+            return false;
+        }
+
+        return configuration.AccessPolicy is null ||
+            IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
+    }
+
+    /// <summary>
+    /// Gets whether the metadata path of <paramref name="path"/> and <paramref name="propertyName"/>, see
+    /// <see cref="HomeBlazeMarkdownSearchToolProvider.GetMetadataPath"/>, resolves from <paramref name="root"/> as
+    /// get_property reads it to a readable member of <paramref name="subject"/> itself. It is not readable when the path
+    /// resolves to a member of another subject or to a dictionary entry, as it can when the policy hides the member.
+    /// </summary>
+    internal static bool IsMetadataReadable(
+        McpServerConfiguration configuration, RegisteredSubject root, RegisteredSubject subject, string path, string? propertyName)
+        => configuration.TryGetReadableProperty(root, HomeBlazeMarkdownSearchToolProvider.GetMetadataPath(path, propertyName)) is
+            { Index: null } resolved &&
+            ReferenceEquals(resolved.Property.Parent.Subject, subject.Subject);
+
     // The subject at the path of the storage when the tools resolve the path to it and show it, else null.
-    private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
+    private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, McpServerConfiguration configuration)
     {
         var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
         var trimmedPath = path.Trim();
-        var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : pathProvider.TryGetSubjectFromPath(storage, trimmedPath);
-        return target is not null && ReferenceEquals(visibleTarget?.Subject, target) && !IsOfExcludedType(visibleTarget, storage.Subject, excludeTypes)
+        var visibleTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : configuration.TryGetReadableSubject(storage, trimmedPath);
+        return target is not null && ReferenceEquals(visibleTarget?.Subject, target) && !IsOfExcludedType(visibleTarget, storage.Subject, configuration.ExcludeTypes)
             ? visibleTarget
             : null;
     }
@@ -113,6 +193,9 @@ internal static class AgentMetadataAccess
     private static bool IsPropertyChecked(IInterceptorSubject target)
         => target is not (FluentStorageContainer or VirtualFolder) && target.FindMetadataStore()?.CanStoreMetadata(target) == true;
 
-    private static bool IsPropertyVisible(RegisteredSubject subject, string propertyName, PathProviderBase pathProvider)
-        => subject.TryGetProperty(propertyName) is { IsAttribute: false } property && pathProvider.IsPropertyIncluded(property);
+    private static bool IsPropertyVisible(
+        RegisteredSubject subject, string propertyName, McpServerConfiguration configuration, PathProviderBase pathProvider)
+        => subject.TryGetProperty(propertyName) is { IsAttribute: false } property &&
+            pathProvider.IsPropertyIncluded(property) &&
+            configuration.IsAllowed(property, McpAccessActions.Read);
 }

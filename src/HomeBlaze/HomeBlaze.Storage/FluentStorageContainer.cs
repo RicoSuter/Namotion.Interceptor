@@ -18,6 +18,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
@@ -808,6 +809,26 @@ public partial class FluentStorageContainer :
             ? storage
             : storage.Context.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
     }
+
+    /// <summary>
+    /// Gets the member that holds the metadata of <paramref name="subject"/>, or of its property
+    /// <paramref name="propertyName"/>, so that a caller can check access to it before a write: the dynamic property
+    /// <see cref="KnownAttributes.Metadata"/> of the subject, or that attribute of the property. A missing member is
+    /// added with null, which is the same as no metadata and the state that a removal of the metadata leaves. Null when
+    /// <paramref name="propertyName"/> names no property of the subject other than an attribute or the metadata of the
+    /// subject, whose metadata a write refuses, and when <paramref name="subject"/> is no longer the current
+    /// registration of its subject.
+    /// </summary>
+    public static RegisteredSubjectProperty? GetOrAddMetadataMember(RegisteredSubject subject, string? propertyName)
+        => StorageMetadataValues.GetOrAddMember(subject, propertyName);
+
+    /// <summary>
+    /// Gets the message with which an order write, of <c>SetOrder</c> or of the order in the metadata of a folder,
+    /// refuses <paramref name="names"/> when the folder has <paramref name="children"/>, or null when it accepts them,
+    /// so that a caller that hides children refuses them alike: as if the hidden ones did not exist.
+    /// </summary>
+    public static string? GetOrderNamesError(IEnumerable<string> names, IEnumerable<string> children)
+        => StorageOrder.GetNamesError(names, children);
 
     /// <summary>
     /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a

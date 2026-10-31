@@ -1,5 +1,6 @@
 using HomeBlaze.AI.Mcp;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 
 namespace HomeBlaze.AI.Agents;
@@ -16,10 +17,10 @@ internal sealed class HomeBlazeAgentToolSource : IAgentToolSource
         _serviceProvider = serviceProvider;
     }
 
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly)
+    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy)
     {
         var rootSubjectProvider = () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(_serviceProvider);
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(_serviceProvider, rootSubjectProvider, isReadOnly, forAgents: true);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(_serviceProvider, rootSubjectProvider, isReadOnly, accessPolicy);
         return new McpToolFactory(rootSubjectProvider, configuration).CreateTools();
     }
 }

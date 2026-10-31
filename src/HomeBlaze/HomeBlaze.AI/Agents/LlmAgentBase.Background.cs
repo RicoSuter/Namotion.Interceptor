@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.AI.Mcp;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -93,6 +94,14 @@ public abstract partial class LlmAgentBase
         }
     }
 
+    // The operator chose the watch paths, so they are read without the agent's roles but with the system rules.
+    private Task<IReadOnlyList<AgentWatchedState>> FetchWatchedStateAsync(CancellationToken cancellationToken) =>
+        AgentWatchPaths.FetchStateAsync(
+            Volatile.Read(ref _normalizedWatchPaths),
+            _services.ToolSource,
+            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, McpAuthorization.EverythingRoleNames),
+            cancellationToken);
+
     // The scheduler callback: an exception escaping it ends the scheduler loop, so only cancellation of the
     // stopping token may leave this method. Every started run counts, also one that fails or is cancelled.
     private async Task RunBackgroundAsync(string reason, CancellationToken cancellationToken)
@@ -107,12 +116,13 @@ public abstract partial class LlmAgentBase
             started = BeginTurn(BackgroundRunStatusMessage);
             var progress = CreateProgress();
             var allowedTools = AllowedTools;
-            tools = CreateToolSet(allowedTools, progress);
+            var accessPolicy = GetTurnAccessPolicy(Roles);
+            tools = CreateToolSet(allowedTools, accessPolicy, progress);
             var message = AgentPromptBuilder.BuildBackgroundMessage(
                 reason,
                 Timeline.GetRecentBackgroundResults(RecentResultCount),
                 Timeline.GetLastQuietRunTime(),
-                await AgentWatchPaths.FetchStateAsync(Volatile.Read(ref _normalizedWatchPaths), _services.ToolSource, cancellationToken),
+                await FetchWatchedStateAsync(cancellationToken),
                 started.Value);
 
             var result = await RunTurnAsync(AgentTurnKind.Background, message, allowedTools, tools, progress, cancellationToken);

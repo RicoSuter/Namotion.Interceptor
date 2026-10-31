@@ -47,7 +47,8 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 #### Method Tools
 
-- `list_methods` lists each operation and query with name, kind (`query` or `operation`, matching the tool that calls it), title, description, return type and whether it requires confirmation. It leaves out the methods excluded from agents, see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods).
+- `list_methods` lists each operation and query with name, kind (`query` or `operation`, matching the tool that calls it), title, description, return type and whether it requires confirmation. It leaves out the methods excluded from agents, see [Excluding Subjects and Methods](../../development/building-subjects.md#excluding-subjects-and-methods), and those the access policy does not allow to read.
+- `invoke_query` and `invoke_operation` resolve the subject as the other tools do, so a subject the access policy hides is "Subject not found.", report a method without `read` as not found, and refuse one without `execute`, see [Write Limits](#write-limits-implemented).
 - Parameters use the `McpMethodParameter` shape of the core library: JSON Schema `type`, `format`, `enum` names and `nullable`. HomeBlaze adds the unit of an `[OperationParameter(Unit = ...)]` as `description`. A `Percent` parameter reads "fraction where 1 = 100% (0.2 = 20%)", since agents pass the fraction and only the operation dialog takes 0 to 100.
 - `invoke_query` calls only `[Query]` methods and `invoke_operation` only `[Operation]` methods, so each permission is exactly one tool. A method of the other kind returns an error naming the right tool, and nothing is invoked. A read-only configuration does not offer `invoke_operation`.
 - Arguments are passed by name in a `parameters` object and converted with `McpValueConverter`: an enum accepts its name (ignoring case) or a defined number, a `TimeSpan` its `hh:mm:ss` string.
@@ -62,7 +63,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 - The operations check their own rules, the [page write rules](#page-write-rules), and refuse a change with an `ArgumentException` whose message reaches the caller. A read-only configuration does not offer the tools.
 - `search_markdown` finds text without reading every page. It matches `query` within single lines as plain text, or as a .NET regular expression with `regex: true`, ignoring case unless `ignore_case` is false, optionally only in or under `path`.
 - It also searches the [notes of metadata](../../administration/metadata.md#notes-links-and-tags), which hold no secrets. A match in notes has `kind: notes`, the path of its subject, for a property its `property`, and `read`, the path that `get_property` reads the metadata with, such as `/Devices/Pump/Temperature@HomeBlaze:Metadata`.
-- It leaves out the pages and notes of a subject of a type in `ExcludeTypes` or below one, and the notes of a property that the path provider leaves out, as `browse` and `search` do not show them. For agents, it also leaves out the notes of agents and of the subjects inside them.
+- It leaves out the pages and notes of a subject of a type in `ExcludeTypes` or below one, and the notes of a property that the path provider leaves out, as `browse` and `search` do not show them. It searches a page only when the tools show it at its path and the access policy allows `read` and `execute` on its `ReadRawContent`, and notes only when `get_property` could read their metadata member, so the notes of agents are left out for every client.
 - It searches the `ReadRawContent` view, so expressions stay unevaluated and [hidden values](#hidden-values) are `***` before matching. A secret can neither match nor appear in a result.
 - The result lists matching pages and notes in path order, at most `max_pages` (default 20, at most 100), each with its title, the number of matching lines and the line number and snippet of up to five.
 - The work is bounded: at most 2,000 pages and notes, 10 seconds per search and 100 ms per regular expression match. `truncated` reports a result cut by a limit, and a regular expression that times out returns an error. Other files, such as JSON, are not searched.
@@ -79,10 +80,13 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 
 ### Write Limits [Implemented]
 
-- **Configuration**: `set_property` refuses a property marked `[Configuration]`, also when it is `[State]` as well, through the `PropertyWriteFilter` that both the agents and the external `/mcp` server configure. The filter does not reach `invoke_operation`, so an operation can still change a `[Configuration]` property as part of what it does. The agents' own settings are configuration only and so are not reachable at all.
-- **Agent operations**: the agents' `invoke_operation` and Markdown tools refuse every operation of an agent subject, and `SetMetadata` of a storage whose path leads to an agent or to a subject inside one, or whose arguments do not have the shape of the method, so agents cannot start runs, reset conversations or change the metadata of agents. The filter gets the arguments of the call for that.
-- **Metadata search**: a result filter of `McpMethodInvoker` leaves out every match of `SearchMetadata` that the tools do not show, and for agents every match that `SetMetadata` would refuse them, so an agent finds only what it may change. It then returns at most the first 100, see [Metadata: Agents](../../administration/metadata.md#agents).
-- **Confirmation**: operations marked `[Operation(RequiresConfirmation = true)]` cannot be invoked through MCP; `invoke_operation` refuses them without running them, and reports the refusal before a problem with the arguments. MCP elicitation, the server asking the client's user to confirm during a call, would allow them for clients that support it. It is not implemented, and the CLI agent runs non-interactively and could not answer it.
+Every tool decides with the access policy of its configuration, an `AuthorizationPolicy` of the client's roles with the [system rules](security.md#system-rules), which apply to the agents and to the external `/mcp` server alike and replace the hand-written checks the tools had before. The roles are in [Authorization](../../administration/authorization.md).
+
+- **Configuration**: the system rule that denies `write` on `[configuration]` makes `set_property` refuse a property marked `[Configuration]`, also when it is `[State]` as well, and the `set_property` description says so. The rule decides about members, not about what a method does, so an operation that the policy allows to execute can still change a `[Configuration]` property as part of its work.
+- **Agents**: the system rule that denies every action on `LlmAgentBase` hides every agent and the subjects inside it from the tools, so no client reads their state, runs their operations, such as Run now, or changes their metadata. A call that names one gets the answer of a missing subject, such as "Subject not found." from `invoke_operation` or "No subject at '...' in this storage." from `SetMetadata`. The agents' settings are configuration and were never listed.
+- **Roles**: the system rule on `Authorization` and `Role` keeps every client from reading or changing the roles, so no agent grants itself more.
+- **Metadata**: `SetMetadata` of a storage is refused for arguments that do not have the shape of the method, for a target the tools do not show, and without `write` on the metadata member of the target. A result filter of `McpMethodInvoker` leaves out every match of `SearchMetadata` that the tools do not show or whose metadata member the policy does not allow to read, then returns at most the first 100, see [Metadata: Agents](../../administration/metadata.md#agents).
+- **Confirmation**: the system rule that denies `execute` on `[requires-confirmation]` keeps operations marked `[Operation(RequiresConfirmation = true)]` from running through MCP. `McpMethodInvoker` refuses them with a message of its own before it asks the policy and before a problem with the arguments, so the client is told the actual reason. MCP elicitation, the server asking the client's user to confirm during a call, would allow them for clients that support it. It is not implemented, and the CLI agent runs non-interactively and could not answer it.
 - **Pages**: the Markdown write operations, which all of these reach, follow the [page write rules](#page-write-rules), because a block becomes a running subject of any type configured outside these filters, HTML runs in the browser of whoever opens the page, and images and media embeds load content from other sites.
 
 The operator view of these limits and their remaining gaps is in [Tools and permissions](../../administration/ai-agents.md#tools-and-permissions).
@@ -97,6 +101,7 @@ The operator view of these limits and their remaining gaps is in [Tools and perm
 - A `json` block hides every value that does not match the subject.
 - The old `subject(name)` form hides the whole content of its fence.
 - A page expression never shows a secret configuration value, nor the raw source of a page through its `Content` property, see [Properties Shown on Pages](../../development/building-subjects.md#properties-shown-on-pages).
+- In a query of an agent or an `/mcp` client, a page expression over a property its policy does not allow to read, or below a branch the policy hides, renders empty as well, see [Security](security.md#enforcement).
 
 #### Page Write Rules
 
@@ -150,7 +155,7 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 - Each turn registers its tool set under a random bearer token. A request lists and calls exactly that turn's tools, with no prompts or resources.
 - Closing the tool set at the end of the turn makes a call that passed the token check just before fail without running.
 
-**Tool scoping.** `AllowedTools` is enforced where the tools are served: the API agent receives only the allowed functions, and the agent route lists and calls only the turn's tool set. A per-turn tool-call budget returns an error result once exhausted, so the model answers with what it has; `update_memory` is exempt. Every call is recorded in the timeline with previews of its arguments and result.
+**Tool scoping.** `AllowedTools` decides which tools a turn has and the agent's `Roles` what they reach, see [Security](security.md#principals). `AllowedTools` is enforced where the tools are served: the API agent receives only the allowed functions, and the agent route lists and calls only the turn's tool set. A per-turn tool-call budget returns an error result once exhausted, so the model answers with what it has; `update_memory` is exempt. Every call is recorded in the timeline with previews of its arguments and result.
 
 **Triggers.** A scheduler starts background runs on the poll interval, on changes of `[State]` properties under the watch paths (buffered briefly, never on properties of agents), and on Run now. Runs never overlap, requests during a run coalesce into one follow-up run, and automatic runs keep `MinRunInterval` between starts. Failures back off, configuration failures pause until the configuration is saved or a turn succeeds, and usage limits pause until the reported reset; the timings are in [Triggers](../../administration/ai-agents.md#triggers).
 
@@ -178,7 +183,7 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 |-------|-------------|
 | Stage 1 [Implemented] | `LlmAgentBase` with `ClaudeCliAgent` and `AnthropicAgent`. Read-only by default, per-agent `AllowedTools`. Poll and debounced change triggers, chat, agent memory |
 | Stage 2 | Shared provider subject for credentials, declarative trigger filters (for example "temperature > 80"), agent-to-agent calls with recursion limits |
-| Stage 3 | Per-agent authorization scopes on subjects instead of per-tool permissions, and an approval workflow for operations that require confirmation |
+| Stage 3 | Per-agent roles that scope the tools to subjects [Implemented], see [Security](security.md#graph-authorization-in-progress), and an approval workflow for operations that require confirmation |
 
 ## Key Decisions
 
@@ -187,7 +192,7 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 | Agent runtime | Two backends on one base class: `FunctionInvokingChatClient` for the API, Claude Code for the CLI | Each backend keeps its natural tool loop; no agent framework is needed |
 | Credentials | On the agent: the API key as a secret configuration value, or the login of the local CLI, which HomeBlaze never stores | No provider subject until credentials need to be shared |
 | Interaction model | Background runs on poll, debounced change under watch paths and Run now, plus one chat session per agent; pull-only for external agents | Reacts to events without a rule language; background findings reach the chat |
-| Permissions | Per-agent `AllowedTools`, enforced where tools are served; configuration and agent operations off-limits to agents; confirmation-required operations off-limits to MCP | CLI flags and prompts alone are not a security boundary |
+| Permissions | Per-agent `AllowedTools` and `Roles`, enforced where tools are served; system rules keep secrets, configuration writes, agents, the roles and confirmation-required operations off-limits to every MCP client | CLI flags and prompts alone are not a security boundary |
 | Session model | Separate background runs, one chat session, agent-owned memory | Continuity at a predictable cost per run; a perpetual session would resend a growing context on every tick |
 | Tool split | Core 5 tools in `Namotion.Interceptor.Mcp`, method tools in `HomeBlaze.AI`, history tool in `HomeBlaze.History.Mcp` | Methods are a HomeBlaze convention, and a tool ships with the feature it exposes |
 | Agent writes | Local writes, no source tagging | Source mechanism is for connector feedback-loop prevention, not attribution |
@@ -196,5 +201,5 @@ With `edit_page_layout`, the agent's Markdown tools and `invoke_operation` may a
 
 - MCP push/subscription support for external agents (depends on protocol evolution)
 - Agent audit trail beyond the timeline: how to attribute changes to specific agents (see [Audit](audit.md))
-- Authorization: which agents and clients can access which subjects (see [Security](security.md))
+- Authorization of people and of individual `/mcp` clients (see [Security](security.md))
 - Capacity planning: many built-in agents watching many paths means aggregate model cost and rate limits; budgets across agents are not designed yet

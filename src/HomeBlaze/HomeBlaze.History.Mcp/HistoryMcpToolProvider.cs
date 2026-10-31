@@ -3,6 +3,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Authorization;
 using HomeBlaze.History.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -10,7 +11,6 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.History.Mcp;
 
@@ -82,16 +82,23 @@ public class HistoryMcpToolProvider : IMcpToolProvider
     });
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly PathProviderBase _pathProvider;
+    private readonly McpServerConfiguration _configuration;
     private readonly ILogger<HistoryMcpToolProvider> _logger;
 
+    /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
+    /// <param name="configuration">
+    /// The configuration the tool is added to, which resolves the paths. With an
+    /// <see cref="McpServerConfiguration.AccessPolicy"/>, a path that does not resolve to a readable property is not found
+    /// and one whose property the policy does not allow <c>history</c> on is refused, both without a query.
+    /// </param>
+    /// <param name="logger">Logs failed queries.</param>
     public HistoryMcpToolProvider(
         Func<IInterceptorSubject> rootSubjectProvider,
-        PathProviderBase pathProvider,
+        McpServerConfiguration configuration,
         ILogger<HistoryMcpToolProvider> logger)
     {
         _rootSubjectProvider = rootSubjectProvider;
-        _pathProvider = pathProvider;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -499,7 +506,12 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         {
             var resolved = rootRegistered is null
                 ? null
-                : _pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+                : _configuration.TryGetReadableProperty(rootRegistered, path);
+
+            if (_configuration.AccessPolicy is not null && GetAccessError(resolved, path) is { } accessError)
+            {
+                return new PathResult(path, null, null, null, new { error = accessError });
+            }
 
             // Null rather than a guess when the type is not one history records: reporting an
             // unrecordable property as "number" invites the caller to chart something that will never
@@ -535,7 +547,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
 
             result = await stores
                 .QueryHistoryAsync(
-                    new HistoryQuery(path, from, to, bucket, aggregation, maxPoints), cancellationToken)
+                    new HistoryQuery(GetQueryPath(resolved, rootRegistered, path), from, to, bucket, aggregation, maxPoints), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (HistoryAggregationNotSupportedException exception)
@@ -567,6 +579,34 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         }
 
         return new PathResult(path, valueType, unit, result, null);
+    }
+
+    // With a policy, the property was resolved and checked, so its history is queried under the path it is recorded with,
+    // whichever spelling of its path the client used; the requested path when it has none. Without a policy, the
+    // requested path, so that history of a property no longer in the graph stays available.
+    private string GetQueryPath((RegisteredSubjectProperty Property, object? Index)? resolved, RegisteredSubject? rootRegistered, string path)
+    {
+        if (_configuration.AccessPolicy is null ||
+            resolved is not { Index: null } match ||
+            rootRegistered?.Subject.Context.TryGetService<ISubjectPathResolver>() is not { } resolver)
+        {
+            return path;
+        }
+
+        return match.Property.GetHistoryPath(resolver) ?? path;
+    }
+
+    // Without a policy, a path that does not resolve is still queried, so the history of a property no longer in the graph stays available.
+    private string? GetAccessError((RegisteredSubjectProperty Property, object? Index)? resolved, string path)
+    {
+        if (resolved is not { } match)
+        {
+            return $"Path not found: {path}";
+        }
+
+        return _configuration.IsAllowed(match.Property, AuthorizationActions.History.Name)
+            ? null
+            : $"History is not available: {path}. The access policy does not allow it.";
     }
 
     /// <summary>

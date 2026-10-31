@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Blazor;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Blazor;
@@ -193,7 +194,7 @@ public class AgentToolOptionsTests
 
     private sealed class ThrowingToolSource : IAgentToolSource
     {
-        public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly) =>
+        public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
             throw new InvalidOperationException("The root subject is still loading, try again shortly.");
     }
 }

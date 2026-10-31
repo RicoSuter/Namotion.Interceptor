@@ -67,7 +67,7 @@ internal static class AgentToolOptions
         IReadOnlyList<McpToolInfo>? offeredTools;
         try
         {
-            offeredTools = toolSource.CreateTools(isReadOnly: false);
+            offeredTools = toolSource.CreateTools(isReadOnly: false, AllowAllMcpAccessPolicy.Instance);
         }
         catch (Exception)
         {

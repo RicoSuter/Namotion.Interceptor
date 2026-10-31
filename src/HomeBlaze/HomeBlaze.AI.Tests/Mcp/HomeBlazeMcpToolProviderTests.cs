@@ -789,17 +789,14 @@ public class HomeBlazeMcpToolProviderTests
 
         var room = new TestThing(context) { Name = "Test Room", Temperature = 21.5m };
 
-        var pathProvider = new StateAttributePathProvider();
-        var invoker = new McpMethodInvoker(
-            () => room, pathProvider, new EmptyServiceProvider(), NullLogger.Instance, isReadOnly, operationFilter: null);
-        var toolProvider = new HomeBlazeMcpToolProvider(invoker, isReadOnly);
-
         var configuration = new McpServerConfiguration
         {
-            PathProvider = pathProvider,
-            IsReadOnly = isReadOnly,
-            ToolProviders = { toolProvider }
+            PathProvider = new StateAttributePathProvider(),
+            IsReadOnly = isReadOnly
         };
+        var invoker = new McpMethodInvoker(
+            () => room, configuration, new EmptyServiceProvider(), NullLogger.Instance, isReadOnly, operationFilter: null);
+        configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker, isReadOnly));
         return (room, new McpToolFactory(room, configuration));
     }
 

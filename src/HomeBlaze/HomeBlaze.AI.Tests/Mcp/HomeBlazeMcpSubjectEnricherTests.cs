@@ -1,8 +1,12 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.Authorization;
+using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -100,6 +104,67 @@ public class HomeBlazeMcpSubjectEnricherTests
         // Assert
         Assert.Equal("/pages/House/Thing.md", withPage["$url"]);
         Assert.False(withoutPage.ContainsKey("$url"));
+    }
+
+    [Fact]
+    public void WhenThereIsNoAccessPolicy_ThenTheAddressIsTheCanonicalPath()
+    {
+        // Arrange
+        var graph = CreateHolderGraph();
+        var enricher = CreatePageEnricher(graph, accessPolicy: null);
+
+        // Act
+        var deviceEnrichments = enricher.GetSubjectEnrichments(graph.Device.TryGetRegisteredSubject()!);
+        var folderEnrichments = enricher.GetSubjectEnrichments(graph.Folder.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.Equal("/pages/Secret", deviceEnrichments["$url"]);
+        Assert.Equal("/pages/Open", folderEnrichments["$url"]);
+    }
+
+    [Fact]
+    public void WhenTheCanonicalPathGoesThroughAHiddenProperty_ThenTheSubjectHasNoAddress()
+    {
+        // Arrange
+        var graph = CreateHolderGraph();
+        var enricher = CreatePageEnricher(graph, CreateNoSecretPolicy());
+
+        // Act
+        var enrichments = enricher.GetSubjectEnrichments(graph.Device.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.False(enrichments.ContainsKey("$url"));
+        Assert.Equal("Device", enrichments["$title"]);
+    }
+
+    [Fact]
+    public void WhenTheCanonicalPathIsReadable_ThenTheSubjectHasItsAddress()
+    {
+        // Arrange
+        var graph = CreateHolderGraph();
+        var enricher = CreatePageEnricher(graph, CreateNoSecretPolicy());
+
+        // Act
+        var folderEnrichments = enricher.GetSubjectEnrichments(graph.Folder.TryGetRegisteredSubject()!);
+        var rootEnrichments = enricher.GetSubjectEnrichments(graph.Root.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.Equal("/pages/Open", folderEnrichments["$url"]);
+        Assert.Equal("/pages/", rootEnrichments["$url"]);
+    }
+
+    [Fact]
+    public void WhenTheSubjectAlsoHasAReadablePath_ThenTheToolsShowItThere()
+    {
+        // Arrange
+        var graph = CreateHolderGraph();
+        var configuration = new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = CreateNoSecretPolicy() };
+
+        // Act
+        var shown = configuration.TryGetReadableSubject(graph.Root.TryGetRegisteredSubject()!, "/Open/Open");
+
+        // Assert
+        Assert.Same(graph.Device, shown?.Subject);
     }
 
     [Fact]
@@ -267,6 +332,41 @@ public class HomeBlazeMcpSubjectEnricherTests
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
     }
+
+    // The device is attached at /Open/Open first, the path the tools write for it, and then at /Secret, its canonical
+    // path as the shallowest one.
+    private static HolderGraph CreateHolderGraph()
+    {
+        var context = CreateContext();
+        var root = new TestHolder(context) { Name = "Root" };
+        var folder = new TestHolder(context) { Name = "Folder" };
+        var device = new TestHolder(context) { Name = "Device" };
+        root.Open = folder;
+        folder.Open = device;
+        root.Secret = device;
+        return new HolderGraph(root, folder, device);
+    }
+
+    private static IMcpAccessPolicy CreateNoSecretPolicy()
+    {
+        var role = new AuthorizationRole
+        {
+            Name = "NoSecret",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Members = [nameof(TestHolder.Secret)], Actions = [PermissionAction.Read] }]
+        };
+        return TestAccessPolicies.Create(role.Name, role);
+    }
+
+    private static HomeBlazeMcpSubjectEnricher CreatePageEnricher(HolderGraph graph, IMcpAccessPolicy? accessPolicy)
+    {
+        var configuration = new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = accessPolicy };
+        var getPageUrl = HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(
+            _ => true, new SubjectPathResolver(() => graph.Root), configuration, () => graph.Root);
+        return new HomeBlazeMcpSubjectEnricher([], isReadOnly: false, getPageUrl, accessPolicy);
+    }
+
+    private sealed record HolderGraph(TestHolder Root, TestHolder Folder, TestHolder Device);
 
     private static HomeBlazeMcpSubjectEnricher CreateEnricher(bool isReadOnly = false)
     {

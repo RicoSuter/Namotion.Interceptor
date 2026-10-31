@@ -88,7 +88,8 @@ namespace HomeBlaze.AI.Agents
     }
     public sealed class AgentServices
     {
-        public AgentServices(HomeBlaze.AI.Agents.IAgentToolSource toolSource, HomeBlaze.AI.Agents.AgentTurnTokenRegistry tokenRegistry, HomeBlaze.AI.Agents.IAgentEndpointAddress endpointAddress, System.TimeProvider timeProvider) { }
+        public AgentServices(HomeBlaze.AI.Agents.IAgentToolSource toolSource, HomeBlaze.AI.Agents.AgentTurnTokenRegistry tokenRegistry, HomeBlaze.AI.Agents.IAgentEndpointAddress endpointAddress, System.TimeProvider timeProvider, HomeBlaze.Authorization.AuthorizationService authorizationService) { }
+        public HomeBlaze.Authorization.AuthorizationService AuthorizationService { get; }
         public HomeBlaze.AI.Agents.IAgentEndpointAddress EndpointAddress { get; }
         public System.TimeProvider TimeProvider { get; }
         public HomeBlaze.AI.Agents.AgentTurnTokenRegistry TokenRegistry { get; }
@@ -221,7 +222,7 @@ namespace HomeBlaze.AI.Agents
     }
     public interface IAgentToolSource
     {
-        System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(bool isReadOnly);
+        System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Mcp.McpToolInfo> CreateTools(bool isReadOnly, Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy accessPolicy);
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public abstract class LlmAgentBase : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
@@ -268,6 +269,8 @@ namespace HomeBlaze.AI.Agents
         public string? Name { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public System.TimeSpan? PollInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.Collections.Generic.List<string> Roles { get; set; }
         [HomeBlaze.Abstractions.Attributes.State("Background Runs", Position=7)]
         public int RunCount { get; }
         protected HomeBlaze.AI.Agents.AgentServices Services { get; }
@@ -359,6 +362,17 @@ namespace HomeBlaze.AI.Agents.ClaudeCli
 }
 namespace HomeBlaze.AI.Mcp
 {
+    public sealed class AllowAllMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
+    {
+        public static HomeBlaze.AI.Mcp.AllowAllMcpAccessPolicy Instance { get; }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+    }
+    public sealed class AuthorizationMcpAccessPolicy : Namotion.Interceptor.Mcp.Abstractions.IMcpAccessPolicy
+    {
+        public AuthorizationMcpAccessPolicy(Namotion.Interceptor.Authorization.AuthorizationPolicy policy, Microsoft.Extensions.Logging.ILogger? logger = null, string? clientName = null) { }
+        public Namotion.Interceptor.Authorization.AuthorizationPolicy Policy { get; }
+        public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
+    }
     public class HomeBlazeMarkdownSearchToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
     {
         public const string SearchMarkdownToolName = "search_markdown";
@@ -399,7 +413,8 @@ namespace HomeBlaze.AI
     }
     public readonly struct McpToolProviderContext : System.IEquatable<HomeBlaze.AI.McpToolProviderContext>
     {
-        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider, bool IsReadOnly) { }
+        public McpToolProviderContext(System.IServiceProvider Services, System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider, bool IsReadOnly, Namotion.Interceptor.Mcp.McpServerConfiguration Configuration) { }
+        public Namotion.Interceptor.Mcp.McpServerConfiguration Configuration { get; init; }
         public bool IsReadOnly { get; init; }
         public Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; init; }
         public System.Func<Namotion.Interceptor.IInterceptorSubject> RootSubjectProvider { get; init; }

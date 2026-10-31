@@ -121,6 +121,11 @@ namespace HomeBlaze.Services
         public static bool TryCreateObject(System.Type type, System.Collections.Generic.IReadOnlyDictionary<string, string?> inputs, out object? value, out string? error) { }
         public static bool TryParseJson(string? input, System.Type type, bool isNullable, out object? value, out string? error) { }
     }
+    public static class PropertyReadAccess
+    {
+        public static bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static System.IDisposable Enter(System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? canRead) { }
+    }
     public static class RegisteredSubjectMethodExtensions
     {
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Metadata.MethodMetadata> GetAllMethods(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, HomeBlaze.Abstractions.Attributes.ExclusionTarget target) { }

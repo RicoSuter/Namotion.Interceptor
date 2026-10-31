@@ -55,18 +55,26 @@ internal static class StorageOrder
             return null;
         }
 
-        var children = new HashSet<string>(ChildOrdering.GetShownNames(folder), StringComparer.Ordinal);
+        return GetNamesError(order.EnumerateArray().Select(static item => item.GetString()!), ChildOrdering.GetShownNames(folder));
+    }
+
+    /// <summary>
+    /// Gets why an order with the given names is refused, or null when it is valid: each name is one of
+    /// <paramref name="children"/> and given once.
+    /// </summary>
+    public static string? GetNamesError(IEnumerable<string> names, IEnumerable<string> children)
+    {
+        var childNames = new HashSet<string>(children, StringComparer.Ordinal);
         var listedNames = new HashSet<string>(StringComparer.Ordinal);
         var repeatedNames = new SortedSet<string>(StringComparer.Ordinal);
         var unknownNames = new List<string>();
-        foreach (var item in order.EnumerateArray())
+        foreach (var name in names)
         {
-            var name = item.GetString()!;
             if (!listedNames.Add(name))
             {
                 repeatedNames.Add(name);
             }
-            else if (!children.Contains(name))
+            else if (!childNames.Contains(name))
             {
                 unknownNames.Add(name);
             }
@@ -78,7 +86,7 @@ internal static class StorageOrder
         }
 
         return unknownNames.Count > 0
-            ? $"Names that are not children of the folder: {NameList.Format(unknownNames)}. Its children: {NameList.Format(children.Order(StringComparer.Ordinal))}."
+            ? $"Names that are not children of the folder: {NameList.Format(unknownNames)}. Its children: {NameList.Format(childNames.Order(StringComparer.Ordinal))}."
             : null;
     }
 }

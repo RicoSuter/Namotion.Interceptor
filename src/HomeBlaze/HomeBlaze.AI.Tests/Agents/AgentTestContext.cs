@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Hosting;
@@ -10,8 +11,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -89,13 +92,18 @@ internal sealed class TestAgentToolSource : IAgentToolSource
 
     public TestAgentToolSource(Func<IInterceptorSubject> root) => _root = root;
 
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly)
+    /// <summary>The access policy of the last tools created.</summary>
+    public IMcpAccessPolicy? LastAccessPolicy { get; private set; }
+
+    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy)
     {
+        LastAccessPolicy = accessPolicy;
         var configuration = new McpServerConfiguration
         {
             PathProvider = new StateAttributePathProvider(),
             PathPrefix = "/",
-            IsReadOnly = isReadOnly
+            IsReadOnly = isReadOnly,
+            AccessPolicy = accessPolicy
         };
         return new McpToolFactory(_root, configuration).CreateTools();
     }
@@ -119,13 +127,25 @@ internal sealed class TestDataDirectory : IDataDirectoryProvider
 
 internal static class AgentTestContext
 {
-    /// <summary>Creates the agent services for a graph whose tools read from <paramref name="root"/>.</summary>
+    /// <summary>
+    /// Creates the agent services for a graph whose tools read from <paramref name="root"/>, with an authorization service
+    /// over the graph of <paramref name="root"/>, or over an empty graph when the root has no registry.
+    /// </summary>
     public static AgentServices CreateServices(
         AgentTestRoot root, AgentTurnTokenRegistry? tokenRegistry = null, Uri? endpoint = null, TimeProvider? timeProvider = null) =>
         new(new TestAgentToolSource(() => root),
             tokenRegistry ?? new AgentTurnTokenRegistry(),
             new FixedEndpointAddress(endpoint),
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            CreateAuthorizationService(((IInterceptorSubject)root).Context));
+
+    private static AuthorizationService CreateAuthorizationService(IInterceptorSubjectContext context)
+    {
+        var graphContext = context.TryGetService<ISubjectRegistry>() is not null
+            ? context
+            : InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        return new AuthorizationService(graphContext, new StateAttributePathProvider());
+    }
 }
 
 /// <summary>

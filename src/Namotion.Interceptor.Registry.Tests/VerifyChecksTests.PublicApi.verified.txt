@@ -177,6 +177,7 @@ namespace Namotion.Interceptor.Registry.Paths
                 "Property",
                 "Index"})]
         public static System.Collections.Generic.IEnumerable<System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>> GetPropertiesFromPaths(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, System.Collections.Generic.IEnumerable<string> paths) { }
+        public static bool HasIncludedPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "segment",
                 "index"})]

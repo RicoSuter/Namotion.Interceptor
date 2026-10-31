@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 
 namespace HomeBlaze.AI.Agents;
 
@@ -8,7 +9,8 @@ namespace HomeBlaze.AI.Agents;
 public interface IAgentToolSource
 {
     /// <summary>
-    /// Creates all graph tools; <paramref name="isReadOnly"/> blocks set_property and operations.
+    /// Creates all graph tools; <paramref name="isReadOnly"/> blocks set_property and operations, and
+    /// <paramref name="accessPolicy"/> decides per member and action what the tools show and change.
     /// </summary>
-    IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly);
+    IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy);
 }

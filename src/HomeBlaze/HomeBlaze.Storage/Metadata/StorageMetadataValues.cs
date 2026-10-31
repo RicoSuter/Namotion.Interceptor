@@ -37,7 +37,7 @@ internal static class StorageMetadataValues
     /// </remarks>
     public static void Set(RegisteredSubject subject, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
     {
-        var name = propertyName is null ? KnownAttributes.Metadata : $"{propertyName}@{KnownAttributes.Metadata}";
+        var name = GetMemberName(propertyName);
         lock (GetLock(subject.Subject))
         {
             // The registration of the caller is stale when the subject was detached and attached again since it was read,
@@ -61,6 +61,41 @@ internal static class StorageMetadataValues
                 // A property of that name that the subject has of its own is left alone.
                 Add(subject, name, propertyName, values);
             }
+        }
+    }
+
+    /// <summary>
+    /// Gets the member that <see cref="Set"/> sets the metadata of the subject, or of its property
+    /// <paramref name="propertyName"/>, in, and adds it with null when it is missing, which is the same as no metadata
+    /// and the state that a removal leaves. Null when <paramref name="propertyName"/> names no property of the subject
+    /// other than an attribute or the metadata of the subject, as such metadata cannot be set, and when the registration
+    /// is no longer the current one of the subject.
+    /// </summary>
+    /// <remarks>Holds the lock of the subject, see <see cref="Set"/>.</remarks>
+    public static RegisteredSubjectProperty? GetOrAddMember(RegisteredSubject subject, string? propertyName)
+    {
+        if (propertyName == KnownAttributes.Metadata)
+        {
+            return null;
+        }
+
+        var name = GetMemberName(propertyName);
+        lock (GetLock(subject.Subject))
+        {
+            // A value added to a stale registration would be kept in the data of the subject, where Set would find it
+            // without the property of the current registration and then set nothing.
+            if (!ReferenceEquals(subject.Subject.TryGetRegisteredSubject(), subject))
+            {
+                return null;
+            }
+
+            if (subject.TryGetProperty(name) is { } member)
+            {
+                return member;
+            }
+
+            Add(subject, name, propertyName, null);
+            return subject.TryGetProperty(name);
         }
     }
 
@@ -108,7 +143,10 @@ internal static class StorageMetadataValues
         return true;
     }
 
-    private static void Add(RegisteredSubject subject, string name, string? propertyName, ImmutableDictionary<string, JsonElement> values)
+    private static string GetMemberName(string? propertyName)
+        => propertyName is null ? KnownAttributes.Metadata : $"{propertyName}@{KnownAttributes.Metadata}";
+
+    private static void Add(RegisteredSubject subject, string name, string? propertyName, ImmutableDictionary<string, JsonElement>? values)
     {
         var value = new StrongBox<ImmutableDictionary<string, JsonElement>?>(values);
         if (propertyName is null)

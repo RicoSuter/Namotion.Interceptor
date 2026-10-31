@@ -2,6 +2,7 @@ using System.Text.Json;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
+using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Xunit;
 
@@ -73,6 +75,32 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         Assert.True(result.GetProperty("success").GetBoolean());
         Assert.Equal("# New page", ReadFile(expectedFile));
         Assert.Equal("# New page", readBack.GetProperty("result").GetString());
+    }
+
+    [Theory]
+    [InlineData("edit_markdown", "ReplaceText")]
+    [InlineData("write_markdown", "ReplaceContent")]
+    [InlineData("create_markdown", "CreateMarkdownFile")]
+    public async Task WhenAReaderUsesAMarkdownTool_ThenTheOperationIsRefusedAndNothingIsWritten(string toolName, string operationName)
+    {
+        // Arrange
+        var (root, storage, services) = await CreateGraphAsync();
+        var tools = CreateTools(services, root, accessPolicy: TestAccessPolicies.Create(BuiltInRoles.ReaderName));
+        object input = toolName switch
+        {
+            "edit_markdown" => new { path = NotesPath, old_text = "cold", new_text = "too warm" },
+            "write_markdown" => new { path = NotesPath, content = "# Rewritten" },
+            _ => new { folder_path = DocsPath, name = "New.md", content = "# New page" }
+        };
+
+        // Act
+        var result = await CallAsync(tools[toolName], input);
+
+        // Assert
+        Assert.Equal($"Operation '{operationName}' is not permitted. The access policy does not allow it.", result.GetProperty("error").GetString());
+        Assert.Equal("# Notes\n\nThe freezer is cold.", ReadFile("Notes.md"));
+        Assert.Equal("# Notes\n\nThe freezer is cold.", GetNotes(storage).Content);
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Docs", "New.md")));
     }
 
     [Theory]
@@ -181,7 +209,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Arrange
         var (root, _, services) = await CreateGraphAsync();
         var invoker = new McpMethodInvoker(
-            () => root, new StateAttributePathProvider(), services, NullLogger.Instance,
+            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, services, NullLogger.Instance,
             isReadOnly: false, operationFilter: (_, method, _) => $"{method.PropertyName} is refused.");
         var provider = new HomeBlazeMarkdownToolProvider(invoker, isReadOnly: false);
         var tools = provider.GetTools().ToDictionary(tool => tool.Name);
@@ -208,7 +236,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         // Act
         var readOnlyTools = CreateTools(services, root, isReadOnly: true);
         var writableTools = CreateTools(services, root, isReadOnly: false);
-        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, forAgents: false))
+        var externalTools = new McpToolFactory(root, HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: false, TestAccessPolicies.Everything))
             .CreateTools().ToDictionary(tool => tool.Name);
 
         // Assert
@@ -297,9 +325,10 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         return (root, storage, serviceProvider);
     }
 
-    private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, bool isReadOnly = false)
+    private static Dictionary<string, McpToolInfo> CreateTools(
+        IServiceProvider services, AgentTestRoot root, bool isReadOnly = false, IMcpAccessPolicy? accessPolicy = null)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, forAgents: true);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly, accessPolicy ?? TestAccessPolicies.Operator);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 
