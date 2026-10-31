@@ -69,7 +69,7 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     [Derived]
     public string? IconColor => IsConnected ? "Success" : null;
 
-    public override bool IsBlocking => IsConnected;
+    public override bool IsMovementBlocking => IsConnected;
 
     public override bool IsVisible => IsConnected;
 

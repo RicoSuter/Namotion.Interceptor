@@ -34,7 +34,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
 
     public string? IconName => "DoorFront";
 
-    public override bool IsBlocking => !IsOpen;
+    public override bool IsMovementBlocking => !IsOpen;
 
     public override bool IsSoundBlocking => !IsOpen;
 

@@ -14,7 +14,7 @@ internal sealed record GameViewObject(
     int Facing,
     string Title,
     string Color,
-    bool IsBlocking,
+    bool IsMovementBlocking,
     bool IsOpen,
     bool IsSelf,
     bool IsMicrophoneOn,

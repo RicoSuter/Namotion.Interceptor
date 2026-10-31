@@ -72,9 +72,9 @@ public class GameSerializationTests
         Assert.Equal((4, 1, 10), (wall.Width, wall.Depth, wall.Height));
         Assert.Equal((2, 2, 7), (player.Width, player.Depth, player.Height));
         Assert.Equal(GameDirection.North, player.Facing);
-        Assert.False(player.IsBlocking);
+        Assert.False(player.IsMovementBlocking);
         Assert.False(player.IsVisible);
-        Assert.True(wall.IsBlocking);
+        Assert.True(wall.IsMovementBlocking);
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public class GameDoorTests
         // Assert
         Assert.Equal((4, 1, 10), (door.Width, door.Depth, door.Height));
         Assert.False(door.IsOpen);
-        Assert.True(door.IsBlocking);
+        Assert.True(door.IsMovementBlocking);
         Assert.True(door.IsVisible);
     }
 
@@ -55,7 +55,7 @@ public class GameDoorTests
 
         // Assert
         Assert.True(door.IsOpen);
-        Assert.False(door.IsBlocking);
+        Assert.False(door.IsMovementBlocking);
         Assert.Equal(1, _context.Root.WriteCount);
         Assert.All(results, result => Assert.True(result.IsAccepted));
         Assert.Equal((0, 3), (player.X, player.Y));
