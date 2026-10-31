@@ -162,4 +162,58 @@ public class MqttClientConfigurationTests
         Assert.NotNull(deserialized);
         Assert.Equal(timestamp.ToUnixTimeMilliseconds(), deserialized!.Value.ToUnixTimeMilliseconds());
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("123abc")]
+    [InlineData("253402300800000")]
+    [InlineData("-62135596800001")]
+    [InlineData("99999999999999999")]
+    [InlineData("-99999999999999999")]
+    public void WhenTimestampIsOutOfRangeOrPartiallyParsed_ThenReturnsNull(string timestamp)
+    {
+        // Arrange
+        var bytes = System.Text.Encoding.UTF8.GetBytes(timestamp);
+
+        // Act
+        var result = Namotion.Interceptor.Mqtt.MqttHelper.DefaultDeserializeTimestamp(bytes);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("-62135596800000")]
+    [InlineData("253402300799999")]
+    public void WhenTimestampIsAtDateTimeOffsetBoundary_ThenReturnsTimestamp(string timestamp)
+    {
+        // Arrange
+        var bytes = System.Text.Encoding.UTF8.GetBytes(timestamp);
+
+        // Act
+        var result = Namotion.Interceptor.Mqtt.MqttHelper.DefaultDeserializeTimestamp(bytes);
+
+        // Assert
+        Assert.Equal(long.Parse(timestamp), result!.Value.ToUnixTimeMilliseconds());
+    }
+
+    [Fact]
+    public void WhenTimestampDeserializerThrows_ThenSourceTimestampIsMissing()
+    {
+        // Arrange
+        var properties = new[]
+        {
+            new MQTTnet.Packets.MqttUserProperty("ts", System.Text.Encoding.UTF8.GetBytes("bad"))
+        };
+
+        // Act
+        var result = Namotion.Interceptor.Mqtt.MqttHelper.ExtractSourceTimestamp(
+            properties,
+            "ts",
+            _ => throw new InvalidOperationException());
+
+        // Assert
+        Assert.Null(result);
+    }
 }
