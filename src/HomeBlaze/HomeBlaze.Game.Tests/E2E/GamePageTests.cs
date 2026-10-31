@@ -287,6 +287,33 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenOneTreeStandsBehindThePlayerAndOneBetweenTheCameraAndThePlayer_ThenOnlyTheOneInFrontFades()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        // North of the player, away from the camera; the bounds of its leaning trunk cross the sightline, its triangles do not.
+        var behind = new Tree { X = player.X - 2, Y = player.Y + 2, Variant = 0, Rotation = 180 };
+        world.Game.Objects = new Dictionary<string, GameObject> { ["behind"] = behind };
+        await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
+        await canvas.EvaluateAsync(@"canvas => {
+            window.gameMostFaded = Number(canvas.dataset.gameFaded);
+            new MutationObserver(() => window.gameMostFaded = Math.max(window.gameMostFaded, Number(canvas.dataset.gameFaded)))
+                .observe(canvas, { attributes: true, attributeFilter: ['data-game-faded'] });
+        }");
+
+        // Act
+        // A slim pine south of the player, toward the camera.
+        world.Game.Objects = new Dictionary<string, GameObject>(world.Game.Objects) { ["front"] = new Tree { X = player.X, Y = player.Y - 6, Variant = 6 } };
+
+        // Assert
+        await Expect(canvas).ToHaveAttributeAsync("data-game-models", "2", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "1", new() { Timeout = Timeout });
+        Assert.Equal(1, await page.EvaluateAsync<int>("() => window.gameMostFaded"));
+    }
+
+    [Fact]
     public async Task WhenTwoBrowsersPlay_ThenTheySeeEachOtherAndOneCanMessageTheOther()
     {
         // Arrange

@@ -9,9 +9,11 @@ const METER = 4;
 const FADED_VISIBILITY = 0.3;
 // A fade glides between fully visible and faded over this time.
 const FADE_MS = 200;
-// A faded object stays faded until the sightline misses it by this many tiles, so a sightline that grazes its edge while
-// the camera follows a step does not make it blink.
-const UNFADE_MARGIN = 0.5;
+// The sightline to the own player's head is tested this often, exactly against the triangles of the meshes it crosses the
+// bounds of, and an object it hit stays faded this long after the last hit, so it does not blink while the camera follows
+// a step.
+const SIGHTLINE_CHECK_MS = 100;
+const FADE_HOLD_MS = 300;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
 const IDLE_DELAY_STEPS = 0.75;
@@ -116,6 +118,10 @@ export async function createEntities(scene, options) {
     // Set by dispose, so that a model load finishing later does not touch the disposed scene.
     let isViewDisposed = false;
     let lastFadeFrame = 0;
+    let lastSightlineCheck = -Infinity;
+    // Counts the renders; a mesh's world matrix and bounds are computed when the scene renders.
+    let frame = 0;
+    const sightline = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, 1), 1);
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
     ground.material = await createGroundMaterial();
@@ -280,6 +286,7 @@ export async function createEntities(scene, options) {
     }
 
     function addMeshes(entity, meshes) {
+        entity.changedAtFrame = frame;
         for (const mesh of meshes) {
             mesh.isPickable = false;
             mesh.gameMaterial = mesh.material;
@@ -469,7 +476,8 @@ export async function createEntities(scene, options) {
 
     function createEntity(view) {
         const entity = {
-            view, root: null, tween: null, idleAt: 0, isFaded: false, visibility: 1, isDisposed: false,
+            view, root: null, tween: null, idleAt: 0, isFaded: false, lastHitAt: -Infinity, visibility: 1, changedAtFrame: 0,
+            isDisposed: false,
             meshes: [], materials: [], partNodes: [], animations: null, instance: null,
         };
         if (view.kind === 'player') {
@@ -531,6 +539,7 @@ export async function createEntities(scene, options) {
 
     function place(entity, x, y) {
         entity.root.position = positionOf(entity.view, x, y);
+        entity.changedAtFrame = frame;
         entity.tween = null;
         setWalking(entity, false);
     }
@@ -669,6 +678,7 @@ export async function createEntities(scene, options) {
         selfId = null;
         hideTarget();
         for (const other of entities.values()) {
+            other.lastHitAt = -Infinity;
             setFaded(other, false);
             if (other.visibility !== 1) {
                 setVisibility(other, 1);
@@ -676,13 +686,37 @@ export async function createEntities(scene, options) {
         }
     }
 
-    // Whether the segment from the start by the offset crosses the world bounds of one of the entity's meshes grown by the
-    // margin on every side. Mesh bounds hug a model's trunk and crown separately and follow the rotation of a part, so an
-    // object fades only where it can hide the head. Allocation free for the render loop.
-    function crosses(entity, startX, startY, startZ, offsetX, offsetY, offsetZ, margin) {
+    // Points the reused sightline from the eye to the own player's head and records a hit on every object whose triangles
+    // it meets before the head.
+    function checkSightline(eye, self, now) {
+        const offsetX = self.root.position.x - eye.x;
+        const offsetY = self.view.height * HEAD_HEIGHT - eye.y;
+        const offsetZ = self.root.position.z - eye.z;
+        const length = Math.hypot(offsetX, offsetY, offsetZ);
+        if (length < 1e-6) {
+            return;
+        }
+
+        sightline.origin.copyFrom(eye);
+        sightline.direction.copyFromFloats(offsetX / length, offsetY / length, offsetZ / length);
+        sightline.length = length;
+        for (const entity of entities.values()) {
+            // Until the scene rendered once after an object was added or placed, its meshes keep the world matrix and bounds
+            // of the origin, next to the own player, and would fade it for a moment.
+            if (entity.view.kind !== 'player' && entity.changedAtFrame < frame - 1 && hides(entity, eye, offsetX, offsetY, offsetZ)) {
+                entity.lastHitAt = now;
+            }
+        }
+    }
+
+    // The bounds of a mesh, such as a trunk with leaning branches, can cross the sightline where no triangle does, so they
+    // only select the meshes to test exactly.
+    function hides(entity, eye, offsetX, offsetY, offsetZ) {
         for (const mesh of entity.meshes) {
             // A mesh without vertices, such as the node above the primitives of a model, has an empty box at its origin.
-            if (mesh.getTotalVertices() > 0 && crossesBox(mesh.getBoundingInfo().boundingBox, startX, startY, startZ, offsetX, offsetY, offsetZ, margin)) {
+            if (mesh.getTotalVertices() > 0
+                && crossesBox(mesh.getBoundingInfo().boundingBox, eye, offsetX, offsetY, offsetZ)
+                && sightline.intersectsMesh(mesh, false).hit) {
                 return true;
             }
         }
@@ -690,15 +724,14 @@ export async function createEntities(scene, options) {
         return false;
     }
 
-    // Clips the part of the segment inside the box one axis at a time.
-    function crossesBox(box, startX, startY, startZ, offsetX, offsetY, offsetZ, margin) {
+    // Whether the segment from the eye by the offset crosses the box, clipping the part of the segment inside it one axis
+    // at a time; allocation free.
+    function crossesBox(box, eye, offsetX, offsetY, offsetZ) {
         const min = box.minimumWorld;
         const max = box.maximumWorld;
         segment.enter = 0;
         segment.exit = 1;
-        return clip(startX, offsetX, min.x - margin, max.x + margin)
-            && clip(startY, offsetY, min.y - margin, max.y + margin)
-            && clip(startZ, offsetZ, min.z - margin, max.z + margin);
+        return clip(eye.x, offsetX, min.x, max.x) && clip(eye.y, offsetY, min.y, max.y) && clip(eye.z, offsetZ, min.z, max.z);
     }
 
     function clip(start, offset, low, high) {
@@ -848,6 +881,7 @@ export async function createEntities(scene, options) {
         },
 
         animate(now) {
+            frame++;
             const seconds = now / 1000;
             windSwayPhase = (seconds * WIND_SPEED) % TWO_PI;
             windGustPhase = (seconds * GUST_SPEED) % TWO_PI;
@@ -894,14 +928,14 @@ export async function createEntities(scene, options) {
 
             const elapsed = Math.min(FADE_MS, Math.max(0, now - lastFadeFrame));
             lastFadeFrame = now;
-            const eye = camera.position;
-            const offsetX = self.root.position.x - eye.x;
-            const offsetY = self.view.height * HEAD_HEIGHT - eye.y;
-            const offsetZ = self.root.position.z - eye.z;
+            if (now - lastSightlineCheck >= SIGHTLINE_CHECK_MS) {
+                lastSightlineCheck = now;
+                checkSightline(camera.position, self, now);
+            }
+
             for (const entity of entities.values()) {
                 if (entity.view.kind !== 'player') {
-                    const margin = entity.isFaded ? UNFADE_MARGIN : 0;
-                    setFaded(entity, crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ, margin));
+                    setFaded(entity, now - entity.lastHitAt < FADE_HOLD_MS);
                     glideVisibility(entity, elapsed);
                 }
             }
