@@ -55,6 +55,18 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     [State(IsDiscrete = true, Position = 3)]
     public partial bool IsConnected { get; internal set; }
 
+    /// <summary>
+    /// Whether a page of the player has its microphone on; only the player's own pages switch it.
+    /// </summary>
+    [State(IsDiscrete = true, Position = 4)]
+    public partial bool IsMicrophoneOn { get; internal set; }
+
+    /// <summary>
+    /// Whether a page of the player has its speaker on; only the player's own pages switch it.
+    /// </summary>
+    [State(IsDiscrete = true, Position = 5)]
+    public partial bool IsAudioOn { get; internal set; }
+
     [Derived]
     public string? Title => string.IsNullOrEmpty(ClientTitle) ? "Player" : ClientTitle;
 
@@ -68,11 +80,16 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     public override bool IsVisible => IsConnected;
 
     // Not intercepted: runtime state of the movement, created by the game under its lock.
-    internal StepRateLimiter? StepRateLimiter { get; set; }
+    internal RateLimiter? StepRateLimiter { get; set; }
 
-    internal StepRateLimiter? TurnRateLimiter { get; set; }
+    internal RateLimiter? TurnRateLimiter { get; set; }
 
     internal long? LastMessageTimestamp { get; set; }
+
+    // Not intercepted: the page whose microphone counts and the pages with the speaker on, kept by the game under its lock.
+    internal int? MicrophonePageId { get; set; }
+
+    internal HashSet<int>? AudioPageIds { get; set; }
 
     public GamePlayer()
     {
@@ -80,6 +97,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
         ClientId = string.Empty;
         ClientTitle = string.Empty;
         IsConnected = false;
+        IsMicrophoneOn = false;
+        IsAudioOn = false;
     }
 
     /// <summary>
