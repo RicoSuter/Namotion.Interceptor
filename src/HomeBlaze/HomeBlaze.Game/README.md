@@ -36,12 +36,12 @@ North is +Y and east is +X. An object covers the tiles from `X` to `X + Width - 
 | | `Objects` | Configuration | `Dictionary<string, GameObject>` keyed by object name, managed by the user and by player actions |
 | `GameObject` (abstract) | `X`, `Y` | Configuration | South-west corner of the footprint |
 | | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | In tiles; `Height` is only used for rendering |
-| | `IsBlocking`, `IsVisible` | Virtual, not persisted | `true` by default |
+| | `IsMovementBlocking`, `IsVisible` | Virtual, not persisted | `true` by default |
 | `Wall` | | | Defaults 4 x 1 x 10 tiles (1 m long, 25 cm thick, 2.5 m tall) |
-| `Door` | `IsOpen` | Configuration | Defaults 4 x 1 x 10, closed; use 1 x 4 in a north-south wall. `IsBlocking => !IsOpen` |
+| `Door` | `IsOpen` | Configuration | Defaults 4 x 1 x 10, closed; use 1 x 4 in a north-south wall. `IsMovementBlocking => !IsOpen` |
 | `GamePlayer` | `Facing` | Configuration | `GameDirection`, north by default |
 | | `ClientId`, `ClientTitle`, `IsConnected` | State | `ClientId` is set from the dictionary key in `OnPlayersChanging` |
-| | | | Defaults 2 x 2 x 7 (50 x 50 cm, 175 cm tall). `IsBlocking` and `IsVisible` follow `IsConnected` |
+| | | | Defaults 2 x 2 x 7 (50 x 50 cm, 175 cm tall). `IsMovementBlocking` and `IsVisible` follow `IsConnected` |
 
 `GamePlayer` derives from `GameObject`, so one index covers players and objects and the renderer treats both alike. They still live in two collections because different parties manage them. The player's footprint is square, so turning never changes the tiles it covers. `GamePlayer` is `[ExcludeFromCreation]`.
 

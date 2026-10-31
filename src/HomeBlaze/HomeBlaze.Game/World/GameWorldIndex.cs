@@ -32,7 +32,7 @@ internal sealed class GameWorldIndex
             return;
         }
 
-        var entry = new Entry(gameObject.Footprint, gameObject.IsBlocking, gameObject.IsVisible);
+        var entry = new Entry(gameObject.Footprint, gameObject.IsMovementBlocking, gameObject.IsVisible);
         if (_entries.TryGetValue(gameObject, out var existing))
         {
             if (existing == entry)
@@ -109,7 +109,7 @@ internal sealed class GameWorldIndex
         foreach (var gameObject in objects)
         {
             var entry = _entries[gameObject];
-            if (entry.IsBlocking && !ReferenceEquals(gameObject, ignored) && entry.Footprint.Intersects(area))
+            if (entry.IsMovementBlocking && !ReferenceEquals(gameObject, ignored) && entry.Footprint.Intersects(area))
             {
                 return true;
             }
@@ -161,5 +161,5 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private readonly record struct Entry(Footprint Footprint, bool IsBlocking, bool IsVisible);
+    private readonly record struct Entry(Footprint Footprint, bool IsMovementBlocking, bool IsVisible);
 }
