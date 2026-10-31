@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Game.World;
 using Microsoft.Extensions.Logging;
 
@@ -9,6 +10,8 @@ namespace HomeBlaze.Game.Voice;
 /// </summary>
 internal sealed class GameVoiceMixer
 {
+    private static readonly object WarnedMarker = new();
+
     private readonly Lock _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
@@ -16,6 +19,9 @@ internal sealed class GameVoiceMixer
     // Guarded by _lock.
     private readonly Dictionary<string, Speaker> _speakers = new();
     private readonly Dictionary<string, IGameVoiceSink[]> _sinks = new();
+
+    // Sinks whose failure was logged as a warning already; weak, so a closed page's sink is not kept alive.
+    private readonly ConditionalWeakTable<IGameVoiceSink, object> _warnedSinks = new();
 
     // Used only by Mix, which one loop runs at a time.
     private readonly Dictionary<string, short[]> _frames = new();
@@ -203,7 +209,8 @@ internal sealed class GameVoiceMixer
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "Sending a voice frame to a page failed");
+            var level = _warnedSinks.TryAdd(sink, WarnedMarker) ? LogLevel.Warning : LogLevel.Debug;
+            _logger.Log(level, exception, "Sending a voice frame to a page failed");
         }
     }
 
