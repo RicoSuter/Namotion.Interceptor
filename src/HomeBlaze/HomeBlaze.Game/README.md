@@ -36,15 +36,17 @@ North is +Y and east is +X. An object covers the tiles from `X` to `X + Width - 
 | | `Players` | Configuration | `Dictionary<string, GamePlayer>` keyed by client id, managed by the game |
 | | `Objects` | Configuration | `Dictionary<string, GameObject>` keyed by object name, managed by the user and by player actions |
 | `GameObject` (abstract) | `X`, `Y` | Configuration | South-west corner of the footprint |
-| | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | In tiles; `Height` is only used for rendering |
+| | `Width`, `Depth`, `Height` | Virtual, not persisted | In tiles; `Height` is only used for rendering. Walls and doors override them as configuration |
 | | `IsMovementBlocking`, `IsVisible` | Virtual, not persisted | `true` by default |
 | | `IsSoundBlocking` | Virtual, not persisted | Whether the object stops sound, `false` by default, so an object that blocks movement, such as a plant or a chair, lets sound through; see the hearing range under [Voice](#voice) |
-| `Wall` | | | Defaults 4 x 1 x 10 tiles (1 m long, 25 cm thick, 2.5 m tall). `IsSoundBlocking => true` |
-| `Door` | `IsOpen` | Configuration | Defaults 4 x 1 x 10, closed; use 1 x 4 in a north-south wall. `IsMovementBlocking` and `IsSoundBlocking` are `!IsOpen` |
+| `Wall` | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | Defaults 4 x 1 x 10 tiles (1 m long, 25 cm thick, 2.5 m tall). `IsSoundBlocking => true` |
+| `Door` | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | Defaults 4 x 1 x 10; use 1 x 4 in a north-south wall |
+| | `IsOpen` | Configuration | Closed by default. `IsMovementBlocking` and `IsSoundBlocking` are `!IsOpen` |
 | `GamePlayer` | `Facing` | Configuration | `GameDirection`, north by default |
 | | `ClientId`, `ClientTitle`, `IsConnected` | State | `ClientId` is set from the dictionary key in `OnPlayersChanging` |
 | | `IsMicrophoneOn`, `IsAudioOn` | State | Switched only by the player's own pages, not persisted, reset when the client disconnects |
-| | | | Defaults 2 x 2 x 7 (50 x 50 cm, 175 cm tall). `IsMovementBlocking` and `IsVisible` follow `IsConnected` |
+| | `Width`, `Depth`, `Height` | Fixed | Always 2 x 2 x 7 (50 x 50 cm, 175 cm tall), `Size` and `BodyHeight`; a set value, also one from a loaded file, has no effect |
+| | | | `IsMovementBlocking` and `IsVisible` follow `IsConnected` |
 
 `GamePlayer` derives from `GameObject`, so one index covers players and objects and the renderer treats both alike. They still live in two collections because different parties manage them. The player's footprint is square, so turning never changes the tiles it covers. `GamePlayer` is `[ExcludeFromCreation]`.
 

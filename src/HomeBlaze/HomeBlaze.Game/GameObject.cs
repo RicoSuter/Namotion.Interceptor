@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.World;
@@ -31,20 +30,21 @@ public abstract partial class GameObject : IConfigurable
     [Configuration]
     public partial int Y { get; set; }
 
-    [Configuration]
-    [Range(1, MaximumSize)]
-    public partial int Width { get; set; }
-
-    [Configuration]
-    [Range(1, MaximumSize)]
-    public partial int Depth { get; set; }
+    /// <summary>
+    /// The width in tiles. Walls and doors configure it; a player has a fixed size and ignores a set value.
+    /// </summary>
+    public virtual int Width { get; set; } = 1;
 
     /// <summary>
-    /// The height in tiles, which only the rendering uses.
+    /// The depth in tiles. Walls and doors configure it; a player has a fixed size and ignores a set value.
     /// </summary>
-    [Configuration]
-    [Range(1, MaximumSize)]
-    public partial int Height { get; set; }
+    public virtual int Depth { get; set; } = 1;
+
+    /// <summary>
+    /// The height in tiles, which only the rendering uses. Walls and doors configure it; a player has a fixed size
+    /// and ignores a set value.
+    /// </summary>
+    public virtual int Height { get; set; } = 1;
 
     /// <summary>
     /// Whether this object blocks movement, which means no other movement blocking object may enter the tiles of its footprint.
@@ -69,9 +69,6 @@ public abstract partial class GameObject : IConfigurable
     {
         X = 0;
         Y = 0;
-        Width = 1;
-        Depth = 1;
-        Height = 1;
     }
 
     public virtual Task ApplyConfigurationAsync(CancellationToken cancellationToken)

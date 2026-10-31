@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -26,6 +27,18 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     /// The height in tiles, the height of a wall.
     /// </summary>
     public const int DefaultHeight = Wall.DefaultHeight;
+
+    [Configuration]
+    [Range(1, MaximumSize)]
+    public override partial int Width { get; set; }
+
+    [Configuration]
+    [Range(1, MaximumSize)]
+    public override partial int Depth { get; set; }
+
+    [Configuration]
+    [Range(1, MaximumSize)]
+    public override partial int Height { get; set; }
 
     [Configuration]
     public partial bool IsOpen { get; set; }
