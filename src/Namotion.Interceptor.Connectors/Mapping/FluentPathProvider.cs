@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
@@ -46,5 +47,19 @@ public sealed class FluentPathProvider<TMetadata> : PathProviderBase
             return segment ?? property.BrowseName;
 
         return null;
+    }
+
+    /// <inheritdoc />
+    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        var subjectType = property.Subject.GetType();
+        if (_registry.TryGetSegment(subjectType, property.Name, out segment))
+        {
+            segment ??= property.BrowseName;
+            return true;
+        }
+
+        segment = InlinePathsAttribute.IsInlinePathsProperty(subjectType, property.Name) ? property.BrowseName : null;
+        return segment is not null;
     }
 }

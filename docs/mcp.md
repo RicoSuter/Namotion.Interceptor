@@ -20,7 +20,7 @@ services.AddMcpServer()
         sp => resolveRootSubject(sp),
         sp => new McpServerConfiguration
         {
-            PathProvider = new DefaultPathProvider()
+            PathProvider = DefaultPathProvider.Instance
         });
 
 // 2. Map the MCP endpoint
@@ -89,6 +89,8 @@ Folder/SubFolder/Device/Status   (property path)
 ```
 
 Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are written and read, including keys that need the bracket form. A path that does not resolve is answered with `Path not found: <path>`, or with `Invalid path syntax: <reason>` when it is malformed.
+
+The tools list only properties the path provider includes: `browse` shows only those, and `search` returns a subject only when the property holding it is included, and for an attribute also the property it belongs to. The paths they return, and the paths `get_property`, `set_property` and the `browse` path resolve, use the provider's segments but pass through every property, so a subject held below a property the provider excludes keeps its path, unlike the registry's [included properties](registry.md#included-properties) rule. Such a path resolves only when the provider's `TryGetPropertyFromSegment` finds the excluded properties on the way by their segment, or by their `BrowseName` when `TryGetPropertySegment` gives them none. A provider derived from `PathProviderBase` that overrides only `IsPropertyIncluded` does, but a provider that finds only the properties it includes, such as `AttributeBasedPathProvider` for a property without a `[Path]` attribute, does not, and `get_property` then answers `Path not found` for a path `search` returned. Paths in `where` resolve only through included properties.
 
 ### `browse`
 
@@ -276,7 +278,7 @@ Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Sc
 var config = new McpServerConfiguration
 {
     // Required: property filtering and path resolution
-    PathProvider = new DefaultPathProvider(),
+    PathProvider = DefaultPathProvider.Instance,
 
     // Optional: subject-level metadata enrichment
     SubjectEnrichers = { new MySubjectEnricher() },
