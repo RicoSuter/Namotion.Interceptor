@@ -71,14 +71,18 @@ Moving `Wall` and `Door` changes their `$type` to `HomeBlaze.Game.Objects.Walls.
   - Both resolve the caller as the operations do today and throw `InvalidOperationException` with a message for the player.
 - `WallTool` ("Build wall"): parameters `length` (1 to 40, default 4), `height` (1 to 20, default 10), `material` (`WallMaterial`, default `Bricks`), validated with `[Range]` and again on the server. The wall is `length` tiles long in the facing direction and 1 tile thick.
 - `TreeTool` ("Plant tree"): parameter `variant` (nullable; null picks a random variant). Rotation (0 to 359) and scale (80 to 120 percent) are random. The tree's footprint is 2 x 2 tiles in front of the player.
-- "Demolish" stays an operation of the game and works on every object.
+- Actions on an object are operations of that object, as today: `Wall` and `Tree` have "Demolish", `Door` has "Open" and "Close" (only the applicable one enabled), `GamePlayer` has "Send message". The game itself has no object actions.
+- Public object API on `Game`, so that object types use no internal members:
+  - `Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken)` removes the object from the world; it throws `InvalidOperationException` when the object is not part of this game.
+  - `Task UpdateAsync(GameObject gameObject, Action change, CancellationToken cancellationToken)` runs `change` under the game's lock and updates the index; when the object blocks movement afterwards and its footprint overlaps another movement-blocking object, the change is undone by restoring the object's configuration and state properties captured before, and the call throws "Something is in the way.". The door's "Close" becomes `UpdateAsync(this, () => IsOpen = false, …)`, so the occupied doorway check is generic.
+  - The current internal `RemoveObjectAsync` and `SetDoorOpenAsync` are replaced by these.
 - The current "Build wall" operation of `Game` moves to `WallTool`.
 
 ## Objects
 
-- `Wall`: `[Configuration] WallMaterial Material` (`Bricks`, `Concrete`, `Wood`, default `Bricks`), configurable `Width`, `Depth`, `Height` as today, `IsMovementBlocking` and `IsSoundBlocking` true. `Visual`: one box with the material's texture.
-- `Door`: behavior as today (`IsOpen`, the "Open" and "Close" operations, refused while the doorway is occupied). `Visual`: a brick lintel above the opening and a wooden leaf with its pivot at the hinge, rotated 0 or 90 degrees by `IsOpen`.
-- `Tree`: `[Configuration] int Variant`, `int Rotation`, `int Scale` (percent); fixed footprint 2 x 2 like players (sizes not configurable), `IsMovementBlocking` true, `IsSoundBlocking` false. `Visual`: one `Model` part with the variant's model, rotation and scale, effect `Wind`, height from the variant table. A variant outside the table falls back to variant 0.
+- `Wall`: "Demolish" through `Game.RemoveAsync`; `[Configuration] WallMaterial Material` (`Bricks`, `Concrete`, `Wood`, default `Bricks`), configurable `Width`, `Depth`, `Height` as today, `IsMovementBlocking` and `IsSoundBlocking` true. `Visual`: one box with the material's texture.
+- `Door`: behavior as today (`IsOpen`, the "Open" and "Close" operations, closing refused while the doorway is occupied), implemented through `Game.UpdateAsync`. `Visual`: a brick lintel above the opening and a wooden leaf with its pivot at the hinge, rotated 0 or 90 degrees by `IsOpen`.
+- `Tree`: a "Demolish" operation through `Game.RemoveAsync`; `[Configuration] int Variant`, `int Rotation`, `int Scale` (percent); fixed footprint 2 x 2 like players (sizes not configurable), `IsMovementBlocking` true, `IsSoundBlocking` false. `Visual`: one `Model` part with the variant's model, rotation and scale, effect `Wind`, height from the variant table. A variant outside the table falls back to variant 0.
 - Tree models: 5 to 8 CC0 models (Quaternius or Kenney nature packs), each a small `.glb`, with a table of model file and height per variant in `Tree`.
 
 ## Remembered parameters
@@ -111,6 +115,7 @@ Unit tests (`HomeBlaze.Game.Tests`, `HomeBlaze.Components.Tests`):
 - `Tree` blocks movement but not sound, has a fixed size, falls back to variant 0.
 - `WallTool` builds the requested wall in the facing direction and refuses blocked or diagonal placement; ranges are enforced on the server.
 - `TreeTool` picks a random variant only without one, sets rotation and scale within range, refuses blocked placement.
+- `Game.RemoveAsync` removes an object of the game and refuses a foreign one; `Game.UpdateAsync` applies a change, and undoes and refuses one that would make a movement-blocking object overlap another.
 - Walls with `Material` and trees save and load; tools save and load with `$type`.
 - The demo world loads, every room is reachable from the spawn point through open or openable doors, and no tree blocks a door.
 - `MethodParameterDialog` prefills initial values.
