@@ -7,6 +7,11 @@ const TELEPORT_DISTANCE = 6;
 // One meter, the size of one grass repeat and the spacing of the ground grid.
 const METER = 4;
 const FADED_VISIBILITY = 0.3;
+// A fade glides between fully visible and faded over this time.
+const FADE_MS = 200;
+// A faded object stays faded until the sightline misses it by this many tiles, so a sightline that grazes its edge while
+// the camera follows a step does not make it blink.
+const UNFADE_MARGIN = 0.5;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
 const IDLE_DELAY_STEPS = 0.75;
@@ -93,11 +98,12 @@ export async function createEntities(scene, options) {
     const BABYLON = window.BABYLON;
     const entities = new Map();
     const targetMarkers = [];
-    // Shared by the objects of the view: box materials by texture and color, model loads by URL, and the wind variant of
-    // each model material.
+    // Shared by the objects of the view: box materials by texture and color, model loads by URL, the wind variant of each
+    // model material, and the faded variant of each material.
     const boxMaterials = new Map();
     const models = new Map();
     const windMaterials = new Map();
+    const fadeMaterials = new Map();
     // Written to the canvas for tests and diagnosis.
     const stats = { parts: 0, models: 0, failures: 0, faded: 0 };
     // Reused by every frame, so the render loop does not allocate.
@@ -109,6 +115,7 @@ export async function createEntities(scene, options) {
     let selfId = null;
     // Set by dispose, so that a model load finishing later does not touch the disposed scene.
     let isViewDisposed = false;
+    let lastFadeFrame = 0;
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
     ground.material = await createGroundMaterial();
@@ -235,17 +242,48 @@ export async function createEntities(scene, options) {
             windMaterial = material.clone(`${material.name}-wind`);
             const Plugin = getWindPlugin();
             windMaterial.gameWind = new Plugin(windMaterial);
+            windMaterial.gameWindSource = material;
             windMaterials.set(material, windMaterial);
         }
 
         return windMaterial;
     }
 
+    // A glTF material has a fixed transparency mode, with which Babylon ignores the mesh visibility for blending, so a faded
+    // mesh shows this blending copy instead. The depth pre-pass shows only the nearest surface, not the faces behind it.
+    function getFadeMaterial(material) {
+        let fadeMaterial = fadeMaterials.get(material);
+        if (!fadeMaterial) {
+            // Cloned from the source, because a clone of the wind copy would not carry its plugin reliably.
+            const source = material.gameWindSource ?? material;
+            fadeMaterial = source.clone(`${material.name}-fade`);
+            if (material.gameWindSource) {
+                const Plugin = getWindPlugin();
+                fadeMaterial.gameWind = new Plugin(fadeMaterial);
+            }
+
+            fadeMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+            fadeMaterial.needDepthPrePass = true;
+            fadeMaterials.set(material, fadeMaterial);
+        }
+
+        return fadeMaterial;
+    }
+
+    // The shared materials stay untouched, so fading one object never changes another.
+    function showMesh(mesh, visibility) {
+        mesh.visibility = visibility;
+        const material = visibility < 1 && mesh.gameMaterial ? getFadeMaterial(mesh.gameMaterial) : mesh.gameMaterial;
+        if (mesh.material !== material) {
+            mesh.material = material;
+        }
+    }
+
     function addMeshes(entity, meshes) {
-        const visibility = entity.isFaded ? FADED_VISIBILITY : 1;
         for (const mesh of meshes) {
             mesh.isPickable = false;
-            mesh.visibility = visibility;
+            mesh.gameMaterial = mesh.material;
+            showMesh(mesh, entity.visibility);
             entity.meshes.push(mesh);
         }
     }
@@ -341,28 +379,8 @@ export async function createEntities(scene, options) {
         stats.failures++;
     }
 
-    // The box around all parts relative to the object's corner, which fading tests; rotations are left out.
-    function getBounds(parts) {
-        if (parts.length === 0) {
-            return { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
-        }
-
-        const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
-        for (const part of parts) {
-            bounds.minX = Math.min(bounds.minX, part.x);
-            bounds.minY = Math.min(bounds.minY, part.y);
-            bounds.minZ = Math.min(bounds.minZ, part.z);
-            bounds.maxX = Math.max(bounds.maxX, part.x + part.w);
-            bounds.maxY = Math.max(bounds.maxY, part.y + part.h);
-            bounds.maxZ = Math.max(bounds.maxZ, part.z + part.d);
-        }
-
-        return bounds;
-    }
-
     function createObject(entity) {
         entity.root = new BABYLON.TransformNode(entity.view.id, scene);
-        entity.bounds = getBounds(entity.view.parts);
         entity.partNodes = entity.view.parts.map((part, index) => createPart(entity, part, index));
     }
 
@@ -451,8 +469,8 @@ export async function createEntities(scene, options) {
 
     function createEntity(view) {
         const entity = {
-            view, root: null, tween: null, idleAt: 0, isFaded: false, isDisposed: false,
-            meshes: [], materials: [], partNodes: [], bounds: null, animations: null, instance: null,
+            view, root: null, tween: null, idleAt: 0, isFaded: false, visibility: 1, isDisposed: false,
+            meshes: [], materials: [], partNodes: [], animations: null, instance: null,
         };
         if (view.kind === 'player') {
             createPlayer(entity);
@@ -563,13 +581,23 @@ export async function createEntities(scene, options) {
         }
 
         entity.isFaded = isFaded;
-        const visibility = isFaded ? FADED_VISIBILITY : 1;
-        for (const mesh of entity.meshes) {
-            mesh.visibility = visibility;
-        }
-
         stats.faded += isFaded ? 1 : -1;
         updateStats();
+    }
+
+    function glideVisibility(entity, elapsed) {
+        const target = entity.isFaded ? FADED_VISIBILITY : 1;
+        if (entity.visibility !== target) {
+            const step = (1 - FADED_VISIBILITY) * elapsed / FADE_MS;
+            setVisibility(entity, target < entity.visibility ? Math.max(target, entity.visibility - step) : Math.min(target, entity.visibility + step));
+        }
+    }
+
+    function setVisibility(entity, visibility) {
+        entity.visibility = visibility;
+        for (const mesh of entity.meshes) {
+            showMesh(mesh, visibility);
+        }
     }
 
     // What a glide cannot animate: a change of any of it rebuilds the object.
@@ -612,7 +640,6 @@ export async function createEntities(scene, options) {
 
             node.part = part;
         });
-        entity.bounds = getBounds(parts);
     }
 
     // The turn from one angle to another in radians, in -PI to PI, so that 170 to -170 degrees turns by 20 degrees.
@@ -643,19 +670,35 @@ export async function createEntities(scene, options) {
         hideTarget();
         for (const other of entities.values()) {
             setFaded(other, false);
+            if (other.visibility !== 1) {
+                setVisibility(other, 1);
+            }
         }
     }
 
-    // Whether the segment from the start by the offset crosses the bounds of the entity, clipping the part of the segment
-    // inside them one axis at a time; allocation free for the render loop.
-    function crosses(entity, startX, startY, startZ, offsetX, offsetY, offsetZ) {
-        const position = entity.root.position;
-        const bounds = entity.bounds;
+    // Whether the segment from the start by the offset crosses the world bounds of one of the entity's meshes grown by the
+    // margin on every side. Mesh bounds hug a model's trunk and crown separately and follow the rotation of a part, so an
+    // object fades only where it can hide the head. Allocation free for the render loop.
+    function crosses(entity, startX, startY, startZ, offsetX, offsetY, offsetZ, margin) {
+        for (const mesh of entity.meshes) {
+            // A mesh without vertices, such as the node above the primitives of a model, has an empty box at its origin.
+            if (mesh.getTotalVertices() > 0 && crossesBox(mesh.getBoundingInfo().boundingBox, startX, startY, startZ, offsetX, offsetY, offsetZ, margin)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Clips the part of the segment inside the box one axis at a time.
+    function crossesBox(box, startX, startY, startZ, offsetX, offsetY, offsetZ, margin) {
+        const min = box.minimumWorld;
+        const max = box.maximumWorld;
         segment.enter = 0;
         segment.exit = 1;
-        return clip(startX, offsetX, position.x + bounds.minX, position.x + bounds.maxX)
-            && clip(startY, offsetY, bounds.minY, bounds.maxY)
-            && clip(startZ, offsetZ, position.z + bounds.minZ, position.z + bounds.maxZ);
+        return clip(startX, offsetX, min.x - margin, max.x + margin)
+            && clip(startY, offsetY, min.y - margin, max.y + margin)
+            && clip(startZ, offsetZ, min.z - margin, max.z + margin);
     }
 
     function clip(start, offset, low, high) {
@@ -843,19 +886,23 @@ export async function createEntities(scene, options) {
 
         // Fades the objects between the camera and the own player's head, including those that do not block movement, such
         // as an open door whose lintel hides the head.
-        afterCameraMoved(camera) {
+        afterCameraMoved(camera, now) {
             const self = entities.get(selfId);
             if (!self) {
                 return;
             }
 
+            const elapsed = Math.min(FADE_MS, Math.max(0, now - lastFadeFrame));
+            lastFadeFrame = now;
             const eye = camera.position;
             const offsetX = self.root.position.x - eye.x;
             const offsetY = self.view.height * HEAD_HEIGHT - eye.y;
             const offsetZ = self.root.position.z - eye.z;
             for (const entity of entities.values()) {
                 if (entity.view.kind !== 'player') {
-                    setFaded(entity, crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ));
+                    const margin = entity.isFaded ? UNFADE_MARGIN : 0;
+                    setFaded(entity, crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ, margin));
+                    glideVisibility(entity, elapsed);
                 }
             }
         },

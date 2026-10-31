@@ -267,6 +267,26 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenATreeStandsBetweenTheCameraAndThePlayer_ThenItFadesUntilItIsMovedAway()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        // A slim pine south of the player, toward the camera.
+        var tree = new Tree { X = player.X, Y = player.Y - 6, Variant = 6 };
+        world.Game.Objects = new Dictionary<string, GameObject> { ["tree"] = tree };
+        await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "1", new() { Timeout = Timeout });
+
+        // Act
+        tree.X = player.X + 40;
+
+        // Assert
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "0", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTwoBrowsersPlay_ThenTheySeeEachOtherAndOneCanMessageTheOther()
     {
         // Arrange
