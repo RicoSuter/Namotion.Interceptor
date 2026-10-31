@@ -173,6 +173,49 @@ public class GameVoiceMixerTests
     }
 
     [Fact]
+    public void WhenFramesComeAtTheFrameRate_ThenNoneAreDropped()
+    {
+        // Arrange
+        const int frameCount = 50;
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        _mixer.SetMicrophonePage("speaker", 1);
+        var table = CreateTable(("listener", "speaker", 1f));
+
+        // Act
+        for (var index = 0; index < frameCount; index++)
+        {
+            _timeProvider.Advance(GameVoiceSettings.FrameDuration);
+            _mixer.Receive("speaker", 1, VoiceFrames.Create(1000));
+            _mixer.Mix(table);
+        }
+
+        // Assert
+        Assert.Equal(frameCount, _sink.Count);
+    }
+
+    [Fact]
+    public void WhenFramesComeAtTwiceTheFrameRate_ThenSomeAreRefused()
+    {
+        // Arrange
+        const int frameCount = 100;
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        _mixer.SetMicrophonePage("speaker", 1);
+        var table = CreateTable(("listener", "speaker", 1f));
+
+        // Act
+        for (var index = 0; index < frameCount; index++)
+        {
+            _timeProvider.Advance(GameVoiceSettings.FrameDuration / 2);
+            _mixer.Receive("speaker", 1, VoiceFrames.Create(1000));
+            _mixer.Mix(table);
+        }
+
+        // Assert
+        // Mixing after every frame keeps the queue from dropping, so only the rate limit refuses frames.
+        Assert.InRange(_sink.Count, frameCount / 2, frameCount - 1);
+    }
+
+    [Fact]
     public void WhenAnotherPageBecomesTheMicrophonePage_ThenOnlyItsFramesCount()
     {
         // Arrange
@@ -235,6 +278,22 @@ public class GameVoiceMixerTests
 
         // Assert
         Assert.Empty(_sink.Frames);
+    }
+
+    [Fact]
+    public void WhenOneOfTwoRegistrationsOfASinkIsDisposed_ThenTheOtherStillSends()
+    {
+        // Arrange
+        var first = _mixer.RegisterSink("listener", _sink);
+        using var second = _mixer.RegisterSink("listener", _sink);
+        Speak("speaker", 1000);
+
+        // Act
+        first.Dispose();
+        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+
+        // Assert
+        Assert.Equal(1, _sink.Count);
     }
 
     private sealed class ThrowingVoiceSink : IGameVoiceSink

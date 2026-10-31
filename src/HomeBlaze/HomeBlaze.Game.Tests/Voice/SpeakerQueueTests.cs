@@ -142,6 +142,22 @@ public class SpeakerQueueTests
     }
 
     [Fact]
+    public void WhenItPausedForTheShrinkDelayWithoutPlaying_ThenTheStartSizeStays()
+    {
+        // Arrange
+        using var queue = new SpeakerQueue(_timeProvider);
+        GrowTo(queue, 2);
+        _timeProvider.Advance(GameVoiceSettings.BufferShrinkDelay);
+        FillToStart(queue);
+
+        // Act
+        Dequeue(queue);
+
+        // Assert
+        Assert.Equal(2, queue.StartFrames);
+    }
+
+    [Fact]
     public void WhenItRanDryLessThanTheShrinkDelayAgo_ThenTheStartSizeStays()
     {
         // Arrange

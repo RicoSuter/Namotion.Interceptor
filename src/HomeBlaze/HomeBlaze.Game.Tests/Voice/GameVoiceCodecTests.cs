@@ -29,7 +29,17 @@ public class GameVoiceCodecTests
     public void WhenAFrameHasTheWrongSize_ThenDecodingThrows()
     {
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => GameVoiceCodec.Decode(new byte[10], new short[GameVoiceSettings.SamplesPerFrame]));
+        var exception = Assert.Throws<ArgumentException>(() => GameVoiceCodec.Decode(new byte[10], new short[GameVoiceSettings.SamplesPerFrame]));
+        Assert.Equal("frame", exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenTheSamplesHaveNoRoomForAFrame_ThenDecodingThrows()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            GameVoiceCodec.Decode(new byte[GameVoiceSettings.FrameBytes], new short[GameVoiceSettings.SamplesPerFrame - 1]));
+        Assert.Equal("samples", exception.ParamName);
     }
 
     [Fact]

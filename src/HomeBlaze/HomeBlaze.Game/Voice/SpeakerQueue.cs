@@ -5,9 +5,9 @@ namespace HomeBlaze.Game.Voice;
 /// <summary>
 /// The frames of one speaker waiting for the mixer, in a pooled ring buffer. It plays once it holds its start size,
 /// grows the start size by <see cref="GameVoiceSettings.BufferGrowth"/> when it runs dry while playing, and shrinks it
-/// by one frame after <see cref="GameVoiceSettings.BufferShrinkDelay"/> without running dry. It keeps at most its start
-/// size plus one growth step, and never more than <see cref="GameVoiceSettings.ServerQueueMaximum"/>, dropping the
-/// oldest frames. Not thread-safe: the mixer guards it with its lock.
+/// by one frame after <see cref="GameVoiceSettings.BufferShrinkDelay"/> of playing without running dry. It keeps at
+/// most its start size plus one growth step, and never more than <see cref="GameVoiceSettings.ServerQueueMaximum"/>,
+/// dropping the oldest frames. Not thread-safe: the mixer guards it with its lock.
 /// </summary>
 internal sealed class SpeakerQueue : IDisposable
 {
@@ -56,7 +56,12 @@ internal sealed class SpeakerQueue : IDisposable
         var slot = (_head + Count) % Capacity;
         GameVoiceCodec.Decode(frame, buffer.AsSpan(slot * Samples, Samples));
         Count++;
-        IsPlaying |= Count >= StartFrames;
+        if (!IsPlaying && Count >= StartFrames)
+        {
+            IsPlaying = true;
+            // The shrink delay counts only playing time, so a pause in speech does not shrink the start size.
+            _lastDryTimestamp = _timeProvider.GetTimestamp();
+        }
     }
 
     /// <summary>
