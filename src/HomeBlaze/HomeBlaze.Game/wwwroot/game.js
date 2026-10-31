@@ -165,12 +165,18 @@ class GameView {
     }
 
     applyUpdate(update) {
+        // A lost own player drops the input's prediction, so a later own player starts from the server's position.
         for (const id of update.removed) {
-            this.entities.remove(id);
+            if (this.entities.remove(id)) {
+                this.input.reset();
+            }
         }
 
         for (const view of update.upserted) {
-            this.entities.upsert(view);
+            if (this.entities.upsert(view)) {
+                this.input.reset();
+            }
+
             if (view.isSelf) {
                 this.input.onServerSelf(view);
             }
@@ -205,6 +211,7 @@ class GameView {
         this.input?.dispose();
         this.resizeObserver?.disconnect();
         this.engine?.stopRenderLoop();
+        this.entities?.dispose();
         this.scene?.dispose();
         this.engine?.dispose();
     }

@@ -269,9 +269,19 @@ export async function createEntities(scene, options) {
         }
     }
 
+    // The own player's label reads "(you)", so becoming or ceasing to be the own player recreates it.
     function hasShapeChanged(previous, view) {
         return previous.kind !== view.kind || previous.width !== view.width || previous.depth !== view.depth
-            || previous.height !== view.height || previous.color !== view.color || previous.title !== view.title;
+            || previous.height !== view.height || previous.color !== view.color || previous.title !== view.title
+            || previous.isSelf !== view.isSelf;
+    }
+
+    function clearSelf() {
+        selfId = null;
+        hideTarget();
+        for (const other of entities.values()) {
+            setFaded(other, false);
+        }
     }
 
     // Whether the segment from the start by the offset crosses the box of the entity, clipping the part of the segment
@@ -307,7 +317,13 @@ export async function createEntities(scene, options) {
     }
 
     return {
+        /** Adds or updates the object; returns true when it was the own player and is not anymore. */
         upsert(view) {
+            const isSelfLost = !view.isSelf && view.id === selfId;
+            if (isSelfLost) {
+                clearSelf();
+            }
+
             if (view.isSelf) {
                 selfId = view.id;
                 ensureOrigin(view.x, view.y);
@@ -323,12 +339,12 @@ export async function createEntities(scene, options) {
                 }
 
                 // A recreated own player keeps the predicted position, which the input owns.
-                const shown = view.isSelf && previous ? { ...view, x: previous.x, y: previous.y, facing: previous.facing } : view;
+                const shown = view.isSelf && previous?.isSelf ? { ...view, x: previous.x, y: previous.y, facing: previous.facing } : view;
                 entity = createEntity(shown);
                 entities.set(view.id, entity);
                 place(entity, shown.x, shown.y);
                 setFacing(entity, shown.facing);
-                return;
+                return isSelfLost;
             }
 
             const hasMoved = entity.view.x !== view.x || entity.view.y !== view.y;
@@ -342,8 +358,11 @@ export async function createEntities(scene, options) {
 
                 setFacing(entity, view.facing);
             }
+
+            return isSelfLost;
         },
 
+        /** Removes the object; returns true when it was the own player. */
         remove(id) {
             const entity = entities.get(id);
             if (entity) {
@@ -351,13 +370,17 @@ export async function createEntities(scene, options) {
                 entities.delete(id);
             }
 
-            if (id === selfId) {
-                selfId = null;
-                hideTarget();
-                for (const other of entities.values()) {
-                    setFaded(other, false);
-                }
+            if (id !== selfId) {
+                return false;
             }
+
+            clearSelf();
+            return true;
+        },
+
+        /** Releases what the scene does not own; call before disposing the scene. */
+        dispose() {
+            character.dispose();
         },
 
         setSelf(x, y, facing, animate) {

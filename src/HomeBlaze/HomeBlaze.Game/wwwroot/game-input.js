@@ -74,6 +74,8 @@ export function createInput(dotNet, options, entities) {
     let sequence = 0;
     let isDisposed = false;
     let predicted = null;
+    // Counts the resets, so the answer to a step sent before one is dropped.
+    let generation = 0;
 
     function heldDirection() {
         const offsetX = (pressed.has('east') ? 1 : 0) - (pressed.has('west') ? 1 : 0);
@@ -110,12 +112,13 @@ export function createInput(dotNet, options, entities) {
         }
 
         const step = { sequence: ++sequence, direction, turnOnly };
+        const sentGeneration = generation;
         pending.push(step);
         predicted = apply(predicted, step);
         show(predicted, true);
         try {
             const result = await dotNet.invokeMethodAsync('Step', step.sequence, direction, turnOnly);
-            if (isDisposed) {
+            if (isDisposed || sentGeneration !== generation) {
                 return;
             }
 
@@ -129,7 +132,9 @@ export function createInput(dotNet, options, entities) {
             }
         } catch {
             // The circuit is gone; the page reconnects or reloads on its own.
-            pending.length = 0;
+            if (sentGeneration === generation) {
+                pending.length = 0;
+            }
         }
     }
 
@@ -232,6 +237,13 @@ export function createInput(dotNet, options, entities) {
             if (pending.length === 0) {
                 reconcile(serverState);
             }
+        },
+
+        /** Forgets the own player, so the next one starts from the server's position. */
+        reset() {
+            generation++;
+            predicted = null;
+            pending.length = 0;
         },
 
         dispose() {
