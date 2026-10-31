@@ -21,6 +21,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     /// </summary>
     public static readonly TimeSpan StepInterval = TimeSpan.FromMilliseconds(180);
 
+    // Guards Players, Objects, the positions of their objects and the index, so that two players never take one tile.
+    private readonly Lock _lock = new();
+
     [Configuration]
     public partial string Name { get; set; }
 
