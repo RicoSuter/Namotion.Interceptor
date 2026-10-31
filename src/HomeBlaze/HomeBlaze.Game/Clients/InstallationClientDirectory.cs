@@ -56,7 +56,7 @@ internal sealed class InstallationClientDirectory(Func<IInterceptorSubjectContex
 
         // The installation is a single instance, so the one found stays valid while the registry knows it.
         var installation = _installation;
-        if (installation is null || !registry.KnownSubjects.ContainsKey(installation))
+        if (installation is null || registry.TryGetRegisteredSubject(installation) is null)
         {
             installation = registry.KnownSubjects.Keys.OfType<HomeBlazeInstallation>().FirstOrDefault();
             _installation = installation;
