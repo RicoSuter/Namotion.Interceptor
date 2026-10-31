@@ -7,7 +7,8 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
-/// A subject the tools do not show is not reachable through another parent, and a reference to it reads as null.
+/// A subject is shown through any parent with a readable path, so hiding one link hides only that link, and a reference
+/// to a subject that is not shown reads as null.
 /// </summary>
 public class HiddenSubjectAccessTests
 {
@@ -23,7 +24,7 @@ public class HiddenSubjectAccessTests
         IsReadOnly = isReadOnly
     };
 
-    // The device is written through Private, the parent it got first, so hiding Private hides the device.
+    // The device got Private first, so without a policy its path goes through Private; hiding Private leaves Public.
     private static (TestHouse House, TestDevice Device) CreateHouse()
     {
         var context = CreateContext();
@@ -38,7 +39,7 @@ public class HiddenSubjectAccessTests
         result.GetProperty("results").EnumerateObject().Select(entry => entry.Name).ToArray();
 
     [Fact]
-    public async Task WhenASubjectIsHiddenThroughItsWrittenParent_ThenGetPropertyAndSetPropertyDoNotReachItThroughAnother()
+    public async Task WhenOneParentOfASubjectIsHidden_ThenGetPropertyAndSetPropertyReachItThroughTheOther()
     {
         // Arrange
         var (house, device) = CreateHouse();
@@ -47,34 +48,36 @@ public class HiddenSubjectAccessTests
         // Act
         var read = await McpToolCaller.CallAsync(house, configuration, "get_property", new { path = "Public.DeviceName" });
         var write = await McpToolCaller.CallAsync(house, configuration, "set_property", new { path = "Public.DeviceName", value = "Changed" });
+        var hidden = await McpToolCaller.CallAsync(house, configuration, "get_property", new { path = "Private.DeviceName" });
 
         // Assert
-        Assert.Equal("Path not found: Public.DeviceName", read.GetProperty("error").GetString());
-        Assert.Equal("Path not found: Public.DeviceName", write.GetProperty("error").GetString());
-        Assert.Equal("Camera", device.DeviceName);
+        Assert.Equal("Camera", read.GetProperty("value").GetString());
+        Assert.True(write.GetProperty("success").GetBoolean());
+        Assert.Equal("Changed", device.DeviceName);
+        Assert.Equal("Path not found: Private.DeviceName", hidden.GetProperty("error").GetString());
     }
 
     [Fact]
-    public void WhenASubjectIsHiddenThroughItsWrittenParent_ThenTheHelpersDoNotResolveItThroughAnother()
+    public void WhenOneParentOfASubjectIsHidden_ThenTheHelpersResolveItThroughTheOther()
     {
         // Arrange
-        var (house, _) = CreateHouse();
+        var (house, device) = CreateHouse();
         var root = house.TryGetRegisteredSubject()!;
         var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private)));
 
         // Act
         var subject = configuration.TryGetReadableSubject(root, "Public");
         var property = configuration.TryGetReadableProperty(root, "Public.DeviceName");
-        var holdingProperty = configuration.TryGetReadableProperty(root, "Public");
+        var hiddenSubject = configuration.TryGetReadableSubject(root, "Private");
 
         // Assert
-        Assert.Null(subject);
-        Assert.Null(property);
-        Assert.Equal(nameof(TestHouse.Public), holdingProperty!.Value.Property.Name);
+        Assert.Same(device, subject!.Subject);
+        Assert.Equal(nameof(TestDevice.DeviceName), property!.Value.Property.Name);
+        Assert.Null(hiddenSubject);
     }
 
     [Fact]
-    public async Task WhenASubjectIsHiddenThroughItsWrittenParent_ThenAWherePathThroughAnotherReadsAsMissing()
+    public async Task WhenOneParentOfASubjectIsHidden_ThenAWherePathThroughTheOtherReadsIt()
     {
         // Arrange
         // Search leaves out the root, so the house is held by a group.
@@ -89,12 +92,12 @@ public class HiddenSubjectAccessTests
 
         // Assert
         Assert.Equal(["Items[house]"], GetResultPaths(withoutPolicy));
-        Assert.Empty(GetResultPaths(withPolicy));
+        Assert.Equal(["Items[house]"], GetResultPaths(withPolicy));
     }
 
-    // X is written through Secret, so it is hidden, and also held by A. G is written through B, so it is shown, and
-    // also held by X.Child; H is G's child. A path through A.Child passes the hidden X on the way to a shown subject.
-    private static (TestMixedGroup Root, TestNode G) CreatePassedThroughHiddenSubject()
+    // X got Secret first and is also held by A. G is held by B and by X.Child; H is G's child. A path through A.Child
+    // passes X, whose other link is hidden, on the way to G.
+    private static (TestMixedGroup Root, TestNode G) CreatePassedThroughPartlyHiddenSubject()
     {
         var context = CreateContext();
         var node = new TestNode(context) { Name = "Node" };
@@ -110,65 +113,48 @@ public class HiddenSubjectAccessTests
         return (root, g);
     }
 
-    public static TheoryData<string, string> PassedThroughHiddenSubjectCalls => new()
+    public static TheoryData<string, string> PassedThroughPartlyHiddenSubjectCalls => new()
     {
         { "get_property", JsonSerializer.Serialize(new { path = "Items[node].A.Child.Name" }) },
-        { "set_property", JsonSerializer.Serialize(new { path = "Items[node].A.Child.Name", value = "Changed" }) },
-        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[node].A.Child.Child", depth = 0 }) }
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[node].A.Child.Child", depth = 0 }) },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestNode) }, where = "A.Child.Name == \"G\"" }) }
     };
 
     [Theory]
-    [MemberData(nameof(PassedThroughHiddenSubjectCalls))]
-    public async Task WhenAPathPassesAHiddenSubjectOnTheWayToAShownOne_ThenTheToolReportsItAsNotFound(string toolName, string input)
+    [MemberData(nameof(PassedThroughPartlyHiddenSubjectCalls))]
+    public async Task WhenAPathPassesASubjectWhoseOtherLinkIsHidden_ThenTheToolAnswersAsWithoutAPolicy(string toolName, string input)
     {
         // Arrange
-        var (root, g) = CreatePassedThroughHiddenSubject();
+        var (root, _) = CreatePassedThroughPartlyHiddenSubject();
         var request = JsonSerializer.Deserialize<JsonElement>(input);
-        var path = request.GetProperty("path").GetString();
 
         // Act
-        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), toolName == "set_property" ? "get_property" : toolName, request);
+        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), toolName, request);
         var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret))), toolName, request);
 
         // Assert
         Assert.False(withoutPolicy.TryGetProperty("error", out _));
-        Assert.Equal($"Path not found: {path}", withPolicy.GetProperty("error").GetString());
-        Assert.Equal("G", g.Name);
+        Assert.DoesNotContain(nameof(TestNode.Secret), withPolicy.GetRawText());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
     }
 
     [Fact]
-    public async Task WhenAWherePathPassesAHiddenSubjectOnTheWayToAShownOne_ThenItReadsAsMissing()
+    public void WhenAPathPassesASubjectWhoseOtherLinkIsHidden_ThenTheHelpersResolveIt()
     {
         // Arrange
-        var (root, _) = CreatePassedThroughHiddenSubject();
-        var input = new { format = "json", types = new[] { nameof(TestNode) }, where = "A.Child.Name == \"G\"" };
-
-        // Act
-        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), "search", input);
-        var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret))), "search", input);
-
-        // Assert
-        Assert.Equal(["Items[node]"], GetResultPaths(withoutPolicy));
-        Assert.Empty(GetResultPaths(withPolicy));
-    }
-
-    [Fact]
-    public void WhenAPathPassesAHiddenSubjectOnTheWayToAShownOne_ThenTheHelpersDoNotResolveIt()
-    {
-        // Arrange
-        var (root, _) = CreatePassedThroughHiddenSubject();
+        var (root, g) = CreatePassedThroughPartlyHiddenSubject();
         var registeredRoot = root.TryGetRegisteredSubject()!;
         var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret)));
 
         // Act
         var property = configuration.TryGetReadableProperty(registeredRoot, "Items[node].A.Child.Name");
-        var subject = configuration.TryGetReadableSubject(registeredRoot, "Items[node].A.Child.Child");
-        var shown = configuration.TryGetReadableSubject(registeredRoot, "Items[node].B.Child");
+        var subject = configuration.TryGetReadableSubject(registeredRoot, "Items[node].A.Child");
+        var hidden = configuration.TryGetReadableSubject(registeredRoot, "Items[node].Secret.Child");
 
         // Assert
-        Assert.Null(property);
-        Assert.Null(subject);
-        Assert.Equal("H", ((TestNode)shown!.Subject).Name);
+        Assert.Same(g, property!.Value.Property.Subject);
+        Assert.Same(g, subject!.Subject);
+        Assert.Null(hidden);
     }
 
     [Theory]

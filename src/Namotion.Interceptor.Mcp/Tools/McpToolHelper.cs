@@ -218,12 +218,13 @@ internal static class McpToolHelper
 
     /// <summary>
     /// The path the tools write for the subject from <paramref name="rootSubject"/>, after the configuration's
-    /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty, otherwise null
-    /// when <see cref="McpServerConfiguration.PathProvider"/> does not let paths pass the property holding the subject
-    /// (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>) or the registry writes no path. The properties
-    /// above it are in the path whether the path provider includes them or not, as get_property and browse resolve.
-    /// With an <see cref="McpServerConfiguration.AccessPolicy"/> also null when no path exists through properties the
-    /// policy allows to read.
+    /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty. Any other
+    /// subject's path goes through the first parent, in registry order, whose holding property
+    /// <see cref="McpServerConfiguration.PathProvider"/> lets paths pass (see
+    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>) and from which the registry writes a path; null when
+    /// there is none. The properties above the holding property are in the path whether the path provider includes them
+    /// or not, as get_property and browse resolve, and with an <see cref="McpServerConfiguration.AccessPolicy"/> they
+    /// are all ones the policy allows to read.
     /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject, McpServerConfiguration configuration, IInterceptorSubject rootSubject)
@@ -234,21 +235,21 @@ internal static class McpToolHelper
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        var parents = subject.Parents;
-        if (parents.Length == 0)
-        {
-            return null;
-        }
-
         // The resolution provider writes the path provider's segments and includes every property, or with a policy
         // exactly what the policy allows to read, the holding property too. The registry checks inclusion in the walk
         // that writes the text, so a subject moved on it while a call runs cannot put the name of a hidden property
         // into the text.
-        var parent = parents[0];
-        var path = configuration.BasePathProvider.IsPropertyIncludedInPaths(parent.Property)
-            ? parent.Property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, parent.Index)
-            : null;
-        return path is not null ? $"{pathPrefix}{path}" : null;
+        var basePathProvider = configuration.BasePathProvider;
+        foreach (var parent in subject.Parents)
+        {
+            if (basePathProvider.IsPropertyIncludedInPaths(parent.Property) &&
+                parent.Property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, parent.Index) is { } path)
+            {
+                return $"{pathPrefix}{path}";
+            }
+        }
+
+        return null;
     }
 
     private static ScalarProperty BuildScalarPropertyDto(

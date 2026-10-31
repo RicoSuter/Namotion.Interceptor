@@ -85,7 +85,9 @@ public class ReadInvariantAccessTests
         { "browse", JsonSerializer.Serialize(new { format = "json", depth = 3, includeProperties = true }), "Light" },
         { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[room].Device", depth = 0, includeProperties = true }), "Light" },
         { "get_property", JsonSerializer.Serialize(new { path = "Items[room].Device.DeviceName" }), "Light" },
-        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestRoom) }, where = "Device.DeviceName == \"Light\"" }), "Items[room]" }
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestRoom) }, where = "Device.DeviceName == \"Light\"" }), "Items[room]" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[room]", depth = 1 }), "\"$path\":\"Items[room].Device\"" },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestDevice) } }), "\"Items[room].Device\"" }
     };
 
     [Theory]
@@ -93,7 +95,8 @@ public class ReadInvariantAccessTests
     public async Task WhenASharedSubjectWasFirstAttachedOutsideTheRoot_ThenADenyWritesPolicyAnswersAsWithoutAPolicy(string toolName, string input, string expectedText)
     {
         // Arrange
-        // The device's first parent is outside the tool root, so the registry writes no path for it.
+        // The device's first parent is outside the tool root. The tools write its path through the first parent from
+        // which the registry writes one, the room's Device.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
