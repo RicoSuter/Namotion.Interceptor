@@ -129,7 +129,10 @@ public class GamePlacementTests
         var player = _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(50, 50);
 
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => _context.Game.PlaceAsync(new GameCaller(player), "wall", wall, CancellationToken.None));
+        // Act
+        var exception = await Record.ExceptionAsync(() => _context.Game.PlaceAsync(new GameCaller(player), "wall", wall, CancellationToken.None));
+
+        // Assert
+        Assert.Equal("gameObject", Assert.IsType<ArgumentException>(exception).ParamName);
     }
 }

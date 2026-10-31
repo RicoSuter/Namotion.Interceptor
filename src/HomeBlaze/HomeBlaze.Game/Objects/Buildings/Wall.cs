@@ -17,6 +17,9 @@ namespace HomeBlaze.Game.Objects.Buildings;
 [InterceptorSubject]
 public partial class Wall : GameObject, ITitleProvider, IIconProvider
 {
+    // 8 tiles (2 m) is above head height, so lower walls let sound pass over them.
+    private const int SoundBlockingHeight = 8;
+
     private readonly GameVisualCache<(int Width, int Height, int Depth, WallMaterial Material)> _visual = new();
 
     /// <summary>
@@ -48,7 +51,7 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
 
     public string? IconName => "ViewColumn";
 
-    public override bool IsSoundBlocking => true;
+    public override bool IsSoundBlocking => Height >= SoundBlockingHeight;
 
     public override GameVisual Visual => _visual.Get((Width, Height, Depth, Material),
         static state => new GameVisual([WallTextures.CreateBox(state.Material, default, new GameVisualVector(state.Width, state.Height, state.Depth))]));

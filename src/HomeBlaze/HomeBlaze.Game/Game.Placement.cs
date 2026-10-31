@@ -34,7 +34,7 @@ public partial class Game
             var actor = ResolveActor(caller) ?? throw new InvalidOperationException(NoActorMessage);
             if (!FrontPlacement.TryGetFootprint(actor.Footprint, actor.Facing, across, along, out var footprint))
             {
-                throw new InvalidOperationException(actor.Facing.IsDiagonal() ? DiagonalMessage : BlockedMessage);
+                throw new InvalidOperationException(!Enum.IsDefined(actor.Facing) || actor.Facing.IsDiagonal() ? DiagonalMessage : BlockedMessage);
             }
 
             return new GamePlacement(footprint.X, footprint.Y, footprint.Width, footprint.Depth, actor.Facing);
@@ -44,6 +44,7 @@ public partial class Game
     /// <summary>
     /// Adds the object to <see cref="Objects"/> under a new name of the prefix, a dash and 8 random hex digits, and saves
     /// the game.
+    /// Canceling only stops the write; the change stays applied and is saved later.
     /// </summary>
     /// <exception cref="ArgumentException">The prefix is empty, the object is already part of this game, or its size is
     /// outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
@@ -61,7 +62,7 @@ public partial class Game
             }
 
             var objects = CurrentObjects;
-            ValidateNewObject(objects, gameObject);
+            ValidateNewObject(objects, gameObject, nameof(gameObject));
             var index = GetIndex();
             if (gameObject.IsMovementBlocking && index.IsBlocked(gameObject.Footprint, ignored: null))
             {

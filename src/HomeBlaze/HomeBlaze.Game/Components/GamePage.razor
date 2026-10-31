@@ -987,14 +987,26 @@
         _targets = targets;
     }
 
-    // The operations of the game, then those of its tools ordered by name.
+    // The operations of the game, then those of its tools ordered by name. Runs on every flush, so it sorts only
+    // when there is more than one tool.
     private static List<GameAction> GetGameActions(Game game)
     {
         var actions = new List<GameAction>();
         AddActions(actions, game);
-        foreach (var (_, tool) in game.Tools.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        var tools = game.Tools;
+        if (tools.Count == 1)
         {
-            AddActions(actions, tool);
+            foreach (var (_, tool) in tools)
+            {
+                AddActions(actions, tool);
+            }
+        }
+        else if (tools.Count > 1)
+        {
+            foreach (var (_, tool) in tools.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                AddActions(actions, tool);
+            }
         }
 
         return actions;
