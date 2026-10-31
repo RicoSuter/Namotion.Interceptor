@@ -32,6 +32,7 @@ public partial class Game
             }
 
             player.Facing = direction;
+            _isSaveRequested = true;
             if (turnOnly || !TryGetStep(player, direction, out var moved))
             {
                 return new MoveResult(turnOnly, player.X, player.Y, player.Facing);

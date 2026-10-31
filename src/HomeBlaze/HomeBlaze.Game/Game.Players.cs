@@ -42,6 +42,7 @@ public partial class Game
         {
             Players = next;
             _isIndexStale = true;
+            _isSaveRequested = true;
         }
     }
 
@@ -95,6 +96,7 @@ public partial class Game
             var position = SpawnFinder.FindFreePosition(player.Footprint, area => !index.IsBlocked(area, player));
             player.X = position.X;
             player.Y = position.Y;
+            _isSaveRequested = true;
             _logger.LogDebug("{Client} joined the game {Game} at {X}, {Y}", client.Title, Title, position.X, position.Y);
         }
 
