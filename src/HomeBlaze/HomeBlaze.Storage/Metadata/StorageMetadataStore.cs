@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Text.Json;
-using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions.Metadata;
@@ -200,7 +199,7 @@ internal sealed class StorageMetadataStore
             // A file in a folder that is gone is gone with its metadata file.
             if (!isFileKnownGone &&
                 (await connection.Reconciler.IsFolderGoneAsync(entry.Parent, CancellationToken.None) ||
-                 await connection.Client.ExistsAsync(entry.Path, CancellationToken.None)))
+                 await connection.Client.ObjectExists(entry.Path, CancellationToken.None)))
             {
                 return;
             }
@@ -240,13 +239,13 @@ internal sealed class StorageMetadataStore
     {
         if (connection.Index.TryGet(path, out var entry))
         {
-            // A folder with the name of a metadata file is no metadata file, and deleting the path would delete it with all it holds.
+            // A folder with the name of a metadata file is no metadata file, and its entry must stay in the index.
             if (entry.IsFolder)
             {
                 return;
             }
         }
-        else if (!await connection.Client.ExistsAsync(path, cancellationToken))
+        else if (!await connection.Client.ObjectExists(path, cancellationToken))
         {
             // A file that no pass has listed yet is deleted as well.
             return;
@@ -254,7 +253,7 @@ internal sealed class StorageMetadataStore
 
         try
         {
-            await connection.Client.DeleteAsync(path, cancellationToken: cancellationToken);
+            await connection.Client.DeleteObject(path, cancellationToken);
         }
         catch (Exception exception) when (FluentStorageContainer.CanHaveReachedStorage(exception))
         {

@@ -1,15 +1,15 @@
 using System.Collections.Concurrent;
-using FluentStorage;
-using FluentStorage.Blobs;
+using FluentStorage.Model;
+using FluentStorage.Storage;
 
 namespace HomeBlaze.Storage.Tests;
 
 /// <summary>
 /// A storage whose next call of one operation can be made to hang, to test what a stalled source does.
 /// </summary>
-internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
+internal sealed class PausableStore(IStore inner) : StoreBase
 {
-    /// <summary>The operation of reading from a stream that <see cref="OpenReadAsync"/> returned.</summary>
+    /// <summary>The operation of reading from a stream that <see cref="OpenRead"/> returned.</summary>
     public const string ReadOperation = "Read";
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
@@ -63,7 +63,7 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     public void RunAfterNextListing(Action action) => Volatile.Write(ref _afterNextListing, action);
 
     /// <summary>
-    /// Makes the first read from one of the streams that <see cref="OpenReadAsync"/> returns from now on hang.
+    /// Makes the first read from one of the streams that <see cref="OpenRead"/> returns from now on hang.
     /// The returned task completes when that read has arrived.
     /// </summary>
     /// <param name="streamNumber">Which of the streams opened from now on, starting at one.</param>
@@ -100,24 +100,24 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     /// </summary>
     public void FailNextDeleteAfterItRan(Exception exception) => Volatile.Write(ref _deleteFailure, exception);
 
-    public async Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+    public override async Task<List<StoreObject>> ListObjects(StorageListOptions? options = null, CancellationToken cancellationToken = default)
     {
-        await ArriveAsync(nameof(ListAsync));
-        var blobs = await inner.ListAsync(options, cancellationToken);
+        await ArriveAsync(nameof(ListObjects));
+        var blobs = await inner.ListObjects(options, cancellationToken);
         Interlocked.Exchange(ref _afterNextListing, null)?.Invoke();
         return blobs;
     }
 
-    public async Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)
+    public override async Task SetObject(string objectPath, Stream sourceStream, bool append, CancellationToken cancellationToken = default)
     {
-        await ArriveAsync(nameof(WriteAsync));
-        await inner.WriteAsync(fullPath, dataStream, append, cancellationToken);
+        await ArriveAsync(nameof(SetObject));
+        await inner.SetObject(objectPath, sourceStream, append, cancellationToken);
     }
 
-    public async Task<Stream> OpenReadAsync(string fullPath, CancellationToken cancellationToken = default)
+    public override async Task<Stream> OpenRead(string objectPath, CancellationToken cancellationToken = default)
     {
-        await ArriveAsync(nameof(OpenReadAsync));
-        var stream = await inner.OpenReadAsync(fullPath, cancellationToken);
+        await ArriveAsync(nameof(OpenRead));
+        var stream = await inner.OpenRead(objectPath, cancellationToken);
 
         // Null for a file that does not exist, although the signature does not say so.
         if (stream is null)
@@ -128,43 +128,31 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
         return new PausableStream(stream, this, Interlocked.Increment(ref _openedStreamCount));
     }
 
-    public async Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+    public override async Task DeleteObject(string objectPath, CancellationToken cancellationToken = default)
     {
-        await ArriveAsync(nameof(DeleteAsync));
-        await inner.DeleteAsync(fullPaths, cancellationToken);
+        await ArriveAsync(nameof(DeleteObject));
+        await inner.DeleteObject(objectPath, cancellationToken);
         if (Interlocked.Exchange(ref _deleteFailure, null) is { } failure)
         {
             throw failure;
         }
     }
 
-    public async Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+    public override async Task<bool> ObjectExists(string objectPath, CancellationToken cancellationToken = default)
     {
-        await ArriveAsync(nameof(ExistsAsync));
-        return await inner.ExistsAsync(fullPaths, cancellationToken);
+        await ArriveAsync(nameof(ObjectExists));
+        return await inner.ObjectExists(objectPath, cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<Blob>> GetBlobsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+    public override async Task<StoreObject> GetObjectInfo(string objectPath, CancellationToken cancellationToken = default)
     {
-        await ArriveAsync(nameof(GetBlobsAsync));
-        return await inner.GetBlobsAsync(fullPaths, cancellationToken);
+        await ArriveAsync(nameof(GetObjectInfo));
+        return await inner.GetObjectInfo(objectPath, cancellationToken);
     }
 
-    public async Task SetBlobsAsync(IEnumerable<Blob> blobs, CancellationToken cancellationToken = default)
+    public override void Dispose()
     {
-        await ArriveAsync(nameof(SetBlobsAsync));
-        await inner.SetBlobsAsync(blobs, cancellationToken);
-    }
-
-    public async Task<ITransaction> OpenTransactionAsync()
-    {
-        await ArriveAsync(nameof(OpenTransactionAsync));
-        return await inner.OpenTransactionAsync();
-    }
-
-    public void Dispose()
-    {
-        // Ends a call that is still hanging, so that no task outlives the test. Cancelled and not released:
+        // Ends a call that is still hanging, so that no task outlives the test. Canceled and not released:
         // released, it would go on into the storage and write into a directory that the test deletes next.
         _released.TrySetCanceled();
         inner.Dispose();
@@ -195,7 +183,7 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
         }
     }
 
-    private sealed class PausableStream(Stream stream, PausableBlobStorage storage, int number) : Stream
+    private sealed class PausableStream(Stream stream, PausableStore storage, int number) : Stream
     {
         private int _isDisposed;
 

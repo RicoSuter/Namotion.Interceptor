@@ -111,9 +111,80 @@ public class HomeBlazePathsTests
         Assert.Equal(pluginFile, path);
     }
 
-    private static IConfiguration CreateConfiguration(string? rootConfigFile, string? pluginConfigurationPath)
+    [Fact]
+    public void WhenRootConfigFileIsSet_ThenDataProtectionKeysAreNextToIt()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
+        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: null);
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionKeysPath(configuration);
+
+        // Assert
+        Assert.Equal(Path.Combine(dataDirectory, "DataProtection-Keys"), path);
+    }
+
+    [Fact]
+    public void WhenRootConfigFileIsNotSet_ThenDataProtectionKeysAreInDataDirectoryOfWorkingDirectory()
+    {
+        // Arrange
+        var configuration = CreateConfiguration(rootConfigFile: null, pluginConfigurationPath: null);
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionKeysPath(configuration);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath(Path.Combine("Data", "DataProtection-Keys")), path);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void WhenDataProtectionCertificatePathIsNotSet_ThenReturnsNull(string? certificatePath)
+    {
+        // Arrange
+        var configuration = CreateConfiguration(rootConfigFile: null, pluginConfigurationPath: null, certificatePath);
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionCertificatePath(configuration);
+
+        // Assert
+        Assert.Null(path);
+    }
+
+    [Fact]
+    public void WhenDataProtectionCertificatePathIsAbsolute_ThenItIsUsedAsIs()
+    {
+        // Arrange
+        var certificateFile = Path.Combine(Path.GetTempPath(), "secrets", "data-protection.pfx");
+        var configuration = CreateConfiguration(rootConfigFile: null, pluginConfigurationPath: null, certificateFile);
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionCertificatePath(configuration);
+
+        // Assert
+        Assert.Equal(certificateFile, path);
+    }
+
+    [Fact]
+    public void WhenDataProtectionCertificatePathIsRelative_ThenResolvesAgainstWorkingDirectory()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
+        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: null, "secrets/data-protection.pfx");
+
+        // Act
+        var path = HomeBlazePaths.GetDataProtectionCertificatePath(configuration);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath(Path.Combine("secrets", "data-protection.pfx")), path);
+    }
+
+    private static IConfiguration CreateConfiguration(string? rootConfigFile, string? pluginConfigurationPath, string? dataProtectionCertificatePath = null)
     {
         var configuration = new Mock<IConfiguration>();
+        configuration.Setup(instance => instance[HomeBlazePaths.DataProtectionCertificatePathKey]).Returns(dataProtectionCertificatePath);
         configuration.Setup(instance => instance[HomeBlazePaths.RootConfigurationFileKey]).Returns(rootConfigFile);
         configuration.Setup(instance => instance[HomeBlazePaths.PluginConfigurationPathKey]).Returns(pluginConfigurationPath);
         return configuration.Object;

@@ -38,7 +38,7 @@ public class PropertyHistoryDialogTests
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await browserLink.ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = PageLoadTimeout });
+        await _fixture.WaitForUrlAsync(page, url => url.Contains("/browser"), PageLoadTimeout);
 
         // Scoped to the child list's typography: an unscoped "Demo" also matches the app bar's page link.
         await page.Locator("span:text-is('Demo')").First.ClickAsync();

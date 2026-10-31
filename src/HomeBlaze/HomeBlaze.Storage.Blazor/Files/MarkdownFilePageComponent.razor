@@ -1,27 +1,39 @@
+@using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage.Files
 @using MudBlazor
 @using Namotion.Interceptor
 @using HomeBlaze.Services
+@using Microsoft.Extensions.Logging
 @using Microsoft.JSInterop
 
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(MarkdownFile))]
 
 @implements ISubjectComponent
 @inject IJSRuntime JsRuntime
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject SubjectFactory SubjectFactory
+@inject ILogger<MarkdownPageStructureEditor> StructureEditorLogger
 
+@{
+    var structureEditor = StructureEditor;
+}
 <CascadingValue Value="@IsEditing" Name="IsEditing">
-    <div class="markdown-content" style="position: relative;">
-        @if (IsLoading)
-        {
-            <MudProgressCircular Indeterminate="true" />
-        }
-        else
-        {
-            <MarkdownContentView Children="@File?.Children" />
-        }
-    </div>
+    <CascadingValue Value="@structureEditor" TValue="PageStructureEditor">
+        @* The second class marks Inline mode, which spaces the blocks for its insert lines (see the scoped styles). *@
+        <div class="@(structureEditor is not null ? "markdown-content markdown-content-inline" : "markdown-content")" style="position: relative;">
+            @if (IsLoading)
+            {
+                <MudProgressCircular Indeterminate="true" />
+            }
+            else
+            {
+                <MarkdownContentView Content="@File" Children="@File?.Children" />
+            }
+        </div>
+    </CascadingValue>
 </CascadingValue>
 
 <style>
@@ -57,9 +69,48 @@
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
 
+    // The dialogs render outside of the layout that cascades the mode, so they are given it.
+    [CascadingParameter(Name = "IsDarkMode")]
+    public bool IsDarkMode { get; set; } = true;
+
     private const string ModulePath = "./_content/HomeBlaze.Storage.Blazor/Files/MarkdownFilePageComponent.razor.js";
 
+    [CascadingParameter]
+    public WidgetSelection? Selection { get; set; }
+
+    // The widget of the page, inside which the editor finds the widget of a subject to select.
+    [CascadingParameter(Name = "ParentSubjectComponent")]
+    public SubjectComponent? PageComponent { get; set; }
+
+    // The page around this one in Inline mode, which shows content that cannot be edited inline in its source editor.
+    [CascadingParameter(Name = ISubjectRevealTarget.SourceEditorName)]
+    public ISubjectRevealTarget? SourceEditor { get; set; }
+
+    private MarkdownPageStructureEditor? _structureEditor;
+
     private MarkdownFile? File => Subject as MarkdownFile;
+
+    // Inline mode is editing with a selection. The Split preview is not editing, so it never changes the page.
+    private PageStructureEditor? StructureEditor
+    {
+        get
+        {
+            if (!IsEditing || Selection is not { } selection || PageComponent is not { } pageComponent || File is not { } file)
+            {
+                return null;
+            }
+
+            // A navigation to another page keeps this component and gives it the other file.
+            if (_structureEditor is null || _structureEditor.File != file || _structureEditor.Selection != selection ||
+                _structureEditor.PageComponent != pageComponent || _structureEditor.SourceEditor != SourceEditor)
+            {
+                _structureEditor = new MarkdownPageStructureEditor(
+                    file, selection, pageComponent, SourceEditor, DialogService, Snackbar, SubjectFactory, StructureEditorLogger, () => IsDarkMode);
+            }
+
+            return _structureEditor;
+        }
+    }
 
     private bool IsLoading => File?.Content is null;
 

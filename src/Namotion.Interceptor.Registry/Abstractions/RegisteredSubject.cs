@@ -50,6 +50,7 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
+    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
     /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
@@ -180,12 +181,12 @@ public class RegisteredSubject
         }
     }
 
-    internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
+    // Matched by property alone: a subject has one parent entry per property that holds it.
+    internal void RemoveParent(RegisteredSubjectProperty property)
     {
         lock (_lock)
         {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is not null && _firstParent.Equals(entry))
+            if (_firstParent.Property == property)
             {
                 if (_additionalParents is null || _additionalParents.Count == 0)
                 {
@@ -197,99 +198,49 @@ public class RegisteredSubject
                 return;
             }
 
-            if (_additionalParents is not null)
+            var position = IndexOfAdditionalParent(property);
+            if (position >= 0)
             {
-                var indexInList = _additionalParents.IndexOf(entry);
-                if (indexInList >= 0)
-                {
-                    _additionalParents.RemoveAt(indexInList);
-                    InvalidateParentsSnapshot();
-                }
-            }
-        }
-    }
-
-    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
-    {
-        lock (_lock)
-        {
-            if (HasOnlyParent(parent))
-            {
-                // Before the parents change, see IsAttached.
-                MarkDetached();
-            }
-
-            var changed = false;
-
-            if (_additionalParents is not null && _additionalParents.Count > 0)
-            {
-                for (var i = _additionalParents.Count - 1; i >= 0; i--)
-                {
-                    if (_additionalParents[i].Property == parent)
-                    {
-                        _additionalParents.RemoveAt(i);
-                        changed = true;
-                    }
-                }
-            }
-
-            if (_firstParent.Property == parent)
-            {
-                PromoteFirstParentFromAdditional();
-                changed = true;
-            }
-
-            if (changed)
-            {
+                _additionalParents!.RemoveAt(position);
                 InvalidateParentsSnapshot();
             }
         }
     }
 
-    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? newIndex)
     {
         lock (_lock)
         {
-            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
+            var entry = new SubjectPropertyParent { Property = property, Index = newIndex };
+            if (_firstParent.Property == property)
             {
-                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
+                _firstParent = entry;
                 InvalidateParentsSnapshot();
                 return;
             }
 
-            if (_additionalParents is not null)
+            var position = IndexOfAdditionalParent(property);
+            if (position >= 0)
             {
-                var indexInList = _additionalParents.IndexOf(oldEntry);
-                if (indexInList >= 0)
-                {
-                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                    InvalidateParentsSnapshot();
-                }
+                _additionalParents![position] = entry;
+                InvalidateParentsSnapshot();
             }
         }
     }
 
-    // Whether every parent is held by the property and there is at least one. Caller must hold _lock.
-    private bool HasOnlyParent(RegisteredSubjectProperty parent)
+    // Caller must hold _lock.
+    private int IndexOfAdditionalParent(RegisteredSubjectProperty property)
     {
-        if (_firstParent.Property != parent)
-        {
-            return false;
-        }
-
         if (_additionalParents is not null)
         {
-            foreach (var additionalParent in _additionalParents)
+            for (var i = 0; i < _additionalParents.Count; i++)
             {
-                if (additionalParent.Property != parent)
-                {
-                    return false;
-                }
+                if (_additionalParents[i].Property == property)
+                    return i;
             }
         }
 
-        return true;
+        return -1;
     }
 
     // Promotes the head (not the tail) of the overflow list so the surviving parents

@@ -1,5 +1,7 @@
 /* In the split mode the button of the page menu stands above the editor, so the title of the preview needs no room for
-   it (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). */
-.page-split-preview ::deep .markdown-content > h1:first-of-type {
+   it (see MarkdownFilePageComponent.razor.css of HomeBlaze.Storage.Blazor). The preview wraps the title in the wrapper of
+   its block of text, as Inline mode does. */
+.page-split-preview ::deep .markdown-content > h1:first-of-type,
+.page-split-preview ::deep .markdown-content > .subject-component-wrapper:nth-child(1 of :has(> .markdown-text > h1)) > .markdown-text > h1 {
     padding-right: 0;
 }

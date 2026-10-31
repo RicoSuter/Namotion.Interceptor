@@ -19,6 +19,14 @@ public partial class TransactionCascadeSubject
         set => Volatile.Write(ref _throwOnFailingWrite, value);
     }
 
+    /// <summary>Called from the Plain change hook, like a change handler would.</summary>
+    internal Action<TransactionCascadeSubject>? PlainChangedAction { get; set; }
+
+    partial void OnPlainChanged(string? newValue)
+    {
+        PlainChangedAction?.Invoke(this);
+    }
+
     partial void OnFailingChanging(ref string? newValue, ref bool cancel)
     {
         if (ThrowOnFailingWrite)
