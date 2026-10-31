@@ -28,7 +28,8 @@
 
 .game-panel {
     flex: 0 0 240px;
-    padding: 12px;
+    /* Keeps the first heading clear of the page's floating edit button. */
+    padding: 56px 12px 12px;
     overflow-y: auto;
     border-left: 1px solid var(--mud-palette-divider);
     background: var(--mud-palette-surface);
@@ -73,6 +74,7 @@
 
     .game-panel {
         flex: 0 0 auto;
+        padding-top: 12px;
         border-left: none;
         border-top: 1px solid var(--mud-palette-divider);
     }

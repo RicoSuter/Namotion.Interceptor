@@ -157,7 +157,8 @@ export function createInput(dotNet, options, entities) {
             isShiftHeld = true;
         }
 
-        if (isInputBlocked()) {
+        // Leaves shortcuts such as Ctrl+R or Alt+Left to the browser.
+        if (event.ctrlKey || event.altKey || event.metaKey || isInputBlocked()) {
             return;
         }
 
