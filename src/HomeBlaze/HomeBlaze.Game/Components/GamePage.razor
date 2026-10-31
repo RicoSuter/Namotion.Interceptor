@@ -33,10 +33,32 @@
         }
     </div>
     <aside class="game-panel" data-testid="game-panel">
-        <section>
-            <h5>Position</h5>
-            <div data-testid="game-position">@_positionText</div>
-        </section>
+        <div class="game-panel-top">
+            <section class="game-position">
+                <h5>Position</h5>
+                <div data-testid="game-position">@_positionText</div>
+            </section>
+            @* game-input.js handles the presses without a round trip, and sets aria-pressed on the turn button itself. *@
+            <div @ref="_pad" class="game-pad" data-testid="game-pad">
+                @foreach (var button in PadButtons)
+                {
+                    if (button.Move is { } move)
+                    {
+                        <button type="button" tabindex="-1" class="@(button.IsDiagonal ? "game-pad-button game-pad-diagonal" : "game-pad-button")"
+                                data-game-move="@move" aria-label="@button.Label" data-testid="game-pad-@move">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)Icons.Material.Filled.KeyboardArrowUp)</svg>
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" tabindex="-1" class="game-pad-button game-pad-turn"
+                                data-game-turn aria-label="@button.Label" title="@button.Label" data-testid="game-pad-turn">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)Icons.Material.Filled.RotateRight)</svg>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
         @if (_targets.Count > 0)
         {
             <section data-testid="game-looking-at">
@@ -87,6 +109,14 @@
     private const string NoPosition = "–";
     private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
 
+    // In the order of the pad's 3 by 3 grid; the middle one toggles turning only.
+    private static readonly PadButton[] PadButtons =
+    [
+        new("north-west", "Move north west", true), new("north", "Move north", false), new("north-east", "Move north east", true),
+        new("west", "Move west", false), new(null, "Turn only", false), new("east", "Move east", false),
+        new("south-west", "Move south west", true), new("south", "Move south", false), new("south-east", "Move south east", true),
+    ];
+
     private static int _lastViewId;
 
     // Identifies this page's view in the module, which the pages of a tab share.
@@ -94,6 +124,7 @@
     private readonly CancellationTokenSource _lifetime = new();
     private readonly GameViewTracker _tracker = new();
     private ElementReference _canvas;
+    private ElementReference _pad;
     private IJSObjectReference? _module;
     private DotNetObjectReference<GamePage>? _reference;
     private IDisposable? _subscription;
@@ -133,7 +164,7 @@
             }
 
             _module = module;
-            var options = new { viewId = _viewId, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = "./_content/HomeBlaze.Game/" };
+            var options = new { viewId = _viewId, pad = _pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = "./_content/HomeBlaze.Game/" };
             var result = await module.InvokeAsync<StartResult>("start", _lifetime.Token, _canvas, _reference, options);
             if (_isDisposed)
             {
@@ -383,4 +414,6 @@
     private sealed record TargetEntry(IInterceptorSubject Subject, string Title, IReadOnlyList<ActionEntry> Actions);
 
     private sealed record ActionEntry(int Key, MethodMetadata Method);
+
+    private sealed record PadButton(string? Move, string Label, bool IsDiagonal);
 }

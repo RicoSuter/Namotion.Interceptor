@@ -21,7 +21,6 @@ In scope for the first version:
 Out of scope, planned as follow-ups:
 
 - Players controlled by agents (see [Follow-up: agent players](#follow-up-agent-players)).
-- Touch controls.
 - More object types and interactions between players beyond sending a message.
 
 ## Projects and dependencies
@@ -171,7 +170,7 @@ Operations of the first version:
 - The page is served at `/pages/{path}` without the file extension, for the demo world `/pages/Demo/Game`.
 - The page fills the width of the main content and the viewport height below the app bar. The canvas takes all of it except for a side panel on the right and carries no overlays besides the loading, joining and error messages.
 - The side panel is always visible, 240 px wide and styled like the rest of HomeBlaze. From top to bottom it shows:
-  - **Position**: `X 3 · Y -2 · facing NE`.
+  - **Position**: `X 3 · Y -2 · facing NE`, with a direction pad to its right on touch devices and viewports narrower than the MudBlazor `Md` breakpoint (`(pointer: coarse), (max-width: 959.98px)`): four arrows at the edges, four smaller diagonals in the corners and a middle button that toggles turning only, all at least 44 px.
   - **Looking at**: shown only while objects are in the target area; each object's title with its operations as buttons, numbered 1 to 9 across all objects.
   - **Actions**: the operations of the `Game`, such as "Build wall".
   - **Nearby**: the connected players within the view radius, each with its color dot, the own player first.
@@ -182,11 +181,12 @@ Operations of the first version:
 
 ### JS module
 
-`game.js`, an ES module imported by the page, with `game-input.js` for keyboard, steps and prediction and `game-entities.js` for meshes, tweens, ground and target marker:
+`game.js`, an ES module imported by the page, with `game-input.js` for keyboard, direction pad, steps and prediction and `game-entities.js` for meshes, tweens, ground and target marker:
 
 - Loads `babylon.js` and `babylonjs.loaders.min.js` from `_content/HomeBlaze.Game/lib/babylonjs/` once per tab through a loader that fetches each script and runs it with the page's global AMD `define` shadowed. The app hosts an AMD loader (Monaco), which would otherwise make Babylon's UMD build register as an anonymous AMD module instead of setting `window.BABYLON`. It creates the engine on the canvas and disposes everything when the page goes away.
 - Combines held keys (arrow keys and WASD) into one of 8 directions, W plus D giving north east, and repeats once per `StepInterval` while held. Shift turns only. The number keys 1 to 9 invoke the numbered actions. Each step calls .NET through a `DotNetObjectReference`.
-- Ignores keys while focus is in an input field or a MudBlazor dialog is open.
+- Handles the direction pad, whose element the page passes in the start options, with pointer events and no round trip through .NET. A held pad button adds its directions to the held keys, a diagonal two of them, so it repeats like a key and combines with other fingers and keys; pointer capture keeps the press while the finger drifts off the button. In turn only mode a press sends one turn only step. The pad blocks scrolling, text selection and the long press menu.
+- Ignores keys and pad presses while focus is in an input field or a MudBlazor dialog is open.
 - Predicts the own player's steps against the objects it knows nearby and moves immediately. Each step carries an increasing sequence number, which the page echoes with the server's verdict. When the server refuses a step, the browser resets to the server's position and replays the pending steps sent after it (client-side prediction with server reconciliation). When the own player leaves the view or stops being the own player, the prediction and the pending steps are dropped, so the next own player starts from the server's position.
 - Moves other players, and the own player on a correction, with a tween over one `StepInterval` from the old to the new position, so their walking looks even despite network jitter, and plays the walk animation while the tween runs.
 
@@ -264,6 +264,7 @@ E2E tests, marked `Category=Integration`, use `PlaywrightFixture` from `HomeBlaz
 
 - The page loads and shows the join position, facing north, with the own player under "Nearby".
 - An arrow key pressed once moves the player one tile; Shift with an arrow only changes the facing.
+- On a phone viewport with touch, tapping the east pad button moves the player one tile east.
 - Walking into a wall keeps the position and shows the wall under "Looking at".
 - Build a wall from "Actions", then demolish it from "Looking at".
 - With two browser contexts, each lists the other under "Nearby", and "Send message" opens the notification dialog in the other context.
