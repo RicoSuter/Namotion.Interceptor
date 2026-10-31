@@ -35,4 +35,8 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
         Depth = 1;
         Height = DefaultHeight;
     }
+
+    [Operation(Title = "Demolish", Icon = "Delete", Position = 1, Description = "Removes this wall from the game.")]
+    public Task DemolishAsync(CancellationToken cancellationToken) =>
+        (ParentGame ?? throw new InvalidOperationException("The wall is not part of a game.")).RemoveObjectAsync(this, cancellationToken);
 }

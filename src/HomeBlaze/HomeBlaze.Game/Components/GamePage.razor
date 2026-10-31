@@ -3,11 +3,18 @@
 @implements IAsyncDisposable
 @using System.Reactive.Concurrency
 @using System.Reactive.Linq
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Operations
 @using HomeBlaze.Game.View
+@using HomeBlaze.Services
 @using HomeBlaze.Services.Clients
+@using Namotion.Interceptor.Registry
 @using Namotion.Interceptor.Tracking
 @inject IJSRuntime JsRuntime
 @inject CurrentClientConnection CurrentConnection
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
 
 <div class="game-layout">
     <div class="game-stage">
@@ -29,6 +36,37 @@
         <section>
             <h5>Position</h5>
             <div data-testid="game-position">@_positionText</div>
+        </section>
+        @if (_targets.Count > 0)
+        {
+            <section data-testid="game-looking-at">
+                <h5>Looking at</h5>
+                @foreach (var target in _targets)
+                {
+                    <div class="game-target-title" data-testid="game-target-title">@target.Title</div>
+                    @foreach (var action in target.Actions)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="game-action"
+                                   Disabled="_isInvoking" data-testid="game-target-action"
+                                   OnClick="@(() => InvokeActionAsync(target.Subject, action.Method))">
+                            @if (action.Key > 0)
+                            {
+                                <span class="game-key">@action.Key</span>
+                            }
+                            @action.Method.Title
+                        </MudButton>
+                    }
+                }
+            </section>
+        }
+        <section>
+            <h5>Actions</h5>
+            @foreach (var method in _gameActions)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="game-action"
+                           Disabled="@(_isInvoking || _player is null)" data-testid="game-action"
+                           OnClick="@(() => InvokeActionAsync(Game!, method))">@method.Title</MudButton>
+            }
         </section>
         <section>
             <h5>Nearby</h5>
@@ -66,6 +104,10 @@
     private int _isFlushScheduled;
     private string _positionText = NoPosition;
     private IReadOnlyList<GameViewObject> _nearby = [];
+    private IReadOnlyList<TargetEntry> _targets = [];
+    private IReadOnlyList<MethodMetadata> _gameActions = [];
+    private bool _isInvoking;
+    private bool _isViewBroken;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -142,6 +184,55 @@
         return new StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing);
     }
 
+    /// <summary>
+    /// Invokes the target action with the zero-based number key index, as the panel numbers them.
+    /// </summary>
+    [JSInvokable]
+    public Task InvokeTargetAction(int index)
+    {
+        foreach (var target in _targets)
+        {
+            foreach (var action in target.Actions)
+            {
+                if (action.Key == index + 1)
+                {
+                    return InvokeActionAsync(target.Subject, action.Method);
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task InvokeActionAsync(IInterceptorSubject owner, MethodMetadata method)
+    {
+        if (_isDisposed || _isInvoking || Game is not { } game || _player is not { } player)
+        {
+            return;
+        }
+
+        // The target may have moved since the panel rendered.
+        if (owner is GameObject target && !game.GetTargetObjects(player).Contains(target))
+        {
+            return;
+        }
+
+        _isInvoking = true;
+        // A number key reaches this without the re-render a click gets.
+        StateHasChanged();
+        try
+        {
+            var services = new GameCallerServiceProvider(ServiceProvider, new GameCaller(player));
+            await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token);
+        }
+        finally
+        {
+            _isInvoking = false;
+        }
+
+        await FlushAsync();
+    }
+
     // Called inside the writes of the object graph, so it never blocks.
     private void ScheduleFlush()
     {
@@ -167,20 +258,16 @@
 
     private async Task FlushAsync()
     {
-        if (_isDisposed || Game is not { } game || _module is null)
+        if (_isDisposed || _isViewBroken || Game is not { } game || _module is not { } module)
         {
             return;
         }
 
         _player = CurrentConnection.Connection?.ClientId is { } clientId && game.Players.TryGetValue(clientId, out var player) ? player : null;
         var update = game.UpdateView(_tracker, _player);
-        if (!update.IsEmpty)
+        if (!update.IsEmpty && !await TryApplyUpdateAsync(module, update))
         {
-            await _module.InvokeVoidAsync("applyUpdate", _lifetime.Token, _viewId, update);
-            if (_isDisposed)
-            {
-                return;
-            }
+            return;
         }
 
         var self = _tracker.Known.FirstOrDefault(view => view.IsSelf);
@@ -190,8 +277,56 @@
             .OrderByDescending(view => view.IsSelf)
             .ThenBy(view => view.Title, StringComparer.CurrentCulture)
             .ToList();
+        RefreshActions(game);
         StateHasChanged();
     }
+
+    // Returns false when the page went away or the view cannot take updates anymore.
+    private async Task<bool> TryApplyUpdateAsync(IJSObjectReference module, GameViewUpdate update)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("applyUpdate", _lifetime.Token, _viewId, update);
+            return !_isDisposed;
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException)
+        {
+            // The page went away.
+            return false;
+        }
+        catch (JSException)
+        {
+            // The module dropped the view or broke, so every later update would fail too.
+            _isViewBroken = true;
+            _subscription?.Dispose();
+            return false;
+        }
+    }
+
+    private void RefreshActions(Game game)
+    {
+        _gameActions = GetOperations(game);
+        if (_player is not { } player)
+        {
+            _targets = [];
+            return;
+        }
+
+        var key = 0;
+        var targets = new List<TargetEntry>();
+        foreach (var target in game.GetTargetObjects(player))
+        {
+            var actions = GetOperations(target).Select(method => new ActionEntry(key < 9 ? ++key : 0, method)).ToList();
+            targets.Add(new TargetEntry(target, (target as ITitleProvider)?.Title ?? target.GetType().Name, actions));
+        }
+
+        _targets = targets;
+    }
+
+    private static IReadOnlyList<MethodMetadata> GetOperations(IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject()?.GetAllMethods(ExclusionTarget.UserInterface)
+            .Where(method => method.Kind == MethodKind.Operation)
+            .ToList() ?? [];
 
     public async ValueTask DisposeAsync()
     {
@@ -220,4 +355,8 @@
     public sealed record StepResult(int Sequence, bool IsAccepted, int X, int Y, int Facing);
 
     private sealed record StartResult(bool IsStarted, string? Error);
+
+    private sealed record TargetEntry(IInterceptorSubject Subject, string Title, IReadOnlyList<ActionEntry> Actions);
+
+    private sealed record ActionEntry(int Key, MethodMetadata Method);
 }
