@@ -89,7 +89,10 @@ internal sealed class GameViewTracker
         known.X == gameObject.X && known.Y == gameObject.Y && known.Width == gameObject.Width && known.Depth == gameObject.Depth;
 
     private static bool HasSameState(GameViewObject known, GameObject gameObject, bool isSelf) =>
-        known.Height == gameObject.Height && known.IsSelf == isSelf && known.Facing == GetFacing(gameObject);
+        known.Height == gameObject.Height && known.IsSelf == isSelf && known.Facing == GetFacing(gameObject) && HasSameVoice(known, gameObject);
+
+    private static bool HasSameVoice(GameViewObject known, GameObject gameObject) =>
+        known.IsMicrophoneOn == IsMicrophoneOn(gameObject) && known.IsAudioOn == IsAudioOn(gameObject);
 
     private static bool HasSamePassage(GameViewObject known, GameObject gameObject) =>
         known.IsBlocking == gameObject.IsBlocking && known.IsOpen == IsOpen(gameObject);
@@ -99,7 +102,8 @@ internal sealed class GameViewTracker
 
     private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf) =>
         new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
-            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsBlocking, IsOpen(gameObject), isSelf);
+            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsBlocking, IsOpen(gameObject), isSelf,
+            IsMicrophoneOn(gameObject), IsAudioOn(gameObject));
 
     private static string GetKind(GameObject gameObject) => gameObject switch
     {
@@ -112,6 +116,10 @@ internal sealed class GameViewTracker
     private static int GetFacing(GameObject gameObject) => gameObject is GamePlayer player ? (int)player.Facing : 0;
 
     private static bool IsOpen(GameObject gameObject) => gameObject is Door { IsOpen: true };
+
+    private static bool IsMicrophoneOn(GameObject gameObject) => gameObject is GamePlayer { IsMicrophoneOn: true };
+
+    private static bool IsAudioOn(GameObject gameObject) => gameObject is GamePlayer { IsAudioOn: true };
 
     private static string GetTitle(GameObject gameObject) =>
         (gameObject as ITitleProvider)?.Title ?? string.Empty;

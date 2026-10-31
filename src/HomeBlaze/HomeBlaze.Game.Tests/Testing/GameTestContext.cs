@@ -26,11 +26,11 @@ internal sealed class GameTestContext
     }
 
     /// <summary>
-    /// Adds a connected anonymous client and moves its player to the position.
+    /// Adds a connected client, anonymous unless <paramref name="isNamed"/>, and moves its player to the position.
     /// </summary>
-    public GamePlayer AddConnectedPlayer(string clientId, int x = 0, int y = 0)
+    public GamePlayer AddConnectedPlayer(string clientId, int x = 0, int y = 0, bool isNamed = false)
     {
-        Clients.Set(clientId, isNamed: false, isConnected: true);
+        Clients.Set(clientId, isNamed, isConnected: true);
         Game.ReconcilePlayers();
         var player = Game.Players[clientId];
         player.X = x;

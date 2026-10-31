@@ -95,4 +95,21 @@ public class GameSerializationTests
         var door = Assert.IsType<Door>(loaded.Objects["door-1"]);
         Assert.Equal((3, -4, 1, 4, 10, true), (door.X, door.Y, door.Width, door.Depth, door.Height, door.IsOpen));
     }
+
+    [Fact]
+    public void WhenAPlayerHasItsVoiceOn_ThenTheTogglesAreNotSaved()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Players = new Dictionary<string, GamePlayer> { ["kitchen"] = new GamePlayer { IsMicrophoneOn = true, IsAudioOn = true } }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+
+        // Assert
+        Assert.DoesNotContain("isMicrophoneOn", json);
+        Assert.DoesNotContain("isAudioOn", json);
+    }
 }
