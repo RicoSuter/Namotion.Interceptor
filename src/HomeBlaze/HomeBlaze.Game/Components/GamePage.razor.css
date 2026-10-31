@@ -33,6 +33,7 @@
     /* Keeps the first heading clear of the page's floating edit button. */
     padding: 56px 12px 12px;
     overflow-y: auto;
+    overflow-x: hidden;
     border-left: 1px solid var(--mud-palette-divider);
     background: var(--mud-palette-surface);
 }
