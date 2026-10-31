@@ -20,6 +20,7 @@ namespace Namotion.Devices.Ecowitt
     public class EcowittGateway : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.IHubDevice, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittGateway(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Ecowitt.EcowittGateway> logger) { }
+        public EcowittGateway(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Ecowitt.EcowittGateway> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public string? AvailableSoftwareUpdate { get; }
@@ -274,6 +275,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittChannelSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittChannelSensor(int channel) { }
+        public EcowittChannelSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? Humidity { get; }
@@ -302,6 +304,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittCo2Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittCo2Sensor(int channel) { }
+        public EcowittCo2Sensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public decimal? Co2 { get; }
@@ -360,6 +363,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittLeafWetnessSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittLeafWetnessSensor(int channel) { }
+        public EcowittLeafWetnessSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -384,6 +388,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittLeakSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittLeakSensor(int channel) { }
+        public EcowittLeakSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? IconColor { get; }
@@ -490,6 +495,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittPm25Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittPm25Sensor(int channel) { }
+        public EcowittPm25Sensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -516,6 +522,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittRainGauge : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IRainSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittRainGauge(string name) { }
+        public EcowittRainGauge(string name, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Millimeter)]
         [System.ComponentModel.Category("Rainfall")]
         public decimal? DailyRain { get; }
@@ -565,6 +572,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittSensor : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittSensor(string sensorId) { }
+        public EcowittSensor(string sensorId, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? BatteryLevel { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -607,6 +615,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittSoilMoistureSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ISoilSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittSoilMoistureSensor(int channel) { }
+        public EcowittSoilMoistureSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -631,6 +640,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     public class EcowittTemperatureSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittTemperatureSensor(int channel) { }
+        public EcowittTemperatureSensor(int channel, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int Channel { get; }
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]

@@ -20,7 +20,6 @@ public class RandomValueMutationStrategyTests
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithParents()
             .WithLifecycle();
 
     [Fact]

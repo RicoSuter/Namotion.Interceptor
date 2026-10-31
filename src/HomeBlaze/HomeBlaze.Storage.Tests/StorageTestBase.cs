@@ -93,7 +93,7 @@ public abstract class StorageTestBase : IDisposable
             EnableFileWatching = enableFileWatching
         };
 
-        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)storage).AttachToContext(context);
         configure?.Invoke(storage);
         _storages.Add(storage);
         return storage;

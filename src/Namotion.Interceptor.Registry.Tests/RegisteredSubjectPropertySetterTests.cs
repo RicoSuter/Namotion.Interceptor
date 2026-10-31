@@ -38,7 +38,7 @@ public class RegisteredSubjectPropertySetterTests
         string? value = null;
         ((IInterceptorSubject)subject).AddProperties(new SubjectPropertyMetadata(
             CreateInitOnlyPropertyWithPolyfill(), _ => value, (_, newValue) => value = (string?)newValue, isIntercepted: false, isDynamic: true));
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        ((IInterceptorSubject)subject).AttachToContext(InterceptorSubjectContext.Create().WithRegistry());
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
 
         // Act

@@ -1338,7 +1338,7 @@ public class StorageReconcilerTests : StorageTestBase
     {
         // Arrange
         var storage = await ConnectAsync();
-        var failingWrite = new FailingWrite(nameof(FluentStorageContainer.Children));
+        var failingWrite = new FailingWrite(nameof(FluentStorageContainer.Children), storage);
         Context!.AddService<IWriteInterceptor>(failingWrite);
         failingWrite.FailNext();
         WriteFile("Notes.md");
@@ -2088,7 +2088,9 @@ public class StorageReconcilerTests : StorageTestBase
         }
     }
 
-    private sealed class FailingWrite(string propertyName) : IWriteInterceptor
+    // Fails only writes of the given subject when one is given: subjects are attached from construction, so a
+    // subject being loaded writes the same property names through the chain before it is placed in the tree.
+    private sealed class FailingWrite(string propertyName, IInterceptorSubject? subject = null) : IWriteInterceptor
     {
         private int _failNext;
 
@@ -2096,7 +2098,9 @@ public class StorageReconcilerTests : StorageTestBase
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
-            if (context.Property.Name == propertyName && Interlocked.Exchange(ref _failNext, 0) == 1)
+            if (context.Property.Name == propertyName &&
+                (subject is null || ReferenceEquals(context.Property.Subject, subject)) &&
+                Interlocked.Exchange(ref _failNext, 0) == 1)
             {
                 throw new InvalidOperationException("The write was made to fail.");
             }

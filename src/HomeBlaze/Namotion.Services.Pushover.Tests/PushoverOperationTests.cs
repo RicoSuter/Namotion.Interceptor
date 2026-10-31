@@ -62,7 +62,7 @@ public class PushoverOperationTests
                 handler => handler is MethodPropertyInitializer);
 
         var (service, handler) = PushoverTestFactory.CreateService(targetKeys);
-        ((IInterceptorSubject)service).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)service).AttachToContext(context);
         return (service, handler);
     }
 }

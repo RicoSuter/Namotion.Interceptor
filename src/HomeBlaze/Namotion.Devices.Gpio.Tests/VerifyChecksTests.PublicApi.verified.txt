@@ -101,6 +101,7 @@ namespace Namotion.Devices.Gpio
     public class GpioSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public GpioSubject(System.Device.Gpio.GpioDriver? driver = null) { }
+        public GpioSubject(System.Device.Gpio.GpioDriver driver, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public Namotion.Devices.Gpio.Configuration.Ads1115Configuration? Ads1115 { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]

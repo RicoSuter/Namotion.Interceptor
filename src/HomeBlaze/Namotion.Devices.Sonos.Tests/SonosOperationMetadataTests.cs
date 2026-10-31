@@ -113,7 +113,7 @@ public class SonosOperationMetadataTests
         var context = InterceptorSubjectContext.Create().WithRegistry();
         foreach (var subject in subjects)
         {
-            subject.Context.AddFallbackContext(context);
+            subject.AttachToContext(context);
         }
 
         // Act
@@ -141,7 +141,7 @@ public class SonosOperationMetadataTests
         var context = InterceptorSubjectContext.Create().WithRegistry();
         foreach (var subject in subjects)
         {
-            subject.Context.AddFallbackContext(context);
+            subject.AttachToContext(context);
         }
 
         // Act

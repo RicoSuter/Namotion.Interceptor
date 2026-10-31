@@ -19,7 +19,7 @@ public class MovedChildConsistencyTests
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithParents();
+            .WithLifecycle();
     }
 
     private static Car[] CreateHeldCars(IInterceptorSubjectContext context, int count)
@@ -235,7 +235,7 @@ public class MovedChildConsistencyTests
             var picked = cars.OrderBy(_ => random.Next()).Take(random.Next(cars.Length + 1)).ToList();
             if (random.Next(2) == 0)
             {
-                // A repeated item exercises the first-position rule.
+                // A repeated item gives a subject two entries for the property.
                 garage.Cars = picked.Count > 0 ? [.. picked, picked[0]] : picked;
             }
             else
@@ -246,9 +246,10 @@ public class MovedChildConsistencyTests
     }
 
     /// <summary>
-    /// Asserts that the registry children of the property are the distinct subjects of its value, each with its first
-    /// position or key, in the order of a collection (a dictionary's children keep their attach order), that the
-    /// tracked and the registry parents of each carry the same index, and that no former child keeps a parent entry.
+    /// Asserts that the registry children of the property are the occurrences of its value, each with its position or
+    /// key, in the order of a collection (a dictionary's children keep their attach order), that the tracked and the
+    /// registry parents of each subject carry the same indices, and that no former child keeps a parent entry. Parent
+    /// entries are compared in index order, since their order is unspecified.
     /// </summary>
     private static void AssertEveryCopyMatchesValue(
         IInterceptorSubject parent, string propertyName, IEnumerable<IInterceptorSubject> candidates)
@@ -256,7 +257,7 @@ public class MovedChildConsistencyTests
         var registeredProperty = parent.TryGetRegisteredSubject()?.TryGetProperty(propertyName);
         Assert.NotNull(registeredProperty);
         var property = new PropertyReference(parent, propertyName);
-        var expected = GetFirstOccurrences(registeredProperty.GetValue());
+        var expected = GetOccurrences(registeredProperty.GetValue());
         var actual = registeredProperty.Children.Select(child => (child.Subject, child.Index)).ToList();
         if (registeredProperty.GetValue() is IDictionary)
         {
@@ -273,26 +274,29 @@ public class MovedChildConsistencyTests
 
         foreach (var candidate in candidates)
         {
-            var expectedIndices = expected
+            var expectedIndices = InIndexOrder(expected
                 .Where(child => ReferenceEquals(child.Subject, candidate))
-                .Select(child => child.Index)
-                .ToArray();
+                .Select(child => child.Index));
 
-            Assert.Equal(expectedIndices, candidate.GetParents()
+            Assert.Equal(expectedIndices, InIndexOrder(candidate.GetParents()
                 .Where(entry => entry.Property == property)
-                .Select(entry => entry.Index));
+                .Select(entry => entry.Index)));
 
             var registeredParents = candidate.TryGetRegisteredSubject()?.Parents ?? [];
-            Assert.Equal(expectedIndices, registeredParents
+            Assert.Equal(expectedIndices, InIndexOrder(registeredParents
                 .Where(entry => entry.Property.Reference == property)
-                .Select(entry => entry.Index));
+                .Select(entry => entry.Index)));
         }
     }
 
-    private static List<(IInterceptorSubject Subject, object? Index)> GetFirstOccurrences(object? value)
+    private static object?[] InIndexOrder(IEnumerable<object?> indices)
+    {
+        return indices.OrderBy(index => index?.ToString(), StringComparer.Ordinal).ToArray();
+    }
+
+    private static List<(IInterceptorSubject Subject, object? Index)> GetOccurrences(object? value)
     {
         var children = new List<(IInterceptorSubject Subject, object? Index)>();
-        var seen = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         switch (value)
         {
             case IInterceptorSubject subject:
@@ -302,7 +306,7 @@ public class MovedChildConsistencyTests
             case IDictionary dictionary:
                 foreach (DictionaryEntry entry in dictionary)
                 {
-                    if (entry.Value is IInterceptorSubject subject && seen.Add(subject))
+                    if (entry.Value is IInterceptorSubject subject)
                         children.Add((subject, entry.Key));
                 }
                 break;
@@ -311,7 +315,7 @@ public class MovedChildConsistencyTests
                 var position = 0;
                 foreach (var item in enumerable)
                 {
-                    if (item is IInterceptorSubject subject && seen.Add(subject))
+                    if (item is IInterceptorSubject subject)
                         children.Add((subject, position));
 
                     position++;

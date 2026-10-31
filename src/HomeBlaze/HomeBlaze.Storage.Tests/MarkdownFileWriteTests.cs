@@ -1541,7 +1541,7 @@ public class MarkdownFileWriteTests : IDisposable
             EnableFileWatching = false
         };
 
-        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)storage).AttachToContext(context);
         _storages.Add(storage);
         return storage;
     }

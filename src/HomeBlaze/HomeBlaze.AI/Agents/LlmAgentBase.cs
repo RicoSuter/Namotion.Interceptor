@@ -409,7 +409,7 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
             _turnGate.Release();
         }
 
-        var context = ((IInterceptorSubject)this).Context;
+        var context = ((IInterceptorSubject)this).GetContext();
         var resolver = context.TryGetService<ISubjectPathResolver>();
         var scheduler = new AgentTriggerScheduler(_services.TimeProvider, pollInterval: null, TimeSpan.Zero, RunBackgroundAsync, OnPauseLifted);
         using var processor = new ChangeQueueProcessor(
@@ -491,9 +491,9 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     private async Task InitializeStorageAsync(CancellationToken cancellationToken)
     {
-        var context = ((IInterceptorSubject)this).Context;
-        var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
-        var resolver = context.TryGetService<ISubjectPathResolver>();
+        var context = ((IInterceptorSubject)this).TryGetContext();
+        var dataDirectory = context?.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
+        var resolver = context?.TryGetService<ISubjectPathResolver>();
         var path = resolver?.GetPath(this, PathStyle.Canonical);
         if (dataDirectory is not null && path is not null)
         {

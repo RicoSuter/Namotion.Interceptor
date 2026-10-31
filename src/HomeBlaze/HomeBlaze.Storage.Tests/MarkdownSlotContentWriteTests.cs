@@ -423,7 +423,7 @@ public class MarkdownSlotContentWriteTests : IDisposable
             EnableFileWatching = false
         };
 
-        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)storage).AttachToContext(context);
         _storages.Add(storage);
         await storage.ConnectAsync(CancellationToken.None);
         return storage;

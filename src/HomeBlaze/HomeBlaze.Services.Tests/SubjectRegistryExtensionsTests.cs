@@ -194,7 +194,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenSubjectIsConfigurable_ThenConfigurationOwnerIsTheSubject()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var parent = new ConfigurationOwnerTestParent(context);
         var subject = new ConfigurationOwnerTestParent(context);
         parent.StateChild = subject;
@@ -210,7 +210,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenSubjectIsHeldThroughConfigurationProperty_ThenConfigurationOwnerIsTheParent()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var subject = new ConfigurationOwnerTestChild(context);
         var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [subject] };
 
@@ -225,7 +225,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenSubjectIsNestedThroughConfigurationProperties_ThenConfigurationOwnerIsTheNearestConfigurableParent()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var subject = new ConfigurationOwnerTestChild(context);
         var intermediate = new ConfigurationOwnerTestChild(context) { ConfigurationChild = subject };
         var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [intermediate] };
@@ -242,7 +242,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenSubjectIsHeldThroughStateProperty_ThenThereIsNoConfigurationOwner()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var subject = new ConfigurationOwnerTestChild(context);
         var parent = new ConfigurationOwnerTestParent(context) { StateChild = subject };
 
@@ -258,7 +258,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenStatePropertyIsAboveConfigurationProperty_ThenThereIsNoConfigurationOwner()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var subject = new ConfigurationOwnerTestChild(context);
         var intermediate = new ConfigurationOwnerTestChild(context) { ConfigurationChild = subject };
         var parent = new ConfigurationOwnerTestParent(context) { StateChild = intermediate };
@@ -275,7 +275,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenSubjectHasNoParent_ThenThereIsNoConfigurationOwner()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var subject = new ConfigurationOwnerTestChild(context);
 
         // Act
@@ -289,7 +289,7 @@ public class SubjectRegistryExtensionsTests
     public void WhenOwnerPredicateSkipsNearestConfigurableParent_ThenConfigurationOwnerIsTheMatchingParent()
     {
         // Arrange
-        var context = CreateContext().WithParents();
+        var context = CreateContext().WithLifecycle();
         var subject = new ConfigurationOwnerTestParent(context);
         var intermediate = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [subject] };
         var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [intermediate] };

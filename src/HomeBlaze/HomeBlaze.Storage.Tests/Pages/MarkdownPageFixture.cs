@@ -61,7 +61,7 @@ public sealed class MarkdownPageFixture
         {
             StorageType = "inmemory"
         };
-        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)storage).AttachToContext(context);
         await storage.ConnectAsync(CancellationToken.None);
         await StopFollowingAsync(storage);
 

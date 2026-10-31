@@ -57,7 +57,7 @@ public class WallboxChargerOperationEnabledTests
                 handler => handler is MethodPropertyInitializer);
 
         var charger = new WallboxCharger(new TestHttpClientFactory(), NullLogger<WallboxCharger>.Instance);
-        ((IInterceptorSubject)charger).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)charger).AttachToContext(context);
         return charger;
     }
 

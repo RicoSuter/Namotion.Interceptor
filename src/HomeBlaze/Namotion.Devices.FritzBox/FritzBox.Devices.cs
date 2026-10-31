@@ -17,9 +17,9 @@ public partial class FritzBox
     /// </summary>
     internal void ApplyDevicePaths()
     {
-        var context = ((IInterceptorSubject)this).Context;
-        var registry = context.TryGetService<ISubjectRegistry>();
-        var pathResolver = context.TryGetService<ISubjectPathResolver>();
+        var context = ((IInterceptorSubject)this).TryGetContext();
+        var registry = context?.TryGetService<ISubjectRegistry>();
+        var pathResolver = context?.TryGetService<ISubjectPathResolver>();
         if (registry is null || pathResolver is null)
         {
             return;

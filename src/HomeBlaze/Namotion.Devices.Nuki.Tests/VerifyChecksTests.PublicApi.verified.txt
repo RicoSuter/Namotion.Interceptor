@@ -15,6 +15,7 @@ namespace Namotion.Devices.Nuki
         public static readonly System.TimeSpan DefaultPollingInterval;
         public static readonly System.TimeSpan DefaultRetryInterval;
         public NukiBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Nuki.NukiBridge> logger) { }
+        public NukiBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Nuki.NukiBridge> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Attributes.Derived]
         public string? AvailableSoftwareUpdate { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=401)]

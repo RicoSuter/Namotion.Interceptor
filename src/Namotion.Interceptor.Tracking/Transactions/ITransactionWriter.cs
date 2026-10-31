@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// the arguments, writer-owned configuration and any subject state captured before
 /// <see cref="SubjectTransaction.CommitAsync"/>.
 /// </remarks>
-public interface ITransactionWriter
+public interface ITransactionWriter : ISingletonContextService<ITransactionWriter>
 {
     /// <summary>
     /// Writes every source-bound change to its source (best-effort per source) and reports the per-change outcome,

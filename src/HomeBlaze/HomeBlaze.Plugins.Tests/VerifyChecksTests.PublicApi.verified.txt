@@ -27,6 +27,7 @@ namespace HomeBlaze.Plugins
     public class Plugin : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public Plugin(HomeBlaze.Plugins.PluginManager manager) { }
+        public Plugin(HomeBlaze.Plugins.PluginManager manager, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         [System.ComponentModel.Category("Assemblies")]
         public string[] Assemblies { get; }
@@ -106,6 +107,7 @@ namespace HomeBlaze.Plugins
     public class PluginManager : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public PluginManager(HomeBlaze.Plugins.PluginLoader pluginLoader) { }
+        public PluginManager(HomeBlaze.Plugins.PluginLoader pluginLoader, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Plugins.Models.PluginFeedEntry[] Feeds { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]

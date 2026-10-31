@@ -64,7 +64,7 @@ public class DynamicAccessorMetadataTests
             .WithRegistry();
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IReadOnlyGauge));
-        subject.Context.AddFallbackContext(context);
+        subject.AttachToContext(context);
 
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty("Level")!;
 
@@ -86,7 +86,7 @@ public class DynamicAccessorMetadataTests
     {
         // Arrange
         IInterceptorSubject subject = DynamicSubjectFactory.CreateSubject<SetterAccessDevice>();
-        subject.Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        subject.AttachToContext(InterceptorSubjectContext.Create().WithRegistry());
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
 
         // Act
@@ -103,7 +103,7 @@ public class DynamicAccessorMetadataTests
     {
         // Arrange
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor));
-        subject.Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        subject.AttachToContext(InterceptorSubjectContext.Create().WithRegistry());
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(IMotor.Speed))!;
 
         // Act

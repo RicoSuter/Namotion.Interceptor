@@ -41,47 +41,40 @@ public class ContextServiceResolutionTests
     }
     
     [Fact]
-    public void WhenCollectionHasSubCollection_ThenServicesAreInherited()
+    public void WhenTheSameInstanceIsRegisteredTwice_ThenItResolvesOnce()
     {
-        // Arrange
-        var context1 = InterceptorSubjectContext.Create();
-        var context2 = InterceptorSubjectContext.Create();
-        
-        context2.AddFallbackContext(context1);
+        // Arrange: registration keeps insertion order and tolerates duplicate references, so the
+        // dedup lives in service resolution, keeping the first occurrence.
+        var context = InterceptorSubjectContext.Create();
+        var service = new DuplicateOrderedService();
+
+        context.AddService(service);
+        context.AddService(service);
 
         // Act
-        context1.AddService(1);
-        context1.AddService(2);
-        context2.AddService(3);
+        var services = context.GetServices<IOrderedTestService>();
 
         // Assert
-        Assert.Equal(2, context1.GetServices<int>().Count());
-        Assert.Equal(3, context2.GetServices<int>().Count());
+        Assert.Same(service, Assert.Single(services));
     }
 
     [Fact]
-    public void WhenFallbackContextsRegisterSameServiceType_ThenOrderingAttributeBindsAgainstAllInstances()
+    public void WhenTwoInstancesOfSameServiceTypeAreRegistered_ThenOrderingAttributeBindsAgainstAllInstances()
     {
-        // Arrange: the duplicate in the first fallback enumerates before the constrainer
-        // in the second, so last-index binding leaves it unordered (issue #380); relies on
-        // fallback enumeration following HashSet insertion order (true in practice, not contractual)
-        var parent = InterceptorSubjectContext.Create();
-        var fallback1 = InterceptorSubjectContext.Create();
-        var fallback2 = InterceptorSubjectContext.Create();
+        // Arrange: the first duplicate enumerates before the constrainer, so last-index binding
+        // would leave it unordered.
+        var context = InterceptorSubjectContext.Create();
 
         var duplicate0 = new DuplicateOrderedService();
         var constrainer = new ConstrainerOrderedService();
         var duplicate1 = new DuplicateOrderedService();
 
-        fallback1.AddService(duplicate0);
-        fallback2.AddService(constrainer);
-        fallback2.AddService(duplicate1);
-
-        parent.AddFallbackContext(fallback1);
-        parent.AddFallbackContext(fallback2);
+        context.AddService(duplicate0);
+        context.AddService(constrainer);
+        context.AddService(duplicate1);
 
         // Act
-        var services = parent.GetServices<IOrderedTestService>();
+        var services = context.GetServices<IOrderedTestService>();
 
         // Assert: the constrainer precedes both duplicate instances
         Assert.Equal(3, services.Length);
@@ -91,7 +84,7 @@ public class ContextServiceResolutionTests
     }
 
     [Fact]
-    public void WhenSubjectContextsFallBackToSameContext_ThenGetServicesReturnsSameArrayInstance()
+    public void WhenSubjectsShareContext_ThenGetServicesReturnsSameArrayInstance()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
@@ -100,8 +93,8 @@ public class ContextServiceResolutionTests
         var second = new Car(context);
 
         // Act
-        var firstServices = ((IInterceptorSubject)first).Context.GetServices<MarkerService>();
-        var secondServices = ((IInterceptorSubject)second).Context.GetServices<MarkerService>();
+        var firstServices = ((IInterceptorSubject)first).GetContext().GetServices<MarkerService>();
+        var secondServices = ((IInterceptorSubject)second).GetContext().GetServices<MarkerService>();
 
         // Assert
         Assert.Same(ImmutableCollectionsMarshal.AsArray(firstServices), ImmutableCollectionsMarshal.AsArray(secondServices));
@@ -109,127 +102,22 @@ public class ContextServiceResolutionTests
     }
 
     [Fact]
-    public void WhenSubjectContextsFallBackToDifferentContexts_ThenGetServicesReturnsDifferentArrayInstances()
-    {
-        // Arrange
-        var service = new MarkerService();
-        var firstContext = InterceptorSubjectContext.Create();
-        var secondContext = InterceptorSubjectContext.Create();
-        firstContext.AddService(service);
-        secondContext.AddService(service);
-        var first = new Car(firstContext);
-        var second = new Car(secondContext);
-
-        // Act
-        var firstServices = ((IInterceptorSubject)first).Context.GetServices<MarkerService>();
-        var secondServices = ((IInterceptorSubject)second).Context.GetServices<MarkerService>();
-
-        // Assert
-        Assert.Same(service, Assert.Single(firstServices));
-        Assert.Same(service, Assert.Single(secondServices));
-        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(firstServices), ImmutableCollectionsMarshal.AsArray(secondServices));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void WhenFallbackContextGainsService_ThenGetServicesReturnsNewArrayInstance(bool contextHasOwnServices)
-    {
-        // Arrange
-        var service = new MarkerService();
-        var fallback = InterceptorSubjectContext.Create();
-        fallback.AddService(service);
-        IInterceptorSubjectContext context;
-        if (contextHasOwnServices)
-        {
-            context = InterceptorSubjectContext.Create();
-            context.AddService(new object());
-            context.AddFallbackContext(fallback);
-        }
-        else
-        {
-            context = ((IInterceptorSubject)new Car(fallback)).Context;
-        }
-
-        var servicesBefore = context.GetServices<MarkerService>();
-
-        // Act
-        fallback.AddService(new object());
-        var servicesAfter = context.GetServices<MarkerService>();
-
-        // Assert
-        Assert.Same(service, Assert.Single(servicesBefore));
-        Assert.Same(service, Assert.Single(servicesAfter));
-        Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
-    }
-
-    public enum ContextStateChange
-    {
-        OwnServiceAdded,
-        FallbackContextAdded,
-        FallbackContextRemoved
-    }
-
-    [Theory]
-    [InlineData(ContextStateChange.OwnServiceAdded)]
-    [InlineData(ContextStateChange.FallbackContextAdded)]
-    [InlineData(ContextStateChange.FallbackContextRemoved)]
-    public void WhenContextStateChanges_ThenGetServicesReturnsNewArrayInstance(ContextStateChange change)
+    public void WhenServiceIsAdded_ThenGetServicesReturnsNewArrayInstance()
     {
         // Arrange
         var service = new MarkerService();
         var context = InterceptorSubjectContext.Create();
         context.AddService(service);
-        var fallback = InterceptorSubjectContext.Create();
-        fallback.AddService(new object());
-        if (change == ContextStateChange.FallbackContextRemoved)
-        {
-            context.AddFallbackContext(fallback);
-        }
-
         var servicesBefore = context.GetServices<MarkerService>();
 
         // Act
-        switch (change)
-        {
-            case ContextStateChange.OwnServiceAdded:
-                context.AddService(new object());
-                break;
-            case ContextStateChange.FallbackContextAdded:
-                context.AddFallbackContext(fallback);
-                break;
-            case ContextStateChange.FallbackContextRemoved:
-                context.RemoveFallbackContext(fallback);
-                break;
-        }
-
+        context.AddService(new object());
         var servicesAfter = context.GetServices<MarkerService>();
 
         // Assert
         Assert.Same(service, Assert.Single(servicesBefore));
         Assert.Same(service, Assert.Single(servicesAfter));
         Assert.NotSame(ImmutableCollectionsMarshal.AsArray(servicesBefore), ImmutableCollectionsMarshal.AsArray(servicesAfter));
-    }
-
-    [Fact]
-    public void WhenFallbackContextIsRemoved_ThenTheOthersAreListedInOrderAndEarlierSnapshotIsUnchanged()
-    {
-        // Arrange
-        var first = InterceptorSubjectContext.Create();
-        var second = InterceptorSubjectContext.Create();
-        var third = InterceptorSubjectContext.Create();
-        var context = InterceptorSubjectContext.Create();
-        context.AddFallbackContext(first);
-        context.AddFallbackContext(second);
-        context.AddFallbackContext(third);
-        var snapshot = context.FallbackContexts;
-
-        // Act
-        context.RemoveFallbackContext(second);
-
-        // Assert
-        Assert.Equal(new IInterceptorSubjectContext[] { first, third }, context.FallbackContexts);
-        Assert.Equal(new IInterceptorSubjectContext[] { first, second, third }, snapshot);
     }
 
     private sealed class MarkerService;

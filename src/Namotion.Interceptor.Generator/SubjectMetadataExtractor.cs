@@ -76,8 +76,9 @@ internal static class SubjectMetadataExtractor
 
         var methods = SubjectMethodMetadataExtractor.CollectMethods(typeSymbol, semanticModel, location, diagnostics, cancellationToken);
 
+        var constructors = SubjectConstructorMetadataExtractor.CollectConstructors(allTypeDeclarations, semanticModel, cancellationToken);
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor,
-            parameterlessConstructorSetsRequiredMembers) = SubjectTypeShape.DetectConstructorState(typeSymbol, allTypeDeclarations);
+            parameterlessConstructorSetsRequiredMembers) = SubjectTypeShape.DetectConstructorState(typeSymbol, allTypeDeclarations, constructors);
 
         return new ExtractionResult(
             new SubjectMetadata(
@@ -90,6 +91,8 @@ internal static class SubjectMetadataExtractor
                 needsGeneratedParameterlessConstructor,
                 hasOrWillHaveParameterlessConstructor,
                 parameterlessConstructorSetsRequiredMembers,
+                SubjectConstructorMetadataExtractor.HasDeclaredContextConstructor(typeSymbol, semanticModel.Compilation),
+                constructors,
                 baseClass,
                 properties,
                 methods),

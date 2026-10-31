@@ -78,7 +78,7 @@ public class EcowittGatewayConfigurationSaveTests
         var logger = new RecordingLogger<EcowittGateway>();
         var gateway = new EcowittGateway(new TestHttpClientFactory(), logger) { HostAddress = "192.168.1.50" };
 
-        var context = InterceptorSubjectContext.Create().WithParents();
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
         var writer = new TestConfigurationWriter(context) { IsWriting = isWriting, Gateway = gateway };
 
         return (gateway, writer, logger);

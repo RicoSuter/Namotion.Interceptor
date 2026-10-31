@@ -274,7 +274,7 @@ public partial class SunSpecDevice :
     /// </summary>
     internal string? GetModelDefinitionsDirectory()
     {
-        var dataDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
+        var dataDirectory = ((IInterceptorSubject)this).TryGetContext()?.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         var path = ModelDefinitionsPath;
         if (string.IsNullOrWhiteSpace(path))
         {

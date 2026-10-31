@@ -45,7 +45,7 @@ public class ParentTraversalBenchmark
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithParents();
+            .WithLifecycle();
 
         var markedRoot = new ParentTraversalMarkedNode(context);
         var firstBelowMarkedRoot = new ParentTraversalNode();

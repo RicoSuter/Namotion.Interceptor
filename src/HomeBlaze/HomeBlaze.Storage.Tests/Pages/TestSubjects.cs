@@ -543,7 +543,7 @@ public partial class TestHosted : IHostedService, IConfigurable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _log = ((IInterceptorSubject)this).Context.TryGetService<TestHostedLog>();
+        _log = ((IInterceptorSubject)this).TryGetContext()?.TryGetService<TestHostedLog>();
         _log?.Started(this);
         return Task.CompletedTask;
     }

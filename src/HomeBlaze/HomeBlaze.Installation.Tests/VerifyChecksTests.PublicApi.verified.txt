@@ -60,6 +60,7 @@ namespace HomeBlaze.Installation
     public class HomeBlazeInstallation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public HomeBlazeInstallation(Microsoft.Extensions.Hosting.IHostEnvironment hostEnvironment, System.Net.Http.IHttpClientFactory httpClientFactory, HomeBlaze.Services.DeveloperModeService developerModeService, HomeBlaze.Services.Clients.ClientConnectionService clientConnectionService, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Installation.HomeBlazeInstallation> logger) { }
+        public HomeBlazeInstallation(Microsoft.Extensions.Hosting.IHostEnvironment hostEnvironment, System.Net.Http.IHttpClientFactory httpClientFactory, HomeBlaze.Services.DeveloperModeService developerModeService, HomeBlaze.Services.Clients.ClientConnectionService clientConnectionService, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Installation.HomeBlazeInstallation> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=404)]
         [System.ComponentModel.Category("Build")]
         public string? Branch { get; }

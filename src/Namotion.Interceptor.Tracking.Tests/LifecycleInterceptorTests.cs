@@ -105,7 +105,7 @@ public class LifecycleInterceptorTests
 
         mother.Children = [child1, child2];
 
-        ((IInterceptorSubject)mother).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)mother).AttachToContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -118,9 +118,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act
         var mother1 = new Person(context) { FirstName = "Mother1" };
@@ -145,9 +144,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act
         var mother1 = new Person { FirstName = "Mother1" };
@@ -157,55 +155,13 @@ public class LifecycleInterceptorTests
         mother1.Mother = mother2;
         mother2.Mother = mother3;
 
-        ((IInterceptorSubject)mother1).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)mother1).AttachToContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
     }
 
-    [Fact]
-    public void WhenFallbackContextIsReplacedByOneThatReachesTheSameInterceptor_ThenSubjectAndItsChildrenStayAttached()
-    {
-        // Arrange
-        var handler = new TestLifecycleHandler();
-        var context = InterceptorSubjectContext.Create().WithLifecycle();
-        context.AddService(handler);
-        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
-        var first = InterceptorSubjectContext.Create();
-        var second = InterceptorSubjectContext.Create();
-        first.AddFallbackContext(context);
-        second.AddFallbackContext(context);
 
-        var child = new Person { FirstName = "Child" };
-        var person = new Person(first) { Mother = child };
-        var eventCount = handler.GetEvents().Length;
-
-        // Act
-        var isReplaced = ((InterceptorSubjectContext)((IInterceptorSubject)person).Context).ReplaceFallbackContext(first, second);
-
-        // Assert
-        Assert.True(isReplaced);
-        Assert.Equal(eventCount, handler.GetEvents().Length);
-        Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
-        Assert.True(interceptor.TryRunWhileAttached(child, () => { }));
-    }
-
-    [Fact]
-    public void WhenFallbackContextIsReplacedByOneThatReachesAnotherInterceptor_ThenItIsKept()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var otherContext = InterceptorSubjectContext.Create().WithLifecycle();
-        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
-        var person = new Person(context) { FirstName = "Person" };
-
-        // Act
-        var isReplaced = ((InterceptorSubjectContext)((IInterceptorSubject)person).Context).ReplaceFallbackContext(context, otherContext);
-
-        // Assert
-        Assert.False(isReplaced);
-        Assert.True(interceptor.TryRunWhileAttached(person, () => { }));
-    }
 
     [Fact]
     public Task WhenRemovingInterceptors_ThenAllArrayChildrenAreDetached()
@@ -223,7 +179,8 @@ public class LifecycleInterceptorTests
         var child2 = new Person { FirstName = "Child2" };
 
         mother.Children = [child1, child2];
-        ((IInterceptorSubject)mother).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)mother).AttachToContext(context);
+        ((IInterceptorSubject)mother).DetachFromContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -236,9 +193,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act
         var mother1 = new Person(context) { FirstName = "Mother1" };
@@ -247,7 +203,8 @@ public class LifecycleInterceptorTests
 
         mother1.Mother = mother2;
         mother2.Mother = mother3;
-        ((IInterceptorSubject)mother1).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)mother1).AttachToContext(context);
+        ((IInterceptorSubject)mother1).DetachFromContext(context);
 
         // Assert
         return Verify(handler.GetEvents());
@@ -260,9 +217,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act & Assert
         var car = new Car(context)
@@ -274,7 +230,8 @@ public class LifecycleInterceptorTests
         Assert.Empty(car.Detachements);
 
         var subject = (IInterceptorSubject)car;
-        subject.Context.RemoveFallbackContext(context);
+        subject.AttachToContext(context);
+        subject.DetachFromContext(context);
         Assert.Single(car.Attachements);
         Assert.Single(car.Detachements);
     }
@@ -296,7 +253,7 @@ public class LifecycleInterceptorTests
             LastName = "Doe"
         };
 
-        ((IInterceptorSubject)person).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)person).AttachToContext(context);
 
         var father = new Person
         {
@@ -344,9 +301,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -368,9 +324,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -396,9 +351,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -425,9 +379,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -463,7 +416,7 @@ public class LifecycleInterceptorTests
             .Create()
             .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var holder = new BroadlyDeclaredHolder(context);
         var car1 = new Car { Name = "Car1" };
@@ -494,9 +447,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var tire1 = new Tire { Pressure = 2.0m };
@@ -517,9 +469,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var tire1 = new Tire { Pressure = 2.0m };
@@ -545,9 +496,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -574,9 +524,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -611,8 +560,7 @@ public class LifecycleInterceptorTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
-            .WithService(() => handler)
-            .WithContextInheritance();
+            .WithService(() => handler);
 
         var holder = new NullableStructuralHolder(context);
         var car1 = new Car { Name = "Car1" };
@@ -635,8 +583,7 @@ public class LifecycleInterceptorTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
-            .WithService(() => handler)
-            .WithContextInheritance();
+            .WithService(() => handler);
 
         var holder = new NullableStructuralHolder(context);
         var car = new Car { Name = "Car1" };
@@ -658,8 +605,7 @@ public class LifecycleInterceptorTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
-            .WithService(() => handler)
-            .WithContextInheritance();
+            .WithService(() => handler);
 
         var holder = new NullableStructuralHolder(context);
         var car = new Car { Name = "Car1" };
@@ -680,8 +626,7 @@ public class LifecycleInterceptorTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
-            .WithService(() => handler)
-            .WithContextInheritance();
+            .WithService(() => handler);
 
         var holder = new NullableStructuralHolder(context);
         var car = new Car { Name = "Car1" };

@@ -102,12 +102,12 @@ public class SubjectMetadataExtensionsTests
     [Fact]
     public void WhenTheFirstParentsFormACycleWithoutAStore_ThenNoStoreIsFound()
     {
-        // Arrange: subjects that only reference each other keep their first parents in a cycle once the store lets go.
+        // Arrange: subjects that only reference each other, held in the graph by an anchor on one of them, have
+        // each other as their only parents, so their first parents form a cycle without a store on it.
         var first = new TestContainer();
         var second = new TestContainer { Child = first };
         first.Child = second;
-        var store = new MetadataTestStore(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { Container = first };
-        store.Container = null;
+        ((IInterceptorSubject)first).AttachToContext(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
 
         // Act
         var found = first.FindMetadataStore();

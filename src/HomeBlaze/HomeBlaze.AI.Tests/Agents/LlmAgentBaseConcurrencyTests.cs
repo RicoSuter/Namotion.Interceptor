@@ -129,7 +129,7 @@ public class LlmAgentBaseConcurrencyTests
         var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         var statusMessages = new ConcurrentQueue<string?>();
-        using var subscription = ((IInterceptorSubject)test.Agent).Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        using var subscription = ((IInterceptorSubject)test.Agent).GetContext().GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(change => ReferenceEquals(change.Property.Subject, test.Agent) &&
                              change.Property.Name == nameof(LlmAgentBase.StatusMessage))
             .Subscribe(change => statusMessages.Enqueue(change.GetNewValue<string?>()));
@@ -261,7 +261,7 @@ public class LlmAgentBaseConcurrencyTests
             hasLoopHandledThePause = hasLoopHandledTheFailure &&
                 SpinWait.SpinUntil(() => time.CreatedTimerCount > pauseTimerCount, TimeSpan.FromSeconds(30));
         });
-        ((IInterceptorSubject)test.Agent).Context.AddService(interceptor);
+        ((IInterceptorSubject)test.Agent).GetContext().AddService(interceptor);
 
         // Act
         await test.Agent.SendMessageAsync("Hello", CancellationToken.None);

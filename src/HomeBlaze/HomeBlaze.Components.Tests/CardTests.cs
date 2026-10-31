@@ -13,7 +13,7 @@ public class CardTests
         .Create()
         .WithFullPropertyTracking()
         .WithRegistry()
-        .WithParents()
+        .WithLifecycle()
         .WithLifecycle();
 
     [Fact]

@@ -13,7 +13,7 @@ public class WidgetTests
         .Create()
         .WithFullPropertyTracking()
         .WithRegistry()
-        .WithParents()
+        .WithLifecycle()
         .WithLifecycle();
 
     private static Widget CreateWidget() => new(new SubjectPathResolver(() => null));

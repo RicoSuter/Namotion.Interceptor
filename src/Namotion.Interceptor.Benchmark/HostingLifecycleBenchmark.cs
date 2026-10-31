@@ -111,7 +111,7 @@ public class HostingLifecycleBenchmark
         // and costs nanoseconds, so it is only visible against a small baseline.
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         switch (Arm)
         {

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -12,7 +13,8 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
 [RunsBefore(typeof(DerivedPropertyChangeHandler))]
-public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
+public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor,
+    ISingletonContextService<SubjectTransactionInterceptor>
 {
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);
 
@@ -122,31 +124,23 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        var transaction = SubjectTransaction.Current;
-        if (transaction is null || transaction.IsDisposed || transaction.IsCommitted)
-        {
-            next(ref context);
-            return;
-        }
-
-        if (transaction.IsCommitting && ShouldWriteThroughWhileCommitting(transaction))
-        {
-            next(ref context);
-            return;
-        }
-
         // Settable-derived writes are immediate and outside the transaction. This access linearizes at the
-        // non-committing observation above; do not hold the transaction lock while a user setter executes.
-        if (context.Property.Metadata.IsDerived)
+        // non-committing observation in WritesThrough; do not hold the transaction lock while a user setter
+        // executes.
+        var transaction = SubjectTransaction.Current;
+        if (WritesThrough(transaction) || context.Property.Metadata.IsDerived)
         {
             next(ref context);
             return;
         }
 
-        var subjectContext = context.Property.Subject.Context;
-        var subjectInterceptors = ValidateTransactionContext(subjectContext, context.Property, transaction);
+        // Singleton per context, so instance identity is context identity. The subject's context is then the
+        // transaction's, whose handlers the transaction resolved when it began.
+        if (!ReferenceEquals(this, transaction.Interceptor))
+        {
+            ThrowTransactionContextMismatch(context.Property);
+        }
 
-        transaction.IncludeHandlersOf(subjectContext, subjectInterceptors);
         InvokeCapturingHandlers(transaction, context.Property, context.NewValue, context.Origin);
 
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
@@ -176,7 +170,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     /// Records a write of the landed value, which the equality check drops as unchanged, for the commit check when
     /// <paramref name="transaction"/>, the current flow's transaction, captures and <see cref="SubjectTransaction.RecordsCheckOnlyEntries"/> (see
     /// <see cref="SubjectTransaction.RecordCheckOnly{TProperty}"/>). Otherwise, and for a derived property or a
-    /// subject whose context does not route through the transaction's interceptor, the write stays dropped.
+    /// subject of another context, the write stays dropped.
     /// </summary>
     internal static void RecordUnchangedWrite<TProperty>(SubjectTransaction transaction, ref PropertyWriteContext<TProperty> context)
     {
@@ -187,16 +181,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        var subjectContext = context.Property.Subject.Context;
-        var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
-        if (!ContainsByReference(subjectInterceptors, transaction.Interceptor))
-        {
-            return;
-        }
-
-        // A commit that starts meanwhile drops the write instead of failing it. An entry recorded without the handlers
-        // of its context, after a skipped inclusion and a failed commit, would escape their check, so drop it here.
-        if (!transaction.IncludeHandlersOf(subjectContext, subjectInterceptors, skipWhileCommitting: true))
+        if (!ReferenceEquals(context.Property.Subject.TryGetContext(), transaction.Context))
         {
             return;
         }
@@ -215,7 +200,23 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     {
         // The value comparison first: most captured writes differ, so the service lookup runs only for write backs.
         return EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue) &&
-            !context.Property.Subject.Context.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty;
+            context.Property.Subject.TryGetContext() is { } subjectContext &&
+            !subjectContext.GetServices<PropertyValueEqualityCheckHandler>().IsDefaultOrEmpty;
+    }
+
+    /// <summary>
+    /// Whether a write passes straight through: no transaction, a finished one, or a committing one that
+    /// <see cref="ShouldWriteThroughWhileCommitting"/> lets through.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool WritesThrough([NotNullWhen(false)] SubjectTransaction? transaction)
+    {
+        if (transaction is null || transaction.IsDisposed || transaction.IsCommitted)
+        {
+            return true;
+        }
+
+        return transaction.IsCommitting && ShouldWriteThroughWhileCommitting(transaction);
     }
 
     /// <summary>
@@ -237,25 +238,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         return transaction.IsInactiveUnderLockOrThrowIfCommitting();
-    }
-
-    /// <summary>
-    /// Throws when <paramref name="subjectContext"/> does not resolve the interceptor of
-    /// <paramref name="transaction"/>, and otherwise returns the transaction interceptors it resolves.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ImmutableArray<SubjectTransactionInterceptor> ValidateTransactionContext(
-        IInterceptorSubjectContext subjectContext,
-        PropertyReference property,
-        SubjectTransaction transaction)
-    {
-        var subjectInterceptors = subjectContext.GetServices<SubjectTransactionInterceptor>();
-        if (!ResolvesInterceptor(subjectInterceptors, transaction.Interceptor))
-        {
-            ThrowTransactionContextMismatch(property);
-        }
-
-        return subjectInterceptors;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -287,41 +269,12 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
     }
 
-    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowTransactionContextMismatch(PropertyReference property)
     {
         throw new InvalidOperationException(
             $"Cannot modify property '{property.Metadata.Name}': Transaction is bound to a different context.");
-    }
-
-    /// <summary>
-    /// Returns whether <paramref name="interceptors"/> contains <paramref name="target"/> by reference.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool ResolvesInterceptor(
-        ImmutableArray<SubjectTransactionInterceptor> interceptors,
-        SubjectTransactionInterceptor target)
-    {
-        return interceptors.Length == 1
-            ? ReferenceEquals(interceptors[0], target)
-            : ContainsByReference(interceptors, target);
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    internal static bool ContainsByReference(
-        ImmutableArray<SubjectTransactionInterceptor> interceptors,
-        SubjectTransactionInterceptor target)
-    {
-        for (var index = 0; index < interceptors.Length; index++)
-        {
-            if (ReferenceEquals(interceptors[index], target))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

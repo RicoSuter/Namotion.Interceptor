@@ -90,7 +90,7 @@ public class ConfigurableSubjectStartupTests
 
             // Assert
             Assert.Equal("configured", observed);
-            Assert.Same(handler, subject.Context.GetService<IHostedService>());
+            Assert.Same(handler, subject.GetContext().GetService<IHostedService>());
         }
         finally
         {
@@ -191,7 +191,7 @@ public partial class ConfigurableStartupSubject : IHostedService, IConfigurable
     public ConfigurableStartupSubject(ConfigurableStartupProbe probe, IInterceptorSubjectContext context)
     {
         _probe = probe;
-        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+        InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);
     }
 
     [Configuration]

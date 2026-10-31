@@ -21,12 +21,15 @@ public partial class HomeBlazeInstallation
     /// </summary>
     internal void Poll()
     {
-        var context = ((IInterceptorSubject)this).Context;
+        var context = ((IInterceptorSubject)this).TryGetContext();
 
-        var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
+        var dataDirectory = context?.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         DataDirectory = dataDirectory;
         (DataVolumeFreeSpace, DataVolumeTotalSize) = ReadVolume(dataDirectory);
-        CountSubjects(context);
+        if (context is not null)
+        {
+            CountSubjects(context);
+        }
 
         LastUpdated = _timeProvider.GetUtcNow();
     }

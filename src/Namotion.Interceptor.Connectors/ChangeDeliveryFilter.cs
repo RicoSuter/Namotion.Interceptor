@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -63,26 +62,12 @@ internal static class ChangeDeliveryFilter
                && publishedToAnySource;
     }
 
-    // Kept out of TryAcceptForDelivery so the lock's exception frame is not paid per delivered change.
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    // First publish: check and mark under the lock the write terminal commits under, so a confirmation
+    // either commits first and supersedes this older change, or commits after the mark and is written back.
+    // The staleness rule matches IsSupersededBy.
     private static bool TryAcceptFirstPublish(in SubjectPropertyChange change, bool countsSourceCommits)
     {
-        var property = change.Property;
-
-        // First publish: check and mark under the lock the write terminal commits under, so a confirmation
-        // either commits first and the re-check drops this older change, or commits after the mark and is
-        // written back.
-        lock (property.Subject.SyncRoot)
-        {
-            if (property.TryGetWriteState(countsSourceCommits, out var commitRevision, out _) &&
-                IsSupersededBy(in change, commitRevision))
-            {
-                return false;
-            }
-
-            property.MarkAsPublishedToSource();
-            return true;
-        }
+        return change.Property.TryMarkAsPublishedToSource(change.Revision, countsSourceCommits);
     }
 
     // Explicit arms rather than a comparison, so the zero value cannot fall through to the client rule.

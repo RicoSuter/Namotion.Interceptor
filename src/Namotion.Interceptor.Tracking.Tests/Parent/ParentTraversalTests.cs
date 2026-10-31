@@ -1,6 +1,5 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
-using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
@@ -14,7 +13,7 @@ public class ParentTraversalTests
         // Arrange
         var child = new ValueEqualParentSubject { Key = 1 };
         var parent = new ValueEqualParentSubject { Key = 1 };
-        child.AddParent(new PropertyReference(parent, nameof(ValueEqualParentSubject.Child)), null);
+        ParentTraversalGraph.Link(child, parent);
 
         // Act
         var result = child.TryGetFirstParent<ValueEqualParentSubject>();
@@ -27,16 +26,16 @@ public class ParentTraversalTests
     public void WhenIntermediateParentsAreValueEqual_ThenFindsAncestorBeyondBoth()
     {
         // Arrange
-        var child = new Person();
+        var child = new TraversalNode();
         var parent = new ValueEqualParentSubject { Key = 1 };
         var grandparent = new ValueEqualParentSubject { Key = 1 };
-        var ancestor = new Person();
-        child.AddParent(new PropertyReference(parent, nameof(ValueEqualParentSubject.Child)), null);
-        parent.AddParent(new PropertyReference(grandparent, nameof(ValueEqualParentSubject.Child)), null);
-        grandparent.AddParent(new PropertyReference(ancestor, nameof(Person.Children)), 0);
+        var ancestor = new MarkedTraversalNode();
+        ParentTraversalGraph.Link(child, parent);
+        ParentTraversalGraph.Link(parent, grandparent);
+        ParentTraversalGraph.Link(grandparent, ancestor);
 
         // Act
-        var result = child.TryGetFirstParent<Person>();
+        var result = child.TryGetFirstParent<ITraversalMarker>();
 
         // Assert
         Assert.Same(ancestor, result);
@@ -66,15 +65,15 @@ public class ParentTraversalTests
     public void WhenOnlyMatchingSubjectIsSelfInCycle_ThenReturnsNull()
     {
         // Arrange
-        var child = new Person();
+        var child = new MarkedTraversalNode();
         var parent = new ValueEqualParentSubject { Key = 1 };
         var grandparent = new ValueEqualParentSubject { Key = 1 };
-        child.AddParent(new PropertyReference(parent, nameof(ValueEqualParentSubject.Child)), null);
-        parent.AddParent(new PropertyReference(grandparent, nameof(ValueEqualParentSubject.Child)), null);
-        grandparent.AddParent(new PropertyReference(child, nameof(Person.Children)), 0);
+        ParentTraversalGraph.Link(child, parent);
+        ParentTraversalGraph.Link(parent, grandparent);
+        ParentTraversalGraph.Link(grandparent, child);
 
         // Act
-        var result = child.TryGetFirstParent<Person>();
+        var result = child.TryGetFirstParent<ITraversalMarker>();
 
         // Assert
         Assert.Null(result);
@@ -149,67 +148,6 @@ public class ParentTraversalTests
 
         // Assert
         Assert.Same(match, result);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData(1)]
-    public void WhenParentEntryHasNoSubject_ThenItIsSkipped(object? index)
-    {
-        // Arrange
-        var subject = new TraversalNode();
-        subject.AddParent(default, index);
-        var parentBelowMatch = new TraversalNode();
-        ParentTraversalGraph.Link(subject, parentBelowMatch);
-        var match = new MarkedTraversalNode();
-        ParentTraversalGraph.Link(parentBelowMatch, match);
-
-        // Act
-        var result = subject.TryGetFirstParent<ITraversalMarker>();
-
-        // Assert
-        Assert.Same(match, result);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData(1)]
-    public void WhenParentEntryHasNoSubjectAfterSeventeenParents_ThenItIsSkipped(object? index)
-    {
-        // Arrange
-        var subject = new TraversalNode();
-        for (var i = 0; i < 17; i++)
-        {
-            ParentTraversalGraph.Link(subject, new TraversalNode());
-        }
-
-        subject.AddParent(default, index);
-        var parentBelowMatch = new TraversalNode();
-        ParentTraversalGraph.Link(subject, parentBelowMatch);
-        var match = new MarkedTraversalNode();
-        ParentTraversalGraph.Link(parentBelowMatch, match);
-
-        // Act
-        var result = subject.TryGetFirstParent<ITraversalMarker>();
-
-        // Assert
-        Assert.Same(match, result);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData(1)]
-    public void WhenOnlyParentEntryHasNoSubject_ThenReturnsNull(object? index)
-    {
-        // Arrange
-        var subject = new TraversalNode();
-        subject.AddParent(default, index);
-
-        // Act
-        var result = subject.TryGetFirstParent<ITraversalMarker>();
-
-        // Assert
-        Assert.Null(result);
     }
 
     [Theory]
@@ -368,11 +306,16 @@ public class ParentTraversalTests
 }
 
 [InterceptorSubject]
-public sealed partial class ValueEqualParentSubject : IEquatable<ValueEqualParentSubject>
+public sealed partial class ValueEqualParentSubject : ITraversalParent, IEquatable<ValueEqualParentSubject>
 {
+    public ValueEqualParentSubject()
+    {
+        Children = [];
+    }
+
     public int Key { get; init; }
 
-    public partial IInterceptorSubject? Child { get; set; }
+    public partial IReadOnlyList<IInterceptorSubject> Children { get; set; }
 
     public bool Equals(ValueEqualParentSubject? other) => other is not null && Key == other.Key;
 

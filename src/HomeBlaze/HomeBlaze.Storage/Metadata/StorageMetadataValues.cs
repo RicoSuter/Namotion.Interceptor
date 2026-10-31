@@ -52,8 +52,8 @@ internal static class StorageMetadataValues
                 var value = (StrongBox<ImmutableDictionary<string, JsonElement>?>)data!;
                 if (!HaveSameContent(value.Value, values) && subject.TryGetProperty(name) is { } property)
                 {
-                    property.Reference.SetPropertyValueWithInterception(
-                        values, value.Value, (_, newValue) => value.Value = (ImmutableDictionary<string, JsonElement>?)newValue);
+                    subject.Subject.Executor.SetPropertyValue(
+                        property.Reference.Name, values, value.Value, (_, newValue) => value.Value = newValue);
                 }
             }
             else if (values is not null && subject.TryGetProperty(name) is null)

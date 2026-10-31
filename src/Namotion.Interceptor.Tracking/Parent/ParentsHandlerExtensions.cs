@@ -1,35 +1,11 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
 public static class ParentsHandlerExtensions
 {
-    private const string ParentsKey = "ni.parents";
-
-    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
-    {
-        var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
-        parentsSet.Add(parent, index);
-    }
-
-    internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent)
-    {
-        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
-        {
-            ((ParentsSet)existing!).Remove(parent);
-        }
-    }
-
-    internal static void UpdateParentIndex(this IInterceptorSubject subject, PropertyReference parent, object? index)
-    {
-        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
-        {
-            ((ParentsSet)existing!).UpdateIndex(parent, index);
-        }
-    }
-
     /// <summary>
     /// Tries to find the nearest parent of the specified type by traversing the parent hierarchy.
     /// The subject itself is never returned. Returns null if not found instead of throwing.
@@ -160,102 +136,34 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
-    /// Gets the parents of the subject as an immutable array.
-    /// This is the preferred method for accessing parents with zero-allocation enumeration.
-    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
+    /// Gets the occurrence-aware parents of the subject: one entry per structural edge that
+    /// references it, carrying the referencing property and the collection index or dictionary key
+    /// of that occurrence. A subject listed twice in one collection therefore has two entries.
     /// </summary>
+    /// <remarks>
+    /// The result is an immutable snapshot published by the built-in lifecycle, which is its single
+    /// writer. Reading it takes no lock, which is required rather than an optimization: source scope
+    /// walks call this while holding their own lock and are themselves called from inside the
+    /// lifecycle lock.
+    ///
+    /// The first call on a subject activates parent publication for it, so a consumer that never
+    /// asks pays nothing. An unattached subject returns empty, which is the answer rather than a
+    /// stand-in for one: no edge can point at it, because an attached parent would have pulled it
+    /// into the context. The same holds on a context with no lifecycle, where the only subject that
+    /// can be attached is one anchored to that context directly: nothing propagates the context
+    /// along an edge, and a lifecycle cannot be registered behind an attach.
+    ///
+    /// An empty result is not a test for "this subject is a root". It also answers for an
+    /// unattached subject, and for a subject inside its own release, because the release drops the
+    /// ownership record before it runs any detach callback, so a getter evaluated from one sees no
+    /// parents while the subject is still attached. Decide root-ness from the anchor instead, with
+    /// a non-None <see cref="Interceptors.IInterceptorExecutor.AttachmentAnchor"/>.
+    ///
+    /// The order of the entries is unspecified and history-dependent: only the set of occurrences,
+    /// each with its property and its index or key, is meaningful.
+    /// </remarks>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
-        if (subject.Data.TryGetValue((null, ParentsKey), out var parents))
-        {
-            return ((ParentsSet)parents!).ToImmutableArray();
-        }
-        return [];
-    }
-
-    /// <summary>
-    /// Thread-safe collection with O(1) writes and zero-allocation reads via cached ImmutableArray.
-    /// </summary>
-    private sealed class ParentsSet
-    {
-        private readonly Lock _lock = new();
-
-        // Keyed by the property alone, because the lifecycle attaches a subject to a property
-        // once, however many keys or positions of it hold the subject.
-        private readonly Dictionary<PropertyReference, object?> _indices = [];
-        private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
-
-        public void Add(PropertyReference parent, object? index)
-        {
-            lock (_lock)
-            {
-                _indices[parent] = index;
-                _cache = null; // Invalidate cache
-            }
-        }
-
-        public void Remove(PropertyReference parent)
-        {
-            lock (_lock)
-            {
-                if (_indices.Remove(parent))
-                {
-                    _cache = null; // Invalidate cache
-                }
-            }
-        }
-
-        public void UpdateIndex(PropertyReference parent, object? index)
-        {
-            lock (_lock)
-            {
-                ref var current = ref CollectionsMarshal.GetValueRefOrNullRef(_indices, parent);
-                if (Unsafe.IsNullRef(ref current))
-                {
-                    return;
-                }
-
-                current = index;
-                _cache = null; // Invalidate cache
-            }
-        }
-
-        public ImmutableArray<SubjectParent> ToImmutableArray()
-        {
-            var cached = _cache;
-            return cached is not null ? cached[0] : CreateSnapshot();
-        }
-
-        // Kept out of the method above: inlined there, the enumerator made every cached read zero its stack frame.
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private ImmutableArray<SubjectParent> CreateSnapshot()
-        {
-            lock (_lock)
-            {
-                var cached = _cache;
-                if (cached is not null)
-                {
-                    return cached[0];
-                }
-
-                // Fast path: avoid allocation for empty set
-                if (_indices.Count == 0)
-                {
-                    _cache = [ImmutableArray<SubjectParent>.Empty];
-                    return ImmutableArray<SubjectParent>.Empty;
-                }
-
-                var parents = new SubjectParent[_indices.Count];
-                var position = 0;
-                foreach (var (parent, index) in _indices)
-                {
-                    parents[position++] = new SubjectParent(parent, index);
-                }
-
-                var array = ImmutableCollectionsMarshal.AsImmutableArray(parents);
-                _cache = [array];
-                return array;
-            }
-        }
+        return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetParents(subject) ?? [];
     }
 }

@@ -121,7 +121,7 @@ internal sealed class FileSubjectFactory
             context.TryGetLifecycleInterceptor() is { } lifecycle &&
             lifecycle.TryRunWhileAttached(subject, static () => { }))
         {
-            subject.Context.RemoveFallbackContext(context);
+            subject.DetachIfProvisionallyAnchored(context);
         }
     }
 

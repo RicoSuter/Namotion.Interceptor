@@ -59,8 +59,9 @@ public static class InterceptorHostingExtensions
             // Context passed so the start is held open until it has actually run: this overload
             // queues the start and returns without waiting for it, so anything treating "the graph
             // has finished starting" as a completion point would otherwise pass it too early.
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.AttachHostedService(hostedService, subject.Context);
+            var context = subject.TryGetContext();
+            var hostedServiceHandler = context?.TryGetService<HostedServiceHandler>();
+            hostedServiceHandler?.AttachHostedService(hostedService, context!);
         }
 
         return wasAdded;
@@ -79,7 +80,7 @@ public static class InterceptorHostingExtensions
             return false;
         }
 
-        subject.Context.TryGetService<HostedServiceHandler>()?.DetachHostedService(hostedService);
+        subject.TryGetContext()?.TryGetService<HostedServiceHandler>()?.DetachHostedService(hostedService);
         return true;
     }
 
@@ -133,10 +134,10 @@ public static class InterceptorHostingExtensions
 
         if (wasAdded)
         {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            if (hostedServiceHandler != null)
+            var context = subject.TryGetContext();
+            if (context?.TryGetService<HostedServiceHandler>() is { } hostedServiceHandler)
             {
-                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, subject.Context, cancellationToken);
+                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, context, cancellationToken);
             }
         }
 
@@ -156,7 +157,7 @@ public static class InterceptorHostingExtensions
             return false;
         }
 
-        var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+        var hostedServiceHandler = subject.TryGetContext()?.TryGetService<HostedServiceHandler>();
         if (hostedServiceHandler != null)
         {
             await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);

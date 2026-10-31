@@ -18,7 +18,8 @@ namespace Namotion.Interceptor.Validation;
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
 [RunsBefore(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
-public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
+public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler,
+    ISingletonContextService<ValidationInterceptor>
 {
     private static readonly ConcurrentDictionary<Type, ITypedValidation> TypedValidations = new();
 
@@ -72,7 +73,12 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
         ITypedValidation? typedValidation = null;
         foreach (ref readonly var change in context.Changes)
         {
-            var subjectContext = change.Property.Subject.Context;
+            var subjectContext = change.Property.Subject.TryGetContext();
+            if (subjectContext is null)
+            {
+                continue;
+            }
+
             if (!ReferenceEquals(subjectContext, validatorsContext))
             {
                 validatorsContext = subjectContext;
@@ -107,22 +113,13 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
         }
     }
 
-    /// <summary>
-    /// Returns true when <paramref name="obj"/> is a validation interceptor. All instances validate
-    /// alike, so a context that reaches several registrations, for example its own and its fallback's, uses one.
-    /// </summary>
-    /// <param name="obj">The object to compare with.</param>
-    public override bool Equals(object? obj)
-    {
-        return obj is ValidationInterceptor;
-    }
-
-    /// <inheritdoc />
-    public override int GetHashCode() => typeof(ValidationInterceptor).GetHashCode();
-
     private static void ThrowIfInvalid<TProperty>(PropertyReference property, TProperty value, ChangeOrigin origin)
     {
-        var validationResults = Validate(property.Subject.Context.GetServices<IPropertyValidator>(), property, value, origin);
+        // The chain executing this write was resolved from the subject's attached context, so that
+        // context's validators are the ones that apply; an unattached subject runs no chain and is
+        // never validated.
+        var validators = property.Subject.TryGetContext()?.GetServices<IPropertyValidator>() ?? ImmutableArray<IPropertyValidator>.Empty;
+        var validationResults = Validate(validators, property, value, origin);
         if (validationResults is not null)
         {
             throw new PropertyValidationException(property, value, validationResults);

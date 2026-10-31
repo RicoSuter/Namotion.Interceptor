@@ -27,7 +27,6 @@ public static class SubjectContextFactory
             .WithFullPropertyTracking()
             .WithReadPropertyRecorder()
             .WithRegistry()
-            .WithParents()
             .WithLifecycle()
             .WithService<ILifecycleHandler>(
                 () => new MethodPropertyInitializer(),

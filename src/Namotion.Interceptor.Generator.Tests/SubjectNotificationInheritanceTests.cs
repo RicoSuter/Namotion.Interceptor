@@ -157,7 +157,7 @@ public class SubjectNotificationInheritanceTests
                 [InterceptorSubject]
                 public class ExplicitRaiseBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
                 {
-                    private IInterceptorExecutor? _context;
+                    private IInterceptorExecutor? _executor;
                     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
                     public event PropertyChangedEventHandler? PropertyChanged;
@@ -165,9 +165,8 @@ public class SubjectNotificationInheritanceTests
                     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
                         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                    IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
 
                     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -181,21 +180,21 @@ public class SubjectNotificationInheritanceTests
                     protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
                     protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-                        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+                        => _executor is not null ? _executor.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
                     protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
                     {
-                        if (_context is null)
+                        if (_executor is null)
                         {
                             setValue(this, newValue);
                             return true;
                         }
 
-                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                        return _executor.SetPropertyValue(propertyName, newValue, currentValue, setValue);
                     }
 
                     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
-                        => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+                        => _executor is not null ? _executor.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
                 }
             }
             """;

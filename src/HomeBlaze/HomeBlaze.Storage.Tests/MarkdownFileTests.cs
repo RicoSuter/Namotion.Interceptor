@@ -886,7 +886,7 @@ public class MarkdownFileTests
         var markdown = new MarkdownFile(storage, "Docs/page.md", parser, serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>());
 
         root = new VirtualFolder(storage, "");
-        ((IInterceptorSubject)root).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)root).AttachToContext(context);
         root.Children = new Dictionary<string, IInterceptorSubject>
         {
             ["Devices"] = new VirtualFolder(storage, "Devices/")

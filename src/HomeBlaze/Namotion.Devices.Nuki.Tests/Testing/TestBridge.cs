@@ -25,7 +25,7 @@ internal sealed class TestBridge : IAsyncDisposable
             PollingInterval = TimeSpan.FromHours(1),
             RetryInterval = TimeSpan.FromSeconds(NukiBridge.MinimumIntervalSeconds)
         };
-        ((IInterceptorSubject)Bridge).Context.AddFallbackContext(SubjectContextFactory.Create(new ServiceCollection()));
+        ((IInterceptorSubject)Bridge).AttachToContext(SubjectContextFactory.Create(new ServiceCollection()));
     }
 
     public FakeNukiBridge Fake { get; }

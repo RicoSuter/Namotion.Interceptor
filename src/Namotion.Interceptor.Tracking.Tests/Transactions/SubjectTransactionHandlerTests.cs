@@ -590,20 +590,19 @@ public class SubjectTransactionHandlerTests
     {
         // Arrange
         var context = CreateContext();
-        var handlerContext = InterceptorSubjectContext.Create();
-        handlerContext.AddService<ITransactionHandler>(new MisorderedHandler());
-        context.AddFallbackContext(handlerContext);
+        context.AddService<ITransactionHandler>(new MisorderedHandler());
         var beginException = await Record.ExceptionAsync(() => BeginInOwnFlowAsync(context));
-        context.RemoveFallbackContext(handlerContext);
 
         // Act
-        // Started inline so that it completes synchronously only if the failed begin left the lock free.
+        // Started inline so that it reaches handler resolution synchronously only if the failed begin left the lock
+        // free; a held lock would leave it waiting.
         var competingBegin = BeginInOwnFlowAsync(context);
 
         // Assert
         Assert.Contains("[RunsFirst] and [RunsLast]", Assert.IsType<InvalidOperationException>(beginException).Message);
-        Assert.True(competingBegin.IsCompletedSuccessfully);
-        (await competingBegin).Dispose();
+        Assert.True(competingBegin.IsCompleted);
+        var competingException = await Record.ExceptionAsync(() => competingBegin);
+        Assert.Contains("[RunsFirst] and [RunsLast]", Assert.IsType<InvalidOperationException>(competingException).Message);
     }
 
     [Fact]

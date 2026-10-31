@@ -17,12 +17,18 @@ public class ParentIndexTests
         return InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithParents();
+            .WithLifecycle();
     }
 
     private static SubjectParent Parent(IInterceptorSubject subject, string propertyName, object? index)
     {
         return new SubjectParent(new PropertyReference(subject, propertyName), index);
+    }
+
+    // The order of parent entries is unspecified, so they are compared in index order.
+    private static object?[] IndicesOf(IInterceptorSubject subject)
+    {
+        return subject.GetParents().Select(parent => parent.Index).OrderBy(index => index?.ToString(), StringComparer.Ordinal).ToArray();
     }
 
     [Fact]
@@ -150,7 +156,7 @@ public class ParentIndexTests
     }
 
     [Fact]
-    public void WhenSubjectMovesToSeveralKeys_ThenParentIndexIsTheFirstKey()
+    public void WhenSubjectMovesToSeveralKeys_ThenItHasAParentPerKey()
     {
         // Arrange
         var car = new Car();
@@ -164,11 +170,11 @@ public class ParentIndexTests
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car, ["Other"] = other };
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.CarsByName), "First"), Assert.Single(car.GetParents()));
+        Assert.Equal(new object?[] { "First", "Second" }, IndicesOf(car));
     }
 
     [Fact]
-    public void WhenSubjectMovesToSeveralPositions_ThenParentIndexIsTheFirstPosition()
+    public void WhenSubjectMovesToSeveralPositions_ThenItHasAParentPerPosition()
     {
         // Arrange
         var car = new Car();
@@ -179,11 +185,12 @@ public class ParentIndexTests
         garage.Cars = [car, other, car];
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal(new object?[] { 0, 2 }, IndicesOf(car));
+        Assert.Equal(new object?[] { 1 }, IndicesOf(other));
     }
 
     [Fact]
-    public void WhenRetainedSubjectIsAlsoAppended_ThenParentIndexStaysTheFirstPosition()
+    public void WhenRetainedSubjectIsAlsoAppended_ThenTheAppendedPositionIsAnotherParent()
     {
         // Arrange
         var car = new Car();
@@ -194,7 +201,7 @@ public class ParentIndexTests
         garage.Cars = [car, other, car];
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal(new object?[] { 0, 2 }, IndicesOf(car));
     }
 
     [Fact]
@@ -463,7 +470,7 @@ public class ParentIndexTests
     }
 
     [Fact]
-    public void WhenSubjectIsRemovedInPlaceAndAssignedAgain_ThenItKeepsItsOldIndex()
+    public void WhenSubjectIsRemovedInPlaceAndAssignedAgain_ThenItsIndexIsItsPositionInTheNewValue()
     {
         // Arrange
         var context = CreateContext().WithRegistry();
@@ -472,12 +479,13 @@ public class ParentIndexTests
         var assigned = new List<Car> { first, second };
         var garage = new Garage(context) { Cars = assigned };
 
-        // Act: the removed subject still counts as attached, so it is neither attached again nor reported.
+        // Act: the write is compared with the value as it was assigned, so the removed subject is kept and moved.
         assigned.Remove(first);
         garage.Cars = new List<Car> { second, first };
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(first.GetParents()));
-        Assert.Equal(0, garage.TryGetRegisteredProperty(g => g.Cars)!.Children.Single(c => c.Subject == first).Index);
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 1), Assert.Single(first.GetParents()));
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(second.GetParents()));
+        Assert.Equal(1, garage.TryGetRegisteredProperty(g => g.Cars)!.Children.Single(c => c.Subject == first).Index);
     }
 }

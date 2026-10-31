@@ -233,6 +233,7 @@ namespace HomeBlaze.AI.Agents
         public const string WaitingStatusMessage = "Waiting for the previous turn to finish";
         public static readonly System.TimeSpan MaximumTurnTimeout;
         protected LlmAgentBase(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger logger, System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentBackendTool>? supportedBackendTools = null) { }
+        protected LlmAgentBase(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger logger, System.Collections.Generic.IReadOnlyList<HomeBlaze.AI.Agents.AgentBackendTool> supportedBackendTools, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string[] AllowedTools { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -323,6 +324,7 @@ namespace HomeBlaze.AI.Agents.Anthropic
     public class AnthropicAgent : HomeBlaze.AI.Agents.LlmAgentBase, Namotion.Interceptor.IInterceptorSubject
     {
         public AnthropicAgent(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.AI.Agents.Anthropic.AnthropicAgent> logger) { }
+        public AnthropicAgent(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.AI.Agents.Anthropic.AnthropicAgent> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
         public string? ApiKey { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -347,6 +349,7 @@ namespace HomeBlaze.AI.Agents.ClaudeCli
     public class ClaudeCliAgent : HomeBlaze.AI.Agents.LlmAgentBase, Namotion.Interceptor.IInterceptorSubject
     {
         public ClaudeCliAgent(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.AI.Agents.ClaudeCli.ClaudeCliAgent> logger) { }
+        public ClaudeCliAgent(HomeBlaze.AI.Agents.AgentServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.AI.Agents.ClaudeCli.ClaudeCliAgent> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string CliPath { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]

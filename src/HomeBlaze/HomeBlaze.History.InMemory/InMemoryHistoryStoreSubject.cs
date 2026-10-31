@@ -204,7 +204,7 @@ public partial class InMemoryHistoryStoreSubject :
             return;
         }
 
-        var context = ((IInterceptorSubject)this).Context;
+        var context = ((IInterceptorSubject)this).GetContext();
 
         var resolver = context.TryGetService<ISubjectPathResolver>();
         if (resolver is null)

@@ -366,14 +366,13 @@ public class StorageMetadataApplyTests : StorageTestBase
     public async Task WhenSubjectsThatLeftAStoredSubjectStillReferenceEachOther_ThenTheStoreKeepsNoneOfTheirMetadata()
     {
         // Arrange
-        WriteFile("Holder.json", MetadataTestHolder.Serialize("null"));
+        // Subjects that only reference each other, held in the graph by an anchor on one of them, have each
+        // other as their only parents, so no stored subject is above them.
         var storage = await ConnectAsync();
-        var holder = Assert.IsType<MetadataTestHolder>(storage.Children["Holder"]);
         var first = new MetadataTestHolder();
         var second = new MetadataTestHolder { Next = first };
         first.Next = second;
-        holder.Next = first;
-        holder.Next = null;
+        ((IInterceptorSubject)first).AttachToContext(((IInterceptorSubject)storage).GetContext());
 
         // Act
         var canStore = storage.CanStoreMetadata(first);

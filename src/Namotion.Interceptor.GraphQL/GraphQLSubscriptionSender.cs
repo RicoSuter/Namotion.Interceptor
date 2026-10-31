@@ -24,7 +24,7 @@ namespace Namotion.Interceptor.GraphQL
                 new UnboundedChannelOptions { SingleReader = true });
 
             using var subscription = _subject
-                .Context
+                .GetContext()
                 .GetPropertyChangeObservable()
                 .Subscribe(
                     change => changes.Writer.TryWrite(change),
