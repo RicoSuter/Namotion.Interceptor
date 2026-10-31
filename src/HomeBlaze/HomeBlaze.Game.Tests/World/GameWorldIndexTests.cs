@@ -193,4 +193,44 @@ public class GameWorldIndexTests
         Assert.False(isPlayerBlocked);
         Assert.False(isEmptyBlocked);
     }
+
+    [Fact]
+    public void WhenObjectsAreAddedMovedRemovedAndCleared_ThenTheVersionIncreasesEachTime()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var wall = new Wall();
+        var versions = new List<long> { index.Version };
+
+        // Act
+        index.AddOrUpdate(wall);
+        versions.Add(index.Version);
+        wall.X = 10;
+        index.AddOrUpdate(wall);
+        versions.Add(index.Version);
+        index.Remove(wall);
+        versions.Add(index.Version);
+        index.Clear();
+        versions.Add(index.Version);
+
+        // Assert
+        Assert.All(versions.Zip(versions.Skip(1)), pair => Assert.True(pair.Second > pair.First));
+    }
+
+    [Fact]
+    public void WhenAnUnchangedObjectIsUpdatedOrAnUnknownOneRemoved_ThenTheVersionStays()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var wall = new Wall();
+        index.AddOrUpdate(wall);
+        var version = index.Version;
+
+        // Act
+        index.AddOrUpdate(wall);
+        index.Remove(new Wall());
+
+        // Assert
+        Assert.Equal(version, index.Version);
+    }
 }
