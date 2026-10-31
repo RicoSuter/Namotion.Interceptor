@@ -27,6 +27,7 @@
         <Using Include="HomeBlaze.Game.Visuals" />
         <Using Include="HomeBlaze.Game.Objects.Buildings" />
         <Using Include="HomeBlaze.Game.Tools" />
+        <Using Include="HomeBlaze.Game.Objects.Nature" />
     </ItemGroup>
 
     <ItemGroup>

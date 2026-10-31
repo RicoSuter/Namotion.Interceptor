@@ -195,6 +195,56 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenATreeIsPlanted_ThenItStandsInFrontAndThePlayerCannotWalkIntoIt()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        world.Game.Tools = new Dictionary<string, GameTool> { ["tree-tool"] = new TreeTool() };
+        var (page, player) = await world.JoinAsync();
+        var (x, y) = (player.X, player.Y);
+
+        // Act
+        await page.GetByTestId("game-action").Filter(new() { HasText = "Plant tree" }).ClickAsync(new() { Timeout = Timeout });
+        await page.Locator(".mud-dialog").GetByRole(AriaRole.Button, new() { Name = "Execute" }).ClickAsync(new() { Timeout = Timeout });
+        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 1, message: "The tree was not planted");
+        await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Tree", new() { Timeout = Timeout });
+        await page.Keyboard.PressAsync("ArrowUp");
+        // The circuit answers the turn after the step, so the turn shows only once the step was decided.
+        await page.Keyboard.PressAsync("Shift+ArrowLeft");
+
+        // Assert
+        var tree = Assert.IsType<Tree>(Assert.Single(world.Game.Objects.Values));
+        Assert.Equal((x, y + GamePlayer.Size), (tree.X, tree.Y));
+        await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x, y, "W"), new() { Timeout = Timeout });
+        var canvas = page.GetByTestId("game-canvas");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-model-failures", "0", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenATreeStandsBetweenTwoPlayers_ThenTheListenerStillPlaysTheTalkersFrames()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+
+        // Two meters east of the listener, with a tree right between them.
+        talkerPlayer.X = listenerPlayer.X + 8;
+        talkerPlayer.Y = listenerPlayer.Y;
+        world.Game.Objects = new Dictionary<string, GameObject> { ["tree"] = new Tree { X = listenerPlayer.X + 4, Y = listenerPlayer.Y } };
+
+        // Act
+        await TurnOnVoiceAsync(talker);
+        await TurnOnVoiceAsync(listener);
+
+        // Assert
+        await Expect(listener.GetByTestId("game-nearby-player").Filter(new() { HasText = talkerPlayer.Title })).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 50);
+    }
+
+    [Fact]
     public async Task WhenAWallWithAnOpenDoorStandsBetweenTheCameraAndThePlayer_ThenTheDoorFades()
     {
         // Arrange

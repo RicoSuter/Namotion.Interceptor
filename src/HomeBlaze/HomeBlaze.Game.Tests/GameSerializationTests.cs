@@ -10,7 +10,7 @@ public class GameSerializationTests
     public GameSerializationTests()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(Game), typeof(Wall), typeof(Door), typeof(GamePlayer), typeof(WallTool)]);
+        typeProvider.AddTypes([typeof(Game), typeof(Wall), typeof(Door), typeof(GamePlayer), typeof(WallTool), typeof(Tree), typeof(TreeTool)]);
         var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         _serializer = new ConfigurableSubjectSerializer(typeProvider, services);
     }
@@ -199,6 +199,28 @@ public class GameSerializationTests
 
         // Assert
         Assert.Empty(game.Tools);
+    }
+
+    [Fact]
+    public void WhenATreeAndTheTreeToolRoundTrip_ThenTheyKeepTheirTypeAndState()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Objects = new Dictionary<string, GameObject> { ["tree-1"] = new Tree { X = 3, Y = 4, Variant = 5, Rotation = 120, Scale = 90 } },
+            Tools = new Dictionary<string, GameTool> { ["tree-tool"] = new TreeTool() }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+        var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Nature.Tree\"", json);
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Nature.TreeTool\"", json);
+        var tree = Assert.IsType<Tree>(loaded.Objects["tree-1"]);
+        Assert.Equal((3, 4, 5, 120, 90), (tree.X, tree.Y, tree.Variant, tree.Rotation, tree.Scale));
+        Assert.IsType<TreeTool>(loaded.Tools["tree-tool"]);
     }
 
     [Fact]
