@@ -226,6 +226,11 @@ export function createInput(dotNet, options, entities) {
                 dotNet.invokeMethodAsync('InvokeTargetAction', number - 1).catch(() => { });
             }
         }
+
+        if ((event.code === 'KeyM' || event.code === 'KeyN') && !event.repeat) {
+            event.preventDefault();
+            dotNet.invokeMethodAsync(event.code === 'KeyM' ? 'ToggleMicrophone' : 'ToggleAudio').catch(() => { });
+        }
     }
 
     function onKeyUp(event) {

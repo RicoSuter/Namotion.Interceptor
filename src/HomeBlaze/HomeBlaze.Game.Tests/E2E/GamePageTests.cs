@@ -1,5 +1,6 @@
 using System.Globalization;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Game.Voice;
 using HomeBlaze.Installation;
 using Microsoft.Playwright;
 using Namotion.Interceptor.Testing;
@@ -17,6 +18,8 @@ public class GamePageTests
 {
     private const int Timeout = 30000;
     private const string SelfSuffix = " (you)";
+    private const string ReceivedFramesAttribute = "data-voice-received-frames";
+    private const string SentFramesAttribute = "data-voice-sent-frames";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -178,7 +181,51 @@ public class GamePageTests
         await Expect(second.GetByTestId("client-notification-message")).ToHaveTextAsync("Hello from the game", new() { Timeout = Timeout });
     }
 
+    [Fact]
+    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheSpeakersFrames()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (speaker, speakerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+
+        // One meter east of the listener, well within the hearing range.
+        speakerPlayer.X = listenerPlayer.X + 4;
+        speakerPlayer.Y = listenerPlayer.Y;
+
+        // Act
+        await TurnOnVoiceAsync(speaker);
+        await TurnOnVoiceAsync(listener);
+
+        // Assert
+        await WaitForCounterAsync(speaker, SentFramesAttribute, 25);
+        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
+    }
+
     private static string FormatPosition(int x, int y, string facing) => $"X {x} · Y {y} · facing {facing}";
+
+    private static BrowserNewContextOptions CreateMicrophoneContext() => new() { Permissions = ["microphone"] };
+
+    private static async Task TurnOnVoiceAsync(IPage page)
+    {
+        foreach (var testId in new[] { "game-microphone", "game-audio" })
+        {
+            var button = page.GetByTestId(testId);
+            await button.ClickAsync(new() { Timeout = Timeout });
+            await Expect(button).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+        }
+    }
+
+    // game-voice.js counts the frames on the panel, which Playwright polls without a fixed wait.
+    private static Task WaitForCounterAsync(IPage page, string attribute, int minimum) =>
+        page.WaitForFunctionAsync(
+            "([attribute, minimum]) => Number(document.querySelector('[data-testid=\"game-panel\"]')?.getAttribute(attribute) ?? 0) >= minimum",
+            new object[] { attribute, minimum },
+            new() { Timeout = Timeout });
+
+    private static async Task<int> ReadCounterAsync(IPage page, string attribute) =>
+        int.Parse(await page.GetByTestId("game-panel").GetAttributeAsync(attribute) ?? "0", CultureInfo.InvariantCulture);
 
     private static ILocatorAssertions Expect(ILocator locator) => Assertions.Expect(locator);
 
@@ -220,9 +267,11 @@ public class GamePageTests
         /// Opens the game in a new browser context, which is a new client, waits until its player joined, and moves the
         /// players of earlier tests far away so that they cannot block it.
         /// </summary>
-        public async Task<(IPage Page, GamePlayer Player)> JoinAsync(BrowserNewContextOptions? options = null)
+        /// <param name="options">The options of the browser context, or null for the defaults.</param>
+        /// <param name="browser">The browser to open the game in, or null for the shared one.</param>
+        public async Task<(IPage Page, GamePlayer Player)> JoinAsync(BrowserNewContextOptions? options = null, IBrowser? browser = null)
         {
-            var context = await _fixture.Browser.NewContextAsync(options);
+            var context = await (browser ?? _fixture.Browser).NewContextAsync(options);
             _contexts.Add(context);
             var page = await context.NewPageAsync();
             await page.GotoAsync($"{_fixture.ServerAddress}pages/{_gameName}");
@@ -272,6 +321,39 @@ public class GamePageTests
 
             _fixture.RemoveSubjectFromRoot(_gameName, Game);
             _fixture.RemoveSubjectFromRoot(_installationName, _installation);
+        }
+    }
+
+    /// <summary>
+    /// A Chromium whose microphone is a test tone and that grants it without a dialog; the shared browser has neither.
+    /// </summary>
+    private sealed class MediaBrowser : IAsyncDisposable
+    {
+        private readonly IPlaywright _playwright;
+
+        private MediaBrowser(IPlaywright playwright, IBrowser browser)
+        {
+            _playwright = playwright;
+            Browser = browser;
+        }
+
+        public IBrowser Browser { get; }
+
+        public static async Task<MediaBrowser> LaunchAsync()
+        {
+            var playwright = await Playwright.CreateAsync();
+            var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true,
+                Args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+            });
+            return new MediaBrowser(playwright, browser);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Browser.CloseAsync();
+            _playwright.Dispose();
         }
     }
 }
