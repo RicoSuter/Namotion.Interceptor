@@ -2,7 +2,7 @@
   "$type": "HomeBlaze.Game.Game",
   "name": "Demo world",
   "players": {},
-  "tools": { "wall-tool": { "$type": "HomeBlaze.Game.Objects.Buildings.WallTool" } },
+  "tools": { "wall-tool": { "$type": "HomeBlaze.Game.Objects.Buildings.WallTool" }, "tree-tool": { "$type": "HomeBlaze.Game.Objects.Nature.TreeTool" } },
   "objects": {
     "house-south-west": { "$type": "HomeBlaze.Game.Objects.Buildings.Wall", "x": -20, "y": 8, "width": 19, "depth": 1, "height": 10 },
     "house-south-east": { "$type": "HomeBlaze.Game.Objects.Buildings.Wall", "x": 3, "y": 8, "width": 17, "depth": 1, "height": 10 },

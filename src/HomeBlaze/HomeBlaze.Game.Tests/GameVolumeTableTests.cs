@@ -44,6 +44,23 @@ public class GameVolumeTableTests
     }
 
     [Fact]
+    public void WhenATreeStandsBetweenTwoPlayers_ThenTheyHearEachOtherAsWithoutIt()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        _context.AddObject("tree", new Tree { X = 5, Y = 0 });
+
+        // Act
+        _context.Game.UpdateVolumeTable();
+
+        // Assert
+        var table = _context.Game.VolumeTable;
+        Assert.Equal(0.4f, FindVolume(table, "tab-1", "tab-2"));
+        Assert.Equal(0.4f, FindVolume(table, "tab-2", "tab-1"));
+    }
+
+    [Fact]
     public void WhenAPlayerIsOutOfRange_ThenBothRowsAreEmpty()
     {
         // Arrange
