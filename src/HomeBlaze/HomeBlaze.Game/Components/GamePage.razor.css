@@ -21,6 +21,23 @@
     touch-action: none;
 }
 
+/* game.js writes the frame rate here; it stays empty until the first measurement. */
+.game-fps {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font: 500 11px/16px monospace;
+    color: #fff;
+    background: rgba(0, 0, 0, .45);
+    pointer-events: none;
+}
+
+.game-fps:empty {
+    display: none;
+}
+
 .game-message {
     position: absolute;
     top: 16px;

@@ -9,6 +9,7 @@ const CAMERA_SNAP_DISTANCE = 20;
 // Where the camera sits relative to the point it looks at, in tiles: above it and south of it.
 const CAMERA_HEIGHT = 28;
 const CAMERA_DISTANCE = 30;
+const FPS_INTERVAL = 500;
 let babylonLoading = null;
 
 // The page also hosts an AMD loader with a global define, which would make the UMD builds register as anonymous AMD
@@ -127,6 +128,9 @@ class GameView {
         this.dotNet = dotNet;
         this.options = options;
         this.lastFrame = performance.now();
+        this.fpsElement = canvas.parentElement?.querySelector('[data-game-fps]') ?? null;
+        this.lastFpsUpdate = 0;
+        this.shownFps = -1;
     }
 
     async initialize() {
@@ -206,6 +210,20 @@ class GameView {
         }
 
         this.scene.render();
+        this.showFps(now);
+    }
+
+    showFps(now) {
+        if (!this.fpsElement || now - this.lastFpsUpdate < FPS_INTERVAL) {
+            return;
+        }
+
+        this.lastFpsUpdate = now;
+        const fps = Math.round(this.engine.getFps());
+        if (fps !== this.shownFps) {
+            this.shownFps = fps;
+            this.fpsElement.textContent = `${fps} FPS`;
+        }
     }
 
     dispose() {
