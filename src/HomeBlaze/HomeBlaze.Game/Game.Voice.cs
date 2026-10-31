@@ -7,6 +7,9 @@ public partial class Game
 {
     private readonly GameVoiceMixer _voiceMixer;
 
+    // Touched only by the voice loop.
+    private bool _isVoiceTickFailing;
+
     // Guarded by _lock: the players with a voice toggle on by client id, so that an outside replacement of Players
     // finds the instances whose state and mixer speaker it orphaned.
     private readonly Dictionary<string, GamePlayer> _voicePlayers = new();
@@ -89,19 +92,41 @@ public partial class Game
 
     /// <summary>
     /// Rebuilds the volume table when it is due and mixes one frame for every listener; logs instead of throwing, so
-    /// voice never stops the loop.
+    /// voice never stops the loop. A failing rebuild or handler does not skip the mix.
     /// </summary>
     internal void TickVoice()
     {
+        var hasFailed = false;
         try
         {
             UpdateVolumeTable();
+        }
+        catch (Exception exception)
+        {
+            hasFailed = true;
+            LogVoiceTickFailure(exception);
+        }
+
+        try
+        {
             _voiceMixer.Mix(_volumeTable);
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "A voice tick of the game {Game} failed", Title);
+            hasFailed = true;
+            LogVoiceTickFailure(exception);
         }
+
+        _isVoiceTickFailing = hasFailed;
+    }
+
+    // Warns when ticks start failing and stays at debug level while they keep failing, so a persistent fault does not
+    // flood the log at the frame rate.
+    private void LogVoiceTickFailure(Exception exception)
+    {
+        var level = _isVoiceTickFailing ? LogLevel.Debug : LogLevel.Warning;
+        _isVoiceTickFailing = true;
+        _logger.Log(level, exception, "A voice tick of the game {Game} failed", Title);
     }
 
     // Ticks every frame duration until canceled.

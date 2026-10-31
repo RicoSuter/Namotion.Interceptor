@@ -14,9 +14,12 @@ public partial class Game
     // Guarded by _lock: scratch space of the rebuild.
     private readonly List<GameObject> _volumeCandidates = [];
 
-    // Guarded by _lock: the index version and the time of the last rebuild.
+    // Guarded by _lock: the index version of the last rebuild.
     private long _volumeTableIndexVersion = -1;
-    private long? _lastVolumeTableRebuild;
+
+    // Written under _lock only, with the timestamp before the flag; read without it by the gate before the lock.
+    private long _lastVolumeTableRebuild;
+    private bool _hasVolumeTableRebuilt;
 
     /// <summary>
     /// For every connected player, the players it hears and how loud. A published table never changes, so a reader
@@ -48,11 +51,17 @@ public partial class Game
 
     private bool TryRebuildVolumeTable()
     {
+        // The gate runs before the lock and before GetIndex, so a stale index is not rebuilt on every tick.
+        var now = _timeProvider.GetTimestamp();
+        if (!IsVolumeTableIntervalOver(now))
+        {
+            return false;
+        }
+
         lock (_lock)
         {
             var index = GetIndex();
-            var now = _timeProvider.GetTimestamp();
-            if (!IsVolumeTableDue(index, now))
+            if (!_isVolumeTableDirty && index.Version == _volumeTableIndexVersion)
             {
                 return false;
             }
@@ -60,20 +69,13 @@ public partial class Game
             _volumeTable = GameVolumeTable.Build(Players, index, _volumeCandidates);
             _isVolumeTableDirty = false;
             _volumeTableIndexVersion = index.Version;
-            _lastVolumeTableRebuild = now;
+            Volatile.Write(ref _lastVolumeTableRebuild, now);
+            Volatile.Write(ref _hasVolumeTableRebuilt, true);
             return true;
         }
     }
 
-    // Callers hold _lock.
-    private bool IsVolumeTableDue(GameWorldIndex index, long now)
-    {
-        if (!_isVolumeTableDirty && index.Version == _volumeTableIndexVersion)
-        {
-            return false;
-        }
-
-        return _lastVolumeTableRebuild is not { } last
-            || _timeProvider.GetElapsedTime(last, now) >= GameVoiceSettings.VolumeTableInterval;
-    }
+    private bool IsVolumeTableIntervalOver(long now) =>
+        !Volatile.Read(ref _hasVolumeTableRebuilt)
+        || _timeProvider.GetElapsedTime(Volatile.Read(ref _lastVolumeTableRebuild), now) >= GameVoiceSettings.VolumeTableInterval;
 }
