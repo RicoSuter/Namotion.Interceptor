@@ -27,7 +27,7 @@ The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`Operat
 | `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `FrontPlacement` |
 | `View/` | `GameViewTracker` and what it sends to the browser: `GameViewObject`, `GameViewPart`, `GameViewUpdate`, and `GameColors` for players |
 | `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVolumeTable`, `TalkerQueue`, `GameVoiceMixer`, `IGameVoiceSink` |
-| `Components/` | `GamePage.razor` and `GameCallerServiceProvider` |
+| `Components/` | `GamePage.razor`, `GameNameDialog.razor` and `GameCallerServiceProvider` |
 | `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera, frame rate), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (parts, models, wind, glides, fading, players, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/`, `objects/` (assets of the object types) |
 
 ## Model
@@ -133,7 +133,7 @@ All sizes are in tiles at a scale of 100 percent: the height is the shown height
 
 ## Clients and players
 
-The game reads clients through the internal `IGameClientDirectory` (list clients with id, title, named and connected; send a notification; recognize property changes that concern clients). `InstallationClientDirectory` finds the `[SingleInstance]` `HomeBlazeInstallation` in the registry and caches it while the registry still knows it. Unit tests use `FakeClientDirectory` because the installation's own client reconciling is internal to it; the E2E tests cover the real one.
+The game reads clients through the internal `IGameClientDirectory` (list clients with id, title, named and connected; send a notification; rename a client; recognize property changes that concern clients). `InstallationClientDirectory` finds the `[SingleInstance]` `HomeBlazeInstallation` in the registry and caches it while the registry still knows it; renaming calls `HomeBlazeClient.RenameAsync`, which names an anonymous client and saves the installation's client configuration. Game unit tests use `FakeClientDirectory` because the installation's own client reconciling is internal to it; `InstallationClientDirectoryTests` and the E2E tests cover the real one.
 
 `ReconcilePlayers` rules:
 
@@ -142,6 +142,8 @@ The game reads clients through the internal `IGameClientDirectory` (list clients
 - An offline named player keeps its saved position but is neither visible nor blocking, so nobody walks into an invisible obstacle.
 - Renaming a client keeps its id, so its player keeps its position. Forgetting a client turns its tabs into new anonymous clients, so the old player is removed and new ones spawn. All tabs of a named client control the same player.
 - Without an installation, `GetClients` returns null and the players stay as they are.
+
+A player changes the name of its own client through the internal `Game.RenameAsync(caller, name, cancellationToken)`, which the page calls from the pencil button of its own Nearby entry. It is not an operation, so MCP, agents and other clients cannot rename a client through the game. It refuses a caller that is not a player of this game ("Only a player in the game can change their name.") and a name that is empty or longer than `MaximumNameLength` (50) after trimming, passes the trimmed name to the directory and signals a reconcile, through which the player takes the new title. `Game.GetClientName(caller)` gives the name the dialog starts from, null while the client is anonymous.
 
 The loop in `ExecuteAsync` reconciles, flushes a pending save and then waits for either the signal or `HousekeepingInterval` (5 s). The signal is a `SemaphoreSlim(0, 1)` released by `SignalReconcile` on client changes, outside replacements of `Players` and `ApplyConfigurationAsync`. Exactly one pending wait is kept across passes: a new wait per pass would leave the old one queued to swallow the next signal.
 
@@ -350,7 +352,7 @@ Rendering:
 - The frame rate shows at the top left of the view in the element marked `data-game-fps`, which `game.js` updates every 500 ms.
 - For tests and diagnosis the canvas carries `data-game-parts` (parts of the objects in view), `data-game-models` (model parts showing their model), `data-game-model-failures` (model parts showing the fallback box) and `data-game-faded` (objects faded now).
 
-Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** with the pad, **Voice** (microphone and speaker buttons, errors below the top of the panel), **Actions** (operations of the `Game`, then of every tool ordered by its name in `Tools`, disabled without a player; they come first, so they keep their place while targets come and go), **Looking at** (only while targets exist, actions numbered 1 to 9 across all targets) and **Nearby** (the own player first, then the players in its row of the volume table by title, each with a crossed-out microphone or speaker while that one is off, dimmed while the own speaker is off). A new table with the same players keeps the list, because their toggles and titles reach it through the view.
+Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** with the pad, **Voice** (microphone and speaker buttons, errors below the top of the panel), **Actions** (operations of the `Game`, then of every tool ordered by its name in `Tools`, disabled without a player; they come first, so they keep their place while targets come and go), **Looking at** (only while targets exist, actions numbered 1 to 9 across all targets) and **Nearby** (the own player first, then the players in its row of the volume table by title, each with a crossed-out microphone or speaker while that one is off, dimmed while the own speaker is off). The own entry has a pencil button, "Change my name", which opens `GameNameDialog` with the current name, or an empty field while the client is anonymous; Save, or Enter, renames the client, and a failure shows in the error dialog of failed actions. A new table with the same players keeps the list, because their toggles and titles reach it through the view.
 
 ## Assets and licenses
 
@@ -377,8 +379,8 @@ The E2E tests need Playwright's Chromium (`playwright.ps1 install chromium` from
 
 | Helper | Purpose |
 |---|---|
-| `TestRoot` | A root subject that holds the game and counts configuration writes; `FailsToWrite` simulates failures |
-| `FakeClientDirectory` | Thread-safe clients and recorded notifications; `RemoveInstallation` simulates a missing installation |
+| `TestRoot` | A root subject that holds the game, and optionally an installation, and counts configuration writes; `FailsToWrite` simulates failures |
+| `FakeClientDirectory` | Thread-safe clients, renames and recorded notifications; `RemoveInstallation` simulates a missing installation |
 | `GameTestContext` | A game in a `TestRoot` with a `FakeTimeProvider` and fake clients; adds connected players, walls, doors, other objects and tools |
 | `MovementBlocker` | An object that blocks movement but lets sound through, like a plant or a chair |
 | `VisualObject`, `WarnedVisualObject` | Objects whose visual a test sets; the second is a type of its own for the warning that is logged once per type |

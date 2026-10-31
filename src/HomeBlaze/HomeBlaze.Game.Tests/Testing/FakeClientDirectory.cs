@@ -42,6 +42,23 @@ internal sealed class FakeClientDirectory : IGameClientDirectory
         return Task.CompletedTask;
     }
 
+    public Task RenameAsync(string clientId, string name, CancellationToken cancellationToken)
+    {
+        lock (_lock)
+        {
+            var clients = _clients;
+            var index = clients?.FindIndex(client => client.Id == clientId) ?? -1;
+            if (clients is null || index < 0)
+            {
+                throw new InvalidOperationException("The player has no client anymore.");
+            }
+
+            clients[index] = clients[index] with { Title = name, IsNamed = true };
+        }
+
+        return Task.CompletedTask;
+    }
+
     public bool IsClientChange(SubjectPropertyChange change) => false;
 
     public void Set(string id, bool isNamed, bool isConnected, string? title = null)

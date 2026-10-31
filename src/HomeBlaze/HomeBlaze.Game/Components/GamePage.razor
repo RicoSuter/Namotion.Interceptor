@@ -5,6 +5,7 @@
 @using System.Reactive.Linq
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Components.Operations
 @using HomeBlaze.Game.View
 @using HomeBlaze.Game.Voice
@@ -129,6 +130,14 @@
                 <div class="@(player.IsSelf || _isAudioOn ? "game-nearby" : "game-nearby game-nearby-dimmed")" data-testid="game-nearby-player">
                     <span class="game-dot" style="background: @player.Color"></span>
                     <span class="game-nearby-title">@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
+                    @if (player.IsSelf)
+                    {
+                        <span class="game-nearby-icon" title="@RenameTitle">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="game-nearby-rename"
+                                           Disabled="@_isRenaming" aria-label="@RenameTitle"
+                                           data-testid="game-rename" OnClick="RenameAsync" />
+                        </span>
+                    }
                     @if (!player.IsMicrophoneOn)
                     {
                         <span class="game-nearby-icon" title="Microphone off" data-testid="game-nearby-microphone-off">
@@ -149,6 +158,7 @@
 
 @code {
     private const string JoiningMessage = "Joining the game…";
+    private const string RenameTitle = "Change my name";
     private const string ModulePath = "./_content/HomeBlaze.Game/game.js";
     private const string VoiceModulePath = "./_content/HomeBlaze.Game/game-voice.js";
     private const string InsecureMessage = "Voice needs HTTPS";
@@ -195,6 +205,7 @@
     // of the same operation, also on another object of that type, starts from them.
     private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _lastParameters = new();
     private bool _isInvoking;
+    private bool _isRenaming;
     private bool _isViewBroken;
     private IJSObjectReference? _voiceModule;
     // Null until game-voice.js answered, false where the browser offers no voice.
@@ -748,6 +759,33 @@
         }
 
         await FlushAsync();
+    }
+
+    private async Task RenameAsync()
+    {
+        if (_isDisposed || _isRenaming || Game is not { } game || _player is not { } player)
+        {
+            return;
+        }
+
+        _isRenaming = true;
+        try
+        {
+            var caller = new GameCaller(player);
+            var name = await GameNameDialog.ShowAsync(DialogService, game.GetClientName(caller));
+            if (name is not null && !_isDisposed)
+            {
+                await game.RenameAsync(caller, name, CancellationToken.None);
+            }
+        }
+        catch (Exception exception) when (!_isDisposed)
+        {
+            await MethodErrorDialog.ShowAsync(DialogService, RenameTitle, exception);
+        }
+        finally
+        {
+            _isRenaming = false;
+        }
     }
 
     // Called inside the writes of the object graph, so it never blocks.

@@ -7,6 +7,60 @@ namespace HomeBlaze.Game;
 public partial class Game
 {
     /// <summary>
+    /// The most characters a name that a player gives its client may have.
+    /// </summary>
+    internal const int MaximumNameLength = 50;
+
+    /// <summary>
+    /// The message with which renaming is refused for a caller that is not a player of this game.
+    /// </summary>
+    internal const string NoRenameActorMessage = "Only a player in the game can change their name.";
+
+    /// <summary>
+    /// Gets the name of the client of the caller's player, or null while that client is anonymous or the caller is not a
+    /// player of this game.
+    /// </summary>
+    internal string? GetClientName(GameCaller? caller)
+    {
+        if (ResolveActor(caller) is not { } player || _clients.GetClients() is not { } clients)
+        {
+            return null;
+        }
+
+        foreach (var client in clients)
+        {
+            if (client.Id == player.ClientId)
+            {
+                return client.IsNamed ? client.Title : null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Names the client of the caller's player, which keeps the player when its browser closes; the player takes the
+    /// name with the next reconcile, which this requests.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is empty or longer than <see cref="MaximumNameLength"/> after trimming.</exception>
+    /// <exception cref="InvalidOperationException">The caller is not a player of this game, or its client is gone.</exception>
+    internal async Task RenameAsync(GameCaller? caller, string name, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var trimmed = name.Trim();
+        if (trimmed.Length > MaximumNameLength)
+        {
+            throw new ArgumentException($"A name has at most {MaximumNameLength} characters.", nameof(name));
+        }
+
+        var player = ResolveActor(caller) ?? throw new InvalidOperationException(NoRenameActorMessage);
+        await _clients.RenameAsync(player.ClientId, trimmed, cancellationToken);
+
+        // Not every directory reports the rename as a client change.
+        SignalReconcile();
+    }
+
+    /// <summary>
     /// Brings <see cref="Players"/> in line with the clients: a client that is connected or named has a player, which
     /// joins on a free position; does nothing while there is no installation.
     /// </summary>

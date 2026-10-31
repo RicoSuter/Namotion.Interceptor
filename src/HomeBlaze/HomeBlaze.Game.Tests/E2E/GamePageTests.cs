@@ -48,6 +48,26 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenThePlayerChangesItsName_ThenNearbyShowsTheNewName()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var name = $"E2E player {Guid.NewGuid():N}";
+
+        // Act
+        await page.GetByRole(AriaRole.Button, new() { Name = "Change my name" }).ClickAsync(new() { Timeout = Timeout });
+        var input = page.GetByTestId("game-name-input");
+        await input.FillAsync(name, new() { Timeout = Timeout });
+        await input.PressAsync("Enter");
+
+        // Assert
+        await Expect(page.GetByTestId("game-nearby-player").Filter(new() { HasText = name + SelfSuffix })).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        Assert.Equal(name, player.ClientTitle);
+    }
+
+    [Fact]
     public async Task WhenArrowRightIsPressed_ThenThePlayerStepsEast()
     {
         // Arrange
