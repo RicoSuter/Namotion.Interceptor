@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -42,14 +41,13 @@ internal class SetPropertyTool
             return Task.FromResult<object?>(new { error = "Server is in read-only mode." });
         }
 
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        var result = _configuration.UnfilteredPathProvider.TryGetPropertyFromPath(rootRegistered, path);
+        var result = _configuration.TryGetReadableProperty(rootRegistered, path);
 
         if (result is null)
         {

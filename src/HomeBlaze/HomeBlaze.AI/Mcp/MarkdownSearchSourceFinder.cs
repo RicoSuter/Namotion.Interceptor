@@ -113,8 +113,10 @@ internal sealed class MarkdownSearchSourceFinder
         return notes;
     }
 
-    // The path as browse and search show it: the path through the first parent, after the path prefix; null for a
-    // subject of an excluded type or below one.
+    // The path as browse and search show it, after the path prefix: through the first parent, in registry order, from
+    // which a path can be written; null for a subject of an excluded type or below one. The path provider lets paths
+    // pass every property that holds subjects, except an attribute of a property it excludes, so without such
+    // attributes this is the parent the tools choose.
     private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
     {
         if (ReferenceEquals(subject.Subject, rootSubject))
@@ -122,13 +124,21 @@ internal sealed class MarkdownSearchSourceFinder
             return _pathPrefix;
         }
 
-        if (subject.Parents is not [var parent, ..] || AgentMetadataAccess.IsOfExcludedType(subject, rootSubject, _excludeTypes))
+        var parents = subject.Parents;
+        if (parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, rootSubject, _excludeTypes))
         {
             return null;
         }
 
-        var path = parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index);
-        return path is null ? null : _pathPrefix + path;
+        foreach (var parent in parents)
+        {
+            if (parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index) is { } path)
+            {
+                return _pathPrefix + path;
+            }
+        }
+
+        return null;
     }
 
     // Whole segments only, so /Docs does not match /DocsArchive/Page.md; every path is under no prefix.

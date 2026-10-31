@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tests.Tools.Access;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -60,7 +61,7 @@ public class BrowseToolTests
     }
 
     [Fact]
-    public async Task WhenTheWriteFilterRefusesAProperty_ThenBrowseReportsItAsNotWritable()
+    public async Task WhenThePolicyDeniesWrite_ThenBrowseReportsThePropertyAsNotWritable()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -73,7 +74,7 @@ public class BrowseToolTests
         {
             PathProvider = DefaultPathProvider.Instance,
             IsReadOnly = false,
-            PropertyWriteFilter = property => property.Name == nameof(TestDevice.IsOn) ? "Protected." : null
+            AccessPolicy = TestAccessPolicy.DenyWrite(nameof(TestDevice.IsOn))
         };
         var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
 

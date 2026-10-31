@@ -401,6 +401,45 @@ public static class PathExtensions
         }
     }
 
+    /// <summary>
+    /// Gets whether a path from <paramref name="property"/> up to <paramref name="rootSubject"/>, or to the absolute
+    /// top when it is null, passes only properties <paramref name="pathProvider"/> includes under the rule of
+    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>: the property itself and every property holding it, an
+    /// [InlinePaths] dictionary included. The path is searched as
+    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> searches it:
+    /// with a root through any parent of a subject with several parents, without one through the first parent of each
+    /// subject.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="pathProvider">The path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>
+    /// True when such a path exists; false when every path passes an excluded property, when a given root is not
+    /// reachable, or when the parent chain has a cycle.
+    /// </returns>
+    /// <remarks>
+    /// <c>TryGetPath</c> with the same provider and root returns null whenever this returns false. When this returns
+    /// true it returns the path, except that it also returns null when an [InlinePaths] key needs the explicit form
+    /// while another property's segment shadows the inline property, or when the built text is empty.
+    /// </remarks>
+    public static bool HasIncludedPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
+    {
+        if (!pathProvider.TryGetSegmentIncludedInPaths(property, out var leafSegment))
+        {
+            return false;
+        }
+
+        var frames = PooledFrames.Rent();
+        try
+        {
+            return TryBuildPathFrames(property, leafSegment, pathProvider, rootSubject, propertyIndex: null, ref frames);
+        }
+        finally
+        {
+            frames.Return();
+        }
+    }
+
     private static bool TryAppendInlineKey(
         StringBuilder builder, PathProviderBase pathProvider, PathCharacters characters,
         RegisteredSubjectProperty property, object index, string ownSegment)

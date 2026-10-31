@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -55,8 +53,7 @@ internal class SearchTool
 
     private Task<object?> HandleSearchAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var registry = _rootSubjectProvider().Context.TryGetService<ISubjectRegistry>();
         if (registry is null)
@@ -114,6 +111,7 @@ internal class SearchTool
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
+        var visibility = McpVisibility.For(_configuration, rootSubject);
 
         foreach (var (_, registered) in registry.KnownSubjects)
         {
@@ -128,7 +126,7 @@ internal class SearchTool
             }
 
             // Compute path cheaply before building full DTO
-            var path = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration);
+            var path = McpToolHelper.TryGetSubjectPath(registered, _configuration, rootSubject);
             if (path is null)
             {
                 continue;
@@ -145,9 +143,14 @@ internal class SearchTool
                 continue;
             }
 
-            unseenPropertyNames?.Observe(registered, pathProvider);
+            if (!visibility.IsShown(registered))
+            {
+                continue;
+            }
 
-            if (filter is not null && !filter.Matches(registered, pathProvider))
+            unseenPropertyNames?.Observe(registered, pathProvider, visibility);
+
+            if (filter is not null && !filter.Matches(registered, pathProvider, visibility))
             {
                 continue;
             }
@@ -160,7 +163,7 @@ internal class SearchTool
 
             // Build full DTO only for subjects that pass all filters
             var node = McpToolHelper.BuildSubjectNodeDto(
-                registered, pathProvider, rootSubject, _configuration,
+                registered, path, pathProvider, _configuration,
                 includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames);
 
             subjects[path] = node;

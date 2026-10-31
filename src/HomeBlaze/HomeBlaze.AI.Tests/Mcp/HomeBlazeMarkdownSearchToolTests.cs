@@ -6,6 +6,7 @@ using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -501,6 +503,29 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
 
         // Assert
         Assert.Same(McpToolAnnotations.ReadOnly, tool.Annotations);
+    }
+
+    [Fact]
+    public async Task WhenAPagesFirstParentIsOutsideTheToolRoot_ThenItsPathGoesThroughTheParentInsideIt()
+    {
+        // Arrange
+        // The page got the storage first, which the tool root below does not hold.
+        var (graphRoot, services) = await CreateGraphAsync([]);
+        var page = ((IInterceptorSubject)graphRoot).Context.GetService<ISubjectRegistry>().KnownSubjects.Values
+            .Select(subject => subject.Subject)
+            .OfType<MarkdownFile>()
+            .Single(file => file.Name == "Notes.md");
+        var toolRoot = new AgentTestRoot(((IInterceptorSubject)graphRoot).Context)
+        {
+            Children = new Dictionary<string, IInterceptorSubject> { ["Page"] = page }
+        };
+        var tool = CreateTool(services, toolRoot, forAgents: false);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Page"], result.GetProperty("pages").EnumerateArray().Select(match => match.GetProperty("path").GetString()));
     }
 
     private async Task<McpToolInfo> CreateToolAsync(params (string Path, string Content)[] additionalFiles)

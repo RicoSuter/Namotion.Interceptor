@@ -1238,6 +1238,51 @@ public class PathExtensionsTests
             Assert.Same(person.Father, result!.Value.Property.Subject);
         }
     }
+
+    // --- Writing only through included properties ---
+
+    [Fact]
+    public void WhenASubjectOnTheChainMovesBehindAnExcludedPropertyWhileItIsChecked_ThenNoPathIsWrittenThroughIt()
+    {
+        // Arrange
+        // On its first check of father.Father the provider moves the father behind the excluded Mother, which the walk
+        // then reaches.
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person(context) { FirstName = "Father" };
+        var grand = new Person(context) { FirstName = "Grand" };
+        root.Father = father;
+        father.Father = grand;
+        var property = grand.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        var pathProvider = new MovingPathProvider(father.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Father))!, () =>
+        {
+            root.Mother = father;
+            root.Father = null;
+        });
+
+        // Act
+        var path = property.TryGetPath(pathProvider, root, null);
+
+        // Assert
+        Assert.True(pathProvider.IsMoved);
+        Assert.Null(path);
+    }
+
+    private sealed class MovingPathProvider(RegisteredSubjectProperty trigger, Action move) : PathProviderBase
+    {
+        public bool IsMoved { get; private set; }
+
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        {
+            if (!IsMoved && property == trigger)
+            {
+                IsMoved = true;
+                move();
+            }
+
+            return property.Name != nameof(Person.Mother);
+        }
+    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]
