@@ -2,9 +2,9 @@ namespace HomeBlaze.Game.World;
 
 /// <summary>
 /// The only definition of who hears whom and how loud. Sound travels along the shortest open path between the footprint
-/// centers: the straight line while it touches no tile that blocks sound, otherwise the path that
-/// <see cref="SoundPathSearch"/> finds around walls and closed doors. The volume is the distance gain of the path
-/// length times the occlusion gain of the detour, the length the path exceeds the straight distance by.
+/// centers: the straight line while it touches no tile of an object whose <see cref="GameObject.IsSoundBlocking"/> is
+/// true, otherwise the path that <see cref="SoundPathSearch"/> finds around such objects. The volume is the distance gain of the path length times
+/// the occlusion gain of the detour, the length the path exceeds the straight distance by.
 /// </summary>
 internal static class HearingRange
 {

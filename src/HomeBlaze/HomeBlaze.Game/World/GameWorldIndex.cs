@@ -15,7 +15,7 @@ internal sealed class GameWorldIndex
 
     /// <summary>
     /// Increases with every change of the indexed objects, so a reader can tell whether anything moved, appeared,
-    /// disappeared or changed its blocking since it last looked.
+    /// disappeared or changed its movement blocking, sound blocking or visibility since it last looked.
     /// </summary>
     public long Version { get; private set; }
 
@@ -27,8 +27,8 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds the object, or moves it to its current footprint and blocking and visibility state; leaves out an object
-    /// with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
+    /// Adds the object, or moves it to its current footprint and its movement blocking, sound blocking and visibility
+    /// state; leaves out an object with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
     /// </summary>
     public void AddOrUpdate(GameObject gameObject)
     {
@@ -39,7 +39,7 @@ internal sealed class GameWorldIndex
             return;
         }
 
-        var entry = new Entry(gameObject.Footprint, gameObject.IsBlocking, gameObject.IsVisible);
+        var entry = new Entry(gameObject.Footprint, gameObject.IsBlocking, gameObject.IsSoundBlocking, gameObject.IsVisible);
         if (_entries.TryGetValue(gameObject, out var existing))
         {
             if (existing == entry)
@@ -109,8 +109,7 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Whether a blocking object that is not a player covers the tile, which stops sound: walls and closed doors do,
-    /// open doors and players do not.
+    /// Whether an object whose <see cref="GameObject.IsSoundBlocking"/> is true covers the tile, whether visible or not.
     /// </summary>
     public bool IsSoundBlocked(long x, long y)
     {
@@ -121,7 +120,7 @@ internal sealed class GameWorldIndex
 
         foreach (var gameObject in objects)
         {
-            if (IsSoundBlocking(gameObject, out var footprint) && footprint.Contains(x, y))
+            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Contains(x, y))
             {
                 return true;
             }
@@ -184,18 +183,18 @@ internal sealed class GameWorldIndex
     {
         foreach (var gameObject in objects)
         {
-            if (IsSoundBlocking(gameObject, out var footprint) && footprint.Intersects(area) && _found.Add(gameObject))
+            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Intersects(area) && _found.Add(gameObject))
             {
                 results.Add(footprint);
             }
         }
     }
 
-    private bool IsSoundBlocking(GameObject gameObject, out Footprint footprint)
+    private bool TryGetSoundBlockingFootprint(GameObject gameObject, out Footprint footprint)
     {
         var entry = _entries[gameObject];
         footprint = entry.Footprint;
-        return entry.IsBlocking && gameObject is not GamePlayer;
+        return entry.IsSoundBlocking;
     }
 
     private void AddToChunks(GameObject gameObject, Footprint footprint)
@@ -229,5 +228,5 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private readonly record struct Entry(Footprint Footprint, bool IsBlocking, bool IsVisible);
+    private readonly record struct Entry(Footprint Footprint, bool IsBlocking, bool IsSoundBlocking, bool IsVisible);
 }

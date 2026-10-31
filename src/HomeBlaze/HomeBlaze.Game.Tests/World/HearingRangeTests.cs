@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game.Tests.World;
@@ -160,6 +161,40 @@ public class HearingRangeTests
 
         // Assert
         Assert.Equal(0.2, volume, 6);
+    }
+
+    [Fact]
+    public void WhenAnObjectThatBlocksOnlyMovementStandsBetween_ThenTheVoicePasses()
+    {
+        // Arrange
+        _index.AddOrUpdate(new MovementBlocker { X = 10, Y = -1, Width = 1, Depth = 4 });
+        var first = CreatePlayer("a", 0, 0);
+        var second = CreatePlayer("b", 20, 0);
+
+        // Act
+        var volume = GetVolume(first, second);
+
+        // Assert
+        Assert.Equal(0.2, volume, 6);
+    }
+
+    [Fact]
+    public void WhenARoomIsClosedByObjectsThatBlockOnlyMovement_ThenTheVoiceStillPasses()
+    {
+        // Arrange
+        // Walls on three sides, and a movement blocker instead of the north wall above the player.
+        AddWall(-3, -3, 8, 1);
+        AddWall(-3, -2, 1, 6);
+        AddWall(4, -2, 1, 6);
+        _index.AddOrUpdate(new MovementBlocker { X = -3, Y = 4, Width = 8, Depth = 1 });
+        var inside = CreatePlayer("a", 0, 0);
+        var outside = CreatePlayer("b", 0, 10);
+
+        // Act
+        var volume = GetVolume(inside, outside);
+
+        // Assert
+        Assert.Equal(0.4, volume, 6);
     }
 
     [Fact]
