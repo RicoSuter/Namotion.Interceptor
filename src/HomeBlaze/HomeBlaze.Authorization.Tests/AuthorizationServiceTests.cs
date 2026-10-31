@@ -106,7 +106,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public void WhenARoleHasABadPattern_ThenPrincipalsNamingItAreDeniedAndItsStatusIsSetWhileOtherRolesWork()
+    public async Task WhenARoleHasABadPattern_ThenPrincipalsNamingItAreDeniedAndItsStatusIsSetWhileOtherRolesWork()
     {
         // Arrange
         var bad = new Role { Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }] };
@@ -120,16 +120,16 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, badResult.Policy);
         Assert.Contains("'Bad'", badResult.Error);
-        Assert.Contains("'Bad'", bad.Status);
+        await StatusAssert.ContainsAsync("'Bad'", () => bad.Status);
         Assert.Null(goodResult.Error);
         Assert.True(goodResult.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-        Assert.Null(good.Status);
+        await StatusAssert.EqualAsync(null, () => good.Status);
     }
 
     [Theory]
     [InlineData("Home/**")]
     [InlineData("Home")]
-    public void WhenAPatternDoesNotStartWithTheSeparator_ThenTheRoleIsDeniedAndItsStatusSaysItMustStartWithIt(string pattern)
+    public async Task WhenAPatternDoesNotStartWithTheSeparator_ThenTheRoleIsDeniedAndItsStatusSaysItMustStartWithIt(string pattern)
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = ["/Home/**", pattern], Actions = [PermissionAction.Read] }] };
@@ -142,11 +142,11 @@ public sealed class AuthorizationServiceTests : IDisposable
         var expected = $"Path pattern '{pattern}' of role 'Custom' must start with '/'.";
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
         Assert.Equal(expected, result.Error);
-        Assert.Equal(expected, role.Status);
+        await StatusAssert.EqualAsync(expected, () => role.Status);
     }
 
     [Fact]
-    public void WhenAPatternIsTheSeparatorAlone_ThenTheRoleIsDeniedWithAHintThatStartsWithTheSeparator()
+    public async Task WhenAPatternIsTheSeparatorAlone_ThenTheRoleIsDeniedWithAHintThatStartsWithTheSeparator()
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = ["/"], Actions = [PermissionAction.Read] }] };
@@ -157,13 +157,13 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
-        Assert.Equal(
+        await StatusAssert.EqualAsync(
             "Path pattern '/' of role 'Custom' matches no member; use '/**' for every member, or '/*' for the members of the root.",
-            role.Status);
+            () => role.Status);
     }
 
     [Fact]
-    public void WhenAnIncludedRoleHasAPatternWithoutTheSeparator_ThenPrincipalsOfTheIncludingRoleAreDenied()
+    public async Task WhenAnIncludedRoleHasAPatternWithoutTheSeparator_ThenPrincipalsOfTheIncludingRoleAreDenied()
     {
         // Arrange
         var included = new Role { Allow = [new PermissionRule { Paths = ["Home/**"], Actions = [PermissionAction.Read] }] };
@@ -176,11 +176,11 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
         Assert.Equal("Path pattern 'Home/**' of role 'Included' must start with '/'.", result.Error);
-        Assert.Equal(result.Error, including.Status);
+        await StatusAssert.EqualAsync(result.Error, () => including.Status);
     }
 
     [Fact]
-    public void WhenACustomRoleHasABuiltInName_ThenItIsNotUsedAndItsStatusSaysTheNameIsReserved()
+    public async Task WhenACustomRoleHasABuiltInName_ThenItIsNotUsedAndItsStatusSaysTheNameIsReserved()
     {
         // Arrange
         var reserved = new Role { Allow = [new PermissionRule { Members = [nameof(TagTestSubject.Plain)], Actions = [PermissionAction.Write] }] };
@@ -192,12 +192,12 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Null(result.Error);
         Assert.False(result.Policy.CanWrite(Member(nameof(TagTestSubject.Plain))));
-        Assert.Equal("The name 'reader' is reserved for a built-in role.", reserved.Status);
+        await StatusAssert.EqualAsync("The name 'reader' is reserved for a built-in role.", () => reserved.Status);
         Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName], _service.GetRoleNames());
     }
 
     [Fact]
-    public void WhenACustomRoleIsNamedSystem_ThenItIsNotUsedAndOtherRolesStillCompile()
+    public async Task WhenACustomRoleIsNamedSystem_ThenItIsNotUsedAndOtherRolesStillCompile()
     {
         // Arrange
         var system = new Role { Allow = [ReadPlain()] };
@@ -209,7 +209,7 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, systemResult.Policy);
-        Assert.NotNull(system.Status);
+        await StatusAssert.NotNullAsync(() => system.Status);
         Assert.Null(goodResult.Error);
     }
 
@@ -256,7 +256,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public void WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
+    public async Task WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
     {
         // Arrange
         var first = new Role { Allow = [ReadPlain()] };
@@ -269,13 +269,13 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
         Assert.Contains("'Twin'", result.Error);
-        Assert.NotNull(first.Status);
-        Assert.NotNull(second.Status);
+        await StatusAssert.NotNullAsync(() => first.Status);
+        await StatusAssert.NotNullAsync(() => second.Status);
         Assert.Null(_service.GetPolicy([BuiltInRoles.ReaderName]).Error);
     }
 
     [Fact]
-    public void WhenTwoAuthorizationsExist_ThenEachHasAStatusAndCustomRolesAreDeniedWhileBuiltInRolesWork()
+    public async Task WhenTwoAuthorizationsExist_ThenEachHasAStatusAndCustomRolesAreDeniedWhileBuiltInRolesWork()
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
@@ -296,9 +296,10 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Contains("Only one Authorization subject is allowed", customResult.Error);
         Assert.Null(builtInResult.Error);
         Assert.True(builtInResult.Policy.CanWrite(Member(nameof(TagTestSubject.Temperature))));
-        Assert.Equal("Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.", first.Status);
-        Assert.Equal(first.Status, second.Status);
-        Assert.Equal(first.Status, role.Status);
+        const string expected = "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.";
+        await StatusAssert.EqualAsync(expected, () => first.Status);
+        await StatusAssert.EqualAsync(expected, () => second.Status);
+        await StatusAssert.EqualAsync(expected, () => role.Status);
         Assert.DoesNotContain("PlainReader", _service.GetRoleNames());
     }
 
@@ -321,10 +322,8 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Null(result.Error);
-        // A refresh started by the arrangement can still be writing the statuses of the earlier snapshot.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => first.Status is null && role.Status is null,
-            message: "The statuses should clear once the duplicate is removed.");
+        await StatusAssert.EqualAsync(null, () => first.Status);
+        await StatusAssert.EqualAsync(null, () => role.Status);
     }
 
     [Fact]
@@ -473,14 +472,13 @@ public sealed class AuthorizationServiceTests : IDisposable
         var role = new Role { Allow = [ReadPlain()] };
         AddAuthorization(("Custom", role));
         _ = _service.GetRoleNames();
-        Assert.Null(role.Status);
+        await StatusAssert.EqualAsync(null, () => role.Status);
 
         // Act
         role.Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }];
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => role.Status is not null);
-        Assert.Contains("'Custom'", role.Status);
+        await StatusAssert.ContainsAsync("'Custom'", () => role.Status);
     }
 
     [Fact]
@@ -594,7 +592,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public void WhenADenyPatternNamesAnEntry_ThenTheRoleHasAWarningAndStaysUsable()
+    public async Task WhenADenyPatternNamesAnEntry_ThenTheRoleHasAWarningAndStaysUsable()
     {
         // Arrange
         var role = new Role
@@ -611,14 +609,14 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(result.Error);
         Assert.NotSame(AuthorizationPolicy.DenyAll, result.Policy);
         Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-        Assert.Null(role.Status);
-        Assert.Equal(
+        await StatusAssert.EqualAsync(
             "Path pattern '/Kitchen' names a subject, not a member, and matches nothing; use '/Kitchen/**' for the subject and everything below it, or '/Kitchen/*' for its members.",
-            role.Warning);
+            () => role.Warning);
+        await StatusAssert.EqualAsync(null, () => role.Status);
     }
 
     [Fact]
-    public void WhenSeveralPatternsNameEntries_ThenTheWarningListsEachOnce()
+    public async Task WhenSeveralPatternsNameEntries_ThenTheWarningListsEachOnce()
     {
         // Arrange
         var role = new Role
@@ -632,10 +630,10 @@ public sealed class AuthorizationServiceTests : IDisposable
         _ = _service.GetPolicy(["Custom"]);
 
         // Assert
-        Assert.Equal(
+        await StatusAssert.EqualAsync(
             "Path pattern '/Kitchen' names a subject, not a member, and matches nothing; use '/Kitchen/**' for the subject and everything below it, or '/Kitchen/*' for its members. " +
             "Path pattern '/Authorization' names a subject, not a member, and matches nothing; use '/Authorization/**' for the subject and everything below it, or '/Authorization/*' for its members.",
-            role.Warning);
+            () => role.Warning);
     }
 
     [Theory]
@@ -644,7 +642,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     [InlineData("/Kitchen/Plain")]
     [InlineData("/Kitchen/Child")]
     [InlineData("/Missing")]
-    public void WhenAPatternDoesNotNameAnEntry_ThenTheRoleHasNoWarning(string pattern)
+    public async Task WhenAPatternDoesNotNameAnEntry_ThenTheRoleHasNoWarning(string pattern)
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = [pattern], Actions = [PermissionAction.Read] }] };
@@ -655,12 +653,12 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Null(result.Error);
-        Assert.Null(role.Status);
-        Assert.Null(role.Warning);
+        await StatusAssert.EqualAsync(null, () => role.Status);
+        await StatusAssert.EqualAsync(null, () => role.Warning);
     }
 
     [Fact]
-    public void WhenAPatternWithAWildcardWouldNameAnEntry_ThenItIsNotChecked()
+    public async Task WhenAPatternWithAWildcardWouldNameAnEntry_ThenItIsNotChecked()
     {
         // Arrange
         var role = new Role { Deny = [new PermissionRule { Paths = ["/Kitchen*"], Actions = [PermissionAction.Read] }] };
@@ -675,7 +673,7 @@ public sealed class AuthorizationServiceTests : IDisposable
 
         // Assert
         Assert.Null(result.Error);
-        Assert.Null(role.Warning);
+        await StatusAssert.EqualAsync(null, () => role.Warning);
     }
 
     [Fact]
@@ -685,18 +683,18 @@ public sealed class AuthorizationServiceTests : IDisposable
         var role = new Role { Deny = [new PermissionRule { Paths = ["/Kitchen"], Actions = [PermissionAction.Read] }] };
         AddAuthorizationWithKitchen(("Custom", role));
         _ = _service.GetPolicy(["Custom"]);
-        Assert.NotNull(role.Warning);
+        await StatusAssert.NotNullAsync(() => role.Warning);
 
         // Act
         role.Deny = [new PermissionRule { Paths = ["/Kitchen/**"], Actions = [PermissionAction.Read] }];
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() => role.Warning is null);
-        Assert.Null(role.Status);
+        await StatusAssert.EqualAsync(null, () => role.Warning);
+        await StatusAssert.EqualAsync(null, () => role.Status);
     }
 
     [Fact]
-    public void WhenAGetterOnAPatternsPathThrows_ThenThePolicyCompilesAndTheRoleHasNoWarning()
+    public async Task WhenAGetterOnAPatternsPathThrows_ThenThePolicyCompilesAndTheRoleHasNoWarning()
     {
         // Arrange
         var role = new Role
@@ -716,8 +714,8 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Null(result.Error);
         Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
-        Assert.Null(role.Status);
-        Assert.Null(role.Warning);
+        await StatusAssert.EqualAsync(null, () => role.Status);
+        await StatusAssert.EqualAsync(null, () => role.Warning);
     }
 
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)
