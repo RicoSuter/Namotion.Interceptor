@@ -45,6 +45,43 @@ public class GamePersistenceTests
     }
 
     [Fact]
+    public async Task WhenWritingFails_ThenTheNextFlushWritesAgain()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        await _context.Game.FlushPendingSaveAsync(CancellationToken.None);
+        _context.Game.TryMove(player, GameDirection.East, turnOnly: false);
+        _context.Root.FailsToWrite = true;
+        await _context.Game.FlushPendingSaveAsync(CancellationToken.None);
+        var writesBefore = _context.Root.WriteCount;
+        _context.Root.FailsToWrite = false;
+
+        // Act
+        await _context.Game.FlushPendingSaveAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
+        Assert.False(_context.Game.HasPendingSave);
+    }
+
+    [Fact]
+    public async Task WhenTheGameStopsWithACanceledToken_ThenStopDoesNotThrowAndKeepsTheSavePending()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        await _context.Game.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => _context.Root.WriteCount > 0 && !_context.Game.HasPendingSave, message: "The join was not settled");
+        _context.Game.TryMove(player, GameDirection.East, turnOnly: false);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => _context.Game.StopAsync(new CancellationToken(canceled: true)));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(_context.Game.HasPendingSave);
+    }
+
+    [Fact]
     public async Task WhenWritingFails_ThenTheFlushDoesNotThrow()
     {
         // Arrange

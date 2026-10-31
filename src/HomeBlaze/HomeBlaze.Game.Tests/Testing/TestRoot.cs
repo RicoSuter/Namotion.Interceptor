@@ -25,6 +25,7 @@ public partial class TestRoot : IConfigurationWriter
 
     public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _writeCount);
         return Task.FromResult(!FailsToWrite);
     }

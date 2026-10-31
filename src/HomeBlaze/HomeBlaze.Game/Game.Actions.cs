@@ -47,7 +47,7 @@ public partial class Game
             index.AddOrUpdate(wall);
         }
 
-        await WriteConfigurationAsync(cancellationToken);
+        await WriteOrRequestSaveAsync(cancellationToken);
     }
 
     /// <summary>
@@ -66,7 +66,7 @@ public partial class Game
             GetIndex().Remove(gameObject);
         }
 
-        await WriteConfigurationAsync(cancellationToken);
+        await WriteOrRequestSaveAsync(cancellationToken);
     }
 
     internal Task SendMessageAsync(GamePlayer recipient, GamePlayer? sender, string message, CancellationToken cancellationToken)
