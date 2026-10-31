@@ -14,7 +14,7 @@ public class PathProviderBaseTests
 
     [Theory]
     [MemberData(nameof(ProviderNames))]
-    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyIncludedAndTryGetPropertySegment(string providerName)
+    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyIncludedInPathsAndTryGetPropertySegment(string providerName)
     {
         // Arrange
         var context = CreateContext();
@@ -27,14 +27,14 @@ public class PathProviderBaseTests
 
         // Act
         var results = properties
-            .Select(property => (Property: property, Included: pathProvider.TryGetIncludedPropertySegment(property, out var segment), Segment: segment))
+            .Select(property => (Property: property, Included: pathProvider.TryGetSegmentIncludedInPaths(property, out var segment), Segment: segment))
             .ToList();
 
         // Assert
         Assert.Contains(results, result => result.Included);
         foreach (var (property, included, segment) in results)
         {
-            var expectedIncluded = pathProvider.IsPropertyIncluded(property);
+            var expectedIncluded = pathProvider.IsPropertyIncludedInPaths(property);
             Assert.Equal(expectedIncluded, included);
             Assert.Equal(expectedIncluded ? pathProvider.TryGetPropertySegment(property) ?? property.BrowseName : null, segment);
         }

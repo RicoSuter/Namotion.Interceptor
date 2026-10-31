@@ -2,6 +2,7 @@ using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Paths;
@@ -71,7 +72,7 @@ public class FluentPathProviderTests
     }
 
     [Fact]
-    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyIncludedAndTryGetPropertySegment()
+    public void WhenPathsAreBuiltAndResolved_ThenTheyPassOnlyMappedPropertiesWithTheirSegments()
     {
         // Arrange
         var registry = new FluentMappingRegistry<Meta>();
@@ -80,24 +81,24 @@ public class FluentPathProviderTests
         var provider = new FluentPathProvider<Meta>(registry);
 
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [1] = new Person { FirstName = "Ann" } } };
-        var properties = root.TryGetRegisteredSubject()!.GetAllProperties().ToList();
+        var member = new Person { FirstName = "Ann" };
+        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [1] = member } };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
 
         // Act
-        var results = properties
-            .Select(property => (Property: property, Included: provider.TryGetIncludedPropertySegment(property, out var segment), Segment: segment))
+        var paths = member.TryGetRegisteredSubject()!.Properties
+            .Select(property => property.TryGetPath(provider, root))
+            .OfType<string>()
             .ToList();
+        var firstName = provider.TryGetPropertyFromPath(registeredRoot, "1.first");
+        var lastName = provider.TryGetPropertyFromPath(registeredRoot, "1.LastName");
+        var unmapped = provider.TryGetPropertyFromPath(registeredRoot, "1.Father");
 
         // Assert
-        Assert.Equal(
-            ["Members", "first", nameof(Person.LastName)],
-            results.Where(result => result.Included).Select(result => result.Segment));
-        foreach (var (property, included, segment) in results)
-        {
-            var expectedIncluded = provider.IsPropertyIncluded(property);
-            Assert.Equal(expectedIncluded, included);
-            Assert.Equal(expectedIncluded ? provider.TryGetPropertySegment(property) ?? property.BrowseName : null, segment);
-        }
+        Assert.Equal(["1.first", "1.LastName"], paths.Order());
+        Assert.Equal(nameof(Person.FirstName), firstName?.Property.Name);
+        Assert.Equal(nameof(Person.LastName), lastName?.Property.Name);
+        Assert.Null(unmapped);
     }
 
     [Fact]

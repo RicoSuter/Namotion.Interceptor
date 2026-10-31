@@ -49,7 +49,7 @@ public class AttributeBasedPathProvider : PathProviderBase
         => FindPathAttribute(property.ReflectionAttributes, out _)?.Path;
 
     /// <inheritdoc />
-    public override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
         // A derived provider may override the members this answers in one scan. Checked per call rather than cached in
         // a field: a devirtualized call folds the check and its fallback away.
@@ -59,7 +59,7 @@ public class AttributeBasedPathProvider : PathProviderBase
         }
 
         var attribute = FindPathAttribute(property.ReflectionAttributes, out var hasInlinePaths);
-        segment = attribute?.Path ?? (hasInlinePaths ? property.BrowseName : null);
+        segment = attribute is not null ? attribute.Path ?? property.BrowseName : hasInlinePaths ? property.BrowseName : null;
         return segment is not null;
     }
 

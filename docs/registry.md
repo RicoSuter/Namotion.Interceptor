@@ -309,7 +309,7 @@ So a path built with a provider never passes an excluded property, and resolves 
 
 An attribute belongs to its property: it is included only when the provider includes both the attribute and the property it belongs to, and for an attribute of an attribute, that attribute in turn. Excluding a property therefore excludes its attributes too, so no path is built or resolved to them or through a subject one of them holds. To give an attribute a path with `AttributeBasedPathProvider`, annotate the attribute and its property. `PathProviderBase.IsPropertyIncludedInPaths` applies this rule to one property, for code that lists or filters properties as paths do.
 
-Paths ask a `PathProviderBase` for inclusion and segment together through `TryGetIncludedPropertySegment`. A provider that finds both with one lookup can override it, as the built-in providers do, and the override must agree with `IsPropertyIncluded` and `TryGetPropertySegment`.
+Paths ask a `PathProviderBase` for inclusion and segment together through `TryGetIncludedPropertySegment`. A provider that finds both with one lookup can override this protected method, as the built-in providers do. The override must agree with `IsPropertyIncluded` and `TryGetPropertySegment`, and in a class that can be derived from it must fall back to the base method for a derived type, which may override either of them alone.
 
 ```csharp
 [InterceptorSubject]

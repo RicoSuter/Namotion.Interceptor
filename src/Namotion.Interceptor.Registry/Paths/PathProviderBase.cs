@@ -49,9 +49,11 @@ public abstract class PathProviderBase : IPathProvider
     /// <returns>True when the property is included; otherwise, false.</returns>
     /// <remarks>
     /// Override it to answer both from one lookup. An override must agree with <see cref="IsPropertyIncluded"/> and
-    /// <see cref="TryGetPropertySegment"/>, which other callers use on their own.
+    /// <see cref="TryGetPropertySegment"/>, which other callers use on their own. In a class that can be derived from,
+    /// it must take the base route when the instance is of a derived type, which may override either of them alone, as
+    /// the built-in providers do by checking their exact type.
     /// </remarks>
-    public virtual bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    protected virtual bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
         if (!IsPropertyIncluded(property))
         {

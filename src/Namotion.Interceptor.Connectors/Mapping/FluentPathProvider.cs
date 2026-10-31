@@ -50,7 +50,7 @@ public sealed class FluentPathProvider<TMetadata> : PathProviderBase
     }
 
     /// <inheritdoc />
-    public override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
         var subjectType = property.Subject.GetType();
         if (_registry.TryGetSegment(subjectType, property.Name, out segment))

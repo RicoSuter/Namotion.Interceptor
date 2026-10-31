@@ -30,7 +30,7 @@ public class DefaultPathProvider : PathProviderBase
     public override char PathSeparator => _pathSeparator;
 
     /// <inheritdoc />
-    public override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
         // A derived provider may override the members this skips. Checked per call rather than cached in a field: a
         // devirtualized call folds the check and its fallback away, so the override inlines.

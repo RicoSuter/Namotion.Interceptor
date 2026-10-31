@@ -264,7 +264,7 @@ namespace Namotion.Interceptor.Connectors.Mapping
         public FluentPathProvider(Namotion.Interceptor.Connectors.Mapping.FluentMappingRegistry<TMetadata> registry, char pathSeparator = .) { }
         public override char PathSeparator { get; }
         public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public override bool TryGetIncludedPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
+        protected override bool TryGetIncludedPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
         public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
     public interface IPropertyMapper<TMapping>
