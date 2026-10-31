@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -24,6 +25,18 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
     /// The height of a built wall in tiles, 2.5 m.
     /// </summary>
     public const int DefaultHeight = 10;
+
+    [Configuration]
+    [Range(1, MaximumSize)]
+    public override partial int Width { get; set; }
+
+    [Configuration]
+    [Range(1, MaximumSize)]
+    public override partial int Depth { get; set; }
+
+    [Configuration]
+    [Range(1, MaximumSize)]
+    public override partial int Height { get; set; }
 
     public string? Title => "Wall";
 

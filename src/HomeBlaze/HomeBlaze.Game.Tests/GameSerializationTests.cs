@@ -62,6 +62,47 @@ public class GameSerializationTests
     }
 
     [Fact]
+    public void WhenPlayerInFileHasASize_ThenThePlayerKeepsItsFixedSize()
+    {
+        // Arrange
+        const string json = """
+            {
+              "$type": "HomeBlaze.Game.Game",
+              "players": {
+                "kitchen": { "x": 3, "y": -2, "width": 5, "depth": 6, "height": 9, "facing": "East" }
+              }
+            }
+            """;
+
+        // Act
+        var game = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        var player = game.Players["kitchen"];
+        Assert.Equal((3, -2, GameDirection.East), (player.X, player.Y, player.Facing));
+        Assert.Equal((GamePlayer.Size, GamePlayer.Size, GamePlayer.BodyHeight), (player.Width, player.Depth, player.Height));
+    }
+
+    [Fact]
+    public void WhenGameIsSerialized_ThenPlayersHaveNoSize()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Players = new Dictionary<string, GamePlayer> { ["kitchen"] = new GamePlayer { X = 3, Y = -2 } }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+
+        // Assert
+        Assert.Contains("\"x\": 3", json);
+        Assert.DoesNotContain("\"width\"", json);
+        Assert.DoesNotContain("\"depth\"", json);
+        Assert.DoesNotContain("\"height\"", json);
+    }
+
+    [Fact]
     public void WhenObjectsAreCreated_ThenTheyHaveTheirDefaultSizes()
     {
         // Act
