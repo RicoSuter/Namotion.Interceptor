@@ -195,6 +195,11 @@ The E2E tests use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through their o
 - Without an installation the page keeps showing "Joining the game…" rather than saying it needs one.
 - Only one character model, and only walls and doors as object types.
 - A page receives every visible object within `ViewRadius` (200 tiles in each direction) of its player, although the camera shows only about 60 tiles around it and the fog hides the rest. With many objects, either lower `ViewRadius` or let the page report the area its camera covers and send that area plus a margin.
+- Scale: the cost per page, movement and hearing depend on what is near a player, not on the size of the world, and coordinates cover the whole `int` range. These parts grow with the whole world instead, which is fine for several thousand objects and a few dozen players:
+  - All objects live in the `Game` subject and every save rewrites the whole `Game.json`. Much larger worlds need regions in separate files or a database.
+  - A rebuild of the index, after an outside change, an applied configuration or a joining or leaving player, re-adds every object under `_lock`. An index that updates incrementally would avoid it.
+  - Every page subscribes to changes of all objects, so every step anywhere schedules a flush on every page; each flush only diffs its own area. Change notifications per region would keep distant changes away.
+  - Every object is its own mesh, so thousands of walls within the view radius mean thousands of draw calls. Instances of identical meshes would batch them.
 
 Agent players are the planned follow-up. `ResolveActor` and `GameCaller` already isolate who acts, so operations keep their signatures. It needs:
 
