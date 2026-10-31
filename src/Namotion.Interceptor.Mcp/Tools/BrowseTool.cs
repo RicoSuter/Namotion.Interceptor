@@ -98,7 +98,7 @@ internal class BrowseTool
         }
         else
         {
-            var resolved = pathProvider.TryGetSubjectFromPath(rootRegisteredSubject, path!);
+            var resolved = _configuration.UnfilteredPathProvider.TryGetSubjectFromPath(rootRegisteredSubject, path!);
             if (resolved is null)
             {
                 return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path!));

@@ -394,6 +394,34 @@ public class SubjectPathsTests
             [[new PathLink("Rooms", "Kitchen", null), new PathLink("Sensor", null, null), new PathLink("Probe", null, null)]]);
     }
 
+    [Fact]
+    public void WhenLinkIsAnAttributeOfAnExcludedProperty_ThenNoPathIsListedAndTheRegistryBuildsAndResolvesNone()
+    {
+        // Arrange
+        const string ProbePath = "Rooms[Kitchen].Sensor.Probe";
+        var home = TestGraph.Create();
+        var sensor = home.Rooms["Kitchen"].Sensor!;
+        var probe = new Light();
+        sensor.Temperature_Probe = probe;
+        var pathProvider = new ExcludingPathProvider(nameof(Sensor.Temperature));
+        var registeredRoot = Registered(home);
+        var registeredProbe = Registered(probe);
+        var probeParent = registeredProbe.Parents[0];
+        var defaultProviderPath = probeParent.Property.TryGetPath(DefaultPathProvider.Instance, rootSubject: null, probeParent.Index);
+        var paths = new List<PathLink[]>();
+
+        // Act
+        var complete = SubjectPaths.TryGetPaths(registeredProbe, pathProvider, paths, MaxPaths);
+
+        // Assert
+        Assert.False(complete);
+        Assert.Empty(paths);
+        Assert.Null(probeParent.Property.TryGetPath(pathProvider, rootSubject: null, probeParent.Index));
+        Assert.Equal(ProbePath, defaultProviderPath);
+        Assert.Same(probe, DefaultPathProvider.Instance.TryGetSubjectFromPath(registeredRoot, ProbePath)?.Subject);
+        Assert.Null(pathProvider.TryGetSubjectFromPath(registeredRoot, ProbePath));
+    }
+
     private static void AssertLinksMatchRegistry(
         IInterceptorSubject root, IInterceptorSubject subject, PathProviderBase pathProvider, PathLink[][] expectedPaths,
         string[]? unofferedSpellings = null)

@@ -128,7 +128,7 @@ internal class SearchTool
             }
 
             // Compute path cheaply before building full DTO
-            var path = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration.PathPrefix);
+            var path = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration);
             if (path is null)
             {
                 continue;

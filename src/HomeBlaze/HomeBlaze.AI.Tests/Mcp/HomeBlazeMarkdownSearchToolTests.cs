@@ -380,6 +380,30 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         Assert.Equal("Grows with the freezer log.", propertyNotes.GetProperty("value").GetProperty("notes").GetString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenNotesBelongToAConfigurationProperty_ThenTheyAreNotSearched(bool forAgents)
+    {
+        // Arrange
+        var (root, services) = await CreateGraphAsync(
+        [
+            ("Docs/Gateway.json", $$"""{ "$type": "{{typeof(MarkdownSearchSecretDevice).FullName}}" }"""),
+            ("Docs/Gateway.metadata.json", """{ "notes": "The freezer gateway.", "$properties": { "Host": { "notes": "The freezer host." } } }""")
+        ]);
+        var tool = CreateTool(services, root, forAgents);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        var matches = result.GetProperty("pages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["/Storage/Docs/Gateway", "/Storage/Notes.md"],
+            matches.Select(match => match.GetProperty("path").GetString()));
+        Assert.All(matches, match => Assert.False(match.TryGetProperty("property", out _)));
+    }
+
     [Fact]
     public async Task WhenThePathIsGiven_ThenOnlyNotesInOrUnderItAreSearched()
     {

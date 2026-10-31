@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -9,10 +10,20 @@ namespace Namotion.Interceptor.Mcp;
 /// </summary>
 public class McpServerConfiguration
 {
+    private UnfilteredPathProvider? _unfilteredPathProvider;
+
     /// <summary>
-    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry.
+    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list and filter
+    /// on the properties it includes, and resolve and build paths with its segments through every property.
     /// </summary>
     public required IPathProvider PathProvider { get; init; }
+
+    /// <summary>
+    /// <see cref="PathProvider"/> including every property: get_property, set_property and the browse path resolve
+    /// with it, and the paths the tools return are built with it.
+    /// </summary>
+    internal PathProviderBase UnfilteredPathProvider => _unfilteredPathProvider ??= new UnfilteredPathProvider(
+        PathProvider as PathProviderBase ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase."));
 
     /// <summary>
     /// Subject-level JSON enrichment for query responses (e.g., $title, $icon, $type).
