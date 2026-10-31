@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -28,6 +29,76 @@ public abstract class PathProviderBase : IPathProvider
 
     /// <inheritdoc />
     public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
+
+    /// <summary>
+    /// Gets whether paths may pass the property: <see cref="IsPropertyIncluded"/> includes it and, for an attribute,
+    /// the property it belongs to, recursively up to a property that is no attribute. Attributes that belong to each
+    /// other in a cycle are not included. The properties holding its subject are not checked.
+    /// </summary>
+    /// <param name="property">The property to check.</param>
+    /// <returns>True when paths may pass the property; otherwise, false.</returns>
+    public bool IsPropertyIncludedInPaths(RegisteredSubjectProperty property)
+        => IsPropertyIncluded(property) && (!property.IsAttribute || IsAttributedPropertyIncluded(property));
+
+    /// <summary>
+    /// Gets whether <see cref="IsPropertyIncluded"/> includes the property and, when it does, the segment paths use
+    /// for it: <see cref="TryGetPropertySegment"/>, or the property's BrowseName when that is null.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="segment">The segment of the included property, or null.</param>
+    /// <returns>True when the property is included; otherwise, false.</returns>
+    /// <remarks>
+    /// Override it to answer both from one lookup. An override must agree with <see cref="IsPropertyIncluded"/> and
+    /// <see cref="TryGetPropertySegment"/>, which other callers use on their own. In a class that can be derived from,
+    /// it must call <c>base.TryGetIncludedPropertySegment</c> when the instance is of a derived type, which may override
+    /// either of them alone, as the built-in providers do by checking their exact type.
+    /// </remarks>
+    protected virtual bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        if (!IsPropertyIncluded(property))
+        {
+            segment = null;
+            return false;
+        }
+
+        segment = TryGetPropertySegment(property) ?? property.BrowseName;
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="TryGetIncludedPropertySegment"/> under the rule of <see cref="IsPropertyIncludedInPaths"/>.
+    /// </summary>
+    internal bool TryGetSegmentIncludedInPaths(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        if (TryGetIncludedPropertySegment(property, out segment) &&
+            (!property.IsAttribute || IsAttributedPropertyIncluded(property)))
+        {
+            return true;
+        }
+
+        segment = null;
+        return false;
+    }
+
+    private bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute)
+    {
+        // Attributes can name each other in a cycle; a chain longer than the subject's properties is one, and it
+        // belongs to no included property.
+        var remainingSteps = attribute.Parent.Properties.Length;
+        var property = attribute;
+        do
+        {
+            // An attribute whose property is missing belongs to no included property.
+            property = property.Parent.TryGetProperty(property.AttributeMetadata.PropertyName);
+            if (property is null || --remainingSteps < 0 || !IsPropertyIncluded(property))
+            {
+                return false;
+            }
+        }
+        while (property.IsAttribute);
+
+        return true;
+    }
 
     /// <inheritdoc />
     /// <remarks>

@@ -298,6 +298,38 @@ public interface IPathProvider
 }
 ```
 
+### Included properties
+
+A path provider defines a view of the graph: `IsPropertyIncluded` decides which properties are in it and `TryGetPropertySegment` gives their segments. Paths go only through properties the provider includes, in both directions:
+
+- `TryGetPath` and `GetPaths` build no path for a property when it or any property holding it up to the root is excluded, including an `[InlinePaths]` dictionary whose key is a bare segment. When a subject on the way has several parents and a root is given, the path is the first path, in parent order, that reaches the root through properties the provider includes, and there is none only when no such path exists. Without a root, the path follows the first parent of each subject.
+- `TryGetPropertyFromPath`, `TryGetSubjectFromPath` and `GetPropertiesFromPaths` resolve a path only when every segment names a property the provider includes.
+
+So a path built with a provider never passes an excluded property, and resolves back with the same provider to the same property when the provider's `TryGetPropertyFromSegment` finds each property by the segment `TryGetPropertySegment` gives it (or by its `BrowseName` when that is null), which the built-in providers do. Within that, the limits in [Path Syntax](#path-syntax) apply: a segment that contains the separator does not resolve back, and a key of a type other than string, integer, `Guid` or enum resolves to the first entry with the same text. A nested property has a path only when every level above it is included: with `AttributeBasedPathProvider`, every property holding a subject on the way needs a `[Path]` attribute of its own.
+
+An attribute belongs to its property: it is included only when the provider includes both the attribute and the property it belongs to, and for an attribute of an attribute, that attribute in turn. Excluding a property therefore excludes its attributes too, so no path is built or resolved to them or through a subject one of them holds. Attributes that belong to each other in a cycle are not included. To give an attribute a path with `AttributeBasedPathProvider`, annotate the attribute and its property. `PathProviderBase.IsPropertyIncludedInPaths` applies this rule to one property, for code that lists or filters properties as paths do.
+
+Paths ask a `PathProviderBase` for inclusion and segment together through `TryGetIncludedPropertySegment`. A provider that finds both with one lookup can override this protected method, as the built-in providers do. The override must agree with `IsPropertyIncluded` and `TryGetPropertySegment`, and in a class that can be derived from it must call `base.TryGetIncludedPropertySegment` when the instance is of a derived type, which may override either of them alone.
+
+```csharp
+[InterceptorSubject]
+public partial class Room
+{
+    [Path("mqtt", "sensor")]  // without it, Temperature below has no "mqtt" path
+    public partial Sensor? Sensor { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Sensor
+{
+    [Path("mqtt", "temperature")]
+    public partial decimal Temperature { get; set; }
+}
+
+// room.Sensor.Temperature has the path "sensor/temperature"
+var pathProvider = new AttributeBasedPathProvider("mqtt", '/');
+```
+
 ### Built-in Providers
 
 - **DefaultPathProvider** - Uses property names exactly as defined
@@ -312,10 +344,10 @@ Use `[Path]` attributes to map properties to custom external paths:
 [InterceptorSubject]
 public partial class Sensor
 {
-    [Path("temp")]
+    [Path("mqtt", "temp")]
     public partial decimal Temperature { get; set; }
 
-    [Path("hum")]
+    [Path("mqtt", "hum")]
     public partial decimal Humidity { get; set; }
 }
 ```
@@ -385,6 +417,6 @@ Sensors['Kitchen [north]'].Temperature
 
 `[InlinePaths]` keys follow the same rules. A key is written as a bare segment only when it reads back as that key: it is not empty, contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`. The inline property's own segment (`Line.Machines`) addresses the property itself. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
 
-#### Resolving with options
+#### Creating missing subjects
 
-`TryGetPropertyFromPath(rootSubject, path, includedPropertiesOnly, createMissingSubject)` resolves only properties that pass `IsPropertyIncluded` when `includedPropertiesOnly` is true, and calls `createMissingSubject` for a subject reference on the way whose value is null. Missing collection and dictionary items are never created, and a malformed path never calls the hook. The connector path extensions are built on it.
+`TryGetPropertyFromPath(rootSubject, path, createMissingSubject)` calls `createMissingSubject` for a subject reference on the way whose value is null. Missing collection and dictionary items are never created, and a malformed path never calls the hook. The connector path extensions are built on it.
