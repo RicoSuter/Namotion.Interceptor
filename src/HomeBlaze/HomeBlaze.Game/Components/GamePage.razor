@@ -378,10 +378,18 @@
         _targets = targets;
     }
 
-    private static IReadOnlyList<MethodMetadata> GetOperations(IInterceptorSubject subject) =>
-        subject.TryGetRegisteredSubject()?.GetAllMethods(ExclusionTarget.UserInterface)
-            .Where(method => method.Kind == MethodKind.Operation)
-            .ToList() ?? [];
+    // Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply.
+    private static IReadOnlyList<MethodMetadata> GetOperations(IInterceptorSubject subject)
+    {
+        if (subject.TryGetRegisteredSubject() is not { } registered)
+        {
+            return [];
+        }
+
+        return registered.GetAllMethods(ExclusionTarget.UserInterface)
+            .Where(method => method.Kind == MethodKind.Operation && (registered.TryGetProperty(method.PropertyName)?.IsMethodEnabled() ?? true))
+            .ToList();
+    }
 
     public async ValueTask DisposeAsync()
     {

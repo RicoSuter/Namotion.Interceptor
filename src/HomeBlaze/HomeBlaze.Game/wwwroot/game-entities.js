@@ -1,4 +1,5 @@
-// Draws the objects of the view: walls as brick boxes, players as animated people. World coordinates are relative to an
+// Draws the objects of the view: walls as brick boxes, doors as a brick lintel over a swinging wooden panel, players as
+// animated people. World coordinates are relative to an
 // integer origin near the own player, so the GPU's 32-bit floats stay precise anywhere in the int range. One unit is
 // one tile of 25 cm.
 const REBASE_DISTANCE = 2048;
@@ -18,6 +19,11 @@ const WALKING_SPEED_RATIO = 1.05;
 const IDLE_ANIMATION = 'Idle_Neutral';
 const WALKING_ANIMATION = 'Walk';
 const SHIRT_MATERIAL = 'LightBrown';
+// A door panel leaves the top of the opening to the lintel, and swings by a quarter turn when it opens.
+const DOOR_PANEL_HEIGHT = 8.4;
+const DOOR_PANEL_THICKNESS = 0.3;
+const DOOR_OPEN_ANGLE = -Math.PI / 2;
+const DOOR_SWING_MS = 300;
 
 export async function createEntities(scene, options) {
     const BABYLON = window.BABYLON;
@@ -38,6 +44,10 @@ export async function createEntities(scene, options) {
     const wallMaterial = new BABYLON.StandardMaterial('wall', scene);
     wallMaterial.diffuseTexture = new BABYLON.Texture(`${options.baseUrl}textures/bricks.jpg`, scene);
     wallMaterial.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+
+    const doorMaterial = new BABYLON.StandardMaterial('door', scene);
+    doorMaterial.diffuseColor = new BABYLON.Color3(0.55, 0.34, 0.18);
+    doorMaterial.specularColor = new BABYLON.Color3(0.06, 0.05, 0.04);
 
     const targetMaterial = new BABYLON.StandardMaterial('target', scene);
     targetMaterial.emissiveColor = new BABYLON.Color3(1, 0.88, 0.4);
@@ -93,20 +103,79 @@ export async function createEntities(scene, options) {
         return new BABYLON.Vector3(x - originX + view.width / 2, height, y - originY + view.depth / 2);
     }
 
-    function createWall(view) {
-        const sideUv = new BABYLON.Vector4(0, 0, view.width / BRICK_REPEAT_WIDTH, view.height / BRICK_REPEAT_HEIGHT);
-        const endUv = new BABYLON.Vector4(0, 0, view.depth / BRICK_REPEAT_WIDTH, view.height / BRICK_REPEAT_HEIGHT);
-        const topUv = new BABYLON.Vector4(0, 0, view.width / BRICK_REPEAT_WIDTH, view.depth / BRICK_REPEAT_HEIGHT);
-        const box = BABYLON.MeshBuilder.CreateBox(view.id, {
-            width: view.width,
-            height: view.height,
-            depth: view.depth,
+    function createBrickBox(name, width, height, depth) {
+        const sideUv = new BABYLON.Vector4(0, 0, width / BRICK_REPEAT_WIDTH, height / BRICK_REPEAT_HEIGHT);
+        const endUv = new BABYLON.Vector4(0, 0, depth / BRICK_REPEAT_WIDTH, height / BRICK_REPEAT_HEIGHT);
+        const topUv = new BABYLON.Vector4(0, 0, width / BRICK_REPEAT_WIDTH, depth / BRICK_REPEAT_HEIGHT);
+        const box = BABYLON.MeshBuilder.CreateBox(name, {
+            width,
+            height,
+            depth,
             faceUV: [sideUv, sideUv, endUv, endUv, topUv, topUv],
             wrap: true,
         }, scene);
         box.material = wallMaterial;
+        return box;
+    }
+
+    function createWall(view) {
+        const box = createBrickBox(view.id, view.width, view.height, view.depth);
         box.metadata = { kind: 'wall' };
         return { root: box };
+    }
+
+    // The root stands in the middle of the opening; the panel hangs on a hinge at the west end of an opening running
+    // east to west, or at the south end of one running north to south.
+    function createDoor(view) {
+        const root = new BABYLON.TransformNode(view.id, scene);
+        root.metadata = { kind: 'door' };
+        const parts = [];
+        const panelHeight = Math.min(DOOR_PANEL_HEIGHT, view.height);
+        const lintelHeight = view.height - panelHeight;
+        if (lintelHeight > 0.01) {
+            const lintel = createBrickBox(`${view.id}-lintel`, view.width, lintelHeight, view.depth);
+            lintel.parent = root;
+            lintel.position.y = (view.height - lintelHeight) / 2;
+            lintel.isPickable = false;
+            parts.push(lintel);
+        }
+
+        const isAlongX = view.width >= view.depth;
+        const length = isAlongX ? view.width : view.depth;
+        const hinge = new BABYLON.TransformNode(`${view.id}-hinge`, scene);
+        hinge.parent = root;
+        hinge.position.copyFromFloats(isAlongX ? -view.width / 2 : 0, -view.height / 2, isAlongX ? 0 : -view.depth / 2);
+        const panel = BABYLON.MeshBuilder.CreateBox(`${view.id}-panel`, {
+            width: isAlongX ? length : DOOR_PANEL_THICKNESS,
+            height: panelHeight,
+            depth: isAlongX ? DOOR_PANEL_THICKNESS : length,
+        }, scene);
+        panel.material = doorMaterial;
+        panel.parent = hinge;
+        panel.position.copyFromFloats(isAlongX ? length / 2 : 0, panelHeight / 2, isAlongX ? 0 : length / 2);
+        panel.isPickable = false;
+        parts.push(panel);
+
+        const angle = view.isOpen ? DOOR_OPEN_ANGLE : 0;
+        hinge.rotation.y = angle;
+        return { root, parts, door: { hinge, from: angle, to: angle, start: 0, isSwinging: false } };
+    }
+
+    function swingDoor(door, isOpen) {
+        door.from = door.hinge.rotation.y;
+        door.to = isOpen ? DOOR_OPEN_ANGLE : 0;
+        door.start = performance.now();
+        door.isSwinging = true;
+    }
+
+    function animateDoor(door, now) {
+        const progress = Math.min(1, (now - door.start) / DOOR_SWING_MS);
+        // Eases out, so the panel slows down before it stops.
+        const eased = 1 - (1 - progress) * (1 - progress);
+        door.hinge.rotation.y = door.from + (door.to - door.from) * eased;
+        if (progress >= 1) {
+            door.isSwinging = false;
+        }
     }
 
     function createLabel(view, parent) {
@@ -189,8 +258,16 @@ export async function createEntities(scene, options) {
     }
 
     function createEntity(view) {
-        const created = view.kind === 'player' ? createPlayer(view) : createWall(view);
-        return { view, tween: null, idleAt: 0, isFaded: false, ...created };
+        let created;
+        if (view.kind === 'player') {
+            created = createPlayer(view);
+        } else if (view.kind === 'door') {
+            created = createDoor(view);
+        } else {
+            created = createWall(view);
+        }
+
+        return { view, tween: null, idleAt: 0, isFaded: false, parts: null, door: null, ...created };
     }
 
     function disposeEntity(entity) {
@@ -263,9 +340,19 @@ export async function createEntities(scene, options) {
     }
 
     function setFaded(entity, isFaded) {
-        if (entity.isFaded !== isFaded) {
-            entity.isFaded = isFaded;
-            entity.root.visibility = isFaded ? FADED_VISIBILITY : 1;
+        if (entity.isFaded === isFaded) {
+            return;
+        }
+
+        entity.isFaded = isFaded;
+        const visibility = isFaded ? FADED_VISIBILITY : 1;
+        // A door's root is a transform node without visibility of its own.
+        if (entity.parts) {
+            for (const part of entity.parts) {
+                part.visibility = visibility;
+            }
+        } else {
+            entity.root.visibility = visibility;
         }
     }
 
@@ -349,6 +436,10 @@ export async function createEntities(scene, options) {
 
             const hasMoved = entity.view.x !== view.x || entity.view.y !== view.y;
             const previousFacing = entity.view.facing;
+            if (entity.door && entity.view.isOpen !== view.isOpen) {
+                swingDoor(entity.door, view.isOpen);
+            }
+
             // The own player's position and facing belong to the input, which predicts them.
             entity.view = view.isSelf ? { ...view, x: entity.view.x, y: entity.view.y, facing: previousFacing } : view;
             if (!view.isSelf) {
@@ -438,6 +529,10 @@ export async function createEntities(scene, options) {
 
         animate(now) {
             for (const entity of entities.values()) {
+                if (entity.door?.isSwinging) {
+                    animateDoor(entity.door, now);
+                }
+
                 const tween = entity.tween;
                 if (tween) {
                     const progress = Math.min(1, (now - tween.start) / tween.duration);
@@ -464,7 +559,7 @@ export async function createEntities(scene, options) {
             return selfPosition;
         },
 
-        // Fades the walls between the camera and the own player's head.
+        // Fades the walls and doors between the camera and the own player's head.
         afterCameraMoved(camera) {
             const self = entities.get(selfId);
             if (!self) {
