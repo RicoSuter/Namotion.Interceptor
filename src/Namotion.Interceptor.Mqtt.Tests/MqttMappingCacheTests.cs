@@ -330,6 +330,53 @@ public class MqttMappingCacheTests
         Assert.Equal("child/value", topicAfterAttach);
     }
 
+    [Fact]
+    public async Task WhenASubjectMovesFromAnUnmappedToAMappedPropertyWithoutADetach_ThenTheServerFilterAdmitsItsProperty()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Hidden = child;
+        await using var server = CreateServer(subject, mapper);
+        var value = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var includedWhileUnmapped = server.IsPropertyIncluded(value.Reference);
+
+        // Act
+        subject.Child = child;
+        subject.Hidden = null;
+        var includedWhileMapped = server.IsPropertyIncluded(value.Reference);
+
+        // Assert
+        Assert.False(includedWhileUnmapped);
+        Assert.True(includedWhileMapped);
+        Assert.Equal("child/value", server.TryGetTopicForProperty(value.Reference, value).Topic);
+    }
+
+    [Fact]
+    public async Task WhenAHolderMovesFromAnUnmappedToAMappedPropertyWithoutADetach_ThenTheServerFilterAdmitsThePropertiesBelowIt()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var leaf = new MqttCacheTestChild();
+        var holder = new MqttCacheTestChild { Inner = leaf };
+        subject.Hidden = holder;
+        await using var server = CreateServer(subject, mapper);
+        var value = leaf.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var includedWhileUnmapped = server.IsPropertyIncluded(value.Reference);
+
+        // Act
+        subject.Child = holder;
+        subject.Hidden = null;
+        var includedWhileMapped = server.IsPropertyIncluded(value.Reference);
+
+        // Assert
+        Assert.False(includedWhileUnmapped);
+        Assert.True(includedWhileMapped);
+        Assert.Equal("child/inner/value", server.TryGetTopicForProperty(value.Reference, value).Topic);
+    }
+
     private static MqttCacheTestRoot CreateRootSubject()
     {
         var context = InterceptorSubjectContext
@@ -484,6 +531,8 @@ public partial class MqttCacheTestRoot
 
     public partial string? Comment { get; set; }
 
+    public partial MqttCacheTestChild? Hidden { get; set; }
+
     public MqttCacheTestRoot()
     {
         Name = string.Empty;
@@ -495,6 +544,9 @@ public partial class MqttCacheTestChild
 {
     [Path("mqtt", "value")]
     public partial string Value { get; set; }
+
+    [Path("mqtt", "inner")]
+    public partial MqttCacheTestChild? Inner { get; set; }
 
     public MqttCacheTestChild()
     {

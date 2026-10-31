@@ -489,6 +489,13 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
         var entry = (topic, resolvedMapping);
 
+        // A property without a topic can gain one when its subject gets another parent without a detach, which
+        // evicts nothing, so only topics are cached.
+        if (topic is null)
+        {
+            return entry;
+        }
+
         // Add first, then validate (guarantees no memory leak)
         if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
         {
