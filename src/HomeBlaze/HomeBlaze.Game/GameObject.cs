@@ -70,7 +70,12 @@ public abstract partial class GameObject : IConfigurable
     /// from configuration or state properties only, which the page observes, and caches it per state, for example with
     /// <see cref="GameVisualCache{TKey}"/>. Players are drawn by the page itself and ignore it.
     /// </summary>
-    public virtual GameVisual Visual =>
+    public virtual GameVisual Visual => DefaultVisual;
+
+    /// <summary>
+    /// The gray box of the footprint and <see cref="Height"/>, which is also what an invalid visual falls back to.
+    /// </summary>
+    internal GameVisual DefaultVisual =>
         (_defaultVisual ??= new()).Get((Width, Height, Depth), static size => GameVisual.Box(size.Width, size.Height, size.Depth));
 
     internal Footprint Footprint => new(X, Y, Width, Depth);

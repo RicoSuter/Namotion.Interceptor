@@ -25,5 +25,10 @@ public sealed class GameVisualCache<TKey> where TKey : IEquatable<TKey>
         return entry.Visual;
     }
 
-    private sealed record Entry(TKey Key, GameVisual Visual);
+    private sealed class Entry(TKey key, GameVisual visual)
+    {
+        public TKey Key { get; } = key;
+
+        public GameVisual Visual { get; } = visual;
+    }
 }
