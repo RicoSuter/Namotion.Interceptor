@@ -22,17 +22,20 @@ public partial class Game
                 return new MoveResult(false, player.X, player.Y, player.Facing);
             }
 
-            if (!turnOnly)
+            var rateLimiter = turnOnly
+                ? player.TurnRateLimiter ??= new StepRateLimiter(_timeProvider)
+                : player.StepRateLimiter ??= new StepRateLimiter(_timeProvider);
+            if (!rateLimiter.TryTake())
             {
-                player.RateLimiter ??= new StepRateLimiter(_timeProvider);
-                if (!player.RateLimiter.TryTake())
-                {
-                    return new MoveResult(false, player.X, player.Y, player.Facing);
-                }
+                return new MoveResult(false, player.X, player.Y, player.Facing);
             }
 
-            player.Facing = direction;
-            _isSaveRequested = true;
+            if (player.Facing != direction)
+            {
+                player.Facing = direction;
+                _isSaveRequested = true;
+            }
+
             if (turnOnly || !TryGetStep(player, direction, out var moved))
             {
                 return new MoveResult(turnOnly, player.X, player.Y, player.Facing);
@@ -40,6 +43,7 @@ public partial class Game
 
             player.X = moved.X;
             player.Y = moved.Y;
+            _isSaveRequested = true;
             GetIndex().AddOrUpdate(player);
             return new MoveResult(true, player.X, player.Y, player.Facing);
         }

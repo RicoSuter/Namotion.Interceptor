@@ -1,7 +1,7 @@
 namespace HomeBlaze.Game.World;
 
 /// <summary>
-/// A token bucket that refills one step per <see cref="Game.StepInterval"/> up to <see cref="Burst"/>, so network jitter
+/// A token bucket that refills one step or turn per <see cref="Game.StepInterval"/> up to <see cref="Burst"/>, so network jitter
 /// does not refuse steps a client sent in time. Not thread-safe: the game guards it with its lock.
 /// </summary>
 internal sealed class StepRateLimiter(TimeProvider timeProvider)

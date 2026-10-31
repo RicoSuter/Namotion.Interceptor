@@ -100,6 +100,37 @@ public class GameMovementTests
     }
 
     [Fact]
+    public void WhenFourTurnsComeWithinOneInterval_ThenTheFourthIsRefused()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var directions = new[] { GameDirection.East, GameDirection.South, GameDirection.West, GameDirection.North };
+
+        // Act
+        var results = directions.Select(direction => _context.Game.TryMove(player, direction, turnOnly: true).IsAccepted).ToArray();
+
+        // Assert
+        Assert.Equal(new[] { true, true, true, false }, results);
+        Assert.Equal(GameDirection.West, player.Facing);
+    }
+
+    [Fact]
+    public async Task WhenABlockedStepKeepsTheFacing_ThenNoSaveIsRequested()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddWall(0, 2, width: 2, depth: 1);
+        await _context.Game.FlushPendingSaveAsync(CancellationToken.None);
+
+        // Act
+        var result = Step(player, GameDirection.North);
+
+        // Assert
+        Assert.False(result.IsAccepted);
+        Assert.False(_context.Game.HasPendingSave);
+    }
+
+    [Fact]
     public void WhenAStepWouldLeaveTheIntRange_ThenItIsRefused()
     {
         // Arrange
