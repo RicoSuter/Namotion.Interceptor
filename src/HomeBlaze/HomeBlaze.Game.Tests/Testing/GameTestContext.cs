@@ -21,7 +21,7 @@ internal sealed class GameTestContext
     public GameTestContext()
     {
         Root = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
-        Game = new Game(Clients, NullLogger.Instance);
+        Game = new Game(Clients, TimeProvider, NullLogger.Instance);
         Root.Game = Game;
     }
 
