@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -297,5 +298,29 @@ public class RecursiveAttachTests
         Assert.Contains(grandmother, attached);
         Assert.Same(context, grandmother.TryGetContext());
         Assert.Equal(1, grandmother.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenAnExplicitRootHasABackEdge_ThenTheRootAndTheChildAttachExactlyOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new PayloadNode();
+        var child = new PayloadNode { Child = root };
+        root.Child = child;
+        var attached = new List<IInterceptorSubject>();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        lifecycle.SubjectAttached += change => attached.Add(change.Subject);
+
+        // Act
+        root.AttachToContext(context);
+
+        // Assert
+        Assert.Equal(2, attached.Count);
+        Assert.Single(attached, subject => ReferenceEquals(subject, root));
+        Assert.Single(attached, subject => ReferenceEquals(subject, child));
+        Assert.Equal(1, root.GetReferenceCount());
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, ((IInterceptorSubject)root).Executor.AttachmentAnchor);
     }
 }

@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -55,5 +57,35 @@ public class DerivedProjectionOwnershipTests
         Assert.Empty(child.GetParents());
         var data = new PropertyReference(subject, nameof(CachingOrphanDerivedSubject.Current)).GetDerivedPropertyData();
         Assert.Same(child, data.LastKnownValue);
+    }
+
+    [Fact]
+    public void WhenAClaimedChildIsProjectedBeforeReconciliation_ThenItIsNotRejectedAsDeparting()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new RefreshableChildProjection(context);
+        var child = new Person();
+        context.WithService(() => new ContinueAfterWriteInterceptor(subject, nameof(RefreshableChildProjection.Child),
+            () => subject.Refresh++));
+
+        // Act
+        var exception = Record.Exception(() => subject.Child = child);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Same(child, subject.Projected);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class ContinueAfterWriteInterceptor(IInterceptorSubject subject, string propertyName, Action continuation) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (ReferenceEquals(context.Property.Subject, subject) && context.Property.Name == propertyName) continuation();
+        }
     }
 }

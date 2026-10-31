@@ -10,10 +10,10 @@ public class GetterHistoricalDetachContextTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var trigger = new CallbackSpikeSegmentWrapper();
-        var pending = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
+        var root = new PayloadNode(context);
+        var trigger = new ReadHookSegmentHolder();
+        var pending = new PayloadNode();
+        var replacement = new PayloadNode();
         var detachCount = 0;
         context.TryGetLifecycleInterceptor()!.SubjectDetaching += change =>
         {

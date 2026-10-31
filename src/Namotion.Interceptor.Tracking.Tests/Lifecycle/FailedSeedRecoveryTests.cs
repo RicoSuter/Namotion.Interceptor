@@ -17,15 +17,15 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var pending = new CallbackSpikeNode();
-        var completed = new CallbackSpikeNode();
+        var root = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var pending = new PayloadNode();
+        var completed = new PayloadNode();
         var attached = new List<IInterceptorSubject>();
         context.TryGetLifecycleInterceptor()!.SubjectAttached += change => attached.Add(change.Subject);
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
-        object retained = nested ? new CallbackSpikeNode { Payload = trigger } : trigger;
-        if (nested) leaf.Child = (CallbackSpikeNode)retained;
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
+        object retained = nested ? new PayloadNode { Payload = trigger } : trigger;
+        if (nested) leaf.Child = (PayloadNode)retained;
         var value = new[] { completed, retained, pending };
         var failure = new InvalidOperationException("authoritative child getter failed");
         trigger.OnRead = () =>
@@ -58,10 +58,10 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var originalRoot = new CallbackSpikeNode(context);
-        var retainedRoot = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var originalRoot = new PayloadNode(context);
+        var retainedRoot = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("repeated seed failure");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
         var attaches = 0;
@@ -95,8 +95,8 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([new CallbackSpikeNode()]) };
+        var root = new PayloadNode(context);
+        var trigger = new ReadHookSegmentHolder { Children = new([new PayloadNode()]) };
         var calls = new List<string>();
         context.AddService<ILifecycleHandler>(new AfterSeedProbe(trigger, calls));
         context.AddService<ILifecycleHandler>(new BeforeSeedProbe(trigger, calls));
@@ -131,10 +131,10 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var originalRoot = new CallbackSpikeNode(context);
-        var secondRoot = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var originalRoot = new PayloadNode(context);
+        var secondRoot = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("seed getter failed");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
 
@@ -154,9 +154,9 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var originalRoot = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var originalRoot = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("seed getter failed");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
 
@@ -166,7 +166,7 @@ public class FailedSeedRecoveryTests
 
         // The second parent is built while detached, so its edge to the half seeded subject arrives
         // through the attach descent rather than through a reconcile of an attached parent.
-        var descendedRoot = new CallbackSpikeNode { Payload = trigger };
+        var descendedRoot = new PayloadNode { Payload = trigger };
         descendedRoot.AttachToContext(context);
 
         // Assert
@@ -185,9 +185,9 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var root = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("seed getter failed");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
 
@@ -207,9 +207,9 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var root = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("seed getter failed");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
 
@@ -237,9 +237,9 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var originalRoot = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var originalRoot = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("seed getter failed");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
 
@@ -248,8 +248,8 @@ public class FailedSeedRecoveryTests
 
         // The getter is never healed, so the descent of a new root that happens to reference the
         // half seeded subject resumes it and fails on it.
-        var otherLeaf = new CallbackSpikeNode();
-        var descendedRoot = new CallbackSpikeNode { Payload = new object[] { otherLeaf, trigger } };
+        var otherLeaf = new PayloadNode();
+        var descendedRoot = new PayloadNode { Payload = new object[] { otherLeaf, trigger } };
         var rejected = Record.Exception(() => descendedRoot.AttachToContext(context));
 
         // Assert
@@ -265,9 +265,9 @@ public class FailedSeedRecoveryTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var root = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var failure = new InvalidOperationException("seed getter failed");
         trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
 
@@ -282,6 +282,34 @@ public class FailedSeedRecoveryTests
         Assert.Same(failure, rejected);
         Assert.Null(retry);
         SupportContractAssertions.Settled(context, [root, trigger], root, trigger, leaf);
+    }
+
+    [Fact]
+    public void WhenAnExplicitRootsSeedThrows_ThenItsAnchorAndClaimsAreRolledBack()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var target = new PayloadNode();
+        var root = new ReadHookSegmentHolder { Children = new([target]) };
+        var failure = new InvalidOperationException("seed failure");
+        root.OnRead = () =>
+        {
+            if (root.TryGetContext() is not null)
+            {
+                root.OnRead = null;
+                throw failure;
+            }
+        };
+
+        // Act
+        var exception = Record.Exception(() => root.AttachToContext(context));
+
+        // Assert
+        Assert.Same(failure, exception);
+        Assert.Null(root.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)root).Executor.AttachmentAnchor);
+        Assert.Null(target.TryGetContext());
+        Assert.Equal(0, target.GetReferenceCount());
     }
 
     [RunsBefore(typeof(LifecycleInterceptor))]
@@ -310,5 +338,4 @@ public class FailedSeedRecoveryTests
         }
         public void DetachProperty(SubjectPropertyLifecycleChange change) { }
     }
-
 }

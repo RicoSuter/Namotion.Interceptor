@@ -12,9 +12,9 @@ public class CapturedBaselineTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var old = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
+        var root = new PayloadNode(context);
+        var old = new PayloadNode();
+        var replacement = new PayloadNode();
         var sequence = new CaptureOnlySequence(old);
         root.Payload = sequence;
         var reads = sequence.Reads;
@@ -37,9 +37,9 @@ public class CapturedBaselineTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var otherRoot = new CallbackSpikeNode(context);
-        var shared = new CallbackSpikeNode();
+        var root = new PayloadNode(context);
+        var otherRoot = new PayloadNode(context);
+        var shared = new PayloadNode();
         var sequence = new CaptureOnlySequence(shared);
         root.Payload = sequence;
         otherRoot.Child = shared;
@@ -63,12 +63,12 @@ public class CapturedBaselineTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var leaf = new CallbackSpikeNode();
-        var pending = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var root = new PayloadNode(context);
+        var leaf = new PayloadNode();
+        var pending = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([leaf]) };
         var sequence = new CaptureOnlySequence(trigger, pending);
-        var branch = new CallbackSpikeNode { Payload = sequence };
+        var branch = new PayloadNode { Payload = sequence };
         var failure = new InvalidOperationException("descendant seeding failed");
         trigger.OnRead = () =>
         {

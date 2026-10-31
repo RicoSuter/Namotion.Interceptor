@@ -54,7 +54,7 @@ public class NormalizingSetterDerivedRaceTests
             parent.OnAuthoritativeValueRead = null;
             Volatile.Write(ref storedValueAtPark, ReferenceEquals(storedValue, substitute) ? 1 : 0);
             parked.Set();
-            release.Wait(WriteProtocolAcceptance.RendezvousTimeout);
+            release.Wait(WriteProtocolDeadlines.RendezvousTimeout);
         };
 
         Exception? writeException = null;
@@ -67,7 +67,7 @@ public class NormalizingSetterDerivedRaceTests
         // Act: the writer parks inside the window, then an unrelated scalar write on another
         // subject recalculates a derived property that projects the stored value.
         writer.Start();
-        var reachedPark = parked.Wait(WriteProtocolAcceptance.RendezvousTimeout);
+        var reachedPark = parked.Wait(WriteProtocolDeadlines.RendezvousTimeout);
 
         Exception? recalculationException = null;
         var recalculator = new Thread(
@@ -76,10 +76,10 @@ public class NormalizingSetterDerivedRaceTests
             IsBackground = true
         };
         recalculator.Start();
-        var recalculatorCompleted = recalculator.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        var recalculatorCompleted = recalculator.Join(WriteProtocolDeadlines.RendezvousTimeout);
 
         release.Set();
-        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        var writerCompleted = writer.Join(WriteProtocolDeadlines.RendezvousTimeout);
 
         // Assert: the window was actually open while the recalculation ran, so the repro cannot
         // pass by the two writes serializing or by the park landing outside the window.
@@ -136,7 +136,7 @@ public class NormalizingSetterDerivedRaceTests
             parent.OnAuthoritativeValueRead = null;
             Volatile.Write(ref storedValueAtPark, ReferenceEquals(storedValue, substitute) ? 1 : 0);
             parked.Set();
-            release.Wait(WriteProtocolAcceptance.RendezvousTimeout);
+            release.Wait(WriteProtocolDeadlines.RendezvousTimeout);
         };
 
         Exception? writeException = null;
@@ -148,7 +148,7 @@ public class NormalizingSetterDerivedRaceTests
 
         // Act
         writer.Start();
-        var reachedPark = parked.Wait(WriteProtocolAcceptance.RendezvousTimeout);
+        var reachedPark = parked.Wait(WriteProtocolDeadlines.RendezvousTimeout);
 
         Exception? recalculationException = null;
         var recalculator = new Thread(
@@ -157,12 +157,12 @@ public class NormalizingSetterDerivedRaceTests
             IsBackground = true
         };
         recalculator.Start();
-        var recalculatorCompleted = recalculator.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        var recalculatorCompleted = recalculator.Join(WriteProtocolDeadlines.RendezvousTimeout);
         var projectedBeforeRelease = new PropertyReference(probe, nameof(DerivedProjectionProbe.Projected))
             .GetDerivedPropertyData().LastKnownValue;
 
         release.Set();
-        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        var writerCompleted = writer.Join(WriteProtocolDeadlines.RendezvousTimeout);
 
         // Assert
         Assert.True(reachedPark, "the normalizing write never parked inside the store-to-reconcile window");

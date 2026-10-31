@@ -12,9 +12,9 @@ public class CallbackSupportGetterRemainingLimitTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode();
-        var stale = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
+        var root = new PayloadNode();
+        var stale = new PayloadNode();
+        var replacement = new PayloadNode();
         var reentered = false;
         root.Payload = new HookEnumerable([stale], () =>
         {
@@ -44,12 +44,12 @@ public class CallbackSupportGetterRemainingLimitTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var stale = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper();
-        var branch = new CallbackSpikeNode { Payload = trigger };
-        var wrapper = new CallbackSpikeNode { Payload = new[] { branch, stale } };
+        var root = new PayloadNode(context);
+        var stale = new PayloadNode();
+        var replacement = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
+        var branch = new PayloadNode { Payload = trigger };
+        var wrapper = new PayloadNode { Payload = new[] { branch, stale } };
         var originalValue = wrapper.Payload;
         trigger.OnRead = () =>
         {
@@ -71,9 +71,9 @@ public class CallbackSupportGetterRemainingLimitTests
         Assert.Null(replacement.TryGetContext());
     }
 
-    private sealed class HookEnumerable(IEnumerable<CallbackSpikeNode> children, Action onEnumeration) : IEnumerable<CallbackSpikeNode>
+    private sealed class HookEnumerable(IEnumerable<PayloadNode> children, Action onEnumeration) : IEnumerable<PayloadNode>
     {
-        public IEnumerator<CallbackSpikeNode> GetEnumerator()
+        public IEnumerator<PayloadNode> GetEnumerator()
         {
             onEnumeration();
             return children.GetEnumerator();

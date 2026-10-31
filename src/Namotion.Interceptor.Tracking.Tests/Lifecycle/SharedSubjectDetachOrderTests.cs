@@ -4,12 +4,14 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// Regression tests for a defect shipped in 0.9.x and earlier: the context composed onto a subject
-/// when it joined the graph could outlive its detach, because it was composed from the parent of the
-/// first attach and decomposed against the parent of the last detach. For a subject with more than
-/// one parent subject those are different contexts, so the decomposition matched nothing.
+/// A subject with more than one parent that is detached through a different parent than the one it
+/// was attached under, and the cycles such a subject can later form, must leave the subject fully
+/// detached and its reads and writes working. This regressed in 0.9.x and earlier, where the context
+/// composed onto a subject from the parent of its first attach was decomposed against the parent of
+/// its last detach, so for such a subject the decomposition matched nothing and the composition
+/// outlived the detach.
 /// </summary>
-public class ContextInheritanceCycleTests
+public class SharedSubjectDetachOrderTests
 {
     [Fact]
     public void WhenASharedSubjectLosesItsFirstParentBeforeItsLast_ThenItStopsResolvingTheGraphsServices()

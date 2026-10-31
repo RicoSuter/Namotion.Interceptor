@@ -22,15 +22,15 @@ public class CallbackGraphOracleTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode();
+        var root = new PayloadNode();
         root.AttachToContext(context);
-        var pending = new CallbackSpikeNode();
-        var shared = new CallbackSpikeNode { Child = pending };
+        var pending = new PayloadNode();
+        var shared = new PayloadNode { Child = pending };
         pending.Child = shared;
         if (hasIndependentSupport) root.Child = shared;
-        var trigger = new CallbackSpikeSegmentWrapper();
-        var branch = new CallbackSpikeNode { Payload = trigger };
-        var replacement = new CallbackSpikeNode();
+        var trigger = new ReadHookSegmentHolder();
+        var branch = new PayloadNode { Payload = trigger };
+        var replacement = new PayloadNode();
         object finalValue = retainPendingOccurrences ? new object[] { pending, pending, shared } : replacement;
         var failure = new InvalidOperationException("getter failed after the nested write committed");
         var reentered = false;
@@ -72,15 +72,15 @@ public class CallbackGraphOracleTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var shared = new CallbackSpikeNode();
-        var cycleFirst = new CallbackSpikeNode();
-        var cycleSecond = new CallbackSpikeNode { Child = cycleFirst };
+        var shared = new PayloadNode();
+        var cycleFirst = new PayloadNode();
+        var cycleSecond = new PayloadNode { Child = cycleFirst };
         cycleFirst.Child = cycleSecond;
-        var old = new CallbackSpikeNode { Payload = new object[] { shared, cycleFirst, shared } };
-        var intermediate = new CallbackSpikeNode { Payload = new object[] { shared, cycleSecond } };
-        var replacement = new CallbackSpikeNode { Payload = new object[] { shared, shared, cycleFirst } };
+        var old = new PayloadNode { Payload = new object[] { shared, cycleFirst, shared } };
+        var intermediate = new PayloadNode { Payload = new object[] { shared, cycleSecond } };
+        var replacement = new PayloadNode { Payload = new object[] { shared, shared, cycleFirst } };
         var final = reattachOldSubject ? old : replacement;
-        var root = new CallbackSpikeNode { Child = shared, Payload = old };
+        var root = new PayloadNode { Child = shared, Payload = old };
         root.AttachToContext(context);
         var failure = new InvalidOperationException("detach callback failed after the nested write committed");
         var reentered = false;

@@ -12,11 +12,11 @@ public class PropertyEdgeJournalTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var pending = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper();
-        var branch = new CallbackSpikeNode { Payload = trigger };
-        var root = new CallbackSpikeNode { Payload = new[] { branch, pending, pending } };
+        var pending = new PayloadNode();
+        var replacement = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
+        var branch = new PayloadNode { Payload = trigger };
+        var root = new PayloadNode { Payload = new[] { branch, pending, pending } };
         trigger.OnRead = () =>
         {
             if (trigger.GetReferenceCount() == 0) return;
@@ -46,9 +46,9 @@ public class PropertyEdgeJournalTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var pending = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper();
+        var root = new PayloadNode(context);
+        var pending = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
         var value = new object[] { trigger, pending, pending };
         var failure = new InvalidOperationException("seed failed after incoming publication");
         trigger.OnRead = () =>
@@ -77,11 +77,11 @@ public class PropertyEdgeJournalTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode();
+        var root = new PayloadNode();
         root.AttachToContext(context);
-        var pending = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper();
+        var pending = new PayloadNode();
+        var replacement = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
         trigger.OnRead = () =>
         {
             if (trigger.GetReferenceCount() == 0) return;
@@ -114,10 +114,10 @@ public class PropertyEdgeJournalTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var pending = new CallbackSpikeNode();
-        var first = new CallbackSpikeSegmentWrapper();
-        var second = new CallbackSpikeSegmentWrapper();
+        var root = new PayloadNode(context);
+        var pending = new PayloadNode();
+        var first = new ReadHookSegmentHolder();
+        var second = new ReadHookSegmentHolder();
         var failure = new InvalidOperationException("outer getter failed after both nested writes");
         second.OnRead = () =>
         {
@@ -147,7 +147,7 @@ public class PropertyEdgeJournalTests
         Assert.Null(pending.TryGetContext());
     }
 
-    private static void AssertNoJournal(IInterceptorSubjectContext context, CallbackSpikeNode root)
+    private static void AssertNoJournal(IInterceptorSubjectContext context, PayloadNode root)
     {
         var graph = context.TryGetLifecycleInterceptor()!.Graph;
         Assert.Null(graph.GetPropertyJournal(new PropertyReference(root, nameof(root.Payload)), graph.TryGetOwnership(root)));

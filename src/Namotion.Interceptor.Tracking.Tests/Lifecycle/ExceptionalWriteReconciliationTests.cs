@@ -164,6 +164,97 @@ public class ExceptionalWriteReconciliationTests
         Assert.NotNull(callbackFailure.StackTrace);
     }
 
+    [Fact]
+    public void WhenOnlyAQueuedDetachCallbackFails_ThenItsExceptionEscapesUnwrappedAfterTheWriteSettles()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var oldChild = new Person();
+        var parent = new Person(context) { Father = oldChild };
+        var newChild = new Person();
+        var failure = new InvalidOperationException("detach callback");
+        context.TryGetLifecycleInterceptor()!.SubjectDetaching += change =>
+        {
+            if (ReferenceEquals(change.Subject, oldChild)) throw failure;
+        };
+
+        // Act
+        var exception = Record.Exception(() => parent.Father = newChild);
+
+        // Assert
+        Assert.Same(failure, exception);
+        Assert.Same(newChild, parent.Father);
+        Assert.Same(context, newChild.TryGetContext());
+        Assert.Null(oldChild.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenTheWriteAndAQueuedDetachCallbackBothFail_ThenBothExceptionsEscapeInOrder()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var oldChild = new Person();
+        var parent = new Person(context) { Father = oldChild };
+        var newChild = new Person();
+        var writeFailure = new InvalidOperationException("downstream write");
+        var callbackFailure = new InvalidOperationException("detach callback");
+        context.WithService(() => new ThrowingWriteInterceptor(writeFailure));
+        context.TryGetLifecycleInterceptor()!.SubjectDetaching += change =>
+        {
+            if (ReferenceEquals(change.Subject, oldChild)) throw callbackFailure;
+        };
+
+        // Act
+        var exception = Record.Exception(() => parent.Father = newChild);
+
+        // Assert
+        var failures = Assert.IsType<AggregateException>(exception).Flatten().InnerExceptions;
+        Assert.Collection(failures,
+            error => Assert.Same(writeFailure, error),
+            error => Assert.Same(callbackFailure, error));
+        Assert.Same(newChild, parent.Father);
+        Assert.Same(context, newChild.TryGetContext());
+        Assert.Null(oldChild.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenTheWriteItsReconciliationAndAQueuedCallbackAllFail_ThenThePrimaryFailureGroupStaysFirst()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var subject = new ReadHookSegmentHolder();
+        subject.AttachToContext(context);
+        var otherRoot = new PayloadNode(context);
+        var callbackChild = new PayloadNode();
+        var writeFailure = new InvalidOperationException("downstream write");
+        var reconciliationFailure = new InvalidOperationException("authoritative getter");
+        var callbackFailure = new InvalidOperationException("queued callback");
+        context.WithService(() => new ContinueAfterWriteInterceptor(subject, nameof(ReadHookSegmentHolder.Children), () =>
+        {
+            otherRoot.Child = callbackChild;
+            subject.OnRead = () => throw reconciliationFailure;
+            throw writeFailure;
+        }));
+        context.TryGetLifecycleInterceptor()!.SubjectAttached += change =>
+        {
+            if (ReferenceEquals(change.Subject, callbackChild)) throw callbackFailure;
+        };
+
+        // Act
+        var exception = Record.Exception(() => subject.Children = new([new PayloadNode()]));
+        subject.OnRead = null;
+
+        // Assert
+        var aggregate = Assert.IsType<AggregateException>(exception);
+        Assert.Equal(2, aggregate.InnerExceptions.Count);
+        var primary = Assert.IsType<AggregateException>(aggregate.InnerExceptions[0]);
+        Assert.Collection(primary.InnerExceptions,
+            error => Assert.Same(writeFailure, error),
+            error => Assert.Same(reconciliationFailure, error));
+        Assert.Same(callbackFailure, aggregate.InnerExceptions[1]);
+        Assert.Same(context, callbackChild.TryGetContext());
+    }
+
     [RunsAfter(typeof(LifecycleInterceptor))]
     private sealed class NestedWriteThenThrowInterceptor(Person parent, Person latestChild, Exception failure) : IWriteInterceptor
     {
@@ -214,6 +305,16 @@ public class ExceptionalWriteReconciliationTests
                 ContextOnUnwind = child.TryGetContext();
                 IsWrittenOnUnwind = context.IsWritten;
             }
+        }
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class ContinueAfterWriteInterceptor(IInterceptorSubject subject, string propertyName, Action continuation) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (ReferenceEquals(context.Property.Subject, subject) && context.Property.Name == propertyName) continuation();
         }
     }
 }

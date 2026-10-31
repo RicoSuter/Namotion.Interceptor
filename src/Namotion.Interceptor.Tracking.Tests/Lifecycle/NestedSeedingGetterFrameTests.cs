@@ -9,11 +9,11 @@ public class NestedSeedingGetterFrameTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var otherRoot = new CallbackSpikeNode(context);
-        var replacement = new CallbackSpikeNode();
-        var outer = new CallbackSpikeSegmentWrapper();
-        var inner = new CallbackSpikeSegmentWrapper();
+        var root = new PayloadNode(context);
+        var otherRoot = new PayloadNode(context);
+        var replacement = new PayloadNode();
+        var outer = new ReadHookSegmentHolder();
+        var inner = new ReadHookSegmentHolder();
         var outerReads = 0;
         outer.OnRead = () =>
         {

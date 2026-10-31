@@ -15,10 +15,10 @@ public class ClaimedSubjectAdmissionTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
-        var trigger = new CallbackSpikeSegmentWrapper();
+        var root = new PayloadNode(context);
+        var trigger = new ReadHookSegmentHolder();
         var pending = new Tire();
-        var child = new CallbackSpikeNode();
+        var child = new PayloadNode();
         var ran = false;
         trigger.OnRead = () =>
         {
@@ -28,7 +28,7 @@ public class ClaimedSubjectAdmissionTests
             Assert.Same(context, pending.TryGetContext());
             Assert.Equal(0, pending.GetReferenceCount());
             ((IInterceptorSubject)pending).AddProperties(new SubjectPropertyMetadata(
-                "Extra", typeof(CallbackSpikeNode), [], _ => child, null,
+                "Extra", typeof(PayloadNode), [], _ => child, null,
                 isIntercepted: true, isDynamic: true));
             root.Payload = retainOwner ? pending : null;
         };

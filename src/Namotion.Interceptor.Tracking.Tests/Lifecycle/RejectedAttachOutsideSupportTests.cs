@@ -14,11 +14,11 @@ public class RejectedAttachOutsideSupportTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var outside = new CallbackSpikeNode(context);
-        var completed = new CallbackSpikeNode();
-        var pending = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([pending]) };
-        var root = new CallbackSpikeNode { Payload = new object[] { completed, trigger } };
+        var outside = new PayloadNode(context);
+        var completed = new PayloadNode();
+        var pending = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([pending]) };
+        var root = new PayloadNode { Payload = new object[] { completed, trigger } };
         var failure = new InvalidOperationException("seed failed after gaining outside support");
         var triggered = false;
         trigger.OnRead = () =>
@@ -69,9 +69,9 @@ public class RejectedAttachOutsideSupportTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var provisional = new CallbackSpikeNode(context);
-        var trigger = new CallbackSpikeSegmentWrapper();
-        var root = new CallbackSpikeNode { Payload = new object[] { provisional, trigger } };
+        var provisional = new PayloadNode(context);
+        var trigger = new ReadHookSegmentHolder();
+        var root = new PayloadNode { Payload = new object[] { provisional, trigger } };
         var failure = new InvalidOperationException("seed failed after adding a back edge");
         trigger.OnRead = () =>
         {

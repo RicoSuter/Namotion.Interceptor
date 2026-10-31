@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -123,5 +125,47 @@ public class ForeignClaimTests
 
         // Assert
         Assert.Same(context1, subject.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenAnInterceptorAheadOfTheLifecycleAssignsAForeignChildInANestedWrite_ThenItIsRejectedBeforeStorage()
+    {
+        // Arrange
+        var interceptor = new AheadOfLifecycleWriteInterceptor();
+        var context = InterceptorSubjectContext.Create().WithLifecycle().WithService(() => interceptor);
+        var foreignContext = InterceptorSubjectContext.Create().WithLifecycle();
+        var outer = new Person(context);
+        var destination = new Person(context);
+        var wrapper = new Person();
+        var foreign = new Person(foreignContext);
+        Exception? nestedException = null;
+        interceptor.Action = () =>
+        {
+            destination.Father = wrapper;
+            nestedException = Record.Exception(() => wrapper.Father = foreign);
+            Assert.Null(wrapper.Father);
+        };
+
+        // Act
+        outer.Father = new Person();
+
+        // Assert
+        Assert.NotNull(nestedException);
+        Assert.Same(context, wrapper.TryGetContext());
+        Assert.Equal(1, wrapper.GetReferenceCount());
+        Assert.Same(foreignContext, foreign.TryGetContext());
+    }
+
+    [RunsBefore(typeof(LifecycleInterceptor))]
+    private sealed class AheadOfLifecycleWriteInterceptor : IWriteInterceptor
+    {
+        public Action? Action { get; set; }
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            var action = Action;
+            Action = null;
+            action?.Invoke();
+            next(ref context);
+        }
     }
 }

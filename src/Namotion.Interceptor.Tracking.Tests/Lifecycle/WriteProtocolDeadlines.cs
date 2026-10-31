@@ -1,8 +1,8 @@
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// Shared deadlines for the write protocol acceptance repros, and the register of what each repro
-/// pins and what would quietly stop it pinning anything.
+/// Shared deadlines for the concurrent write protocol tests, and the register of what each of those
+/// tests pins and what would quietly stop it pinning anything.
 /// </summary>
 /// <remarks>
 /// CrossContextGateDeadlockTests, attach-callback half. Two lifecycle callbacks writing into each
@@ -17,42 +17,41 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// lifecycle, an interceptor outside it would hold nothing and both writes would simply complete;
 /// the asserted rejection is what catches that, and chain position alone does not.
 ///
-/// TerminalStoreContractTests, foreign-subject half. Fixed, and now the record of a known contract
-/// boundary rather than a repro. Only the proposed value was claimed before the terminal ran, so a
-/// foreign-context subject stored by a normalizing terminal was rejected after the baseline had been
-/// committed. Claiming the stored value moves the rejection ahead of every graph mutation, and the
-/// test asserts that per kind of state rather than through one probe. The backing field is the
-/// boundary and is asserted as such, deliberately in the negative: it still holds what the terminal
-/// stored, because the only store the framework has is the terminal the subject handed it and this
-/// one ignores the value it is given, so no replay restores anything. A change that starts restoring
+/// TerminalStoreContractTests, foreign-subject half. The record of a known contract boundary. A
+/// foreign-context subject stored by a normalizing terminal must be rejected before any graph
+/// mutation, which claiming the stored value and not only the proposed one guarantees, and the test
+/// asserts that per kind of state rather than through one probe. The backing field is the boundary
+/// and is asserted as such, deliberately in the negative: it still holds what the terminal stored,
+/// because the only store the framework has is the terminal the subject handed it and this one
+/// ignores the value it is given, so no replay restores anything. A change that starts restoring
 /// the field fails that assertion, which is the point: the contract would have moved and that should
 /// be seen rather than absorbed. The boundary is stated for consumers in the WriteProperty remarks
 /// and in docs/design/tracking-lifecycle.md, so this entry is the test-side reminder, not the
 /// argument.
 ///
-/// TerminalStoreContractTests, reordering half. Passes today and is a parity guard, not a repro: a
-/// normalizing setter that stores a reordered subset of the proposed subjects must stay legal. It is
-/// the only case that runs the stored-value claim on a value that has to pass, so it is what stops
-/// an over-aggressive fix. Its stored list is a different instance from the proposed one, so a
-/// reference-equality short circuit cannot hide the rewrite, and it is also what pins that the
-/// stored-value claim is skipped when the terminal stored exactly what it was given.
+/// TerminalStoreContractTests, reordering half. A parity guard: a normalizing setter that stores a
+/// reordered subset of the proposed subjects must stay legal. It is the only case that runs the
+/// stored-value claim on a value that has to pass, so it is what stops an over-aggressive rejection.
+/// Its stored list is a different instance from the proposed one, so a reference-equality short
+/// circuit cannot hide the rewrite, and it is also what pins that the stored-value claim is skipped
+/// when the terminal stored exactly what it was given.
 ///
-/// NormalizingSetterDerivedRaceTests. A derived recalculation on another thread convicted a subject
-/// that a normalizing setter had stored before the reconcile attached it. Parks in the authoritative
-/// getter the lifecycle rereads between its own next and its reconcile, which the lifecycle invokes
-/// itself, so no interceptor ordering can move it. Parking in the stored setter was measured and
-/// rejected: that delegate runs under the terminal lock the reading thread also takes, so the reader
-/// blocks instead of racing. The guard asserts the backing field held the substituted subject when
-/// the park ran, so a park landing outside the window fails the test rather than passing it. Its
-/// non-intercepted twin records no dependency, so no structural cascade reaches the probe. It
+/// NormalizingSetterDerivedRaceTests. A derived recalculation on another thread must not convict a
+/// subject that a normalizing setter has stored before the reconcile attached it. Parks in the
+/// authoritative getter the lifecycle rereads between its own next and its reconcile, which the
+/// lifecycle invokes itself, so no interceptor ordering can move it. Parking in the stored setter
+/// does not work: that delegate runs under the terminal lock the reading thread also takes, so the
+/// reader blocks instead of racing. The guard asserts the backing field held the substituted subject
+/// when the park ran, so a park landing outside the window fails the test rather than passing it.
+/// Its non-intercepted twin records no dependency, so no structural cascade reaches the probe. It
 /// asserts LastKnownValue before releasing the writer, proving the scalar-triggered projection
 /// was published without waiting for ownership or relying on a later getter read.
 /// ConcurrentPublicationVerdictTests similarly verifies projection publication while an
 /// unrelated topology operation is in flight.
 ///
-/// AttachResidueTests, root half. A rejected explicit attach left residue behind. Asserts each kind
-/// of state the attach would have written separately, so a partial rollback reports which part
-/// leaked. Depends on discovery invoking user code before the root is claimed, and on seeding
+/// AttachResidueTests, root half. A rejected explicit attach must leave no residue behind. Asserts
+/// each kind of state the attach would have written separately, so a partial rollback reports which
+/// part leaked. Depends on discovery invoking user code before the root is claimed, and on seeding
 /// re-reading the property getter rather than reusing the discovery snapshot; the guard asserts the
 /// root is still unattached when the scan parks.
 ///
@@ -62,7 +61,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// them in that list's order rather than in whatever order the subject enumerates its properties,
 /// which is what makes the published-then-rejected sequence deterministic.
 /// </remarks>
-internal static class WriteProtocolAcceptance
+internal static class WriteProtocolDeadlines
 {
     /// <summary>How long a thread waits to meet another thread at a handoff before giving up.</summary>
     public static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);

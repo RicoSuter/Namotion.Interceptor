@@ -11,14 +11,14 @@ public class CallbackSupportGetterContinuationTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var target = new CallbackSpikeNode();
-        var wrapper = new CallbackSpikeSegmentWrapper { Children = new([target]) };
-        var nodes = new List<CallbackSpikeNode>();
+        var root = new PayloadNode(context);
+        var target = new PayloadNode();
+        var wrapper = new ReadHookSegmentHolder { Children = new([target]) };
+        var nodes = new List<PayloadNode>();
         object component = wrapper;
         for (var index = 0; index < depth; index++)
         {
-            var node = new CallbackSpikeNode { Payload = component };
+            var node = new PayloadNode { Payload = component };
             nodes.Add(node);
             component = node;
         }
@@ -46,12 +46,12 @@ public class CallbackSupportGetterContinuationTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var stale = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper();
-        var branch = new CallbackSpikeNode { Payload = trigger };
-        var wrapper = new CallbackSpikeSegmentWrapper { Children = new([branch, stale]) };
+        var root = new PayloadNode(context);
+        var stale = new PayloadNode();
+        var replacement = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
+        var branch = new PayloadNode { Payload = trigger };
+        var wrapper = new ReadHookSegmentHolder { Children = new([branch, stale]) };
         trigger.OnRead = () =>
         {
             if (trigger.GetReferenceCount() > 0)
@@ -78,9 +78,9 @@ public class CallbackSupportGetterContinuationTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var root = new CallbackSpikeNode(context);
-        var target = new CallbackSpikeNode();
-        var wrapper = new CallbackSpikeSegmentWrapper { Children = new([target]) };
+        var root = new PayloadNode(context);
+        var target = new PayloadNode();
+        var wrapper = new ReadHookSegmentHolder { Children = new([target]) };
         wrapper.OnRead = () =>
         {
             if (ReferenceEquals(root.Payload, wrapper))
@@ -107,9 +107,9 @@ public class CallbackSupportGetterContinuationTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
-        var target = new CallbackSpikeNode();
-        var stable = new ArraySegment<CallbackSpikeNode>([target]);
-        var root = new CallbackSpikeSegmentWrapper { Children = stable };
+        var target = new PayloadNode();
+        var stable = new ArraySegment<PayloadNode>([target]);
+        var root = new ReadHookSegmentHolder { Children = stable };
         var reads = 0;
         root.OnRead = () =>
         {
@@ -138,9 +138,9 @@ public class CallbackSupportGetterContinuationTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
         var foreignContext = InterceptorSubjectContext.Create().WithLifecycle();
-        var foreign = new CallbackSpikeNode(foreignContext);
-        var target = new CallbackSpikeNode();
-        var root = new CallbackSpikeSegmentWrapper { Children = new([target]) };
+        var foreign = new PayloadNode(foreignContext);
+        var target = new PayloadNode();
+        var root = new ReadHookSegmentHolder { Children = new([target]) };
         Exception? writeException = null;
         root.OnRead = () =>
         {
@@ -161,5 +161,107 @@ public class CallbackSupportGetterContinuationTests
         Assert.Same(context, target.TryGetContext());
         Assert.Equal(1, target.GetReferenceCount());
         Assert.Same(foreignContext, foreign.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenAChildGetterWritesTheStableBoxedSegment_ThenAttachTerminatesAndEdgesAgree()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new PayloadNode(context);
+        var target = new PayloadNode();
+        root.Payload = new PayloadNode { Child = target };
+        var stable = new ArraySegment<PayloadNode>([target]);
+        var wrapper = new ReadHookSegmentHolder { Children = stable };
+        var reads = 0;
+        wrapper.OnRead = () =>
+        {
+            if (ReferenceEquals(root.Payload, wrapper) && wrapper.GetReferenceCount() == 1)
+            {
+                if (++reads > 16) throw new InvalidOperationException("unbounded getter retry");
+                wrapper.Children = stable;
+            }
+        };
+
+        // Act
+        var exception = Record.Exception(() => root.Payload = wrapper);
+        wrapper.OnRead = null;
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(reads > 0);
+        Assert.Same(wrapper, root.Payload);
+        Assert.Same(context, wrapper.TryGetContext());
+        Assert.Same(context, target.TryGetContext());
+        Assert.Equal(1, target.GetReferenceCount());
+
+        // Act
+        root.Payload = null;
+
+        // Assert
+        Assert.Null(wrapper.TryGetContext());
+        Assert.Null(target.TryGetContext());
+        Assert.Equal(0, wrapper.GetReferenceCount());
+        Assert.Equal(0, target.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenGetterReplacesOwnerPropertyDuringAttach_ThenFinalGraphMatchesTheLatestWrite()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new PayloadNode(context);
+        var target = new PayloadNode();
+        var wrapper = new ReadHookSegmentHolder { Children = new([target]) };
+        var replacement = new PayloadNode();
+        wrapper.OnRead = () =>
+        {
+            if (ReferenceEquals(root.Payload, wrapper))
+            {
+                wrapper.OnRead = null;
+                root.Payload = replacement;
+            }
+        };
+
+        // Act
+        root.Payload = wrapper;
+
+        // Assert
+        Assert.Same(replacement, root.Payload);
+        Assert.Same(context, replacement.TryGetContext());
+        Assert.Equal(1, replacement.GetReferenceCount());
+        Assert.Null(wrapper.TryGetContext());
+        Assert.Null(target.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenGetterReattachesItsOwnerAndThenWrites_ThenTheNewOwnershipReconcilesTheWrite()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new PayloadNode(context);
+        var stale = new PayloadNode();
+        var replacement = new PayloadNode();
+        var wrapper = new ReadHookSegmentHolder { Children = new([stale]) };
+        wrapper.OnRead = () =>
+        {
+            if (wrapper.GetReferenceCount() > 0)
+            {
+                wrapper.OnRead = null;
+                root.Payload = null;
+                root.Payload = wrapper;
+                wrapper.Children = new([replacement]);
+            }
+        };
+
+        // Act
+        root.Payload = wrapper;
+
+        // Assert
+        Assert.Same(wrapper, root.Payload);
+        Assert.Same(replacement, Assert.Single(wrapper.Children));
+        Assert.Same(context, replacement.TryGetContext());
+        Assert.Equal(1, replacement.GetReferenceCount());
+        Assert.Null(stale.TryGetContext());
     }
 }

@@ -65,7 +65,7 @@ public class ReconcileRetentionWindowTests
 
             baselineAtPark = GetCommittedBaseline(context, garage!, nameof(Garage.CarsByName));
             released.Set();
-            parkObserved = claimAttempted.Wait(WriteProtocolAcceptance.RendezvousTimeout);
+            parkObserved = claimAttempted.Wait(WriteProtocolDeadlines.RendezvousTimeout);
         });
 
         context.WithService(() => handler, _ => false);
@@ -80,7 +80,7 @@ public class ReconcileRetentionWindowTests
         Exception? claimException = null;
         var claimer = new Thread(() =>
         {
-            if (!released.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            if (!released.Wait(WriteProtocolDeadlines.RendezvousTimeout))
             {
                 return;
             }
@@ -96,7 +96,7 @@ public class ReconcileRetentionWindowTests
         // Act
         claimer.Start();
         var assignmentException = Record.Exception(() => garage.CarsByName = newValue);
-        var claimerCompleted = claimer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        var claimerCompleted = claimer.Join(WriteProtocolDeadlines.RendezvousTimeout);
 
         // Assert: the rendezvous happened, and it happened inside the removal pass. Either guard
         // failing means the instrument moved rather than the behaviour changing.

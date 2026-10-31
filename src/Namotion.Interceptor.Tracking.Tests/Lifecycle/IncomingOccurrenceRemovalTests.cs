@@ -14,7 +14,7 @@ public class IncomingOccurrenceRemovalTests
         var child = new Person();
         var first = new ThrowingKey(1);
         var second = new ThrowingKey(2);
-        var root = new CallbackSpikeNode(context)
+        var root = new PayloadNode(context)
         {
             Payload = new Dictionary<ThrowingKey, Person> { [first] = child, [second] = child }
         };

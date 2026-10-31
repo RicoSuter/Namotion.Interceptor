@@ -26,7 +26,7 @@ public class ConcurrentPublicationVerdictTests
         var values = new ParkingEnumerable(() =>
         {
             parked.Set();
-            if (!release.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            if (!release.Wait(WriteProtocolDeadlines.RendezvousTimeout))
                 throw new TimeoutException("Topology operation was not released");
         });
         var operation = Task.Run(() =>
@@ -37,7 +37,7 @@ public class ConcurrentPublicationVerdictTests
 
         try
         {
-            Assert.True(parked.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+            Assert.True(parked.Wait(WriteProtocolDeadlines.RendezvousTimeout));
 
             // Act
             subject.Name = "trigger";
@@ -51,7 +51,7 @@ public class ConcurrentPublicationVerdictTests
         finally
         {
             release.Set();
-            await operation.WaitAsync(WriteProtocolAcceptance.RendezvousTimeout);
+            await operation.WaitAsync(WriteProtocolDeadlines.RendezvousTimeout);
         }
 
         Assert.Same(projected, subject.Current);

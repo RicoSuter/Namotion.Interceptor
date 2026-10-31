@@ -61,14 +61,14 @@ public class NarrowedGenericWriteTests
             writer.Start();
             reachedWait = SpinWait.SpinUntil(
                 () => (writer.ThreadState & ThreadState.WaitSleepJoin) != 0 || writeCompleted.IsSet,
-                WriteProtocolAcceptance.RendezvousTimeout);
+                WriteProtocolDeadlines.RendezvousTimeout);
             enteredBeforeRelease = interceptorEntered.IsSet;
         }
         finally
         {
             lifecycle.ExitStructuralWriteGate();
         }
-        var completed = writer.Join(WriteProtocolAcceptance.JoinTimeout);
+        var completed = writer.Join(WriteProtocolDeadlines.JoinTimeout);
 
         // Assert
         Assert.True(reachedWait);

@@ -13,8 +13,8 @@ public class CommittedOccurrenceCaptureTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode();
-        var child = new CallbackSpikeNode();
+        var root = new PayloadNode();
+        var child = new PayloadNode();
         var value = new ArmedEnumerable([child, child]);
         root.Payload = value;
         if (hasCycle) child.Child = root;
@@ -39,10 +39,10 @@ public class CommittedOccurrenceCaptureTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var child = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
+        var child = new PayloadNode();
+        var replacement = new PayloadNode();
         var value = new ArmedEnumerable([child, child]);
-        var root = new CallbackSpikeNode { Payload = value };
+        var root = new PayloadNode { Payload = value };
         root.AttachToContext(context);
         value.IsArmed = true;
 
@@ -68,11 +68,11 @@ public class CommittedOccurrenceCaptureTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var provisional = new CallbackSpikeNode(context);
-        var owner = new CallbackSpikeNode();
+        var provisional = new PayloadNode(context);
+        var owner = new PayloadNode();
         provisional.Child = owner;
         var value = new ArmedEnumerable([owner]);
-        var outside = new CallbackSpikeNode { Payload = value };
+        var outside = new PayloadNode { Payload = value };
         outside.AttachToContext(context);
         value.IsArmed = true;
 
@@ -89,19 +89,19 @@ public class CommittedOccurrenceCaptureTests
         SupportContractAssertions.Settled(context, [], provisional, owner, outside);
     }
 
-    private sealed class ArmedEnumerable(CallbackSpikeNode[] subjects) : IEnumerable<CallbackSpikeNode>
+    private sealed class ArmedEnumerable(PayloadNode[] subjects) : IEnumerable<PayloadNode>
     {
         public bool IsArmed { get; set; }
         public int ArmedReads { get; private set; }
 
-        public IEnumerator<CallbackSpikeNode> GetEnumerator()
+        public IEnumerator<PayloadNode> GetEnumerator()
         {
             if (IsArmed)
             {
                 ArmedReads++;
                 throw new InvalidOperationException("a committed user enumerable was read again");
             }
-            return ((IEnumerable<CallbackSpikeNode>)subjects).GetEnumerator();
+            return ((IEnumerable<PayloadNode>)subjects).GetEnumerator();
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

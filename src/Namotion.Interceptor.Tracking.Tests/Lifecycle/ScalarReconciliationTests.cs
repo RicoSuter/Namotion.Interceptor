@@ -31,11 +31,11 @@ public class ScalarReconciliationTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode();
+        var root = new PayloadNode();
         root.AttachToContext(context);
-        var old = new CallbackSpikeNode();
-        var final = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper();
+        var old = new PayloadNode();
+        var final = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
         var history = new List<string>();
         var identities = new Dictionary<IInterceptorSubject, string>(ReferenceEqualityComparer.Instance)
         {
@@ -71,8 +71,8 @@ public class ScalarReconciliationTests
     }
 
     private static Action CreateSupersedingRead(
-        CallbackSpikeSegmentWrapper trigger,
-        CallbackSpikeNode root,
+        ReadHookSegmentHolder trigger,
+        PayloadNode root,
         IInterceptorSubjectContext context,
         object finalPayload,
         bool reattachOwner,

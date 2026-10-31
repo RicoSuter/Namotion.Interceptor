@@ -13,12 +13,12 @@ public class RejectedAttachOwnershipEpochTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var outside = retainOwnership ? new CallbackSpikeNode(context) : new CallbackSpikeNode();
-        var discarded = new CallbackSpikeNode();
-        var completed = new CallbackSpikeNode();
-        var replacement = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([discarded]) };
-        var root = new CallbackSpikeNode { Payload = new object[] { completed, trigger } };
+        var outside = retainOwnership ? new PayloadNode(context) : new PayloadNode();
+        var discarded = new PayloadNode();
+        var completed = new PayloadNode();
+        var replacement = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([discarded]) };
+        var root = new PayloadNode { Payload = new object[] { completed, trigger } };
         var failure = new InvalidOperationException("older seed failed after root reattachment");
         var reattached = false;
         trigger.OnRead = () =>
@@ -56,11 +56,11 @@ public class RejectedAttachOwnershipEpochTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var outside = new CallbackSpikeNode(context);
-        var completed = new CallbackSpikeNode();
-        var pending = new CallbackSpikeNode();
-        var trigger = new CallbackSpikeSegmentWrapper { Children = new([pending]) };
-        var root = new CallbackSpikeNode { Payload = new object[] { completed, trigger } };
+        var outside = new PayloadNode(context);
+        var completed = new PayloadNode();
+        var pending = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder { Children = new([pending]) };
+        var root = new PayloadNode { Payload = new object[] { completed, trigger } };
         var failure = new InvalidOperationException("seed failed after provisional adoption");
         trigger.OnRead = () =>
         {

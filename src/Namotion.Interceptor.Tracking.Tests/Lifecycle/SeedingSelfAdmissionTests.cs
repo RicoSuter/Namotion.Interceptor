@@ -13,13 +13,13 @@ public class SeedingSelfAdmissionTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new CallbackSpikeNode(context);
+        var root = new PayloadNode(context);
         var host = new Tire();
-        var child = new CallbackSpikeNode();
+        var child = new PayloadNode();
         var admitted = false;
         object extraValue = duplicateChildren ? new[] { child, child } : child;
         ((IInterceptorSubject)host).AddProperties(new SubjectPropertyMetadata(
-            "Trigger", typeof(CallbackSpikeNode), [], _ =>
+            "Trigger", typeof(PayloadNode), [], _ =>
             {
                 if (!admitted && host.GetReferenceCount() > 0)
                 {

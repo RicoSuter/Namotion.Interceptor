@@ -47,7 +47,7 @@ public class CrossContextGateDeadlockTests
                 return;
             }
 
-            if (!rendezvous.SignalAndWait(WriteProtocolAcceptance.RendezvousTimeout))
+            if (!rendezvous.SignalAndWait(WriteProtocolDeadlines.RendezvousTimeout))
             {
                 return;
             }
@@ -64,7 +64,7 @@ public class CrossContextGateDeadlockTests
                 return;
             }
 
-            if (!rendezvous.SignalAndWait(WriteProtocolAcceptance.RendezvousTimeout))
+            if (!rendezvous.SignalAndWait(WriteProtocolDeadlines.RendezvousTimeout))
             {
                 return;
             }
@@ -93,8 +93,8 @@ public class CrossContextGateDeadlockTests
         // Act
         firstAttach.Start();
         secondAttach.Start();
-        var firstCompleted = firstAttach.Join(WriteProtocolAcceptance.JoinTimeout);
-        var secondCompleted = firstCompleted && secondAttach.Join(WriteProtocolAcceptance.JoinTimeout);
+        var firstCompleted = firstAttach.Join(WriteProtocolDeadlines.JoinTimeout);
+        var secondCompleted = firstCompleted && secondAttach.Join(WriteProtocolDeadlines.JoinTimeout);
 
         // Assert: both callbacks reached the cross write, so a timeout cannot pass by serializing.
         Assert.Equal(2, Volatile.Read(ref rendezvousReached));
@@ -107,7 +107,7 @@ public class CrossContextGateDeadlockTests
         Assert.True(firstCompleted && secondCompleted,
             "probable ABBA deadlock on two lifecycle gates: the first attach " +
             $"{(firstCompleted ? "completed" : "did not complete")} and the second attach " +
-            $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolAcceptance.JoinTimeout.TotalSeconds:F0} seconds");
+            $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolDeadlines.JoinTimeout.TotalSeconds:F0} seconds");
         Assert.IsType<LifecycleContractViolationException>(firstCrossWriteException);
         Assert.IsType<LifecycleContractViolationException>(secondCrossWriteException);
     }
@@ -183,8 +183,8 @@ public class CrossContextGateDeadlockTests
     {
         // Arrange: each context holds a subject the other context's downstream interceptor writes to.
         var rendezvous = new Barrier(2);
-        var firstInterceptor = new CrossContextWriteInterceptor(rendezvous, WriteProtocolAcceptance.RendezvousTimeout);
-        var secondInterceptor = new CrossContextWriteInterceptor(rendezvous, WriteProtocolAcceptance.RendezvousTimeout);
+        var firstInterceptor = new CrossContextWriteInterceptor(rendezvous, WriteProtocolDeadlines.RendezvousTimeout);
+        var secondInterceptor = new CrossContextWriteInterceptor(rendezvous, WriteProtocolDeadlines.RendezvousTimeout);
 
         var firstContext = CreateContext();
         firstContext.AddService<IWriteInterceptor>(firstInterceptor);
@@ -214,8 +214,8 @@ public class CrossContextGateDeadlockTests
         // Act
         firstWrite.Start();
         secondWrite.Start();
-        var firstCompleted = firstWrite.Join(WriteProtocolAcceptance.JoinTimeout);
-        var secondCompleted = firstCompleted && secondWrite.Join(WriteProtocolAcceptance.JoinTimeout);
+        var firstCompleted = firstWrite.Join(WriteProtocolDeadlines.JoinTimeout);
+        var secondCompleted = firstCompleted && secondWrite.Join(WriteProtocolDeadlines.JoinTimeout);
 
         // Assert: both interceptors reached the cross write, so a timeout cannot pass by serializing.
         Assert.Equal(2,
@@ -225,7 +225,7 @@ public class CrossContextGateDeadlockTests
         Assert.True(firstCompleted && secondCompleted,
             "probable ABBA deadlock on two lifecycle gates: the first structural write " +
             $"{(firstCompleted ? "completed" : "did not complete")} and the second structural write " +
-            $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolAcceptance.JoinTimeout.TotalSeconds:F0} seconds");
+            $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolDeadlines.JoinTimeout.TotalSeconds:F0} seconds");
 
         Assert.IsType<LifecycleContractViolationException>(firstInterceptor.CrossContextWriteException);
         Assert.IsType<LifecycleContractViolationException>(secondInterceptor.CrossContextWriteException);

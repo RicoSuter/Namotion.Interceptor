@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// <remarks>
 /// These tests prove the constraints bind by observed callback order, not by inspection, because
 /// <c>ServiceOrderResolver</c> silently drops a constraint whose target does not participate in the
-/// resolved interface. Registration order is deliberately adversarial (the behind probe first, the
+/// resolved interface. Registration order is deliberately unfavorable (the behind probe first, the
 /// lifecycle, then the ahead probe): unordered resolution preserves registration order, so an
 /// unbound constraint leaves each probe on the wrong side of the descent and the observed order
 /// flips.
@@ -123,6 +123,34 @@ public class LifecycleHandlerOrderTests
         // Assert
         Assert.Equal(3, ahead.EdgeVisibleInParents.Count);
         Assert.All(ahead.EdgeVisibleInParents, Assert.True);
+    }
+
+    [Fact]
+    public void WhenAnExplicitRootAttaches_ThenAHandlerBeforeTheLifecycleReceivesTheRootBeforeItsDescendants()
+    {
+        // Arrange
+        var probe = new AheadAttachRecorder();
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        context.AddService<ILifecycleHandler>(probe);
+        var leaf = new PayloadNode();
+        var child = new PayloadNode { Child = leaf };
+        var root = new PayloadNode { Child = child };
+
+        // Act
+        root.AttachToContext(context);
+
+        // Assert
+        Assert.Equal([root, child, leaf], probe.Attached);
+    }
+
+    [RunsBefore(typeof(LifecycleInterceptor))]
+    private sealed class AheadAttachRecorder : ILifecycleHandler
+    {
+        public List<IInterceptorSubject> Attached { get; } = [];
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextAttach) Attached.Add(change.Subject);
+        }
     }
 
     [RunsBefore(typeof(LifecycleInterceptor))]
