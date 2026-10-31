@@ -45,6 +45,26 @@ public class GameViewTrackerTests
     }
 
     [Fact]
+    public void WhenNothingChanged_ThenTheUpdateAllocatesNothing()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10, y: 0);
+        _context.AddWall(-20, 8);
+        _context.Game.UpdateView(_tracker, player);
+        _context.Game.UpdateView(_tracker, player);
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var update = _context.Game.UpdateView(_tracker, player);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.True(update.IsEmpty);
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public void WhenAnotherPlayerMoves_ThenOnlyItIsUpserted()
     {
         // Arrange

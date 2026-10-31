@@ -270,13 +270,11 @@
             return;
         }
 
-        var self = _tracker.Known.FirstOrDefault(view => view.IsSelf);
-        _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
-        _nearby = _tracker.Known
-            .Where(view => view.Kind == GameViewObject.PlayerKind)
-            .OrderByDescending(view => view.IsSelf)
-            .ThenBy(view => view.Title, StringComparer.CurrentCulture)
-            .ToList();
+        if (!update.IsEmpty)
+        {
+            RefreshNearby();
+        }
+
         RefreshActions(game);
         StateHasChanged();
     }
@@ -303,6 +301,26 @@
         }
     }
 
+    private void RefreshNearby()
+    {
+        GameViewObject? self = null;
+        var nearby = new List<GameViewObject>();
+        foreach (var view in _tracker.Known)
+        {
+            if (view.Kind == GameViewObject.PlayerKind)
+            {
+                nearby.Add(view);
+                self = view.IsSelf ? view : self;
+            }
+        }
+
+        nearby.Sort(static (first, second) => first.IsSelf != second.IsSelf
+            ? second.IsSelf.CompareTo(first.IsSelf)
+            : StringComparer.CurrentCulture.Compare(first.Title, second.Title));
+        _nearby = nearby;
+        _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
+    }
+
     private void RefreshActions(Game game)
     {
         _gameActions = GetOperations(game);
@@ -316,7 +334,13 @@
         var targets = new List<TargetEntry>();
         foreach (var target in game.GetTargetObjects(player))
         {
-            var actions = GetOperations(target).Select(method => new ActionEntry(key < 9 ? ++key : 0, method)).ToList();
+            var operations = GetOperations(target);
+            var actions = new List<ActionEntry>(operations.Count);
+            foreach (var method in operations)
+            {
+                actions.Add(new ActionEntry(key < 9 ? ++key : 0, method));
+            }
+
             targets.Add(new TargetEntry(target, (target as ITitleProvider)?.Title ?? target.GetType().Name, actions));
         }
 
