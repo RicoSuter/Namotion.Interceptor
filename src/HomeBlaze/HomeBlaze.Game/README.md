@@ -4,7 +4,7 @@ Maintainer documentation for the game library: how it is built, which invariants
 
 ## Overview
 
-A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every browser client of the installation is a player on an infinite grid of 25 cm tiles. Players walk in 8 directions, look at the tiles in front of them and invoke the operations of the objects standing there, such as building and demolishing walls, opening doors and sending messages. The page renders the world with Babylon.js as a tilted perspective scene centered on the own player. Several `Game` subjects may exist; each is an independent world with its own players.
+A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every browser client of the installation is a player on an infinite grid of 25 cm tiles. Players walk in 8 directions, look at the tiles in front of them and invoke the operations of the objects standing there, such as building and demolishing walls, opening doors and sending messages. The page renders the world with Babylon.js as a tilted perspective scene centered on the own player. Players within 10 m in line of sight talk to each other with their microphones; the server mixes the audio for every listener. Several `Game` subjects may exist; each is an independent world with its own players.
 
 | Project | Contents |
 |---|---|
@@ -17,13 +17,14 @@ The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`Operat
 
 | Folder | Contents |
 |---|---|
-| `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loop, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs`, `Game.Persistence.cs`, `Game.View.cs` |
+| `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loops, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs`, `Game.Persistence.cs`, `Game.View.cs`, `Game.Volume.cs` (volume table), `Game.Voice.cs` (toggles, voice loop) |
 | `GameObject.cs`, `Wall.cs`, `Door.cs`, `GamePlayer.cs` | The objects on the grid |
 | `Clients/` | `IGameClientDirectory` and its installation implementation |
-| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `SpawnFinder`, `StepRateLimiter`, `TargetArea`, `WallPlacement` |
+| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `WallPlacement` |
 | `View/` | `GameViewTracker` and the objects and updates sent to the browser |
+| `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVolumeTable`, `SpeakerQueue`, `GameVoiceMixer`, `IGameVoiceSink` |
 | `Components/` | `GamePage.razor` and `GameCallerServiceProvider` |
-| `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (meshes, tweens, ground, target marker), `lib/`, `models/`, `textures/` |
+| `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (meshes, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/` |
 
 ## Model
 
@@ -41,6 +42,7 @@ North is +Y and east is +X. An object covers the tiles from `X` to `X + Width - 
 | `Door` | `IsOpen` | Configuration | Defaults 4 x 1 x 10, closed; use 1 x 4 in a north-south wall. `IsBlocking => !IsOpen` |
 | `GamePlayer` | `Facing` | Configuration | `GameDirection`, north by default |
 | | `ClientId`, `ClientTitle`, `IsConnected` | State | `ClientId` is set from the dictionary key in `OnPlayersChanging` |
+| | `IsMicrophoneOn`, `IsAudioOn` | State | Switched only by the player's own pages, not persisted, reset when the client disconnects |
 | | | | Defaults 2 x 2 x 7 (50 x 50 cm, 175 cm tall). `IsBlocking` and `IsVisible` follow `IsConnected` |
 
 `GamePlayer` derives from `GameObject`, so one index covers players and objects and the renderer treats both alike. They still live in two collections because different parties manage them. The player's footprint is square, so turning never changes the tiles it covers. `GamePlayer` is `[ExcludeFromCreation]`.
@@ -74,7 +76,7 @@ The loop in `ExecuteAsync` reconciles, flushes a pending save and then waits for
 Moving is not an operation. The page calls the internal `Game.TryMove(player, direction, turnOnly)` once per step and passes only the player of its own circuit's client, so MCP, agents and other clients cannot move a player. Rules, all under `_lock`:
 
 - The player must be the instance in this game's `Players`, and the direction defined.
-- A token bucket per player (`StepRateLimiter`, burst 3, one token per `StepInterval` of 180 ms) limits steps, a second one limits turns. A refused take changes nothing.
+- A token bucket per player (`RateLimiter`, burst `StepBurst` of 3, one token per `StepInterval` of 180 ms) limits steps, a second one limits turns. A refused take changes nothing.
 - Every accepted attempt sets `Facing`, also when the step is blocked. A save is requested only when the position or facing changed.
 - A step moves the footprint one tile and is refused when any tile it would cover holds another blocking object.
 - A diagonal step is refused when both of its orthogonal steps would be refused, so players cannot squeeze between corner-touching blockers.
@@ -93,9 +95,103 @@ Operations are the actions. Those that need to know who acts take `[FromServices
 
 The panel offers every operation except those excluded from the user interface and those disabled through their `KnownAttributes.IsEnabled` attribute (`Door.Open_IsEnabled`, `Door.Close_IsEnabled`). Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply. Invoking goes through `OperationInvoker.InvokeAsync`, so parameter, confirmation, error and result dialogs behave as in the subject browser. Before invoking, the page checks that the object is still in the target area; while a dialog is open the browser does not move the player.
 
+## Voice
+
+Players talk to each other with their microphones. The server decides who hears whom and mixes the audio for every listener in C#; the browser only captures and plays it with its native audio APIs.
+
+Voice needs a secure context (HTTPS or `localhost`), because browsers offer `getUserMedia` and `AudioWorklet` nowhere else. On plain HTTP both buttons are disabled with the tooltip "Voice needs HTTPS". For manual testing from other devices on the LAN, start the app with an HTTPS URL as well, for example `--urls "http://0.0.0.0:5280;https://0.0.0.0:5281"`. Kestrel then serves HTTPS with the ASP.NET development certificate, which is issued for `localhost`, so each browser shows a certificate warning once.
+
+Hearing range (`World/HearingRange`, the only definition of who hears whom):
+
+- A player hears another while their footprint centers are less than `HearingRadius` (40 tiles, 10 m) apart and the straight line between the centers touches no tile that blocks sound. The volume falls linearly from 1 up close to 0 at 40 tiles.
+- `GameWorldIndex.IsSoundBlocked` blocks a tile that a blocking object other than a player covers. Walls and closed doors block, open doors and players do not, and the height does not matter, so a low wall blocks like a full one.
+- The walk takes every tile that the closed segment touches, also only at an edge or a corner. Sound therefore slips neither between two walls that touch at a corner nor along the face of a wall. A line between two players at the same `Y` runs on the grid line between two rows and touches both. Tiles inside either player's footprint are skipped.
+- The walk computes in half tiles, where every footprint center is a whole number, with `long` arithmetic. It is exact and symmetric: both orders of the players visit the same tiles and give the same volume, and footprints near the `int` limits are safe. It runs only within the hearing radius, which keeps the products far inside the `long` range.
+
+Audio and transport:
+
+- 16 kHz, mono, signed 16-bit little-endian PCM in frames of 20 ms (320 samples, 640 bytes), about 256 kbit/s each way per active player.
+- Frames travel over the Blazor connection: the browser calls `ReceiveMicrophoneFrame(byte[])` of the page, the page calls `play(viewId, frame)`. Blazor transfers both as binary, and the circuit identifies the player, so no extra endpoint exists.
+- `GameVoiceCodec` in C# and `encodeFrame`/`decodeFrame` in `game-voice.js` are the only places that know the encoding, so Opus can replace it without touching the mixer, the range rule or the UI.
+
+Toggles: only the player's own pages switch `IsMicrophoneOn` and `IsAudioOn`, through the internal `Game.SetMicrophone(caller, pageId, isOn)` and `Game.SetAudio(caller, pageId, isOn)`. Like `TryMove` they are not operations, so MCP, agents and other clients can read but not change them. Both take `_lock`, accept only a player of this game, and refuse turning on while it is disconnected; turning off always works, so a closing page removes its share. The page id is the page's view id.
+
+- The game keeps per player, not intercepted, `MicrophonePageId`, the page that turned the microphone on last and the only one whose frames count, and `AudioPageIds`, the pages with the speaker on. Turning off removes only the calling page's share. `IsMicrophoneOn` and `IsAudioOn` follow them.
+- A disconnect resets both and drops the player's queued frames.
+- `_voicePlayers` lists the instances with a toggle on. When a player leaves, or an outside assignment of `Players` (configuration editor, reload) replaces its instance, the next reconcile turns the voice of the orphaned instance off in `ReleaseVoiceOfReplacedPlayers` and hands the mixer the microphone page of the instance that took its place.
+
+Volume table (`Voice/GameVolumeTable`, `Game.Volume.cs`):
+
+- An immutable snapshot with a row for every connected player, regardless of its toggles, listing the players it hears and their volume above 0. Nearby uses it too.
+- `GameVolumeTable.Build` compares only the players within `HearingRange.GetArea`, which the chunk index finds, and computes each pair once, from the player with the ordinally smaller client id, adding it to both rows. `GameVolumeTable.Create` builds a table from given rows; tests use it as a factory.
+- `UpdateVolumeTable`, called only by the voice loop, first checks without the lock that `VolumeTableInterval` passed since the last rebuild, so a stale index is not rebuilt on every tick. Under `_lock` it then rebuilds when the index `Version` changed or `_isVolumeTableDirty` is set. The version increases with every change of the index, which covers moves, joins, leaves, walls and doors, also from outside through the lazy index rebuild. Toggles, resets and released players set the flag although rows ignore toggles, so that `VolumeTableChanged` tells the pages about them.
+- It publishes the table through a `volatile` field and then raises `VolumeTableChanged` outside the lock.
+
+Mixer (`Voice/GameVoiceMixer`, one per game, with its own lock):
+
+- `SetMicrophonePage(playerId, pageId)`, called by the game under `_lock`, creates the player's speaker, clears its queue when the page changes, or removes it for none.
+- `Receive(playerId, pageId, frame)` drops a frame that does not have exactly 640 bytes, does not come from the player's microphone page, or exceeds `FrameRateTolerance` times the frame rate (a `RateLimiter` with a burst of `ServerQueueMaximum`). Otherwise it decodes the samples into the speaker's `SpeakerQueue`, a pooled ring buffer, so steady speech allocates nothing per incoming frame.
+- A speaker queue plays once it holds its start size, grows the start size by `BufferGrowth` up to `ServerQueueMaximum` when it runs dry while playing, and shrinks it by one frame after `BufferShrinkDelay` of playing without running dry. It keeps at most its start size plus one growth step, never more than `ServerQueueMaximum`, and drops the oldest frames beyond that, so a shrinking start size lowers the delay.
+- `RegisterSink(playerId, sink)` adds a page with the speaker on and returns an `IDisposable` that removes it; a player can have several. `IGameVoiceSink.Send` returns without waiting for the browser, never changes the frame, which the listener's sinks share, and must not throw when a tick that already took the sinks calls it once more after its registration was disposed.
+- `Mix(table)` takes one frame per playing speaker into pooled buffers and copies the list of listeners under the mixer lock. Outside it, it sums for every listener with sinks the frames of the speakers in its table row, scaled by their volume and never its own, into a reused `int` buffer, clamps to 16 bits into a new `byte[]` and hands it to each of the listener's sinks. A listener that hears no frame in a tick gets nothing. A failing sink is logged as a warning the first time and at debug level after that.
+- The voice loop (`RunVoiceLoopAsync`) runs beside the housekeeping loop in `ExecuteAsync`, ticks every `FrameDuration` on a `PeriodicTimer` of the game's `TimeProvider`, and stops with the housekeeping loop, also when that one ends on an unexpected exception. `TickVoice` updates the volume table and mixes in separate `try` blocks, so a failing rebuild or `VolumeTableChanged` handler does not skip the mix. A failing tick logs a warning when ticks start failing and stays at debug level while they keep failing, so a persistent fault does not flood the log at the frame rate.
+
+Settings (`Voice/GameVoiceSettings`, the one place for every timing and size):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `SampleRate` | 16000 | Samples per second of every frame |
+| `FrameDuration` | 20 ms | Length of one frame |
+| `SamplesPerFrame`, `FrameBytes` | 320, 640 | Size of one frame, derived from the two above |
+| `ServerQueueStart` | 1 frame | Frames a speaker queue needs before it plays |
+| `ServerQueueMaximum` | 6 frames | Frames beyond which the oldest are dropped |
+| `PlaybackBufferStart` | 40 ms | Audio the browser buffers before it plays |
+| `PlaybackBufferMaximum` | 120 ms | Largest buffer the browser grows to |
+| `BufferGrowth` | 1 frame | Growth of a buffer after it ran dry |
+| `BufferShrinkDelay` | 5 s | Time without running dry before a buffer shrinks by one frame |
+| `VolumeTableInterval` | 100 ms | Shortest time between two rebuilds of the volume table |
+| `MaximumPendingSends` | 10 | Sends to a page in flight beyond which new frames to it are dropped |
+| `FrameRateTolerance` | 1.5 | Allowed incoming frame rate as a multiple of the nominal rate |
+| `PlayTimeout` | 1 s | Time after which a frame sent to a page counts as lost and no longer as pending |
+| `CaptureStartTimeout` | 2 min | Time a page waits for the browser to start its microphone, including the permission prompt |
+| `BrowserCallTimeout` | 10 s | Time a page waits for any other voice call to the browser |
+
+The page passes the browser's values to `game-voice.js` when it starts, so JavaScript holds no copy. Expected delay from mouth to ear, estimated from these values and not yet measured: about 100 to 130 ms on the LAN and 150 to 220 ms over the internet, plus whatever Bluetooth headsets add.
+
+Page (`GamePage.razor`):
+
+- The **Voice** section next to Position holds a microphone button (`Mic`/`MicOff`) and a speaker button (`VolumeUp`/`VolumeOff`), filled with the primary color while on and toggled by M and N too. Their accessible names stay "Microphone" and "Speaker", with `aria-pressed` for the state and `aria-keyshortcuts` for the key; the tooltips say "Turn the microphone on (M)" and so on. Until `game-voice.js` answered both are disabled, and without a player a button stays enabled only to turn off what is still on. While a toggle runs, further clicks and keys are ignored, but the button stays enabled so it keeps the focus.
+- Turning the microphone on starts capturing first, waiting up to `CaptureStartTimeout`, and calls `SetMicrophone` only once that succeeded. Turning the speaker on starts playback, registers the page's sink and calls `SetAudio`. When the game refuses, because the player is disconnected, the page stops the browser side again. Every other browser call waits at most `BrowserCallTimeout`. A start that the browser did not answer in time is followed by a stop, so a late success there does not keep capturing or playing.
+- The sink counts sends in flight, drops frames while `MaximumPendingSends` are pending, and hands each frame to the circuit's dispatcher with `InvokeAsync`, because JS interop with byte arrays is not documented as thread-safe. Each `play` call times out after `PlayTimeout`, so a call that a lost connection never answers releases its slot. A failing send is logged at debug level.
+- `VolumeTableChanged` schedules a flush, which refreshes Nearby and, through `Game.GetVoicePages`, stops the page's capture or playback when another page of the player took the microphone over or a disconnect reset the toggles. A change that arrives while a toggle runs is handled by a flush after it. The flush keeps doing this after the view broke, so a stale sink does not keep playing.
+- Disposing the page removes its sink, turns off only its own share and disposes the voice of its view in the browser.
+- Errors appear below the top of the panel: "Microphone access was denied", "No microphone was found", "The microphone could not be started", "The speaker could not be started", "Voice is not available while you are not connected", and "Tap the speaker to resume" while the browser suspended the audio context and a toggle is on. The tap itself resumes the context in the browser, and the page asks once more through `resume` instead of turning the speaker off; a second tap turns it off.
+
+Browser (`game-voice.js`, per view id like `game.js`):
+
+| Call | Direction | Purpose |
+|---|---|---|
+| `initialize(viewId, dotNet, options)` | .NET to JS | Returns whether the browser offers voice (secure context, `getUserMedia`, `AudioWorkletNode`). Options: `element` (the panel), `sampleRate`, `frameSamples`, `bufferStartSamples`, `bufferMaximumSamples`, `bufferGrowthSamples`, `bufferShrinkDelaySeconds` |
+| `startCapture(viewId)`, `stopCapture(viewId)` | .NET to JS | Asks for the microphone with echo cancellation, noise suppression and automatic gain, and starts sending frames; returns `{ isStarted, error }` with `denied`, `not-found` or `failed` |
+| `startPlayback(viewId)`, `stopPlayback(viewId)` | .NET to JS | Starts or stops the playback processor |
+| `resume(viewId)` | .NET to JS | Resumes a suspended audio context where the browser allows it outside a user action |
+| `play(viewId, frame)` | .NET to JS | Queues a mixed frame |
+| `dispose(viewId)` | .NET to JS | Stops everything, releases the microphone and closes the audio context |
+| `ReceiveMicrophoneFrame(frame)` | JS to .NET | One captured frame |
+| `ToggleMicrophone()`, `ToggleAudio()` | JS to .NET | Keys M and N, sent by `game-input.js` |
+| `OnAudioStateChanged(isSuspended)` | JS to .NET | The audio context was suspended or resumed |
+
+- Clicks on the voice buttons (the elements with `data-game-voice` inside the panel) and the M and N keys unlock the audio synchronously inside the user's action, in capture-phase listeners: the first creates the `AudioContext`, and each one resumes it. Strict browsers such as Safari start and resume audio only there, while the page asks for it only after a round trip to the server. A resume is sent even while the context reads as running, because a suspend still in flight reads as running too.
+- While nothing captures, plays or starts, the context is suspended, so an idle page does not keep the audio device busy.
+- Every stop increases a generation counter of capture or playback, so a start that a stop overtook while it waited for the worklet module or the microphone gives up and releases what it got.
+- The capture processor low-passes the microphone with two one-pole stages, resamples it to 16 kHz by linear interpolation, converts it to 16 bits and posts a frame every 320 samples. Its node is connected to the destination and outputs silence, which keeps the browser running it.
+- The playback processor resamples frames to the context rate and plays from a buffer that starts at `PlaybackBufferStart`, grows by one frame up to `PlaybackBufferMaximum` when it runs dry, shrinks by one frame after `BufferShrinkDelay` of playing without running dry, keeps at most one growth step above its target, and plays silence while empty.
+- A `stop` message ends a processor, because one whose `process` returns true keeps its node alive after the node was disconnected.
+- For tests the panel carries `data-voice-sent-frames` and `data-voice-received-frames`, the frames sent and played.
+
 ## Threading invariants
 
-`_lock` guards `Players`, `Objects`, the positions and door states of their objects, the index, `_pendingPlayers`, `_pendingObjects`, `_isSaveRequested` and the per-player rate limiters and message timestamps. Every game write that two players could race on (move, join, build, demolish, open, close) happens under it, so two players never take one tile.
+`_lock` guards `Players`, `Objects`, the positions and door states of their objects, the index, `_pendingPlayers`, `_pendingObjects`, `_isSaveRequested`, the per-player rate limiters and message timestamps, the per-player microphone page and speaker pages, `_voicePlayers`, and the volume table's dirty flag, index version and scratch list. Every game write that two players could race on (move, join, build, demolish, open, close) happens under it, so two players never take one tile.
 
 The property change observer (`Game.OnPropertyChanged`, and the page's handler) runs synchronously inside the write that caused it, on the writer's thread, while the change observable holds its own synchronization gate. A write under `_lock` waits for that gate. If an observer took `_lock`, an outside write delivering its change (holding the gate, waiting for `_lock`) and a game write (holding `_lock`, waiting for the gate) would deadlock. So observers never take `_lock` and never block: they call `SignalReconcile` or `RequestIndexRebuild`, and the page only schedules a flush. Apart from client changes, `OnPropertyChanged` ignores writes made on a thread that holds `_lock`, because the game keeps the index up to date for its own writes.
 
@@ -109,7 +205,14 @@ The page reads some state without the lock:
 - Single properties of objects, such as a target's title for the panel: one intercepted read of a property is never torn.
 - `GameViewTracker.Known`: the tracker is only updated by `Game.UpdateView`, which the page calls from its own renderer dispatcher, and read on that same dispatcher right after, so no other thread touches it.
 
-Everything else the page needs (`TryMove`, `GetTargetObjects`, `UpdateView`) takes the lock itself.
+Everything else the page needs (`TryMove`, `GetTargetObjects`, `UpdateView`, `SetMicrophone`, `SetAudio`, `GetVoicePages`) takes the lock itself.
+
+Voice adds these rules:
+
+- The volume table is built only by the voice loop under `_lock` and published through a `volatile` field, so the mixer and the pages read it without the lock. The time of the last rebuild is written under `_lock` with `Volatile.Write` and read before the lock.
+- The mixer's own lock guards its speaker queues, microphone pages and sinks. The lock order is `_lock` before the mixer lock: the game tells the mixer about microphone pages while holding `_lock`, and the mixer never calls into the game.
+- Sinks run on the voice loop outside both locks, and `VolumeTableChanged` handlers run there outside `_lock`. Neither may block, so the page only hands frames to its dispatcher and schedules a flush.
+- Change observers keep not taking `_lock`.
 
 ## Page and browser protocol
 
@@ -125,7 +228,9 @@ JS interface of `game.js`, keyed by a per-page view id because the pages of a ta
 | `Step(sequence, direction, turnOnly)` | JS to .NET | Calls `TryMove`; returns the sequence, verdict, position and facing, or null without a player |
 | `InvokeTargetAction(index)` | JS to .NET | Invokes the numbered action of the number key |
 
-Flushing: the page subscribes to property changes of the game and of every `GameObject`. The handler only sets a flag and starts a 50 ms delay, after which `FlushAsync` runs on the renderer dispatcher, so updates go out in batches of at most about 20 per second. A flush asks `Game.UpdateView` for the diff of the visible objects within `ViewRadius` (200 tiles, 50 m) of the own player, or of the origin without one, found through the chunk index. A `JSException` from `applyUpdate` marks the view broken and stops the subscription.
+Voice has its own module, `game-voice.js`; see Voice.
+
+Flushing: the page subscribes to property changes of the game and of every `GameObject`. The handler only sets a flag and starts a 50 ms delay, after which `FlushAsync` runs on the renderer dispatcher, so updates go out in batches of at most about 20 per second. A flush asks `Game.UpdateView` for the diff of the visible objects within `ViewRadius` (200 tiles, 50 m) of the own player, or of the origin without one, found through the chunk index. A `JSException` from `applyUpdate` marks the view broken and stops the subscription; later flushes skip the view but keep the panel and the voice in step. `VolumeTableChanged` schedules a flush too, which rebuilds Nearby from the new table.
 
 `GameViewTracker` keeps one `GameViewObject` per known object with an id unique within the page. It recreates a view object only when a sent field changed and returns a shared empty update when nothing changed, so an unchanged view allocates nothing. Player colors derive from the client id with FNV-1a and are cached per client id; walls and doors have fixed colors.
 
@@ -139,7 +244,7 @@ The Babylon loader in `game.js` fetches `babylon.js` and `babylonjs.loaders.min.
 
 Input rules:
 
-- Arrow keys and WASD combine into 8 directions (W plus D is north east) and repeat once per step interval while held. Shift with a direction sends one turn-only step. Number keys 1 to 9 invoke the numbered actions.
+- Arrow keys and WASD combine into 8 directions (W plus D is north east) and repeat once per step interval while held. Shift with a direction sends one turn-only step. Number keys 1 to 9 invoke the numbered actions. M toggles the microphone and N the speaker, ignoring key repeats.
 - Keys with Ctrl, Alt or Meta go to the browser. Keys and pad presses are ignored while focus is in an input field or a MudBlazor dialog is open. Losing window focus releases everything.
 - The direction pad is shown for `(pointer: coarse), (max-width: 959.98px)`. `game-input.js` handles its pointer events without a round trip: a held button adds its directions to the held keys, so it repeats and combines like keys, and pointer capture keeps the press while the finger drifts. The middle button toggles turn-only mode, in which a press sends one turn. The pad blocks scrolling, text selection and the long press menu.
 
@@ -152,7 +257,7 @@ Rendering:
 - Walls and doors that the segment from the camera to the own player's head crosses fade to 30 % visibility.
 - Players are instances of the glTF character, scaled to their `Height`, rotated to their facing, with the shirt tinted and a billboard label.
 
-Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** with the pad, **Looking at** (only while targets exist, actions numbered 1 to 9 across all targets), **Actions** (operations of the `Game`, disabled without a player) and **Nearby** (players in view, the own one first).
+Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** with the pad, **Voice** (microphone and speaker buttons, errors below the top of the panel), **Looking at** (only while targets exist, actions numbered 1 to 9 across all targets), **Actions** (operations of the `Game`, disabled without a player) and **Nearby** (the own player first, then the players in its row of the volume table by title, each with a crossed-out microphone or speaker while that one is off, dimmed while the own speaker is off). A new table with the same players keeps the list, because their toggles and titles reach it through the view.
 
 ## Assets and licenses
 
@@ -181,8 +286,12 @@ The E2E tests need Playwright's Chromium (`playwright.ps1 install chromium` from
 | `FakeClientDirectory` | Thread-safe clients and recorded notifications; `RemoveInstallation` simulates a missing installation |
 | `GameTestContext` | A game in a `TestRoot` with a `FakeTimeProvider` and fake clients; adds connected players, walls and doors |
 | `FrozenTimeProvider` | A stopped clock that runs a callback inside its next reading, which lets a test act while the game holds its lock |
+| `VoiceFrames` | Builds and reads frames of 16-bit little-endian samples |
+| `RecordingVoiceSink` | A thread-safe sink that records the frames the mixer sends |
 
 The E2E tests use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through their own `GameE2ECollection`, because xUnit only finds collection definitions in the test assembly. They assert the side panel, not canvas pixels; headless Chromium renders WebGL in software. Every installation sees all circuits of the shared server, and circuits of closed browser contexts stay connected for minutes, so players of earlier tests may still stand in a new game. The tests therefore read where their own player joined, move the other players far aside, and assert positions relative to the join point.
+
+The voice E2E tests launch their own Chromium with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, so the microphone is a test tone that needs no permission dialog; the test server at `127.0.0.1` is a secure context. They read the frame counters on the panel and prove that frames stop by waiting for the speaker to send 50 more while the listener's count grows by at most `MaximumPendingSends`.
 
 ## Known limits and follow-ups
 
@@ -192,6 +301,18 @@ The E2E tests use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through their o
 - An outside replacement of `Objects` that lands after a game write that started from its pending value wins, discarding that game change (for example a wall built in that window). The same race on `Players` heals on the next reconcile.
 - Without an installation the page keeps showing "Joining the game…" rather than saying it needs one.
 - Only one character model, and only walls and doors as object types.
+- `MaximumPendingSends` of 10 drops frames to a page once its round trip exceeds about 200 ms, because each send waits for the browser to acknowledge it.
+- Echo: the browser's echo canceller works on the microphone, but the playback goes through an `AudioWorklet`, which Chrome's echo canceller may not cover, so without headphones a listener's speaker may reach its own microphone. This is not yet tested with real devices. If confirmed, route the playback through a local loopback `RTCPeerConnection` pair into an `<audio>` element. Headphones avoid it.
+- A stop that a connection drop loses after a toggle can leave the browser capturing while the server shows the microphone off. The mixer drops those frames, because the game no longer counts that page, and the next toggle recovers.
+
+Voice follow-ups:
+
+- Opus compression (Concentus on the server, WebCodecs in the browser) to cut the bandwidth about tenfold.
+- Sound traveling around corners and through openings by path length instead of line of sight.
+- Walls that muffle instead of block.
+- Stereo panning by the speaker's position relative to the listener.
+- A speaking indicator in the 3D scene, which needs audio levels from the server.
+- Extracting the voice handling of `GamePage.razor`, about a third of the component, into its own class if more voice UI lands.
 
 Agent players are the planned follow-up. `ResolveActor` and `GameCaller` already isolate who acts, so operations keep their signatures. It needs:
 
