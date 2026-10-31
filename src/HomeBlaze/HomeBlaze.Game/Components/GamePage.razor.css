@@ -231,6 +231,11 @@
     color: var(--mud-palette-text-secondary);
 }
 
+.game-nearby ::deep .game-nearby-rename {
+    padding: 2px;
+    color: inherit;
+}
+
 .game-nearby-dimmed {
     opacity: .5;
 }

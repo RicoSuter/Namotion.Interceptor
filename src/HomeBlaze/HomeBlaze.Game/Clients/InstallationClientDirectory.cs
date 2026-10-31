@@ -42,6 +42,17 @@ internal sealed class InstallationClientDirectory(Func<IInterceptorSubjectContex
         return client.SendNotificationAsync(notification, cancellationToken);
     }
 
+    public Task RenameAsync(string clientId, string name, CancellationToken cancellationToken)
+    {
+        var installation = FindInstallation() ?? throw new InvalidOperationException("The game needs the installation to change names.");
+        if (!installation.Clients.TryGetValue(clientId, out var client))
+        {
+            throw new InvalidOperationException("The player has no client anymore.");
+        }
+
+        return client.RenameAsync(name, cancellationToken);
+    }
+
     public bool IsClientChange(SubjectPropertyChange change) =>
         change.Property.Subject is HomeBlazeClient ||
         change.Property.Subject is HomeBlazeInstallation && change.Property.Name == nameof(HomeBlazeInstallation.Clients);
