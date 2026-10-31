@@ -128,6 +128,33 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenAClosedDoorIsOpenedWithItsNumberKey_ThenThePlayerStepsThroughIt()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var (x, y) = (player.X, player.Y);
+
+        // Right in front of the player, who faces north.
+        var door = new Door { X = x - 1, Y = y + GamePlayer.Size };
+        world.Game.Objects = new Dictionary<string, GameObject> { ["door"] = door };
+        await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Door", new() { Timeout = Timeout });
+        await Expect(page.GetByTestId("game-target-action")).ToHaveTextAsync(["1Open"], new() { Timeout = Timeout });
+
+        // Act
+        await page.Keyboard.PressAsync("1");
+        await Expect(page.GetByTestId("game-target-action")).ToHaveTextAsync(["1Close"], new() { Timeout = Timeout });
+        for (var step = 0; step < 3; step++)
+        {
+            await page.Keyboard.PressAsync("ArrowUp");
+        }
+
+        // Assert
+        Assert.True(door.IsOpen);
+        await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x, y + 3, "N"), new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenTwoBrowsersPlay_ThenTheySeeEachOtherAndOneCanMessageTheOther()
     {
         // Arrange
