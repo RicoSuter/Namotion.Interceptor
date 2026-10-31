@@ -334,7 +334,7 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
-    public void WhenPrincipalsNameARole_ThenItsUsedByAgentsCountsThemAndARemovalIsSubtracted()
+    public async Task WhenPrincipalsNameARole_ThenItsUsedByAgentsCountsThemAndARemovalIsSubtracted()
     {
         // Arrange
         var role = new Role { Allow = [ReadPlain()] };
@@ -342,21 +342,20 @@ public sealed class AuthorizationServiceTests : IDisposable
         AddAuthorization(("Custom", role), ("Other", other));
         var firstAgent = new object();
         var secondAgent = new object();
-
-        // Act
         _service.SetPrincipalRoles(firstAgent, ["Custom", "custom"]);
         _service.SetPrincipalRoles(secondAgent, ["CUSTOM", BuiltInRoles.ReaderName]);
-        var countWithBoth = role.UsedByAgents;
+        await StatusAssert.EqualAsync(2, () => role.UsedByAgents);
+
+        // Act
         _service.SetPrincipalRoles(firstAgent, null);
 
         // Assert
-        Assert.Equal(2, countWithBoth);
-        Assert.Equal(1, role.UsedByAgents);
-        Assert.Equal(0, other.UsedByAgents);
+        await StatusAssert.EqualAsync(1, () => role.UsedByAgents);
+        await StatusAssert.EqualAsync(0, () => other.UsedByAgents);
     }
 
     [Fact]
-    public void WhenAPrincipalNamesARoleBeforeItExists_ThenTheRoleCountsItOnceAdded()
+    public async Task WhenAPrincipalNamesARoleBeforeItExists_ThenTheRoleCountsItOnceAdded()
     {
         // Arrange
         var authorization = AddAuthorization();
@@ -368,7 +367,7 @@ public sealed class AuthorizationServiceTests : IDisposable
         _ = _service.GetRoleNames();
 
         // Assert
-        Assert.Equal(1, role.UsedByAgents);
+        await StatusAssert.EqualAsync(1, () => role.UsedByAgents);
     }
 
     [Fact]
