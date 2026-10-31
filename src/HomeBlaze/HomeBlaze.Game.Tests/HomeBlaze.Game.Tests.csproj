@@ -6,8 +6,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
         <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="Microsoft.Playwright" />
         <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
         <PackageReference Include="xunit" />
         <PackageReference Include="xunit.runner.visualstudio">
@@ -25,9 +27,18 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.E2E.Tests\HomeBlaze.E2E.Tests.csproj" />
         <ProjectReference Include="..\HomeBlaze.Game\HomeBlaze.Game.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
+
+    <!-- Copy plugin nupkgs after build, as HomeBlaze.E2E.Tests does, because its fixture loads them from the output folder. -->
+    <Target Name="CopyPluginNupkgs" AfterTargets="Build">
+        <ItemGroup>
+            <_PluginNupkgs Include="..\HomeBlaze\Plugins\*.nupkg" />
+        </ItemGroup>
+        <Copy SourceFiles="@(_PluginNupkgs)" DestinationFolder="$(OutputPath)Plugins" SkipUnchangedFiles="true" />
+    </Target>
 
 </Project>
