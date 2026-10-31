@@ -390,7 +390,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenNotesBelongToAConfigurationProperty_ThenTheyAreNotSearched(bool forAgents)
+    public async Task WhenNotesBelongToAConfigurationProperty_ThenTheyAreNotSearched(bool isAgent)
     {
         // Arrange
         var (root, services) = await CreateGraphAsync(
@@ -398,7 +398,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
             ("Docs/Gateway.json", $$"""{ "$type": "{{typeof(MarkdownSearchSecretDevice).FullName}}" }"""),
             ("Docs/Gateway.metadata.json", """{ "notes": "The freezer gateway.", "$properties": { "Host": { "notes": "The freezer host." } } }""")
         ]);
-        var tool = CreateTool(services, root, forAgents);
+        var tool = CreateTool(services, root, isAgent);
 
         // Act
         var result = await CallAsync(tool, new { query = "freezer" });
