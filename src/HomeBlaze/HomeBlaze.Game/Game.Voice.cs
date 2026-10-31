@@ -11,7 +11,7 @@ public partial class Game
     private bool _isVoiceTickFailing;
 
     // Guarded by _lock: the players with a voice toggle on by client id, so that an outside replacement of Players
-    // finds the instances whose state and mixer speaker it orphaned.
+    // finds the instances whose state and mixer talker it orphaned.
     private readonly Dictionary<string, GamePlayer> _voicePlayers = new();
 
     /// <summary>
@@ -203,7 +203,7 @@ public partial class Game
     }
 
     // Callers hold _lock. Turns the voice off of every listed instance that Players no longer holds, because the player
-    // left or an outside assignment replaced it, and leaves the speaker of the instance that took its place alone.
+    // left or an outside assignment replaced it, and leaves the mixer talker of the instance that took its place alone.
     private void ReleaseVoiceOfReplacedPlayers()
     {
         foreach (var (id, listed) in _voicePlayers)

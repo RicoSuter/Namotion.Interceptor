@@ -3,13 +3,13 @@ using System.Buffers;
 namespace HomeBlaze.Game.Voice;
 
 /// <summary>
-/// The frames of one speaker waiting for the mixer, in a pooled ring buffer. It plays once it holds its start size,
+/// The frames of one talker waiting for the mixer, in a pooled ring buffer. It plays once it holds its start size,
 /// grows the start size by <see cref="GameVoiceSettings.BufferGrowth"/> when it runs dry while playing, and shrinks it
 /// by one frame after <see cref="GameVoiceSettings.BufferShrinkDelay"/> of playing without running dry. It keeps at
 /// most its start size plus one growth step, and never more than <see cref="GameVoiceSettings.ServerQueueMaximum"/>,
 /// dropping the oldest frames. Not thread-safe: the mixer guards it with its lock.
 /// </summary>
-internal sealed class SpeakerQueue : IDisposable
+internal sealed class TalkerQueue : IDisposable
 {
     private const int Samples = GameVoiceSettings.SamplesPerFrame;
     private const int Capacity = GameVoiceSettings.ServerQueueMaximum;
@@ -19,7 +19,7 @@ internal sealed class SpeakerQueue : IDisposable
     private int _head;
     private long _lastDryTimestamp;
 
-    public SpeakerQueue(TimeProvider timeProvider)
+    public TalkerQueue(TimeProvider timeProvider)
     {
         _timeProvider = timeProvider;
         _lastDryTimestamp = timeProvider.GetTimestamp();
@@ -44,7 +44,7 @@ internal sealed class SpeakerQueue : IDisposable
     {
         if (_buffer is not { } buffer)
         {
-            throw new ObjectDisposedException(nameof(SpeakerQueue));
+            throw new ObjectDisposedException(nameof(TalkerQueue));
         }
 
         var limit = Math.Min(Capacity, StartFrames + GameVoiceSettings.BufferGrowth);

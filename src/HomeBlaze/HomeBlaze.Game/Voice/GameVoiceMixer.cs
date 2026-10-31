@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Game.Voice;
 
 /// <summary>
-/// Mixes the voices of one game individually for every listener. Its own lock guards the speaker queues, microphone
+/// Mixes the voices of one game individually for every listener. Its own lock guards the talker queues, microphone
 /// pages and sinks; the game calls it while holding the game's lock, and the mixer never calls into the game.
 /// </summary>
 internal sealed class GameVoiceMixer
@@ -17,7 +17,7 @@ internal sealed class GameVoiceMixer
     private readonly ILogger _logger;
 
     // Guarded by _lock.
-    private readonly Dictionary<string, Speaker> _speakers = new();
+    private readonly Dictionary<string, Talker> _talkers = new();
     private readonly Dictionary<string, IGameVoiceSink[]> _sinks = new();
 
     // Sinks whose failure was logged as a warning already; weak, so a closed page's sink is not kept alive.
@@ -45,19 +45,19 @@ internal sealed class GameVoiceMixer
         {
             if (pageId is not { } page)
             {
-                RemoveSpeaker(playerId);
+                RemoveTalker(playerId);
             }
-            else if (_speakers.TryGetValue(playerId, out var speaker))
+            else if (_talkers.TryGetValue(playerId, out var talker))
             {
-                if (speaker.MicrophonePageId != page)
+                if (talker.MicrophonePageId != page)
                 {
-                    speaker.MicrophonePageId = page;
-                    speaker.Queue.Clear();
+                    talker.MicrophonePageId = page;
+                    talker.Queue.Clear();
                 }
             }
             else
             {
-                _speakers[playerId] = new Speaker(page, _timeProvider);
+                _talkers[playerId] = new Talker(page, _timeProvider);
             }
         }
     }
@@ -76,9 +76,9 @@ internal sealed class GameVoiceMixer
 
         lock (_lock)
         {
-            if (_speakers.TryGetValue(playerId, out var speaker) && speaker.MicrophonePageId == pageId && speaker.RateLimiter.TryTake())
+            if (_talkers.TryGetValue(playerId, out var talker) && talker.MicrophonePageId == pageId && talker.RateLimiter.TryTake())
             {
-                speaker.Queue.Enqueue(frame);
+                talker.Queue.Enqueue(frame);
             }
         }
     }
@@ -97,8 +97,8 @@ internal sealed class GameVoiceMixer
     }
 
     /// <summary>
-    /// Takes one frame from every playing speaker and sends every listener with sinks the sum of the frames of the
-    /// speakers in its row of the table, scaled by their volume and without its own; sends nothing to a listener that
+    /// Takes one frame from every playing talker and sends every listener with sinks the sum of the frames of the
+    /// talkers in its row of the table, scaled by their volume and without its own; sends nothing to a listener that
     /// hears no frame. Exceptions of sinks are logged. Must not run concurrently with itself.
     /// </summary>
     public void Mix(GameVolumeTable table)
@@ -139,9 +139,9 @@ internal sealed class GameVoiceMixer
     {
         lock (_lock)
         {
-            foreach (var (playerId, speaker) in _speakers)
+            foreach (var (playerId, talker) in _talkers)
             {
-                TakeFrame(playerId, speaker.Queue);
+                TakeFrame(playerId, talker.Queue);
             }
 
             _listeners.AddRange(_sinks);
@@ -149,7 +149,7 @@ internal sealed class GameVoiceMixer
     }
 
     // Callers hold _lock.
-    private void TakeFrame(string playerId, SpeakerQueue queue)
+    private void TakeFrame(string playerId, TalkerQueue queue)
     {
         var buffer = _spareFrames.TryPop(out var spare) ? spare : new short[GameVoiceSettings.SamplesPerFrame];
         if (queue.TryDequeue(buffer))
@@ -215,11 +215,11 @@ internal sealed class GameVoiceMixer
     }
 
     // Callers hold _lock. The queue returns its buffer to the pool, which is safe because Mix reads queues only under the lock.
-    private void RemoveSpeaker(string playerId)
+    private void RemoveTalker(string playerId)
     {
-        if (_speakers.Remove(playerId, out var speaker))
+        if (_talkers.Remove(playerId, out var talker))
         {
-            speaker.Queue.Dispose();
+            talker.Queue.Dispose();
         }
     }
 
@@ -265,11 +265,11 @@ internal sealed class GameVoiceMixer
         return -1;
     }
 
-    private sealed class Speaker(int microphonePageId, TimeProvider timeProvider)
+    private sealed class Talker(int microphonePageId, TimeProvider timeProvider)
     {
         public int MicrophonePageId { get; set; } = microphonePageId;
 
-        public SpeakerQueue Queue { get; } = new(timeProvider);
+        public TalkerQueue Queue { get; } = new(timeProvider);
 
         // A burst beyond what the queue keeps would be dropped there anyway.
         public RateLimiter RateLimiter { get; } = new(timeProvider,

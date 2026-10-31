@@ -23,11 +23,6 @@ internal sealed class GameVolumeTable
     }
 
     /// <summary>
-    /// Whether the player has a row, which every connected player has, also when it hears nobody.
-    /// </summary>
-    public bool HasRow(string playerId) => _rows.ContainsKey(playerId);
-
-    /// <summary>
     /// Gets the players the player hears; empty for a player without a row.
     /// </summary>
     public ReadOnlySpan<GameVolumeEntry> GetRow(string playerId) =>
@@ -91,17 +86,17 @@ internal sealed class GameVolumeTable
     {
         foreach (var candidate in candidates)
         {
-            if (candidate is not GamePlayer speaker || string.CompareOrdinal(listener.ClientId, speaker.ClientId) >= 0
-                || !rows.TryGetValue(speaker.ClientId, out var speakerRow))
+            if (candidate is not GamePlayer talker || string.CompareOrdinal(listener.ClientId, talker.ClientId) >= 0
+                || !rows.TryGetValue(talker.ClientId, out var talkerRow))
             {
                 continue;
             }
 
-            var volume = (float)HearingRange.GetVolume(listener, speaker, index);
+            var volume = (float)HearingRange.GetVolume(listener, talker, index);
             if (volume > 0)
             {
-                listenerRow.Add(new GameVolumeEntry(speaker.ClientId, volume));
-                speakerRow.Add(new GameVolumeEntry(listener.ClientId, volume));
+                listenerRow.Add(new GameVolumeEntry(talker.ClientId, volume));
+                talkerRow.Add(new GameVolumeEntry(listener.ClientId, volume));
             }
         }
     }

@@ -4,14 +4,14 @@ using Microsoft.Extensions.Time.Testing;
 
 namespace HomeBlaze.Game.Tests.Voice;
 
-public class SpeakerQueueTests
+public class TalkerQueueTests
 {
     private readonly FakeTimeProvider _timeProvider = new();
     private readonly short[] _frame = new short[GameVoiceSettings.SamplesPerFrame];
 
-    private short? Dequeue(SpeakerQueue queue) => queue.TryDequeue(_frame) ? _frame[0] : null;
+    private short? Dequeue(TalkerQueue queue) => queue.TryDequeue(_frame) ? _frame[0] : null;
 
-    private static void FillToStart(SpeakerQueue queue)
+    private static void FillToStart(TalkerQueue queue)
     {
         for (var index = 0; index < queue.StartFrames; index++)
         {
@@ -19,7 +19,7 @@ public class SpeakerQueueTests
         }
     }
 
-    private void DrainUntilDry(SpeakerQueue queue)
+    private void DrainUntilDry(TalkerQueue queue)
     {
         var isPlaying = true;
         while (isPlaying)
@@ -29,7 +29,7 @@ public class SpeakerQueueTests
     }
 
     // Lets the queue run dry while playing until its start size is the given one.
-    private void GrowTo(SpeakerQueue queue, int startFrames)
+    private void GrowTo(TalkerQueue queue, int startFrames)
     {
         while (queue.StartFrames < startFrames)
         {
@@ -42,7 +42,7 @@ public class SpeakerQueueTests
     public void WhenTheQueueIsEmpty_ThenItDoesNotPlay()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
 
         // Act
         var sample = Dequeue(queue);
@@ -57,7 +57,7 @@ public class SpeakerQueueTests
     public void WhenTheQueueHoldsItsStartSize_ThenItPlaysTheFramesInOrder()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
         queue.Enqueue(VoiceFrames.Create(1));
         queue.Enqueue(VoiceFrames.Create(2));
 
@@ -72,7 +72,7 @@ public class SpeakerQueueTests
     public void WhenItRunsDryWhilePlaying_ThenItGrowsAndWaitsForTheLargerStartSize()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
         queue.Enqueue(VoiceFrames.Create(1));
         Dequeue(queue);
 
@@ -94,7 +94,7 @@ public class SpeakerQueueTests
     public void WhenMoreFramesArriveThanOneGrowthStepAboveTheStart_ThenTheOldestAreDropped()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
 
         // Act
         queue.Enqueue(VoiceFrames.Create(1));
@@ -110,7 +110,7 @@ public class SpeakerQueueTests
     public void WhenTheStartSizeReachedTheMaximum_ThenTheQueueKeepsAtMostTheMaximum()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
         GrowTo(queue, GameVoiceSettings.ServerQueueMaximum);
 
         // Act
@@ -129,7 +129,7 @@ public class SpeakerQueueTests
     public void WhenItPlaysWithoutRunningDryForTheShrinkDelay_ThenTheStartSizeShrinks()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
         GrowTo(queue, 2);
         FillToStart(queue);
 
@@ -145,7 +145,7 @@ public class SpeakerQueueTests
     public void WhenItPausedForTheShrinkDelayWithoutPlaying_ThenTheStartSizeStays()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
         GrowTo(queue, 2);
         _timeProvider.Advance(GameVoiceSettings.BufferShrinkDelay);
         FillToStart(queue);
@@ -161,7 +161,7 @@ public class SpeakerQueueTests
     public void WhenItRanDryLessThanTheShrinkDelayAgo_ThenTheStartSizeStays()
     {
         // Arrange
-        using var queue = new SpeakerQueue(_timeProvider);
+        using var queue = new TalkerQueue(_timeProvider);
         GrowTo(queue, 2);
         FillToStart(queue);
 
