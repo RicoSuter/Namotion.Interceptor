@@ -185,7 +185,7 @@ public class GamePageTests
     }
 
     [Fact]
-    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheTalkersFramesAndCountsTrimsAndUnderruns()
+    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheTalkersFramesWithoutTrimming()
     {
         // Arrange
         await using var browser = await MediaBrowser.LaunchAsync();
@@ -204,11 +204,10 @@ public class GamePageTests
         // Assert
         await WaitForCounterAsync(talker, SentFramesAttribute, 25);
         await WaitForCounterAsync(listener, ReceivedFramesAttribute, 100);
-        // Only present, not 0: headless Chromium renders audio in callbacks of 4096 samples (about 85 ms), so the playback
-        // buffer peaks near its maximum and trims although the frames arrive steadily.
-        var panel = listener.GetByTestId("game-panel");
-        await Expect(panel).ToHaveAttributeAsync(TrimmedAttribute, new Regex("^[0-9]+$"), new() { Timeout = Timeout });
-        await Expect(panel).ToHaveAttributeAsync(UnderrunsAttribute, new Regex("^[0-9]+$"), new() { Timeout = Timeout });
+        // Headless Chromium renders audio in callbacks of 4096 samples (about 85 ms), which the lowest level over a window
+        // absorbs. One trim is allowed because a stall of the test machine can leave standing delay that a window drops.
+        await Expect(listener.GetByTestId("game-panel")).ToHaveAttributeAsync(UnderrunsAttribute, new Regex("^[0-9]+$"), new() { Timeout = Timeout });
+        Assert.InRange(await ReadCounterAsync(listener, TrimmedAttribute), 0, 1);
     }
 
     [Fact]

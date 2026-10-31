@@ -28,6 +28,14 @@ public class TalkerQueueTests
         }
     }
 
+    // One frame duration of steady speech: a frame arrives and the mixer takes one.
+    private void Step(TalkerQueue queue, short sample)
+    {
+        _timeProvider.Advance(GameVoiceSettings.FrameDuration);
+        queue.Enqueue(VoiceFrames.Create(sample));
+        Assert.True(queue.TryDequeue(_frame));
+    }
+
     // Lets the queue run dry while playing until its start size is the given one.
     private void GrowTo(TalkerQueue queue, int startFrames)
     {
@@ -92,42 +100,94 @@ public class TalkerQueueTests
     }
 
     [Fact]
-    public void WhenABurstWithinTheHeadroomArrives_ThenTheQueueKeepsEveryFrame()
+    public void WhenFramesArriveAtTheMaximum_ThenTheOldestIsDropped()
     {
         // Arrange
         using var queue = new TalkerQueue(_timeProvider);
-        const int burst = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom;
 
         // Act
-        for (short sample = 1; sample <= burst; sample++)
+        for (short sample = 1; sample <= GameVoiceSettings.ServerQueueMaximum + 1; sample++)
         {
             queue.Enqueue(VoiceFrames.Create(sample));
         }
 
         // Assert
-        Assert.Equal(burst, queue.Count);
-        Assert.Equal(0, queue.Trims);
-        var samples = Enumerable.Range(0, burst).Select(_ => Dequeue(queue)).ToArray();
-        Assert.Equal(Enumerable.Range(1, burst).Select(sample => (short?)sample), samples);
+        Assert.Equal(GameVoiceSettings.ServerQueueMaximum, queue.Count);
+        Assert.Equal(1, queue.Trims);
+        Assert.Equal((short?)2, Dequeue(queue));
     }
 
     [Fact]
-    public void WhenMoreFramesArriveThanTheHeadroomAboveTheStart_ThenTheOldestAreDropped()
+    public void WhenABurstFollowsAGap_ThenTheWindowEndKeepsEveryFrame()
     {
         // Arrange
         using var queue = new TalkerQueue(_timeProvider);
-        const int limit = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom;
+        const int burst = GameVoiceSettings.ServerQueueMaximum - 1;
+        queue.Enqueue(VoiceFrames.Create(1));
+        Dequeue(queue);
+        _timeProvider.Advance(GameVoiceSettings.TrimWindow / 2);
 
         // Act
-        for (short sample = 1; sample <= limit + 1; sample++)
+        for (short sample = 2; sample <= burst + 1; sample++)
         {
             queue.Enqueue(VoiceFrames.Create(sample));
         }
 
+        _timeProvider.Advance(GameVoiceSettings.TrimWindow / 2);
+        var samples = Enumerable.Range(0, burst).Select(_ => Dequeue(queue)).ToArray();
+
         // Assert
-        Assert.Equal(limit, queue.Count);
+        Assert.Equal(0, queue.Trims);
+        Assert.Equal(Enumerable.Range(2, burst).Select(sample => (short?)sample), samples);
+    }
+
+    [Fact]
+    public void WhenTheLevelStaysAboveTheHeadroomForAWindow_ThenTheWindowEndDropsDownToTheStartSize()
+    {
+        // Arrange
+        using var queue = new TalkerQueue(_timeProvider);
+        const int level = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom + 1;
+        for (short sample = 1; sample < level; sample++)
+        {
+            queue.Enqueue(VoiceFrames.Create(sample));
+        }
+
+        // Act
+        // Every step adds and takes one frame, so each dequeue finds the same level until the window ends.
+        var nextSample = (short)level;
+        var start = _timeProvider.GetUtcNow();
+        while (_timeProvider.GetUtcNow() - start < GameVoiceSettings.TrimWindow)
+        {
+            Step(queue, nextSample++);
+        }
+
+        // Assert
         Assert.Equal(1, queue.Trims);
-        Assert.Equal((short?)2, Dequeue(queue));
+        Assert.Equal(GameVoiceSettings.ServerQueueStart - 1, queue.Count);
+    }
+
+    [Fact]
+    public void WhenTheStartSizeShrinksBelowTheStandingLevel_ThenAWindowEndDropsTheExcess()
+    {
+        // Arrange
+        using var queue = new TalkerQueue(_timeProvider);
+        const int grownStart = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom + 2;
+        GrowTo(queue, grownStart);
+        FillToStart(queue);
+
+        // Act
+        var nextSample = (short)0;
+        var start = _timeProvider.GetUtcNow();
+        while (queue.StartFrames > GameVoiceSettings.ServerQueueStart
+            || _timeProvider.GetUtcNow() - start < GameVoiceSettings.BufferShrinkDelay * grownStart)
+        {
+            Step(queue, nextSample++);
+        }
+
+        // Assert
+        // Each step finds Count + 1 frames at its dequeue.
+        Assert.InRange(queue.Trims, 1, grownStart);
+        Assert.InRange(queue.Count + 1, GameVoiceSettings.ServerQueueStart, GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom);
     }
 
     [Fact]

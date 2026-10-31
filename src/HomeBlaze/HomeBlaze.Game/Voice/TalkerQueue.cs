@@ -5,10 +5,11 @@ namespace HomeBlaze.Game.Voice;
 /// <summary>
 /// The frames of one talker waiting for the mixer, in a pooled ring buffer. It plays once it holds its start size,
 /// grows the start size by <see cref="GameVoiceSettings.BufferGrowth"/> when it runs dry while playing, and shrinks it
-/// by one frame after <see cref="GameVoiceSettings.BufferShrinkDelay"/> of playing without running dry. It keeps at
-/// most its start size plus <see cref="GameVoiceSettings.TrimHeadroom"/>, and never more than
-/// <see cref="GameVoiceSettings.ServerQueueMaximum"/>, dropping the oldest frames. Not thread-safe: the mixer guards it
-/// with its lock.
+/// by one frame after <see cref="GameVoiceSettings.BufferShrinkDelay"/> of playing without running dry. At the end of
+/// every <see cref="GameVoiceSettings.TrimWindow"/> of playing it drops the oldest frames down to its start size when the
+/// fewest frames any dequeue found exceeded the start size by more than <see cref="GameVoiceSettings.TrimHeadroom"/>.
+/// It never holds more than <see cref="GameVoiceSettings.ServerQueueMaximum"/>, dropping the oldest frame on arrival.
+/// Not thread-safe: the mixer guards it with its lock.
 /// </summary>
 internal sealed class TalkerQueue : IDisposable
 {
@@ -19,6 +20,8 @@ internal sealed class TalkerQueue : IDisposable
     private short[]? _buffer = ArrayPool<short>.Shared.Rent(Capacity * Samples);
     private int _head;
     private long _lastDryTimestamp;
+    private long _windowStartTimestamp;
+    private int _windowMinimum = int.MaxValue;
 
     public TalkerQueue(TimeProvider timeProvider)
     {
@@ -39,7 +42,7 @@ internal sealed class TalkerQueue : IDisposable
     public bool IsPlaying { get; private set; }
 
     /// <summary>
-    /// The frames added that made the queue drop its oldest frames, counted once per added frame.
+    /// The times the queue dropped its oldest frames, at the end of a window or for a frame arriving at the maximum.
     /// </summary>
     public long Trims { get; private set; }
 
@@ -58,14 +61,10 @@ internal sealed class TalkerQueue : IDisposable
             throw new ObjectDisposedException(nameof(TalkerQueue));
         }
 
-        var limit = Math.Min(Capacity, StartFrames + GameVoiceSettings.TrimHeadroom);
-        if (Count >= limit)
+        if (Count == Capacity)
         {
             Trims++;
-            while (Count >= limit)
-            {
-                DropOldest();
-            }
+            DropOldest();
         }
 
         var slot = (_head + Count) % Capacity;
@@ -74,8 +73,10 @@ internal sealed class TalkerQueue : IDisposable
         if (!IsPlaying && Count >= StartFrames)
         {
             IsPlaying = true;
-            // The shrink delay counts only playing time, so a pause in speech does not shrink the start size.
-            _lastDryTimestamp = _timeProvider.GetTimestamp();
+            // The shrink delay and the trim window count only playing time, so a pause in speech affects neither.
+            var now = _timeProvider.GetTimestamp();
+            _lastDryTimestamp = now;
+            StartWindow(now);
         }
     }
 
@@ -97,6 +98,8 @@ internal sealed class TalkerQueue : IDisposable
             return false;
         }
 
+        _windowMinimum = Math.Min(_windowMinimum, Count);
+        TrimAtWindowEnd(now);
         buffer.AsSpan(_head * Samples, Samples).CopyTo(destination);
         DropOldest();
         ShrinkWhenSteady(now);
@@ -126,6 +129,33 @@ internal sealed class TalkerQueue : IDisposable
     {
         _head = (_head + 1) % Capacity;
         Count--;
+    }
+
+    // The fewest frames over a window is the delay that bursts did not cause, so dropping down to the start size there
+    // removes standing delay without cutting into a burst that the following gap will consume.
+    private void TrimAtWindowEnd(long now)
+    {
+        if (_timeProvider.GetElapsedTime(_windowStartTimestamp, now) < GameVoiceSettings.TrimWindow)
+        {
+            return;
+        }
+
+        if (_windowMinimum > StartFrames + GameVoiceSettings.TrimHeadroom)
+        {
+            Trims++;
+            for (var index = StartFrames; index < _windowMinimum; index++)
+            {
+                DropOldest();
+            }
+        }
+
+        StartWindow(now);
+    }
+
+    private void StartWindow(long now)
+    {
+        _windowStartTimestamp = now;
+        _windowMinimum = int.MaxValue;
     }
 
     private void RunDry(long now)
