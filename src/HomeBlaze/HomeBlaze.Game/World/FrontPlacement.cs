@@ -26,14 +26,14 @@ internal static class FrontPlacement
     {
         GameDirection.East => actor.Right + 1,
         GameDirection.West => (long)actor.X - along,
-        _ => (long)actor.X + (actor.Width - sizeX) / 2
+        _ => (long)actor.X + (((long)actor.Width - sizeX + 1) >> 1)
     };
 
     private static long GetY(Footprint actor, GameDirection facing, int along, int sizeY) => facing switch
     {
         GameDirection.North => actor.Top + 1,
         GameDirection.South => (long)actor.Y - along,
-        _ => (long)actor.Y + (actor.Depth - sizeY) / 2
+        _ => (long)actor.Y + (((long)actor.Depth - sizeY + 1) >> 1)
     };
 
     private static bool TryCreate(long x, long y, int sizeX, int sizeY, out Footprint footprint)

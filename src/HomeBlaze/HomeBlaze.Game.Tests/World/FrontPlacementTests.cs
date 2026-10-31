@@ -20,6 +20,38 @@ public class FrontPlacementTests
         Assert.Equal(new Footprint(x, y, width, depth), footprint);
     }
 
+    [Theory]
+    [InlineData(GameDirection.North, 1, 2, 1, 1)]
+    [InlineData(GameDirection.South, 1, -1, 1, 1)]
+    [InlineData(GameDirection.East, 2, 1, 1, 1)]
+    [InlineData(GameDirection.West, -1, 1, 1, 1)]
+    public void WhenTheObjectIsOneTileAcross_ThenTheOddRemainderGoesEastOrNorth(
+        GameDirection facing, int x, int y, int width, int depth)
+    {
+        // Act
+        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), facing, across: 1, along: 1, out var footprint);
+
+        // Assert
+        Assert.True(isPlaced);
+        Assert.Equal(new Footprint(x, y, width, depth), footprint);
+    }
+
+    [Theory]
+    [InlineData(GameDirection.North, 0, 2, 3, 1)]
+    [InlineData(GameDirection.South, 0, -1, 3, 1)]
+    [InlineData(GameDirection.East, 2, 0, 1, 3)]
+    [InlineData(GameDirection.West, -1, 0, 1, 3)]
+    public void WhenTheObjectIsThreeTilesAcross_ThenTheOddRemainderGoesEastOrNorth(
+        GameDirection facing, int x, int y, int width, int depth)
+    {
+        // Act
+        var isPlaced = FrontPlacement.TryGetFootprint(new Footprint(0, 0, 2, 2), facing, across: 3, along: 1, out var footprint);
+
+        // Assert
+        Assert.True(isPlaced);
+        Assert.Equal(new Footprint(x, y, width, depth), footprint);
+    }
+
     [Fact]
     public void WhenTheFootprintIsAsWideAsThePlayer_ThenItIsCenteredInFront()
     {
