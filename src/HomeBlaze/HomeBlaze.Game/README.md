@@ -194,6 +194,7 @@ The E2E tests use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through their o
 - An outside replacement of `Objects` that lands after a game write that started from its pending value wins, discarding that game change (for example a wall built in that window). The same race on `Players` heals on the next reconcile.
 - Without an installation the page keeps showing "Joining the game…" rather than saying it needs one.
 - Only one character model, and only walls and doors as object types.
+- A page receives every visible object within `ViewRadius` (200 tiles in each direction) of its player, although the camera shows only about 60 tiles around it and the fog hides the rest. With many objects, either lower `ViewRadius` or let the page report the area its camera covers and send that area plus a margin.
 
 Agent players are the planned follow-up. `ResolveActor` and `GameCaller` already isolate who acts, so operations keep their signatures. It needs:
 
