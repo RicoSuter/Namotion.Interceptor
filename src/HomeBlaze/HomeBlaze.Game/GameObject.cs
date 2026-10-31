@@ -88,6 +88,12 @@ public abstract partial class GameObject : IConfigurable
         Y = 0;
     }
 
+    /// <summary>
+    /// Gets the game this object is part of, for example to call <see cref="Game.RemoveAsync"/> from an operation.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The object is not part of a game.</exception>
+    protected Game GetGame() => ParentGame ?? throw new InvalidOperationException("The object is not part of a game.");
+
     public virtual Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         ParentGame?.RequestIndexRebuild();

@@ -6,7 +6,7 @@ using HomeBlaze.Game.Visuals;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
-namespace HomeBlaze.Game;
+namespace HomeBlaze.Game.Objects.Buildings;
 
 /// <summary>
 /// A door that fills an opening in a wall, 4 by 1 tiles in a wall running east to west or 1 by 4 tiles in one running
@@ -85,14 +85,28 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     /// <exception cref="InvalidOperationException">The door is already open or not part of a game.</exception>
     [Operation(Title = "Open", Icon = "MeetingRoom", Position = 1, Description = "Opens this door, so players can walk through it.")]
     public Task OpenAsync(CancellationToken cancellationToken) =>
-        GetGame().SetDoorOpenAsync(this, isOpen: true, cancellationToken);
+        GetGame().UpdateAsync(this, () =>
+        {
+            if (IsOpen)
+            {
+                throw new InvalidOperationException("The door is already open.");
+            }
 
-    /// <exception cref="InvalidOperationException">The door is already closed, someone stands in it, or it is not part of a game.</exception>
-    [Operation(Title = "Close", Icon = "DoorFront", Position = 2, Description = "Closes this door, unless someone stands in it.")]
+            IsOpen = true;
+        }, cancellationToken);
+
+    /// <exception cref="InvalidOperationException">The door is already closed, something stands in it, or it is not part of a game.</exception>
+    [Operation(Title = "Close", Icon = "DoorFront", Position = 2, Description = "Closes this door, unless something stands in it.")]
     public Task CloseAsync(CancellationToken cancellationToken) =>
-        GetGame().SetDoorOpenAsync(this, isOpen: false, cancellationToken);
+        GetGame().UpdateAsync(this, () =>
+        {
+            if (!IsOpen)
+            {
+                throw new InvalidOperationException("The door is already closed.");
+            }
 
-    private Game GetGame() => ParentGame ?? throw new InvalidOperationException("The door is not part of a game.");
+            IsOpen = false;
+        }, cancellationToken);
 
     private static GameVisual CreateVisual(int width, int depth, int height, bool isOpen)
     {

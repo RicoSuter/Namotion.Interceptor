@@ -5,7 +5,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Visuals;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Game;
+namespace HomeBlaze.Game.Objects.Buildings;
 
 /// <summary>
 /// A wall segment that blocks the tiles it stands on.
@@ -57,7 +57,7 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
         Height = DefaultHeight;
     }
 
+    /// <exception cref="InvalidOperationException">The wall is not part of a game.</exception>
     [Operation(Title = "Demolish", Icon = "Delete", Position = 1, Description = "Removes this wall from the game.")]
-    public Task DemolishAsync(CancellationToken cancellationToken) =>
-        (ParentGame ?? throw new InvalidOperationException("The wall is not part of a game.")).RemoveObjectAsync(this, cancellationToken);
+    public Task DemolishAsync(CancellationToken cancellationToken) => GetGame().RemoveAsync(this, cancellationToken);
 }

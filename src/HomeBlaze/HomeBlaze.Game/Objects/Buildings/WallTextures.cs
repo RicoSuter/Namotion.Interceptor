@@ -1,6 +1,6 @@
 using HomeBlaze.Game.Visuals;
 
-namespace HomeBlaze.Game;
+namespace HomeBlaze.Game.Objects.Buildings;
 
 /// <summary>
 /// The textured boxes of walls and door lintels.

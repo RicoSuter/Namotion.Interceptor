@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Objects.Buildings;
+
 namespace HomeBlaze.Game.World;
 
 internal static class WallPlacement
