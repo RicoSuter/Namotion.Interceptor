@@ -92,14 +92,14 @@ internal sealed class GameViewTracker
         known.Height == gameObject.Height && known.IsSelf == isSelf && known.Facing == GetFacing(gameObject);
 
     private static bool HasSamePassage(GameViewObject known, GameObject gameObject) =>
-        known.IsBlocking == gameObject.IsBlocking && known.IsOpen == IsOpen(gameObject);
+        known.IsMovementBlocking == gameObject.IsMovementBlocking && known.IsOpen == IsOpen(gameObject);
 
     private bool HasSameLabel(GameViewObject known, GameObject gameObject) =>
         known.Title == GetTitle(gameObject) && known.Color == GetColor(gameObject);
 
     private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf) =>
         new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
-            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsBlocking, IsOpen(gameObject), isSelf);
+            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsMovementBlocking, IsOpen(gameObject), isSelf);
 
     private static string GetKind(GameObject gameObject) => gameObject switch
     {

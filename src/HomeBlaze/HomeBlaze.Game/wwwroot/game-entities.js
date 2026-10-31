@@ -501,7 +501,7 @@ export async function createEntities(scene, options) {
         getBlockers() {
             const blockers = [];
             for (const entity of entities.values()) {
-                if (entity.view.id !== selfId && entity.view.isBlocking) {
+                if (entity.view.id !== selfId && entity.view.isMovementBlocking) {
                     blockers.push(entity.view);
                 }
             }

@@ -26,7 +26,7 @@ public class GameViewTrackerTests
         Assert.Equal((0, 0, 2, 2, 7), (self.X, self.Y, self.Width, self.Depth, self.Height));
         var wall = Assert.Single(update.Upserted, view => view.Kind == GameViewObject.WallKind);
         Assert.Equal((-20, 8, 19), (wall.X, wall.Y, wall.Width));
-        Assert.True(wall.IsBlocking);
+        Assert.True(wall.IsMovementBlocking);
         Assert.Empty(update.Removed);
     }
 
@@ -116,9 +116,9 @@ public class GameViewTrackerTests
         var update = _context.Game.UpdateView(_tracker, player);
 
         // Assert
-        Assert.Equal(("Door", false, true), (closed.Title, closed.IsOpen, closed.IsBlocking));
+        Assert.Equal(("Door", false, true), (closed.Title, closed.IsOpen, closed.IsMovementBlocking));
         var open = Assert.Single(update.Upserted);
-        Assert.Equal((closed.Id, GameViewObject.DoorKind, true, false), (open.Id, open.Kind, open.IsOpen, open.IsBlocking));
+        Assert.Equal((closed.Id, GameViewObject.DoorKind, true, false), (open.Id, open.Kind, open.IsOpen, open.IsMovementBlocking));
         Assert.Equal(GameColors.Door, open.Color);
     }
 }
