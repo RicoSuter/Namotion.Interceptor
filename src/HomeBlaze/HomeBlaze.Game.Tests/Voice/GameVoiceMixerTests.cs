@@ -16,10 +16,10 @@ public class GameVoiceMixerTests
         _mixer = new GameVoiceMixer(_timeProvider, NullLogger.Instance);
     }
 
-    private static GameVolumeTable CreateTable(params (string Listener, string Speaker, float Volume)[] entries)
+    private static GameVolumeTable CreateTable(params (string Listener, string Talker, float Volume)[] entries)
     {
         var rows = new Dictionary<string, List<GameVolumeEntry>>();
-        foreach (var (listener, speaker, volume) in entries)
+        foreach (var (listener, talker, volume) in entries)
         {
             if (!rows.TryGetValue(listener, out var row))
             {
@@ -27,7 +27,7 @@ public class GameVoiceMixerTests
                 rows[listener] = row;
             }
 
-            row.Add(new GameVolumeEntry(speaker, volume));
+            row.Add(new GameVolumeEntry(talker, volume));
         }
 
         return GameVolumeTable.Create(rows);
@@ -40,7 +40,7 @@ public class GameVoiceMixerTests
     }
 
     [Fact]
-    public void WhenTwoSpeakersAreAudible_ThenTheListenerGetsTheirSumScaledByVolume()
+    public void WhenTwoTalkersAreAudible_ThenTheListenerGetsTheirSumScaledByVolume()
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
@@ -95,24 +95,24 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        Speak("speaker", 1000);
+        Speak("talker", 1000);
 
         // Act
-        _mixer.Mix(CreateTable(("other", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("other", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
     }
 
     [Fact]
-    public void WhenTheSpeakerHasNoMicrophonePage_ThenItsFramesAreDropped()
+    public void WhenTheTalkerHasNoMicrophonePage_ThenItsFramesAreDropped()
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.Receive("speaker", 1, VoiceFrames.Create(1000));
+        _mixer.Receive("talker", 1, VoiceFrames.Create(1000));
 
         // Act
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
@@ -123,11 +123,11 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        Speak("speaker", 1000);
+        Speak("talker", 1000);
 
         // Act
-        _mixer.SetMicrophonePage("speaker", null);
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.SetMicrophonePage("talker", null);
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
@@ -138,11 +138,11 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.SetMicrophonePage("speaker", 1);
-        _mixer.Receive("speaker", 1, new byte[GameVoiceSettings.FrameBytes - 1]);
+        _mixer.SetMicrophonePage("talker", 1);
+        _mixer.Receive("talker", 1, new byte[GameVoiceSettings.FrameBytes - 1]);
 
         // Act
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
@@ -153,13 +153,13 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.SetMicrophonePage("speaker", 1);
-        var table = CreateTable(("listener", "speaker", 1f));
+        _mixer.SetMicrophonePage("talker", 1);
+        var table = CreateTable(("listener", "talker", 1f));
 
         // The clock stands still, so the bucket holds only its burst and refuses the last frame.
         for (short sample = 1; sample <= GameVoiceSettings.ServerQueueMaximum + 1; sample++)
         {
-            _mixer.Receive("speaker", 1, VoiceFrames.Create(sample));
+            _mixer.Receive("talker", 1, VoiceFrames.Create(sample));
         }
 
         // Act
@@ -178,14 +178,14 @@ public class GameVoiceMixerTests
         // Arrange
         const int frameCount = 50;
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.SetMicrophonePage("speaker", 1);
-        var table = CreateTable(("listener", "speaker", 1f));
+        _mixer.SetMicrophonePage("talker", 1);
+        var table = CreateTable(("listener", "talker", 1f));
 
         // Act
         for (var index = 0; index < frameCount; index++)
         {
             _timeProvider.Advance(GameVoiceSettings.FrameDuration);
-            _mixer.Receive("speaker", 1, VoiceFrames.Create(1000));
+            _mixer.Receive("talker", 1, VoiceFrames.Create(1000));
             _mixer.Mix(table);
         }
 
@@ -199,14 +199,14 @@ public class GameVoiceMixerTests
         // Arrange
         const int frameCount = 100;
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.SetMicrophonePage("speaker", 1);
-        var table = CreateTable(("listener", "speaker", 1f));
+        _mixer.SetMicrophonePage("talker", 1);
+        var table = CreateTable(("listener", "talker", 1f));
 
         // Act
         for (var index = 0; index < frameCount; index++)
         {
             _timeProvider.Advance(GameVoiceSettings.FrameDuration / 2);
-            _mixer.Receive("speaker", 1, VoiceFrames.Create(1000));
+            _mixer.Receive("talker", 1, VoiceFrames.Create(1000));
             _mixer.Mix(table);
         }
 
@@ -220,13 +220,13 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.SetMicrophonePage("speaker", 1);
-        _mixer.SetMicrophonePage("speaker", 2);
-        _mixer.Receive("speaker", 1, VoiceFrames.Create(1000));
-        _mixer.Receive("speaker", 2, VoiceFrames.Create(2000));
+        _mixer.SetMicrophonePage("talker", 1);
+        _mixer.SetMicrophonePage("talker", 2);
+        _mixer.Receive("talker", 1, VoiceFrames.Create(1000));
+        _mixer.Receive("talker", 2, VoiceFrames.Create(2000));
 
         // Act
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Equal(2000, VoiceFrames.ReadSample(Assert.Single(_sink.Frames), 0));
@@ -237,11 +237,11 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        Speak("speaker", 1000, pageId: 1);
+        Speak("talker", 1000, pageId: 1);
 
         // Act
-        _mixer.SetMicrophonePage("speaker", 2);
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.SetMicrophonePage("talker", 2);
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
@@ -253,12 +253,12 @@ public class GameVoiceMixerTests
         // Arrange
         using var failing = _mixer.RegisterSink("listener", new ThrowingVoiceSink());
         using var registration = _mixer.RegisterSink("listener", _sink);
-        var table = CreateTable(("listener", "speaker", 1f));
-        Speak("speaker", 1000);
+        var table = CreateTable(("listener", "talker", 1f));
+        Speak("talker", 1000);
 
         // Act
         var exception = Record.Exception(() => _mixer.Mix(table));
-        Speak("speaker", 1000);
+        Speak("talker", 1000);
         _mixer.Mix(table);
 
         // Assert
@@ -267,14 +267,14 @@ public class GameVoiceMixerTests
     }
 
     [Fact]
-    public void WhenNoSpeakerHasAFrame_ThenNothingIsSent()
+    public void WhenNoTalkerHasAFrame_ThenNothingIsSent()
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
-        _mixer.SetMicrophonePage("speaker", 1);
+        _mixer.SetMicrophonePage("talker", 1);
 
         // Act
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
@@ -285,11 +285,11 @@ public class GameVoiceMixerTests
     {
         // Arrange
         var registration = _mixer.RegisterSink("listener", _sink);
-        Speak("speaker", 1000);
+        Speak("talker", 1000);
 
         // Act
         registration.Dispose();
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Empty(_sink.Frames);
@@ -301,11 +301,11 @@ public class GameVoiceMixerTests
         // Arrange
         var first = _mixer.RegisterSink("listener", _sink);
         using var second = _mixer.RegisterSink("listener", _sink);
-        Speak("speaker", 1000);
+        Speak("talker", 1000);
 
         // Act
         first.Dispose();
-        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
         Assert.Equal(1, _sink.Count);

@@ -24,12 +24,12 @@ internal static class GameVoiceSettings
     public const int FrameBytes = SamplesPerFrame * 2;
 
     /// <summary>
-    /// Frames a speaker queue needs before it plays.
+    /// Frames a talker queue needs before it plays.
     /// </summary>
     public const int ServerQueueStart = 1;
 
     /// <summary>
-    /// Frames beyond which a speaker queue drops the oldest.
+    /// Frames beyond which a talker queue drops the oldest.
     /// </summary>
     public const int ServerQueueMaximum = 6;
 

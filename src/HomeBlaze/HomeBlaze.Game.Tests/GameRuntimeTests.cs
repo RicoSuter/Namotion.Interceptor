@@ -213,11 +213,11 @@ public class GameRuntimeTests
     public async Task WhenTheGameRuns_ThenTheVoiceLoopMixesEveryFrameDuration()
     {
         // Arrange
-        var speaker = _context.AddConnectedPlayer("tab-1");
+        var talker = _context.AddConnectedPlayer("tab-1");
         _context.AddConnectedPlayer("tab-2", x: 20);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(new GameCaller(speaker), pageId: 1, isOn: true);
+        _context.Game.SetMicrophone(new GameCaller(talker), pageId: 1, isOn: true);
         await _context.Game.StartAsync(CancellationToken.None);
         try
         {

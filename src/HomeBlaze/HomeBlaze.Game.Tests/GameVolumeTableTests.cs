@@ -7,11 +7,11 @@ public class GameVolumeTableTests
 {
     private readonly GameTestContext _context = new();
 
-    private static float? FindVolume(GameVolumeTable table, string listenerId, string speakerId)
+    private static float? FindVolume(GameVolumeTable table, string listenerId, string talkerId)
     {
         foreach (var entry in table.GetRow(listenerId))
         {
-            if (entry.PlayerId == speakerId)
+            if (entry.PlayerId == talkerId)
             {
                 return entry.Volume;
             }
@@ -44,7 +44,7 @@ public class GameVolumeTableTests
     }
 
     [Fact]
-    public void WhenAPlayerIsOutOfRange_ThenBothRowsExistAndAreEmpty()
+    public void WhenAPlayerIsOutOfRange_ThenBothRowsAreEmpty()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
@@ -55,14 +55,12 @@ public class GameVolumeTableTests
 
         // Assert
         var table = _context.Game.VolumeTable;
-        Assert.True(table.HasRow("tab-1"));
-        Assert.True(table.HasRow("tab-2"));
         Assert.Equal(0, table.GetRow("tab-1").Length);
         Assert.Equal(0, table.GetRow("tab-2").Length);
     }
 
     [Fact]
-    public void WhenAPlayerIsOffline_ThenItHasNoRow()
+    public void WhenAPlayerIsOffline_ThenItHearsNobodyAndNobodyHearsIt()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
@@ -74,7 +72,7 @@ public class GameVolumeTableTests
 
         // Assert
         var table = _context.Game.VolumeTable;
-        Assert.False(table.HasRow("kitchen"));
+        Assert.Equal(0, table.GetRow("kitchen").Length);
         Assert.Null(FindVolume(table, "tab-1", "kitchen"));
     }
 
@@ -97,7 +95,7 @@ public class GameVolumeTableTests
         var table = _context.Game.VolumeTable;
         Assert.Equal(0.75f, before);
         Assert.True(isRebuilt);
-        Assert.False(table.HasRow("tab-2"));
+        Assert.Equal(0, table.GetRow("tab-2").Length);
         Assert.Null(FindVolume(table, "tab-1", "tab-2"));
         Assert.Null(FindVolume(table, "tab-2", "tab-1"));
     }
