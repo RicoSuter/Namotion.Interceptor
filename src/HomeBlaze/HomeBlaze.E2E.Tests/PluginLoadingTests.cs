@@ -66,7 +66,7 @@ public class PluginLoadingTests
         var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
         await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await browserLink.ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("/browser"), new() { Timeout = PageLoadTimeout });
+        await _fixture.WaitForUrlAsync(page, url => url.Contains("/browser"), PageLoadTimeout);
 
         // Click on the Plugins entry in the root subject tree
         var pluginsEntry = page.GetByText("Plugins").First;

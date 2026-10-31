@@ -141,4 +141,4 @@ The motor above has the name `keptmotor`. It keeps running when the page is edit
 :: HomeBlaze.Samples.Motor Name="Unnamed Motor" TargetSpeed=2000 SimulationInterval=00:00:01
 ::
 
-The motor above has no name, so the page knows it by its position. Add a block or an expression anywhere before it and save the page: the motor is created again and starts at a speed of zero, while the named motor keeps its speed.
+The motor above has no name, so the page knows it by its type and its position among the blocks of the page. Add a block anywhere before it and save the page: the motor is created again and starts at a speed of zero, while the named motor keeps its speed. Text and expressions before it do not move it.

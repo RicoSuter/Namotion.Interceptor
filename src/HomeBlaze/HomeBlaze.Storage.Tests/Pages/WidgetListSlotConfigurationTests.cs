@@ -10,7 +10,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// <summary>
 /// The list slots of the chart and the table: blocks on a page, a list in a configuration file of their own.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class WidgetListSlotConfigurationTests
 {
     private const string ChartPage =

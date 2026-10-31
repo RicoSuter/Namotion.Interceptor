@@ -52,7 +52,7 @@
         }
     </DialogContent>
     <DialogActions>
-        @if (_selectedType is not null)
+        @if (_selectedType is not null && Options.Type is null)
         {
             <MudButton OnClick="GoBack"
                        Disabled="_isCreating"
@@ -145,6 +145,11 @@
 
         // A normal handler would re-render the dialog, and with it the form, each time the pointer enters the button.
         _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;
+
+        if (Options.Type is { } type)
+        {
+            SelectType(SubjectTypeCatalog.Describe(type));
+        }
     }
 
     private string GetTitle()

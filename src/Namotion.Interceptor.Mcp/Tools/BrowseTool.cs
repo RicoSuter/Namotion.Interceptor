@@ -110,7 +110,7 @@ internal class BrowseTool
 
         var subjectCount = 0;
         var omittedCount = 0;
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var unseenPropertyNames = UnseenPropertyNames.TryCreate(null, propertyNames);
         var options = new NodeOptions(
             includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes, visibility);

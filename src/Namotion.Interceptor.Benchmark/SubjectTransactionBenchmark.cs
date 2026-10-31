@@ -106,43 +106,4 @@ public class SubjectTransactionBenchmark
 
         await transaction.CommitAsync(CancellationToken.None);
     }
-
-    private sealed class BenchmarkSource : ISubjectSource
-    {
-        public BenchmarkSource(IInterceptorSubject rootSubject)
-        {
-            RootSubject = rootSubject;
-        }
-
-        public IInterceptorSubject RootSubject { get; }
-
-        public int WriteBatchSize => 0;
-
-        public ValueTask<WriteResult> WriteChangesAsync(
-            ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        {
-            return new ValueTask<WriteResult>(WriteResult.Success);
-        }
-
-        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
-        {
-            return Task.FromResult<Action?>(null);
-        }
-
-        public SourceState State => SourceState.Synchronizing;
-
-        public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
-
-        public DateTimeOffset? LastSynchronizedAt => null;
-
-        public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
-
-        ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
-
-        public event EventHandler<SourceEvent>? StateChanged
-        {
-            add { }
-            remove { }
-        }
-    }
 }

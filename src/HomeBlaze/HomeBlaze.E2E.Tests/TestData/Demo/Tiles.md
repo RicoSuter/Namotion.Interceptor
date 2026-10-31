@@ -76,6 +76,11 @@ This page is changed by the tile widget tests.
 :::: HomeBlaze.Components.Switch#narrowtile Kind=Tile Path=tilemotor/IsPowered Label="Narrow"
 ::
 
+:: HomeBlaze.Components.CanvasLayout#lowcanvas MinHeight=80
+::: Node X=0 Y=0 Width=71 Height=64
+:::: HomeBlaze.Components.Switch#iconlabeltile Kind=Tile Path=tilemotor/IsPowered On=tilemotor/PowerOn Off=tilemotor/PowerOff Map=powered Label="" Icon=ArrowUpward Subtitle=""
+::
+
 :: HomeBlaze.Components.CanvasLayout#fitcanvas MinHeight=200 Width=400 Scale=FitWidth
 ::: Node X=0 Y=0 Width=200 Height=200
 :::: HomeBlaze.Components.Switch#canvastile Kind=Tile Path=tilemotor/IsPowered Label="Canvas tile"

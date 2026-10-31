@@ -12,6 +12,9 @@ public static class SubjectTransactionExtensions
     /// </summary>
     public static readonly TimeSpan DefaultCommitTimeout = TimeSpan.FromSeconds(30);
 
+    // The largest delay a CancellationTokenSource accepts.
+    private static readonly TimeSpan MaxCommitTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     /// <summary>
     /// Begins a new transaction bound to this context.
     /// </summary>
@@ -24,30 +27,43 @@ public static class SubjectTransactionExtensions
     /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>
     /// <param name="requirement">The transaction requirement for validation. Defaults to <see cref="TransactionRequirement.None"/>.</param>
     /// <param name="conflictBehavior">The conflict detection behavior. Defaults to <see cref="TransactionConflictBehavior.FailOnConflict"/>.</param>
+    /// <param name="checkMode">When transaction handlers validate the written values. Defaults to <see cref="TransactionCheckMode.Immediate"/>.</param>
     /// <param name="commitTimeout">
-    /// Timeout for commit operations. Defaults to 30 seconds. User cancellation is ignored during commit;
-    /// only the timeout can cancel the commit operation. Use <see cref="Timeout.InfiniteTimeSpan"/> to disable timeout.
+    /// The commit timeout, 30 seconds by default, or <see cref="Timeout.InfiniteTimeSpan"/> for none. Once a commit
+    /// runs, only the timeout can cancel it.
     /// </param>
-    /// <param name="cancellationToken">The cancellation token (used before commit starts, ignored during commit).</param>
+    /// <param name="cancellationToken">Cancels waiting for the exclusive lock when the transaction begins.</param>
     /// <returns>A new SubjectTransaction instance.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="commitTimeout"/> is negative and not <see cref="Timeout.InfiniteTimeSpan"/>, or
+    /// greater than <see cref="uint.MaxValue"/> - 1 milliseconds (about 49.7 days).
+    /// </exception>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The transaction policies are independent optional parameters with defaults, so callers name only the ones they change.")]
     public static TransactionAwaitable BeginTransactionAsync(
         this IInterceptorSubjectContext context,
         TransactionFailureHandling failureHandling,
         TransactionLocking locking = TransactionLocking.Exclusive,
         TransactionRequirement requirement = TransactionRequirement.None,
         TransactionConflictBehavior conflictBehavior = TransactionConflictBehavior.FailOnConflict,
+        TransactionCheckMode checkMode = TransactionCheckMode.Immediate,
         TimeSpan? commitTimeout = null,
         CancellationToken cancellationToken = default)
     {
         var effectiveTimeout = commitTimeout ?? DefaultCommitTimeout;
-        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, effectiveTimeout, cancellationToken);
+        if (effectiveTimeout != Timeout.InfiniteTimeSpan && (effectiveTimeout < TimeSpan.Zero || effectiveTimeout > MaxCommitTimeout))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(commitTimeout), effectiveTimeout,
+                "The commit timeout must be Timeout.InfiniteTimeSpan or between zero and uint.MaxValue - 1 milliseconds.");
+        }
+
+        var task = SubjectTransaction.BeginTransactionAsync(context, failureHandling, locking, requirement, conflictBehavior, checkMode, effectiveTimeout, cancellationToken);
         return new TransactionAwaitable(task);
     }
 }
 
 /// <summary>
-/// Custom awaitable that sets AsyncLocal after the underlying task completes.
-/// This ensures the transaction is visible in the caller's execution context.
+/// Awaitable that makes the begun transaction current in the caller's execution context.
 /// </summary>
 public readonly struct TransactionAwaitable
 {
@@ -67,7 +83,7 @@ public readonly struct TransactionAwaitable
 }
 
 /// <summary>
-/// Custom awaiter that sets AsyncLocal in the caller's context after GetResult.
+/// Awaiter that makes the begun transaction current in the caller's execution context in GetResult.
 /// </summary>
 public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
 {
@@ -87,15 +103,13 @@ public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
         try
         {
             transaction = _awaiter.GetResult();
-            // Set the AsyncLocal in the caller's execution context
-            // This happens when the awaiter resumes the caller, in the caller's context
+            // GetResult runs in the caller's execution context, so the AsyncLocal value flows to the caller.
             SubjectTransaction.SetCurrent(transaction);
             return transaction;
         }
         catch
         {
-            // If GetResult throws, dispose the transaction to clean up resources
-            // and prevent counter/lock leaks
+            // Prevents leaking the active transaction count and the exclusive lock.
             transaction?.Dispose();
             throw;
         }

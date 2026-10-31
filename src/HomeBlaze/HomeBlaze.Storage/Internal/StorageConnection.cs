@@ -1,4 +1,4 @@
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +24,7 @@ internal readonly record struct StorageConnectionSettings(
 internal sealed class StorageConnection : IDisposable
 {
     private readonly CancellationTokenSource _endedSource = new();
-    private readonly TimeLimitedBlobStorage _client;
+    private readonly TimeLimitedStore _client;
     // Null for a storage that is not on disk.
     private readonly string? _storageDirectory;
     private readonly TimeProvider _timeProvider;
@@ -40,7 +40,7 @@ internal sealed class StorageConnection : IDisposable
 
     public StorageConnection(
         StorageConnectionSettings settings,
-        IBlobStorage client,
+        IStore client,
         string? storageDirectory,
         FluentStorageContainer storage,
         FileSubjectFactory subjectFactory,
@@ -48,7 +48,7 @@ internal sealed class StorageConnection : IDisposable
         TimeProvider timeProvider,
         ILogger? logger)
     {
-        _client = new TimeLimitedBlobStorage(
+        _client = new TimeLimitedStore(
             client,
             timeProvider,
             logger,
@@ -69,9 +69,9 @@ internal sealed class StorageConnection : IDisposable
     public StorageConnectionSettings Settings { get; }
 
     /// <summary>The storage. Every call on it returns within <see cref="StorageCallTimeout.Limit"/>.</summary>
-    public IBlobStorage Client => _client;
+    public IStore Client => _client;
 
-    /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
+    /// <inheritdoc cref="TimeLimitedStore.IsUnresponsive"/>
     public bool IsStorageUnresponsive => _client.IsUnresponsive;
 
     /// <remarks>Only read and written on <see cref="Worker"/>, as is the tree that <see cref="Reconciler"/> assigns.</remarks>
@@ -239,7 +239,7 @@ internal sealed class StorageConnection : IDisposable
 
     // The disk client lists a directory that is missing or cannot be reached as empty, and a pass would take
     // that for a storage whose files are all gone. It also creates a missing directory again when it writes
-    // or is asked about a path in a folder, and the next pass would then find a directory that is there.
+    // a path, or reads or deletes a path in a folder, and the next pass would then find a directory that is there.
     private static void VerifyDirectory(string directory)
     {
         // Throws for a path that cannot be examined, where Directory.Exists only answers false.

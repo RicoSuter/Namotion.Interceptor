@@ -56,10 +56,13 @@ var rootConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(builder.Conf
 var seedDirectory = builder.Configuration[HomeBlazePaths.SeedDirectoryKey];
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(rootConfigurationPath, seedDirectory);
 
+builder.Services.AddHomeBlazeDataProtection(builder.Configuration);
+
 var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
+builder.Services.AddScoped<HomeBlaze.Components.Pages.PageEditModeChoice>();
 
 // The history package contributes its own tool; the AI package knows nothing about it. Registered once so
 // both the external MCP server and the built-in agents get it.

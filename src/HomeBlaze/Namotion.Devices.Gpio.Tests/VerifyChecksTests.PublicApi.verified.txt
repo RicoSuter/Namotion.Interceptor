@@ -1,0 +1,185 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Gpio.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Gpio
+{
+    public enum AdcSource
+    {
+        Mcp3008 = 0,
+        Ads1115 = 1,
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class AnalogChannel : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public AnalogChannel() { }
+        public AnalogChannel(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int ChannelNumber { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int RawValue { get; set; }
+        public Namotion.Devices.Gpio.AdcSource Source { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; set; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public double Value { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class GpioPin : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public GpioPin() { }
+        public GpioPin(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsOn { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public Namotion.Devices.Gpio.GpioPinMode Mode { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=0)]
+        public int PinNumber { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Toggle", "IsEnabled")]
+        public bool Toggle_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOff", "IsEnabled")]
+        public bool TurnOff_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOn", "IsEnabled")]
+        public bool TurnOn_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public bool Value { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="ToggleOff", Position=2, Title="Turn Off")]
+        public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="ToggleOn", Position=1, Title="Turn On")]
+        public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public enum GpioPinMode
+    {
+        Input = 0,
+        InputPullUp = 1,
+        InputPullDown = 2,
+        Output = 3,
+    }
+    public static class GpioServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddGpio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Gpio.GpioSubject>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Memory")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Hardware")]
+    [System.ComponentModel.Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
+    [System.ComponentModel.DisplayName("GPIO")]
+    public class GpioSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public GpioSubject(System.Device.Gpio.GpioDriver? driver = null) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public Namotion.Devices.Gpio.Configuration.Ads1115Configuration? Ads1115 { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<int, Namotion.Devices.Gpio.AnalogChannel> AnalogChannels { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public Namotion.Devices.Gpio.Configuration.Mcp3008Configuration? Mcp3008 { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<int, Namotion.Devices.Gpio.GpioPin> Pins { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; set; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=400)]
+        public bool UseSimulation { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Title="Set Raspberry Pi Pin Names")]
+        public void SetRaspberryPiPinNames() { }
+    }
+}
+namespace Namotion.Devices.Gpio.Configuration
+{
+    public class Ads1115Configuration : System.IEquatable<Namotion.Devices.Gpio.Configuration.Ads1115Configuration>
+    {
+        public Ads1115Configuration() { }
+        public int Address { get; set; }
+        public int I2cBus { get; set; }
+    }
+    public class Mcp3008Configuration : System.IEquatable<Namotion.Devices.Gpio.Configuration.Mcp3008Configuration>
+    {
+        public Mcp3008Configuration() { }
+        public int ChipSelectPin { get; set; }
+        public int ClockPin { get; set; }
+        public int MisoPin { get; set; }
+        public int MosiPin { get; set; }
+    }
+}
+namespace Namotion.Devices.Gpio.Simulation
+{
+    public class SimulationGpioDriver : System.Device.Gpio.GpioDriver
+    {
+        public SimulationGpioDriver() { }
+        public SimulationGpioDriver(int pinCount) { }
+        protected override int PinCount { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<int, System.Device.Gpio.PinMode> PinModes { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<int, System.Device.Gpio.PinValue> PinValues { get; }
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "PinNumber",
+                "Value"})]
+        public System.Collections.Generic.List<System.ValueTuple<int, System.Device.Gpio.PinValue>> WriteHistory { get; }
+        protected override void AddCallbackForPinValueChangedEvent(int pinNumber, System.Device.Gpio.PinEventTypes eventTypes, System.Device.Gpio.PinChangeEventHandler callback) { }
+        protected override void ClosePin(int pinNumber) { }
+        protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) { }
+        protected override System.Device.Gpio.PinMode GetPinMode(int pinNumber) { }
+        protected override bool IsPinModeSupported(int pinNumber, System.Device.Gpio.PinMode mode) { }
+        protected override void OpenPin(int pinNumber) { }
+        protected override System.Device.Gpio.PinValue Read(int pinNumber) { }
+        protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, System.Device.Gpio.PinChangeEventHandler callback) { }
+        protected override void SetPinMode(int pinNumber, System.Device.Gpio.PinMode mode) { }
+        public void SimulatePinValueChange(int pinNumber, System.Device.Gpio.PinValue newValue) { }
+        protected override System.Device.Gpio.WaitForEventResult WaitForEvent(int pinNumber, System.Device.Gpio.PinEventTypes eventTypes, System.Threading.CancellationToken cancellationToken) { }
+        protected override void Write(int pinNumber, System.Device.Gpio.PinValue value) { }
+    }
+}

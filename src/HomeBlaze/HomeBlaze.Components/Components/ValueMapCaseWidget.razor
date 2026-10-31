@@ -1,0 +1,17 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(ValueMapCase))]
+@implements ISubjectComponent
+
+@* A case of a value map, which only the case list of a map that is edited inline shows. *@
+@if (Subject is ValueMapCase mapCase)
+{
+    <div class="d-flex align-center gap-2 value-map-case" data-testid="value-map-case">
+        <span>@mapCase.Value</span>
+        <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" aria-hidden="true" />
+        <span>@mapCase.Text</span>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

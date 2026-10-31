@@ -9,7 +9,6 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownReadAccessTests
 {
     private static readonly string Namespace = typeof(TestMeter).Namespace!;

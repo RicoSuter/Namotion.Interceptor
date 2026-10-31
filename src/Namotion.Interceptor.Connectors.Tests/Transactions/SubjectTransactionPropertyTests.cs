@@ -423,7 +423,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
 
         // Act & Assert: Setting MotorSpeed=150 without raising limit is rejected during capture
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        Assert.Throws<ValidationException>(() => motor.MotorSpeed = 150);
+        Assert.Throws<PropertyValidationException>(() => motor.MotorSpeed = 150);
     }
 
     private static IInterceptorSubjectContext CreateContextWithMotorValidation()

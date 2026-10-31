@@ -1,8 +1,10 @@
 @using System.Runtime.CompilerServices
 @using HomeBlaze.Components.Dialogs
+@using Microsoft.JSInterop
 
 @inject SubjectComponentRegistry ComponentRegistry
 @inject IDialogService DialogService
+@inject IJSRuntime JSRuntime
 
 @* The widget below tracks its own reads, so a parent that renders again with the same parameters, as a page does for a change of an expression, renders neither this wrapper nor the widget. *@
 @inherits Namotion.Interceptor.Blazor.TrackedComponentBase
@@ -16,9 +18,19 @@
     {
         var isSelectable = IsSelectable;
         var isSelected = isSelectable && ReferenceEquals(Selection?.Selected, this);
+        var isRevealable = !isSelectable && Revealer is not null && Type == SubjectComponentType.Widget;
+        @* Text that is not selectable yet, such as in a card that is not selected, becomes selectable once it is selected.
+           A double click on it opens its own dialog rather than the one of the card, which the first click selected. Text
+           renders as a block only in Inline mode and in the preview next to the editor, which a click reveals. *@
+        var opensOnDoubleClick = isSelectable || (_isTextBlock && !isRevealable);
+        if (opensOnDoubleClick && !_doubleClickCallback.HasDelegate)
+        {
+            // Created once and only when first needed, so that a viewed page allocates none per widget.
+            _doubleClickCallback = EventCallback.Factory.Create<MouseEventArgs>(this, OnDoubleClickAsync);
+        }
         @* A page fills a container of definite height, such as the split editor's pane, and keeps its natural
            height elsewhere. *@
-        <div class="@(isSelected ? "subject-component-wrapper selectable selected" : isSelectable ? "subject-component-wrapper selectable" : "subject-component-wrapper")"
+        <div class="@GetWrapperClass(isSelectable, isSelected, isRevealable, _isTextBlock)"
              style="position: relative;@(Type == SubjectComponentType.Page ? " height: 100%;" : null)"
              tabindex="@(isSelectable ? "0" : null)"
              role="@(isSelectable ? "group" : null)"
@@ -26,15 +38,20 @@
              aria-current="@(isSelected ? "true" : null)"
              aria-label="@(isSelectable ? GetAccessibleName() : null)"
              @onpointerdown="@(isSelectable ? _pointerDownCallback : default)"
-             @onclick="@(isSelectable ? _clickCallback : default)"
-             @onclick:stopPropagation="@isSelectable"
+             @onclick="@(isSelectable ? _clickCallback : isRevealable ? _revealCallback : default)"
+             @onclick:stopPropagation="@(isSelectable || isRevealable)"
+             @ondblclick="@(opensOnDoubleClick ? _doubleClickCallback : default)"
+             @ondblclick:stopPropagation="@opensOnDoubleClick"
              @onkeydown="@(isSelectable ? _keyDownCallback : default)"
              @onkeydown:stopPropagation="@isSelectable">
             @{
-                var selectableParent = isSelected ? SelectableParent : null;
-                var hasEditAction = isSelected && HasEditComponent;
+                var selectableParent = isSelected ? SelectableAncestor : null;
+                var structureEditor = isSelected ? StructureEditor : null;
+                var actions = structureEditor?.GetActions(Subject) ?? default;
+                var hasEditAction = isSelected && (actions.CanEditText || HasEditComponent);
+                var addTargets = structureEditor?.GetAddTargets(Subject) ?? [];
             }
-            @if (isSelected && (selectableParent != null || hasEditAction))
+            @if (isSelected && (selectableParent != null || hasEditAction || actions.CanEditInSource || actions.CanDelete || addTargets.Count > 0))
             {
                 @* The anchor of the bar, see SubjectComponent.razor.css. *@
                 <div class="subject-action-bar-anchor">
@@ -43,12 +60,15 @@
                                 TransformOrigin="Origin.BottomRight"
                                 OverflowBehavior="OverflowBehavior.FlipAlways"
                                 Elevation="4"
-                                Class="subject-action-bar"
+                                Class="@(_isTextBlock ? "subject-action-bar text-block-bar" : "subject-action-bar")"
                                 role="toolbar"
                                 aria-label="Widget actions"
                                 data-testid="widget-action-bar">
                         @* Written here, so that it keeps the scope of this component in the provider of the popover. *@
-                        <div class="subject-action-bar-content">
+                        @* The bar renders in the provider of the popovers, outside the widget, where a double click on it
+                           does not reach the widget. This guards the case where the bar renders inside the wrapper, so that a
+                           double click on it never opens the edit dialog of the widget. *@
+                        <div class="subject-action-bar-content" @ondblclick:stopPropagation="true">
                             @if (selectableParent != null)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
@@ -60,15 +80,93 @@
                                                data-testid="select-parent-button" />
                             }
 
+                            @if (actions.CanMoveUp)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp"
+                                               Size="Size.Small"
+                                               Color="@(_isTextBlock ? Color.Success : Color.Default)"
+                                               title="Move up"
+                                               aria-label="Move up"
+                                               OnClick="_moveUpCallback"
+                                               data-testid="move-up-button" />
+                            }
+
+                            @if (actions.CanMoveDown)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown"
+                                               Size="Size.Small"
+                                               Color="@(_isTextBlock ? Color.Success : Color.Default)"
+                                               title="Move down"
+                                               aria-label="Move down"
+                                               OnClick="_moveDownCallback"
+                                               data-testid="move-down-button" />
+                            }
+
+                            @* Only the selected widget renders its bar, so the names and lambdas below allocate for one widget. *@
+                            @if (addTargets is [{ AddItemName: { } onlyItemName } onlyTarget])
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Add"
+                                               Size="Size.Small"
+                                               title="@onlyItemName"
+                                               aria-label="@onlyItemName"
+                                               OnClick="@(() => structureEditor!.AddListItemAsync(Subject!, onlyTarget))"
+                                               data-testid="add-button" />
+                            }
+                            else if (addTargets.Count > 0)
+                            {
+                                var addMenuName = $"Add to {GetAccessibleName()}";
+                                <MudMenu Icon="@Icons.Material.Filled.Add"
+                                         Size="Size.Small"
+                                         Dense="true"
+                                         AriaLabel="@addMenuName"
+                                         title="@addMenuName"
+                                         data-testid="add-menu">
+                                    @foreach (var target in addTargets)
+                                    {
+                                        if (target.AddItemName is { } itemName)
+                                        {
+                                            <MudMenuItem OnClick="@(() => structureEditor!.AddListItemAsync(Subject!, target))">@(itemName)...</MudMenuItem>
+                                        }
+                                        else
+                                        {
+                                            <MudMenuItem OnClick="@(() => structureEditor!.AddWidgetAsync(Subject!, target))">@(target.AddWidgetName)...</MudMenuItem>
+                                            <MudMenuItem OnClick="@(() => structureEditor!.AddTextAsync(Subject!, target))">@(target.AddTextName)...</MudMenuItem>
+                                        }
+                                    }
+                                </MudMenu>
+                            }
+
                             @if (hasEditAction)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                                Size="Size.Small"
-                                               Color="Color.Primary"
+                                               Color="@(_isTextBlock ? Color.Success : Color.Primary)"
                                                title="Edit"
                                                aria-label="Edit"
                                                OnClick="_editCallback"
                                                data-testid="edit-subject-button" />
+                            }
+
+                            @if (actions.CanEditInSource)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Code"
+                                               Size="Size.Small"
+                                               Color="Color.Success"
+                                               title="Edit in Source"
+                                               aria-label="Edit in Source"
+                                               OnClick="_editCallback"
+                                               data-testid="edit-in-source-button" />
+                            }
+
+                            @if (actions.CanDelete)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Size="Size.Small"
+                                               Color="Color.Error"
+                                               title="Delete"
+                                               aria-label="Delete"
+                                               OnClick="_deleteCallback"
+                                               data-testid="delete-block-button" />
                             }
                         </div>
                     </MudPopover>
@@ -108,6 +206,13 @@
     [Parameter]
     public Dictionary<string, object?>? AdditionalParameters { get; set; }
 
+    /// <summary>
+    /// Whether the widget can be selected while the page is edited. A widget that cannot keeps rendering the same way,
+    /// and the widgets inside it stay selectable.
+    /// </summary>
+    [Parameter]
+    public bool IsSelectionEnabled { get; set; } = true;
+
     [CascadingParameter(Name = "IsEditing")]
     public bool IsEditing { get; set; }
 
@@ -117,8 +222,39 @@
     [CascadingParameter]
     public WidgetSelection? Selection { get; set; }
 
+    /// <summary>
+    /// The editor of the structure of the page, cascaded while the page is edited inline. Without it no structure action
+    /// is shown.
+    /// </summary>
+    [CascadingParameter]
+    public PageStructureEditor? StructureEditor { get; set; }
+
+    /// <summary>Cascaded to the preview next to an editor, where a click reveals the widget in the editor.</summary>
+    [CascadingParameter]
+    public ISubjectRevealTarget? Revealer { get; set; }
+
+    /// <summary>Gets whether the selected widget is this one or a widget inside it.</summary>
+    public bool ContainsSelection
+    {
+        get
+        {
+            for (var component = Selection?.Selected; component is not null; component = component.ParentComponent)
+            {
+                if (ReferenceEquals(component, this))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>Gets this widget when it can be selected, otherwise the nearest widget around it that can, or null.</summary>
+    public SubjectComponent? GetSelectableSelfOrAncestor() => IsSelectable ? this : SelectableAncestor;
+
     [CascadingParameter(Name = "ParentSubjectComponent")]
-    private SubjectComponent? ParentComponent { get; set; }
+    internal SubjectComponent? ParentComponent { get; set; }
 
     // A pointer that moved further than this between press and click dragged something, such as a node of a canvas.
     private const double MaximumClickDistance = 5;
@@ -130,12 +266,18 @@
     private List<SubjectComponent>? _childComponents;
 
     // Created once: a method group in the markup would allocate a delegate on every render, and every widget renders here.
-    // Only a selectable widget gets the handlers of the wrapper, so that an event on a viewed page stays in the browser.
+    // Only a selectable or revealable widget gets the handlers of the wrapper, so that an event on a viewed page stays in
+    // the browser.
     private EventCallback<PointerEventArgs> _pointerDownCallback;
     private EventCallback<MouseEventArgs> _clickCallback;
+    private EventCallback<MouseEventArgs> _doubleClickCallback;
     private EventCallback<KeyboardEventArgs> _keyDownCallback;
+    private EventCallback<MouseEventArgs> _revealCallback;
     private EventCallback _selectParentCallback;
     private EventCallback _editCallback;
+    private EventCallback _moveUpCallback;
+    private EventCallback _moveDownCallback;
+    private EventCallback _deleteCallback;
 
     /// <summary>
     /// Two-way binding for accessing the rendered component instance.
@@ -156,13 +298,25 @@
         Subject != null &&
         (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit) || Subject.HasConfigurationProperties());
 
-    // Every block of a page is configurable, also one without configuration properties of its own. The content of a slot,
-    // such as the text of a card, and an expression in the text are not.
+    // Every block of a page is configurable, also one without configuration properties of its own, and a block of text is
+    // selectable as well. The content of a slot, such as the body of a card, and an expression in the text are not. A
+    // disposed widget is not, so that the selection never falls back onto a widget that a render removed.
     internal bool IsSelectable =>
+        !_isDisposed &&
         IsEditing &&
+        IsSelectionEnabled &&
         Type == SubjectComponentType.Widget &&
         Selection != null &&
-        (Subject is IConfigurable || HasEditComponent);
+        (Subject is IConfigurable || _isTextBlock || HasEditComponent);
+
+    // Constant strings, so that rendering a wrapper allocates no class names. Text blocks are grouped only in Inline mode
+    // and in the preview next to the editor, so a viewed page never has the class text-block.
+    internal static string GetWrapperClass(bool isSelectable, bool isSelected, bool isRevealable, bool isTextBlock) =>
+        isSelected ? (isTextBlock ? "subject-component-wrapper selectable selected text-block" : "subject-component-wrapper selectable selected")
+        : isSelectable ? (isTextBlock ? "subject-component-wrapper selectable text-block" : "subject-component-wrapper selectable")
+        : isRevealable ? (isTextBlock ? "subject-component-wrapper revealable text-block" : "subject-component-wrapper revealable")
+        : isTextBlock ? "subject-component-wrapper text-block"
+        : "subject-component-wrapper";
 
     // Keyed weakly, because the type of a widget can come from a plugin that is unloaded again.
     private static readonly ConditionalWeakTable<Type, string> TypeDisplayNames = new();
@@ -171,8 +325,26 @@
     private RegisteredSubjectProperty? _labelProperty;
     private RegisteredSubjectProperty? _pathProperty;
 
-    private string GetAccessibleName()
+    // Whether the widget of the subject is a block of text of its page, which can be selected without a configuration.
+    private bool _isTextBlock;
+
+    // The kind and the first words of a block of text, from its markup, see ITextBlockWidget.
+    private string? _textBlockName;
+
+    // Set first in Dispose: a render disposes a widget before the widgets inside it.
+    private bool _isDisposed;
+
+    /// <summary>
+    /// Gets the name that assistive technology reads for the widget: the kind and the first words of a block of text, or its
+    /// title, its path or the name of its type.
+    /// </summary>
+    public string GetAccessibleName()
     {
+        if (_textBlockName is { } textBlockName)
+        {
+            return textBlockName;
+        }
+
         if (SubjectNames.TryGetTitle(Subject!, _labelProperty) is { } title)
         {
             return title;
@@ -189,7 +361,8 @@
     private static RegisteredSubjectProperty? TryGetTextProperty(RegisteredSubject? subject, string propertyName) =>
         subject?.TryGetProperty(propertyName) is { } property && property.Type == typeof(string) ? property : null;
 
-    private SubjectComponent? SelectableParent
+    /// <summary>Gets the nearest widget around this one that can be selected, or null.</summary>
+    public SubjectComponent? SelectableAncestor
     {
         get
         {
@@ -218,11 +391,11 @@
 
     /// <summary>
     /// Gets this widget when it can be selected, otherwise the first widget inside it that can, such as the widget in
-    /// the page content of a canvas node.
+    /// the page content of a canvas node. With <paramref name="subject"/>, only a widget of that subject counts.
     /// </summary>
-    internal SubjectComponent? FindSelectable()
+    internal SubjectComponent? FindSelectable(IInterceptorSubject? subject = null)
     {
-        if (IsSelectable)
+        if (IsSelectable && (subject is null || ReferenceEquals(Subject, subject)))
         {
             return this;
         }
@@ -231,7 +404,7 @@
         {
             foreach (var child in _childComponents)
             {
-                if (child.FindSelectable() is { } selectable)
+                if (child.FindSelectable(subject) is { } selectable)
                 {
                     return selectable;
                 }
@@ -252,7 +425,7 @@
 
     private void SelectParent()
     {
-        Selection?.Select(SelectableParent);
+        Selection?.Select(SelectableAncestor);
     }
 
     private void OnPointerDown(PointerEventArgs args)
@@ -272,11 +445,26 @@
         Selection?.Select(this);
     }
 
-    // A Space on the focused widget itself arrives here as Enter, see widget-selection.js, so that a Space in an input
-    // inside the widget stays with the input.
+    // The innermost widget takes the click. A widget that has no block of its own, such as a subject that a Widget
+    // block shows, reveals the nearest widget around it that has one.
+    private async Task RevealAsync(MouseEventArgs args)
+    {
+        for (var component = this; component is not null; component = component.ParentComponent)
+        {
+            if (component.Subject is { } subject && await Revealer!.RevealAsync(subject))
+            {
+                return;
+            }
+        }
+    }
+
+    // Enter and Space on the wrapper itself arrive as Enter with this code, see widget-selection.js. A key on a control
+    // inside, such as an input or an insert button, reaches the wrapper too, with its own code, and stays with the control.
+    private const string WrapperKeyCode = "SelectableWidget";
+
     private async Task OnKeyDown(KeyboardEventArgs args)
     {
-        if (args.Key != "Enter" || Selection == null)
+        if (args.Key != "Enter" || args.Code != WrapperKeyCode || Selection == null)
         {
             return;
         }
@@ -285,14 +473,49 @@
         {
             Selection.Select(this);
         }
-        else if (HasEditComponent)
+        else if (HasEditAction)
         {
             await OpenEditDialog();
         }
     }
 
+    // The click that starts a double click selected the block already, unless it was a drag.
+    private async Task OnDoubleClickAsync(MouseEventArgs args)
+    {
+        if (Selection == null)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(Selection.Selected, this))
+        {
+            Selection.Select(this);
+        }
+
+        if (HasEditAction)
+        {
+            await OpenEditDialog();
+        }
+    }
+
+    // The condition of the Edit button in the bar. The editor opens no dialog for text that cannot be edited.
+    private bool HasEditAction => HasEditComponent || (_isTextBlock && StructureEditor is not null);
+
     protected override void OnParametersSet()
     {
+        // Created once, and only on a page that has a use for them, so that a viewed page allocates none per widget.
+        if (Revealer is not null && !_revealCallback.HasDelegate)
+        {
+            _revealCallback = EventCallback.Factory.Create<MouseEventArgs>(this, RevealAsync);
+        }
+
+        if (StructureEditor is not null && !_deleteCallback.HasDelegate)
+        {
+            _moveUpCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, -1));
+            _moveDownCallback = EventCallback.Factory.Create(this, () => StructureEditor!.MoveAsync(Subject!, 1));
+            _deleteCallback = EventCallback.Factory.Create(this, () => StructureEditor!.DeleteAsync(Subject!));
+        }
+
         if (Subject != _previousSubject || AdditionalParameters != _previousAdditionalParameters)
         {
             if (Subject != _previousSubject)
@@ -300,8 +523,14 @@
                 var registeredSubject = Subject?.TryGetRegisteredSubject();
                 _labelProperty = TryGetTextProperty(registeredSubject, SubjectNames.LabelPropertyName);
                 _pathProperty = SubjectNames.TryGetPathProperty(registeredSubject);
+                _isTextBlock = Subject is not null &&
+                               ComponentRegistry.GetComponent(Subject.GetType(), Type)?.ComponentType is { } componentType &&
+                               typeof(ITextBlockWidget).IsAssignableFrom(componentType);
             }
 
+            _textBlockName = _isTextBlock && AdditionalParameters?.GetValueOrDefault(ITextBlockWidget.HtmlParameterName) is string html
+                ? TextBlockNames.Describe(html, AdditionalParameters.GetValueOrDefault(ITextBlockWidget.KindParameterName) as string)
+                : null;
             _previousSubject = Subject;
             _previousAdditionalParameters = AdditionalParameters;
             _cachedParameters = BuildComponentParameters();
@@ -328,6 +557,18 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // A reload creates the widget of an inserted block after the edit returned, see WidgetSelection.SelectSubject. The
+        // focus is asked for first, so that it goes to the widget only once it rendered as selected.
+        if (Selection is { } selection)
+        {
+            if (selection.TakesFocus(this))
+            {
+                await RestoreFocusAsync();
+            }
+
+            selection.OnRendered(this);
+        }
+
         // Compared as the rendered object rather than as ISubjectComponent: the registry accepts any
         // component type, and a host that waits for this callback must also hear from one that is not
         // an ISubjectComponent.
@@ -345,12 +586,32 @@
         if (Subject == null)
             return;
 
+        if (_isTextBlock && StructureEditor is { } editor)
+        {
+            await (editor.GetActions(Subject).CanEditInSource ? editor.EditInSourceAsync(Subject) : editor.EditTextAsync(Subject));
+            return;
+        }
+
         var title = SubjectNames.TryGetTitle(Subject, _labelProperty);
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, SubjectEditDialog.GetTitle(null, title));
     }
 
+    // The edit replaced the element that had the focus, such as the moved block or the button of its bar, which leaves the
+    // focus on the body of the document.
+    private async Task RestoreFocusAsync()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("widgetSelection.restoreFocus");
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+        }
+    }
+
     public void Dispose()
     {
+        _isDisposed = true;
         Selection?.Remove(this);
         ParentComponent?._childComponents?.Remove(this);
     }

@@ -302,6 +302,12 @@ car.Tire = tire; // tire.Context is automatically set to context
 
 This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
 
+A subject that several parents hold inherits the context of the parent that attached it first. When that parent releases it while another parent still holds it, the subject inherits the context of a remaining parent instead, so it keeps the services of the graph after the first parent leaves it. A remaining parent is skipped when its context falls back on the subject's own, such as a child of the subject that holds it as well, or reaches other lifecycle interceptors, such as a parent constructed with the context of another graph. A subject that only such parents still hold keeps the context of the parent that released it, and loses the services of the graph once that parent leaves it.
+
+Pass a context only to the root subject and construct every other subject without one. A subject constructed with a context is a root of that context: the context keeps it reachable, and with lifecycle tracking keeps it attached, until `subject.Context.RemoveFallbackContext(context)` removes it. Dropping the last reference to a root is not enough. Once a property of a subject in the graph references it, it is a child instead, and stays one: when its last reference is removed, it leaves the graph like any other child and does not become a root again.
+
+When the last parent reference to a subject is removed, counted over every graph that holds it, inheritance removes the context of the parent that released it and every other fallback context that reaches only the releasing graph's lifecycle interceptor, such as the context the subject was constructed with. A context that also reaches another lifecycle interceptor stays, so a root of one graph that another graph releases stays in its own graph. When the subject is assigned into a graph again, it inherits the context of its new parent.
+
 ## Subject Lifecycle Tracking
 
 Track when subjects enter or leave the object graph, and when property references are added or removed:
@@ -401,6 +407,33 @@ Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
+
+### Child Index Changes
+
+A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:
+
+```csharp
+public class MyChildIndexHandler : IChildIndexHandler
+{
+    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    {
+        foreach (var child in children)
+        {
+            // child.Subject now sits at child.Index in the value of property
+        }
+    }
+}
+```
+
+These rules hold for every index the library keeps, in the registry (`Children`, `Parents`) and in parent tracking (`GetParents()`):
+
+- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
+- The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing, unless it holds a subject under several keys and the first of them changes.
+- An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation. A subject removed in place and then assigned again counts as still attached, so it is neither attached again nor reported, and keeps its old index.
+- Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so the stored index keeps the old instance. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification and derived properties, miss that write, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
+- The same requirements apply as to `ILifecycleHandler` (below). The handler must not write the property that was written, and the span is only valid during the call.
+- Apart from the cases above, once concurrent writes settle, every index matches the stored value. While a write runs, a reader on another thread can see the value and the indices updated at different times.
+- On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with one of its positions or keys, and after an in-place mutation with a position or key read from the mutated value, neither of which needs to be the stored one.
 
 ### Thread Safety
 
@@ -514,6 +547,14 @@ This is the classic reference counting limitation. **Workarounds:**
 1. Call `DetachSubjectFromContext(subject)` explicitly
 2. Break all cycle references before removing the parent
 
+A reference back to the root closes a cycle through it and makes the root a child, so the graph then has no root. It stays attached only through that cycle:
+
+```
+Root → A → Root (back-reference)
+```
+
+If `A.Root = null`, or `Root.A = null` (detaching A releases the references A holds), the root loses its last reference: the root and everything below it leave the graph, and the root also loses the context it was constructed with. Do not hold the root in a property of its own graph. To navigate upward, use [parent tracking](#parent-child-relationship-tracking), which records parents without referencing them.
+
 ## Parent-Child Relationship Tracking
 
 Tracks parent-child relationships in the subject graph, enabling upward navigation:
@@ -535,6 +576,8 @@ var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is
 ```
 
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
+
+Every parent carries an `Index`, and a subject has one parent per property that holds it. The index follows the assigned value as described in [Child Index Changes](#child-index-changes).
 
 This enables scenarios like:
 - Finding the root object of a subject graph

@@ -90,11 +90,16 @@ namespace HomeBlaze.Services
     }
     public static class HomeBlazePaths
     {
+        public const string DataProtectionCertificatePasswordKey = "HomeBlaze:DataProtection:CertificatePassword";
+        public const string DataProtectionCertificatePathKey = "HomeBlaze:DataProtection:CertificatePath";
+        public const string DataProtectionKeysDirectory = "DataProtection-Keys";
         public const string PluginConfigurationPathKey = "PluginConfigurationPath";
         public const string RootConfigurationFileKey = "HomeBlaze:RootConfigFile";
         public const string SeedDirectoryKey = "HomeBlaze:SeedDirectory";
         public static readonly string DefaultPluginConfigurationFile;
         public static readonly string DefaultRootConfigurationFile;
+        public static string? GetDataProtectionCertificatePath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
+        public static string GetDataProtectionKeysPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
@@ -179,7 +184,7 @@ namespace HomeBlaze.Services
     }
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Registry.SubjectRegistry)})]
-    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.IChildIndexHandler, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
         public long PathsVersion { get; }
@@ -428,7 +433,6 @@ namespace HomeBlaze.Services.Lifecycle
         public PropertyAttributeInitializer() { }
         public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
         public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value) { }
     }
 }
 namespace HomeBlaze.Services.Metadata

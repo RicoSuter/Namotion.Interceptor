@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text;
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -69,24 +71,24 @@ public class StorageReconcilerTests : StorageTestBase
     public async Task WhenFilesWereReloadedOnce_ThenLaterPassesOpenNoFile()
     {
         // Arrange
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         WriteFile("Notes.md", "first");
         WriteFile("Data.gated", "first");
         WriteFile("Motor.json", SerializeMotor("Pump"));
         var storage = await ConnectAsync(configure: container =>
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+            container.ClientDecorator = inner => client = new PausableStore(inner));
         WriteFile("Notes.md", "second version");
         WriteFile("Data.gated", "second version");
         WriteFile("Motor.json", SerializeMotor("Pump, changed"));
         await storage.ReconcileAsync();
-        var openCountAfterReload = client!.GetCallCount(nameof(IBlobStorage.OpenReadAsync));
+        var openCountAfterReload = client!.GetCallCount(nameof(IStore.OpenRead));
 
         // Act
         await storage.ReconcileAsync();
         await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(openCountAfterReload, client.GetCallCount(nameof(IBlobStorage.OpenReadAsync)));
+        Assert.Equal(openCountAfterReload, client.GetCallCount(nameof(IStore.OpenRead)));
     }
 
     [Fact]
@@ -196,6 +198,35 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.Same(machines, parent.Property.Subject);
         Assert.Equal(nameof(VirtualFolder.Children), parent.Property.Name);
         Assert.Equal("Motor", parent.Index);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenDeviceMovesToParentFolderAndItsOldFolderIsDeleted_ThenItIsStillReachableThroughTheGraph(bool isOnePass)
+    {
+        // Arrange: the device has no constructor that takes the context, so it has its services from its folder only.
+        WriteFile("House/Kitchen/Dishwasher.json", InjectedDevice.Serialize("Dishwasher"));
+        WriteFile("House/Freezer.json", InjectedDevice.Serialize("Freezer"));
+        var storage = await ConnectAsync();
+        var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
+        var device = Assert.IsType<InjectedDevice>(((VirtualFolder)house.Children["Kitchen"]).Children["Dishwasher"]);
+        var resolver = new SubjectPathResolver(() => storage);
+
+        // Act
+        File.Move(GetFullPath("House/Kitchen/Dishwasher.json"), GetFullPath("House/Dishwasher.json"));
+        if (!isOnePass)
+        {
+            await storage.ReconcileAsync();
+        }
+
+        Directory.Delete(GetFullPath("House/Kitchen"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Dishwasher", "Freezer"], house.Children.Keys.Order());
+        Assert.Same(device, house.Children["Dishwasher"]);
+        Assert.Equal("Dishwasher", resolver.ResolveValue("/House/Dishwasher/Name", PathStyle.Canonical));
     }
 
     [Fact]
@@ -871,7 +902,7 @@ public class StorageReconcilerTests : StorageTestBase
     public async Task WhenPassQueuedBehindFirstPassFails_ThenConnectDoesNotReplaceItsStatus()
     {
         // Arrange: what the connect does after its first pass is posted here and runs only when the test says so.
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         FluentStorageContainer? storage = null;
         WriteFile("Slow.gated");
         var gate = GatedFile.PauseNextLoad();
@@ -884,7 +915,7 @@ public class StorageReconcilerTests : StorageTestBase
             connect = ConnectAsync(configure: container =>
             {
                 storage = container;
-                container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+                container.ClientDecorator = inner => client = new PausableStore(inner);
             });
         }
         finally
@@ -894,7 +925,7 @@ public class StorageReconcilerTests : StorageTestBase
 
         // A second pass is queued behind the first one, as the trigger does for a change during startup.
         await gate.WhenReachedAsync();
-        var listingOfSecondPassReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingOfSecondPassReached = client!.PauseNext(nameof(IStore.ListObjects));
         var secondPass = storage!.ReconcileAsync();
 
         // Act
@@ -915,7 +946,7 @@ public class StorageReconcilerTests : StorageTestBase
     public async Task WhenPassQueuedBehindFailedFirstPassFinishes_ThenConnectDoesNotReplaceItsStatus()
     {
         // Arrange: what the connect does after its first pass is posted here and runs only when the test says so.
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         FluentStorageContainer? storage = null;
         Task? listingOfFirstPassReached = null;
         WriteFile("Notes.md");
@@ -930,8 +961,8 @@ public class StorageReconcilerTests : StorageTestBase
                 storage = container;
                 container.ClientDecorator = inner =>
                 {
-                    client = new PausableBlobStorage(inner);
-                    listingOfFirstPassReached = client.PauseNext(nameof(IBlobStorage.ListAsync));
+                    client = new PausableStore(inner);
+                    listingOfFirstPassReached = client.PauseNext(nameof(IStore.ListObjects));
                     return client;
                 };
             });
@@ -990,15 +1021,15 @@ public class StorageReconcilerTests : StorageTestBase
     {
         // Arrange
         WriteFile("Data.gated", "first");
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var hookedTimeProvider = new HookedTimeProvider(new ManualTimeProvider());
         var storage = await ConnectAsync(configure: container =>
         {
             container.TimeProvider = hookedTimeProvider;
             container.ReconcileIntervalSeconds = 60;
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+            container.ClientDecorator = inner => client = new PausableStore(inner);
         });
-        var listingReached = client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = client!.PauseNext(nameof(IStore.ListObjects));
         var pass = storage.ReconcileAsync();
         await listingReached;
         var write = WriteBlobAsync(storage, "Data.gated", "second");
@@ -1886,11 +1917,11 @@ public class StorageReconcilerTests : StorageTestBase
     public async Task WhenPlainFilesAreLoadedAndRefreshed_ThenNoMetadataCallIsMade()
     {
         // Arrange
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         WriteFile("Data.bin", "first");
         WriteFile("Values.json", """{ "value": 1 }""");
         var storage = await ConnectAsync(configure: container =>
-            container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+            container.ClientDecorator = inner => client = new PausableStore(inner));
         WriteFile("Data.bin", "second version");
         WriteFile("Values.json", """{ "value": 22 }""");
 
@@ -1898,7 +1929,7 @@ public class StorageReconcilerTests : StorageTestBase
         await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(0, client!.GetCallCount(nameof(IBlobStorage.GetBlobsAsync)));
+        Assert.Equal(0, client!.GetCallCount(nameof(IStore.GetObjectInfo)));
         Assert.Equal("second version".Length, Assert.IsType<GenericFile>(storage.Children["Data.bin"]).FileSize);
         Assert.Equal("""{ "value": 22 }""".Length, Assert.IsType<JsonFile>(storage.Children["Values.json"]).FileSize);
     }
