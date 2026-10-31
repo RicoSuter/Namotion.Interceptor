@@ -7,8 +7,8 @@ namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
 /// Whether the tools show a subject, for one tool call. Without an access policy every subject is shown. With one, a
-/// subject is shown when it is the root, or when it is not empty for the policy and, through at least one of its
-/// parents, no path reaches the root or one reaches it through properties the policy allows to read only.
+/// subject is shown when it is the root, or when it is not empty for the policy and has a readable path: a path from the
+/// root, through one of its parents, that passes only properties the policy allows to read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpVisibility
@@ -118,19 +118,18 @@ internal sealed class McpVisibility
         return isShown;
     }
 
-    // A subject with several parents is shown through any of them, so hiding one link hides only that link. A parent
-    // from which no path reaches the root hides nothing, so a subject without such a path is shown when not empty.
+    // A subject with several parents is shown through any of them, so hiding one link hides only that link. A subject
+    // without a readable path from the root is not shown, also when no path reaches the root at all.
     private bool Evaluate(RegisteredSubject subject, IMcpAccessPolicy policy)
     {
-        var parents = subject.Parents;
-        if (parents.Length == 0 || IsEmptyForPolicy(subject, policy))
+        if (IsEmptyForPolicy(subject, policy))
         {
             return false;
         }
 
-        foreach (var parent in parents)
+        foreach (var parent in subject.Parents)
         {
-            if (!parent.Property.IsAnyPropertyOnPathExcluded(_readablePathProvider!, _rootSubject, parent.Index))
+            if (parent.Property.HasIncludedPath(_readablePathProvider!, _rootSubject))
             {
                 return true;
             }

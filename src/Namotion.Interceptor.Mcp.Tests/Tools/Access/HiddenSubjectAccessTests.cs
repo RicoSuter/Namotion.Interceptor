@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
@@ -116,6 +117,7 @@ public class HiddenSubjectAccessTests
     public static TheoryData<string, string> PassedThroughPartlyHiddenSubjectCalls => new()
     {
         { "get_property", JsonSerializer.Serialize(new { path = "Items[node].A.Child.Name" }) },
+        { "set_property", JsonSerializer.Serialize(new { path = "Items[node].A.Child.Name", value = "Changed" }) },
         { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[node].A.Child.Child", depth = 0 }) },
         { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestNode) }, where = "A.Child.Name == \"G\"" }) }
     };
@@ -125,17 +127,20 @@ public class HiddenSubjectAccessTests
     public async Task WhenAPathPassesASubjectWhoseOtherLinkIsHidden_ThenTheToolAnswersAsWithoutAPolicy(string toolName, string input)
     {
         // Arrange
-        var (root, _) = CreatePassedThroughPartlyHiddenSubject();
+        // Each call gets its own graph, so a write of the first does not change what the second sees.
+        var (rootWithoutPolicy, gWithoutPolicy) = CreatePassedThroughPartlyHiddenSubject();
+        var (rootWithPolicy, gWithPolicy) = CreatePassedThroughPartlyHiddenSubject();
         var request = JsonSerializer.Deserialize<JsonElement>(input);
 
         // Act
-        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), toolName, request);
-        var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret))), toolName, request);
+        var withoutPolicy = await McpToolCaller.CallAsync(rootWithoutPolicy, CreateConfiguration(policy: null), toolName, request);
+        var withPolicy = await McpToolCaller.CallAsync(rootWithPolicy, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestNode.Secret))), toolName, request);
 
         // Assert
         Assert.False(withoutPolicy.TryGetProperty("error", out _));
         Assert.DoesNotContain(nameof(TestNode.Secret), withPolicy.GetRawText());
         Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+        Assert.Equal(gWithoutPolicy.Name, gWithPolicy.Name);
     }
 
     [Fact]
@@ -155,6 +160,101 @@ public class HiddenSubjectAccessTests
         Assert.Same(g, property!.Value.Property.Subject);
         Assert.Same(g, subject!.Subject);
         Assert.Null(hidden);
+    }
+
+    // The device got the outside house's Public first, and inside the root it is held only under the hidden Private.
+    private static (TestMixedGroup Root, TestDevice Device) CreateHiddenInsideAndHeldOutside()
+    {
+        var context = CreateContext();
+        var device = new TestDevice(context) { DeviceName = "Camera" };
+        var outside = new TestHouse(context) { Address = "Outside" };
+        outside.Public = device;
+        var house = new TestHouse(context) { Address = "Main Street" };
+        house.Private = device;
+        var root = new TestMixedGroup(context);
+        root.Items = new Dictionary<string, IInterceptorSubject> { ["house"] = house };
+        return (root, device);
+    }
+
+    public static TheoryData<string, string> HiddenInsideAndHeldOutsideCalls => new()
+    {
+        { "browse", JsonSerializer.Serialize(new { format = "json", depth = 10, includeProperties = true, includeAttributes = true }) },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[house].Private", depth = 0, includeProperties = true }) },
+        { "search", JsonSerializer.Serialize(new { format = "json", includeProperties = true }) },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestDevice) }, includeProperties = true }) },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestHouse) }, where = "Private.DeviceName == \"Camera\"" }) },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName" }) },
+        { "set_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName", value = "Changed" }) }
+    };
+
+    [Theory]
+    [MemberData(nameof(HiddenInsideAndHeldOutsideCalls))]
+    public async Task WhenASubjectsOnlyPathInsideTheRootIsHiddenAndItsOtherParentIsOutside_ThenNoToolRevealsIt(string toolName, string input)
+    {
+        // Arrange
+        var (rootWithoutPolicy, _) = CreateHiddenInsideAndHeldOutside();
+        var (rootWithPolicy, device) = CreateHiddenInsideAndHeldOutside();
+        var request = JsonSerializer.Deserialize<JsonElement>(input);
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(rootWithoutPolicy, CreateConfiguration(policy: null), toolName == "set_property" ? "get_property" : toolName, request);
+        var withPolicy = await McpToolCaller.CallAsync(rootWithPolicy, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private))), toolName, request);
+
+        // Assert
+        // Without a policy the call reaches the device, or for the where filter the house through it.
+        Assert.False(withoutPolicy.TryGetProperty("error", out _));
+        Assert.DoesNotContain("Camera", withPolicy.GetRawText());
+        Assert.Equal("Camera", device.DeviceName);
+        if (request.TryGetProperty("path", out var path))
+        {
+            Assert.Equal($"Path not found: {path.GetString()}", withPolicy.GetProperty("error").GetString());
+        }
+        else if (withPolicy.TryGetProperty("results", out var results))
+        {
+            Assert.DoesNotContain(results.EnumerateObject(), entry => entry.Name.Contains("Private") || entry.Name == "Items[house]" && request.TryGetProperty("where", out _));
+        }
+        else
+        {
+            Assert.DoesNotContain(nameof(TestHouse.Private), withPolicy.GetRawText());
+        }
+    }
+
+    [Fact]
+    public void WhenASubjectsOnlyPathInsideTheRootIsHiddenAndItsOtherParentIsOutside_ThenTheHelpersAndTheVisibilityHideIt()
+    {
+        // Arrange
+        var (root, device) = CreateHiddenInsideAndHeldOutside();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private)));
+
+        // Act
+        var subject = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Private");
+        var property = configuration.TryGetReadableProperty(registeredRoot, "Items[house].Private.DeviceName");
+        var isShown = McpVisibility.For(configuration, root).IsShown(device);
+
+        // Assert
+        Assert.Null(subject);
+        Assert.Null(property);
+        Assert.False(isShown);
+    }
+
+    [Fact]
+    public void WhenASubjectOtherThanTheRootHasNoParent_ThenItIsNotShown()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new TestRoom(context) { Name = "Kitchen" };
+        var detached = new TestDevice(context) { DeviceName = "Detached" };
+        var configuration = CreateConfiguration(new TestAccessPolicy((_, _) => true));
+
+        // Act
+        var isShown = McpVisibility.For(configuration, root).IsShown(detached);
+        var isRootShown = McpVisibility.For(configuration, root).IsShown(root);
+
+        // Assert
+        Assert.Empty(detached.TryGetRegisteredSubject()!.Parents);
+        Assert.False(isShown);
+        Assert.True(isRootShown);
     }
 
     [Theory]
