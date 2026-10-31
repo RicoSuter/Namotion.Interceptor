@@ -99,6 +99,29 @@ internal sealed class GameWorldIndex
         }
     }
 
+    /// <summary>
+    /// Whether a blocking object that is not a player covers the tile, which stops sound: walls and closed doors do,
+    /// open doors and players do not.
+    /// </summary>
+    public bool IsSoundBlocked(long x, long y)
+    {
+        if (!_chunks.TryGetValue((x >> ChunkShift, y >> ChunkShift), out var objects))
+        {
+            return false;
+        }
+
+        foreach (var gameObject in objects)
+        {
+            var entry = _entries[gameObject];
+            if (entry.IsBlocking && gameObject is not GamePlayer && entry.Footprint.Contains(x, y))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool HasValidSize(GameObject gameObject) =>
         IsValidSize(gameObject.Width) && IsValidSize(gameObject.Depth) && IsValidSize(gameObject.Height);
 

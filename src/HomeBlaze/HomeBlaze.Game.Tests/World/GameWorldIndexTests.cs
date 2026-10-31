@@ -157,4 +157,40 @@ public class GameWorldIndexTests
         Assert.False(index.IsBlocked(new Footprint(0, 0, 1, 1), ignored: null));
         Assert.Equal(0, index.Count);
     }
+
+    [Fact]
+    public void WhenAWallOrAClosedDoorCoversATile_ThenTheTileBlocksSound()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        index.AddOrUpdate(new Wall { X = 0, Y = 0, Width = 4, Depth = 1 });
+        index.AddOrUpdate(new Door { X = 10, Y = 0 });
+
+        // Act
+        var isWallBlocked = index.IsSoundBlocked(3, 0);
+        var isDoorBlocked = index.IsSoundBlocked(11, 0);
+
+        // Assert
+        Assert.True(isWallBlocked);
+        Assert.True(isDoorBlocked);
+    }
+
+    [Fact]
+    public void WhenAnOpenDoorAPlayerOrNothingCoversATile_ThenTheTileLetsSoundThrough()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        index.AddOrUpdate(new Door { X = 0, Y = 0, IsOpen = true });
+        index.AddOrUpdate(new GamePlayer { X = 10, Y = 0, IsConnected = true });
+
+        // Act
+        var isOpenDoorBlocked = index.IsSoundBlocked(1, 0);
+        var isPlayerBlocked = index.IsSoundBlocked(10, 0);
+        var isEmptyBlocked = index.IsSoundBlocked(50, 50);
+
+        // Assert
+        Assert.False(isOpenDoorBlocked);
+        Assert.False(isPlayerBlocked);
+        Assert.False(isEmptyBlocked);
+    }
 }
