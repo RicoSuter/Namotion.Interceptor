@@ -6,8 +6,9 @@ namespace HomeBlaze.Game.Voice;
 /// The frames of one talker waiting for the mixer, in a pooled ring buffer. It plays once it holds its start size,
 /// grows the start size by <see cref="GameVoiceSettings.BufferGrowth"/> when it runs dry while playing, and shrinks it
 /// by one frame after <see cref="GameVoiceSettings.BufferShrinkDelay"/> of playing without running dry. It keeps at
-/// most its start size plus one growth step, and never more than <see cref="GameVoiceSettings.ServerQueueMaximum"/>,
-/// dropping the oldest frames. Not thread-safe: the mixer guards it with its lock.
+/// most its start size plus <see cref="GameVoiceSettings.TrimHeadroom"/>, and never more than
+/// <see cref="GameVoiceSettings.ServerQueueMaximum"/>, dropping the oldest frames. Not thread-safe: the mixer guards it
+/// with its lock.
 /// </summary>
 internal sealed class TalkerQueue : IDisposable
 {
@@ -38,6 +39,16 @@ internal sealed class TalkerQueue : IDisposable
     public bool IsPlaying { get; private set; }
 
     /// <summary>
+    /// The frames added that made the queue drop its oldest frames, counted once per added frame.
+    /// </summary>
+    public long Trims { get; private set; }
+
+    /// <summary>
+    /// The times the queue ran dry while playing.
+    /// </summary>
+    public long Underruns { get; private set; }
+
+    /// <summary>
     /// Adds a frame of exactly <see cref="GameVoiceSettings.FrameBytes"/> bytes.
     /// </summary>
     public void Enqueue(ReadOnlySpan<byte> frame)
@@ -47,10 +58,14 @@ internal sealed class TalkerQueue : IDisposable
             throw new ObjectDisposedException(nameof(TalkerQueue));
         }
 
-        var limit = Math.Min(Capacity, StartFrames + GameVoiceSettings.BufferGrowth);
-        while (Count >= limit)
+        var limit = Math.Min(Capacity, StartFrames + GameVoiceSettings.TrimHeadroom);
+        if (Count >= limit)
         {
-            DropOldest();
+            Trims++;
+            while (Count >= limit)
+            {
+                DropOldest();
+            }
         }
 
         var slot = (_head + Count) % Capacity;
@@ -116,6 +131,7 @@ internal sealed class TalkerQueue : IDisposable
     private void RunDry(long now)
     {
         IsPlaying = false;
+        Underruns++;
         StartFrames = Math.Min(Capacity, StartFrames + GameVoiceSettings.BufferGrowth);
         _lastDryTimestamp = now;
     }

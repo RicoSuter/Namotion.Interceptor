@@ -400,7 +400,9 @@
         bufferStartSamples = ToSamples(GameVoiceSettings.PlaybackBufferStart),
         bufferMaximumSamples = ToSamples(GameVoiceSettings.PlaybackBufferMaximum),
         bufferGrowthSamples = GameVoiceSettings.BufferGrowth * GameVoiceSettings.SamplesPerFrame,
+        bufferHeadroomSamples = GameVoiceSettings.TrimHeadroom * GameVoiceSettings.SamplesPerFrame,
         bufferShrinkDelaySeconds = GameVoiceSettings.BufferShrinkDelay.TotalSeconds,
+        rampSeconds = GameVoiceSettings.PlaybackRamp.TotalSeconds,
     };
 
     private static int ToSamples(TimeSpan duration) => (int)Math.Round(duration.TotalSeconds * GameVoiceSettings.SampleRate);

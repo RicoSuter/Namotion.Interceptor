@@ -125,6 +125,8 @@ class GameVoice {
         this.pendingStarts = 0;
         this.sentFrames = 0;
         this.receivedFrames = 0;
+        this.underruns = 0;
+        this.trims = 0;
         this.isDisposed = false;
         this.onClick = event => {
             if (event.target instanceof Element && event.target.closest(VOICE_BUTTONS)) {
@@ -326,10 +328,14 @@ class GameVoice {
                         bufferStartSamples: options.bufferStartSamples,
                         bufferMaximumSamples: options.bufferMaximumSamples,
                         bufferGrowthSamples: options.bufferGrowthSamples,
+                        bufferHeadroomSamples: options.bufferHeadroomSamples,
                         bufferShrinkDelaySeconds: options.bufferShrinkDelaySeconds,
+                        rampSeconds: options.rampSeconds,
                     },
                 });
+                this.playback.port.onmessage = event => this.count(event.data);
                 this.playback.connect(context.destination);
+                this.count({ underruns: 0, trims: 0 });
             }
 
             return STARTED;
@@ -343,11 +349,20 @@ class GameVoice {
         const playback = this.playback;
         if (playback) {
             this.playback = null;
+            playback.port.onmessage = null;
             playback.port.postMessage('stop');
             playback.disconnect();
         }
 
         this.suspendWhenIdle();
+    }
+
+    // The processor reports what it counted since its last report, so the totals add up across playbacks.
+    count({ underruns, trims }) {
+        this.underruns += underruns;
+        this.trims += trims;
+        this.root?.setAttribute('data-voice-underruns', String(this.underruns));
+        this.root?.setAttribute('data-voice-trimmed', String(this.trims));
     }
 
     play(frame) {

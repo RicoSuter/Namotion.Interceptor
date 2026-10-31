@@ -131,7 +131,7 @@ Mixer (`Voice/GameVoiceMixer`, one per game, with its own lock):
 
 - `SetMicrophonePage(playerId, pageId)`, called by the game under `_lock`, creates the player's talker, clears its queue when the page changes, or removes it for none.
 - `Receive(playerId, pageId, frame)` drops a frame that does not have exactly 640 bytes, does not come from the player's microphone page, or exceeds `FrameRateTolerance` times the frame rate (a `RateLimiter` with a burst of `ServerQueueMaximum`). Otherwise it decodes the samples into the talker's `TalkerQueue`, a pooled ring buffer, so steady speech allocates nothing per incoming frame.
-- A talker queue plays once it holds its start size, grows the start size by `BufferGrowth` up to `ServerQueueMaximum` when it runs dry while playing, and shrinks it by one frame after `BufferShrinkDelay` of playing without running dry. It keeps at most its start size plus one growth step, never more than `ServerQueueMaximum`, and drops the oldest frames beyond that, so a shrinking start size lowers the delay.
+- A talker queue plays once it holds its start size, grows the start size by `BufferGrowth` up to `ServerQueueMaximum` when it runs dry while playing, and shrinks it by one frame after `BufferShrinkDelay` of playing without running dry. It keeps at most its start size plus `TrimHeadroom`, never more than `ServerQueueMaximum`, and drops the oldest frames beyond that, so a burst of frames that the network delivers together survives while a shrinking start size still lowers the delay. `Trims` counts the added frames that made it drop and `Underruns` the times it ran dry while playing.
 - `RegisterSink(playerId, sink)` adds a page with the speaker on and returns an `IDisposable` that removes it; a player can have several. `IGameVoiceSink.Send` returns without waiting for the browser, never changes the frame, which the listener's sinks share, and must not throw when a tick that already took the sinks calls it once more after its registration was disposed.
 - `Mix(table)` takes one frame per playing talker into pooled buffers and copies the list of listeners under the mixer lock. Outside it, it sums for every listener with sinks the frames of the talkers in its table row, scaled by their volume and never its own, into a reused `int` buffer, clamps to 16 bits into a new `byte[]` and hands it to each of the listener's sinks. A listener that hears no frame in a tick gets nothing. A failing sink is logged as a warning the first time and at debug level after that.
 - The voice loop (`RunVoiceLoopAsync`) runs beside the housekeeping loop in `ExecuteAsync`, ticks every `FrameDuration` on a `PeriodicTimer` of the game's `TimeProvider`, and stops with the housekeeping loop, also when that one ends on an unexpected exception. `TickVoice` updates the volume table and mixes in separate `try` blocks, so a failing rebuild or `VolumeTableChanged` handler does not skip the mix. A failing tick logs a warning when ticks start failing and stays at debug level while they keep failing, so a persistent fault does not flood the log at the frame rate.
@@ -148,6 +148,8 @@ Settings (`Voice/GameVoiceSettings`, the one place for every timing and size):
 | `PlaybackBufferStart` | 40 ms | Audio the browser buffers before it plays |
 | `PlaybackBufferMaximum` | 120 ms | Largest buffer the browser grows to |
 | `BufferGrowth` | 1 frame | Growth of a buffer after it ran dry |
+| `TrimHeadroom` | 3 frames | Frames a buffer may hold beyond its current target before it drops the oldest audio; it always drops beyond its maximum |
+| `PlaybackRamp` | 2 ms | Fade with which the browser's playback leaves and enters silence and smooths a dropped stretch |
 | `BufferShrinkDelay` | 5 s | Time without running dry before a buffer shrinks by one frame |
 | `VolumeTableInterval` | 100 ms | Shortest time between two rebuilds of the volume table |
 | `MaximumPendingSends` | 10 | Sends to a page in flight beyond which new frames to it are dropped |
@@ -172,7 +174,7 @@ Browser (`game-voice.js`, per view id like `game.js`):
 
 | Call | Direction | Purpose |
 |---|---|---|
-| `initialize(viewId, dotNet, options)` | .NET to JS | Returns whether the browser offers voice (secure context, `getUserMedia`, `AudioWorkletNode`). Options: `element` (the panel), `sampleRate`, `frameSamples`, `bufferStartSamples`, `bufferMaximumSamples`, `bufferGrowthSamples`, `bufferShrinkDelaySeconds` |
+| `initialize(viewId, dotNet, options)` | .NET to JS | Returns whether the browser offers voice (secure context, `getUserMedia`, `AudioWorkletNode`). Options: `element` (the panel), `sampleRate`, `frameSamples`, `bufferStartSamples`, `bufferMaximumSamples`, `bufferGrowthSamples`, `bufferHeadroomSamples`, `bufferShrinkDelaySeconds`, `rampSeconds` |
 | `startCapture(viewId)`, `stopCapture(viewId)` | .NET to JS | Asks for the microphone with echo cancellation, noise suppression and automatic gain, and starts sending frames; returns `{ isStarted, error }` with `denied`, `not-found` or `failed` |
 | `startPlayback(viewId)`, `stopPlayback(viewId)` | .NET to JS | Starts or stops the playback processor |
 | `resume(viewId)` | .NET to JS | Resumes a suspended audio context where the browser allows it outside a user action |
@@ -187,9 +189,11 @@ Browser (`game-voice.js`, per view id like `game.js`):
 - While nothing captures, plays or starts, the context is suspended, so an idle page does not keep the audio device busy.
 - Every stop increases a generation counter of capture or playback, so a start that a stop overtook while it waited for the worklet module or the microphone gives up and releases what it got. The `onended` handler of the microphone track reports only for the current generation, and a stop clears it.
 - The capture processor low-passes the microphone with two one-pole stages, resamples it to 16 kHz by linear interpolation, converts it to 16 bits and posts a frame every 320 samples. Its node is connected to the destination and outputs silence, which keeps the browser running it.
-- The playback processor resamples frames to the context rate and plays from a buffer that starts at `PlaybackBufferStart`, grows by one frame up to `PlaybackBufferMaximum` when it runs dry, shrinks by one frame after `BufferShrinkDelay` of playing without running dry, keeps at most one growth step above its target, and plays silence while empty.
+- The playback processor resamples frames to the context rate and plays from a buffer that starts at `PlaybackBufferStart`, grows by one frame up to `PlaybackBufferMaximum` when it runs dry, shrinks by one frame after `BufferShrinkDelay` of playing without running dry, keeps at most `TrimHeadroom` above its target and never more than its maximum, and plays silence while empty.
+- Starting, running dry and dropping the oldest audio each make the output jump, which clicks. The playback processor instead blends from its last output value into what follows over `PlaybackRamp` at the context rate: into silence when it runs dry, into the audio when it starts and after a drop.
+- The playback processor counts underruns (running dry while playing) and trims (frames whose arrival dropped the oldest audio, one per frame however much it dropped) and posts what it counted at most every 250 ms while the counts change.
 - A `stop` message ends a processor, because one whose `process` returns true keeps its node alive after the node was disconnected.
-- For tests the panel carries `data-voice-sent-frames` and `data-voice-received-frames`, the frames sent and played.
+- For tests and diagnosis the panel carries `data-voice-sent-frames` and `data-voice-received-frames`, the frames sent and played, and `data-voice-underruns` and `data-voice-trimmed`, the underruns and trims of the playback processor, summed over its restarts.
 
 ## Threading invariants
 
@@ -293,7 +297,7 @@ The E2E tests need Playwright's Chromium (`playwright.ps1 install chromium` from
 
 The E2E tests use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through their own `GameE2ECollection`, because xUnit only finds collection definitions in the test assembly. They assert the side panel, not canvas pixels; headless Chromium renders WebGL in software. Every installation sees all circuits of the shared server, and circuits of closed browser contexts stay connected for minutes, so players of earlier tests may still stand in a new game. The tests therefore read where their own player joined, move the other players far aside, and assert positions relative to the join point.
 
-The voice E2E tests launch their own Chromium with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, so the microphone is a test tone that needs no permission dialog; the test server at `127.0.0.1` is a secure context. They read the frame counters on the panel and prove that frames stop by waiting for the talker to send 50 more while the listener's count grows by at most `MaximumPendingSends`.
+The voice E2E tests launch their own Chromium with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, so the microphone is a test tone that needs no permission dialog; the test server at `127.0.0.1` is a secure context. They read the frame counters on the panel and prove that frames stop by waiting for the talker to send 50 more while the listener's count grows by at most `MaximumPendingSends`. Headless Chromium renders audio in callbacks of 4096 samples (about 85 ms), so its playback buffer peaks near the maximum and trims although frames arrive steadily; the tests therefore check only that the underrun and trim counters are present, not that they stay at 0.
 
 ## Known limits and follow-ups
 

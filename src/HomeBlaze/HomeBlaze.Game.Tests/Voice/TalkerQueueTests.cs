@@ -85,25 +85,49 @@ public class TalkerQueueTests
 
         // Assert
         Assert.Null(dry);
+        Assert.Equal(1, queue.Underruns);
         Assert.Equal(GameVoiceSettings.ServerQueueStart + GameVoiceSettings.BufferGrowth, queue.StartFrames);
         Assert.Null(beforeStart);
         Assert.Equal((short?)2, afterStart);
     }
 
     [Fact]
-    public void WhenMoreFramesArriveThanOneGrowthStepAboveTheStart_ThenTheOldestAreDropped()
+    public void WhenABurstWithinTheHeadroomArrives_ThenTheQueueKeepsEveryFrame()
     {
         // Arrange
         using var queue = new TalkerQueue(_timeProvider);
+        const int burst = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom;
 
         // Act
-        queue.Enqueue(VoiceFrames.Create(1));
-        queue.Enqueue(VoiceFrames.Create(2));
-        queue.Enqueue(VoiceFrames.Create(3));
+        for (short sample = 1; sample <= burst; sample++)
+        {
+            queue.Enqueue(VoiceFrames.Create(sample));
+        }
 
         // Assert
-        Assert.Equal(GameVoiceSettings.ServerQueueStart + GameVoiceSettings.BufferGrowth, queue.Count);
-        Assert.Equal(new short?[] { 2, 3 }, new[] { Dequeue(queue), Dequeue(queue) });
+        Assert.Equal(burst, queue.Count);
+        Assert.Equal(0, queue.Trims);
+        var samples = Enumerable.Range(0, burst).Select(_ => Dequeue(queue)).ToArray();
+        Assert.Equal(Enumerable.Range(1, burst).Select(sample => (short?)sample), samples);
+    }
+
+    [Fact]
+    public void WhenMoreFramesArriveThanTheHeadroomAboveTheStart_ThenTheOldestAreDropped()
+    {
+        // Arrange
+        using var queue = new TalkerQueue(_timeProvider);
+        const int limit = GameVoiceSettings.ServerQueueStart + GameVoiceSettings.TrimHeadroom;
+
+        // Act
+        for (short sample = 1; sample <= limit + 1; sample++)
+        {
+            queue.Enqueue(VoiceFrames.Create(sample));
+        }
+
+        // Assert
+        Assert.Equal(limit, queue.Count);
+        Assert.Equal(1, queue.Trims);
+        Assert.Equal((short?)2, Dequeue(queue));
     }
 
     [Fact]
@@ -122,6 +146,7 @@ public class TalkerQueueTests
         // Assert
         Assert.Equal(GameVoiceSettings.ServerQueueMaximum, queue.StartFrames);
         Assert.Equal(GameVoiceSettings.ServerQueueMaximum, queue.Count);
+        Assert.Equal(2, queue.Trims);
         Assert.Equal((short?)3, Dequeue(queue));
     }
 

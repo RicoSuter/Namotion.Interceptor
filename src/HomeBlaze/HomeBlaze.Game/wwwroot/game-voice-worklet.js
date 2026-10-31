@@ -57,6 +57,9 @@ class CaptureProcessor extends AudioWorkletProcessor {
     }
 }
 
+// Seconds between two reports of the playback counters to the main thread, sent only after a count changed.
+const REPORT_INTERVAL_SECONDS = 0.25;
+
 class PlaybackProcessor extends AudioWorkletProcessor {
     constructor(options) {
         super();
@@ -65,6 +68,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.startSamples = settings.bufferStartSamples;
         this.maximumSamples = settings.bufferMaximumSamples;
         this.growthSamples = settings.bufferGrowthSamples;
+        this.headroomSamples = settings.bufferHeadroomSamples;
         this.shrinkDelay = settings.bufferShrinkDelaySeconds;
         this.targetSamples = this.startSamples;
         this.capacity = this.maximumSamples + settings.frameSamples;
@@ -75,6 +79,15 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.isPlaying = false;
         this.isStopped = false;
         this.lastDry = currentTime;
+        // Output samples at the context rate over which a step in the output is blended out.
+        this.rampSamples = Math.max(1, Math.round(settings.rampSeconds * sampleRate));
+        this.rampRemaining = 0;
+        this.rampFrom = 0;
+        this.lastOutput = 0;
+        // Counted since the last report, which sends and resets them.
+        this.underruns = 0;
+        this.trims = 0;
+        this.lastReport = currentTime;
         this.port.onmessage = event => {
             if (event.data === 'stop') {
                 this.isStopped = true;
@@ -84,12 +97,14 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         };
     }
 
-    // Keeps the delay near the target: drops the oldest audio beyond one growth step above it, and beyond the maximum.
+    // Keeps the delay near the target: drops the oldest audio beyond the headroom above it, and beyond the maximum.
     enqueue(samples) {
-        const limit = Math.min(this.maximumSamples, this.targetSamples + this.growthSamples);
+        const limit = Math.min(this.maximumSamples, this.targetSamples + this.headroomSamples);
         const excess = this.available + samples.length - limit;
         if (excess > 0) {
             this.skip(excess);
+            this.trims++;
+            this.startRamp();
         }
 
         // A frame larger than the ring keeps only its newest samples.
@@ -103,16 +118,20 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this.available += count;
         if (!this.isPlaying && this.available >= this.targetSamples) {
             this.isPlaying = true;
+            this.startRamp();
         }
     }
 
     process(inputs, outputs) {
         const output = outputs[0][0];
         for (let index = 0; index < output.length; index++) {
-            output[index] = this.isPlaying ? this.next() : 0;
+            const value = this.blend(this.isPlaying ? this.next() : 0);
+            output[index] = value;
+            this.lastOutput = value;
         }
 
         this.shrinkWhenSteady();
+        this.report();
         return !this.isStopped;
     }
 
@@ -133,8 +152,27 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         return value;
     }
 
+    // Starting, running dry and dropping audio each make the output jump, which clicks; the ramp glides from the last
+    // output instead.
+    startRamp() {
+        this.rampFrom = this.lastOutput;
+        this.rampRemaining = this.rampSamples;
+    }
+
+    blend(value) {
+        if (this.rampRemaining === 0) {
+            return value;
+        }
+
+        const weight = this.rampRemaining / this.rampSamples;
+        this.rampRemaining--;
+        return value + (this.rampFrom - value) * weight;
+    }
+
     runDry() {
         this.isPlaying = false;
+        this.underruns++;
+        this.startRamp();
         this.targetSamples = Math.min(this.maximumSamples, this.targetSamples + this.growthSamples);
         this.lastDry = currentTime;
     }
@@ -143,6 +181,15 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         if (this.isPlaying && this.targetSamples > this.startSamples && currentTime - this.lastDry >= this.shrinkDelay) {
             this.targetSamples = Math.max(this.startSamples, this.targetSamples - this.growthSamples);
             this.lastDry = currentTime;
+        }
+    }
+
+    report() {
+        if ((this.underruns > 0 || this.trims > 0) && currentTime - this.lastReport >= REPORT_INTERVAL_SECONDS) {
+            this.port.postMessage({ underruns: this.underruns, trims: this.trims });
+            this.underruns = 0;
+            this.trims = 0;
+            this.lastReport = currentTime;
         }
     }
 
