@@ -44,7 +44,7 @@
             <section class="game-voice">
                 <h5>Voice</h5>
                 <div class="game-voice-buttons">
-                    <MudTooltip Text="@MicrophoneTooltip">
+                    <MudTooltip Text="@MicrophoneTooltip" Placement="Placement.Left">
                         <MudIconButton Icon="@(_isMicrophoneOn ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
                                        Variant="@(_isMicrophoneOn ? Variant.Filled : Variant.Text)"
                                        Color="@(_isMicrophoneOn ? Color.Primary : Color.Default)"
@@ -52,7 +52,7 @@
                                        aria-label="Microphone" aria-pressed="@(_isMicrophoneOn ? "true" : "false")" aria-keyshortcuts="M"
                                        data-game-voice data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
                     </MudTooltip>
-                    <MudTooltip Text="@AudioTooltip">
+                    <MudTooltip Text="@AudioTooltip" Placement="Placement.Left">
                         <MudIconButton Icon="@(_isAudioOn ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
                                        Variant="@(_isAudioOn ? Variant.Filled : Variant.Text)"
                                        Color="@(_isAudioOn ? Color.Primary : Color.Default)"
