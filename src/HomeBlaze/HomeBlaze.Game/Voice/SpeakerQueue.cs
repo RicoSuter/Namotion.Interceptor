@@ -88,6 +88,16 @@ internal sealed class SpeakerQueue : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Drops every queued frame and waits for <see cref="StartFrames"/> frames again before playing.
+    /// </summary>
+    public void Clear()
+    {
+        _head = 0;
+        Count = 0;
+        IsPlaying = false;
+    }
+
     public void Dispose()
     {
         if (_buffer is { } buffer)

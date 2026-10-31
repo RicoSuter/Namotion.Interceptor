@@ -21,6 +21,7 @@ public partial class Game
         lock (_lock)
         {
             SynchronizePlayerSet(clients);
+            ReleaseVoiceOfReplacedPlayers();
 
             var index = GetIndex();
             foreach (var client in clients)
@@ -40,7 +41,6 @@ public partial class Game
         var next = AddMissingPlayers(clients, RemoveStalePlayers(clients, current));
         if (!ReferenceEquals(next, current))
         {
-            ResetVoiceOfRemovedPlayers(current, next);
             ReplacePlayers(next);
             RequestIndexRebuild();
             _isSaveRequested = true;

@@ -233,6 +233,21 @@ public class GameVoiceMixerTests
     }
 
     [Fact]
+    public void WhenAnotherPageBecomesTheMicrophonePage_ThenTheFramesQueuedBeforeAreDropped()
+    {
+        // Arrange
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        Speak("speaker", 1000, pageId: 1);
+
+        // Act
+        _mixer.SetMicrophonePage("speaker", 2);
+        _mixer.Mix(CreateTable(("listener", "speaker", 1f)));
+
+        // Assert
+        Assert.Empty(_sink.Frames);
+    }
+
+    [Fact]
     public void WhenASinkThrows_ThenTheOtherSinksStillGetTheFrameAndTheNextMixRuns()
     {
         // Arrange

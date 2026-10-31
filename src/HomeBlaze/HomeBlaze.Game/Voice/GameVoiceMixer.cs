@@ -30,7 +30,8 @@ internal sealed class GameVoiceMixer
     }
 
     /// <summary>
-    /// Sets the only page whose frames count for the player, or none, which drops the player's queued frames.
+    /// Sets the only page whose frames count for the player, or none; the player's queued frames are dropped when the
+    /// page changes.
     /// </summary>
     public void SetMicrophonePage(string playerId, int? pageId)
     {
@@ -42,7 +43,11 @@ internal sealed class GameVoiceMixer
             }
             else if (_speakers.TryGetValue(playerId, out var speaker))
             {
-                speaker.MicrophonePageId = page;
+                if (speaker.MicrophonePageId != page)
+                {
+                    speaker.MicrophonePageId = page;
+                    speaker.Queue.Clear();
+                }
             }
             else
             {
