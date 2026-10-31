@@ -44,18 +44,23 @@ public class GameVoiceMixerTests
     {
         // Arrange
         using var registration = _mixer.RegisterSink("listener", _sink);
+        var table = CreateTable(("listener", "first", 1f), ("listener", "second", 0.5f));
+
+        // The first frame of a new pair glides up from 0.
         Speak("first", 1000);
         Speak("second", 2000);
-        var table = CreateTable(("listener", "first", 1f), ("listener", "second", 0.5f));
+        _mixer.Mix(table);
+        Speak("first", 1000);
+        Speak("second", 2000);
 
         // Act
         _mixer.Mix(table);
 
         // Assert
-        var frame = Assert.Single(_sink.Frames);
+        var frame = _sink.Frames[^1];
         Assert.Equal(GameVoiceSettings.FrameBytes, frame.Length);
         Assert.Equal(2000, VoiceFrames.ReadSample(frame, 0));
-        Assert.Equal(2000, VoiceFrames.ReadSample(frame, GameVoiceSettings.SamplesPerFrame - 1));
+        Assert.Equal(2000, VoiceFrames.ReadLastSample(frame));
     }
 
     [Theory]
@@ -72,7 +77,7 @@ public class GameVoiceMixerTests
         _mixer.Mix(CreateTable(("listener", "first", 1f), ("listener", "second", 1f)));
 
         // Assert
-        Assert.Equal(expected, VoiceFrames.ReadSample(Assert.Single(_sink.Frames), 0));
+        Assert.Equal(expected, VoiceFrames.ReadLastSample(Assert.Single(_sink.Frames)));
     }
 
     [Fact]
@@ -87,7 +92,7 @@ public class GameVoiceMixerTests
         _mixer.Mix(CreateTable(("listener", "listener", 1f), ("listener", "other", 1f)));
 
         // Assert
-        Assert.Equal(2000, VoiceFrames.ReadSample(Assert.Single(_sink.Frames), 0));
+        Assert.Equal(2000, VoiceFrames.ReadLastSample(Assert.Single(_sink.Frames)));
     }
 
     [Fact]
@@ -170,7 +175,7 @@ public class GameVoiceMixerTests
 
         // Assert
         // The queue keeps every frame it accepted, and the refused one never plays.
-        var samples = _sink.Frames.Select(frame => (int)VoiceFrames.ReadSample(frame, 0));
+        var samples = _sink.Frames.Select(frame => (int)VoiceFrames.ReadLastSample(frame));
         Assert.Equal(Enumerable.Range(1, GameVoiceSettings.ServerQueueMaximum), samples);
     }
 
@@ -231,7 +236,7 @@ public class GameVoiceMixerTests
         _mixer.Mix(CreateTable(("listener", "talker", 1f)));
 
         // Assert
-        Assert.Equal(2000, VoiceFrames.ReadSample(Assert.Single(_sink.Frames), 0));
+        Assert.Equal(2000, VoiceFrames.ReadLastSample(Assert.Single(_sink.Frames)));
     }
 
     [Fact]
@@ -311,6 +316,88 @@ public class GameVoiceMixerTests
 
         // Assert
         Assert.Equal(1, _sink.Count);
+    }
+
+    [Fact]
+    public void WhenAPairIsNew_ThenItsGainGlidesUpFromZeroAcrossTheFrame()
+    {
+        // Arrange
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        Speak("talker", 10000);
+
+        // Act
+        _mixer.Mix(CreateTable(("listener", "talker", 0.5f)));
+
+        // Assert
+        var frame = Assert.Single(_sink.Frames);
+        Assert.InRange(VoiceFrames.ReadSample(frame, 0), 0, 50);
+        Assert.InRange(VoiceFrames.ReadSample(frame, GameVoiceSettings.SamplesPerFrame / 2), 2400, 2600);
+        Assert.Equal(5000, VoiceFrames.ReadLastSample(frame));
+    }
+
+    [Fact]
+    public void WhenTheVolumeChangesBetweenTicks_ThenTheGainGlidesFromThePreviousToTheNewVolume()
+    {
+        // Arrange
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        Speak("talker", 10000);
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
+        Speak("talker", 10000);
+
+        // Act
+        _mixer.Mix(CreateTable(("listener", "talker", 0.5f)));
+
+        // Assert
+        var frame = _sink.Frames[^1];
+        Assert.InRange(VoiceFrames.ReadSample(frame, 0), 9950, 10000);
+        Assert.Equal(5000, VoiceFrames.ReadLastSample(frame));
+        var samples = Enumerable.Range(0, GameVoiceSettings.SamplesPerFrame).Select(index => VoiceFrames.ReadSample(frame, index)).ToList();
+        Assert.All(samples.Zip(samples.Skip(1), (previous, next) => previous - next), step => Assert.InRange(step, 0, 30));
+    }
+
+    [Fact]
+    public void WhenAPairLeavesTheTable_ThenItGlidesDownToZeroOverOneFrameAndThenStops()
+    {
+        // Arrange
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        Speak("talker", 10000);
+        _mixer.Mix(CreateTable(("listener", "talker", 1f)));
+        var empty = CreateTable();
+
+        // Act
+        Speak("talker", 10000);
+        _mixer.Mix(empty);
+        Speak("talker", 10000);
+        _mixer.Mix(empty);
+
+        // Assert
+        Assert.Equal(2, _sink.Count);
+        var frame = _sink.Frames[^1];
+        Assert.InRange(VoiceFrames.ReadSample(frame, 0), 9950, 10000);
+        Assert.Equal(0, VoiceFrames.ReadLastSample(frame));
+    }
+
+    [Fact]
+    public void WhenNoTalkerHadAFrameInTheTickBefore_ThenThePairGlidesUpFromZeroAgain()
+    {
+        // Arrange
+        using var registration = _mixer.RegisterSink("listener", _sink);
+        var table = CreateTable(("listener", "talker", 1f));
+        Speak("talker", 10000);
+        _mixer.Mix(table);
+        _mixer.Mix(table);
+
+        // The queue ran dry while playing, so it waits for one more frame before it plays again.
+        Speak("talker", 10000);
+        Speak("talker", 10000);
+
+        // Act
+        _mixer.Mix(table);
+
+        // Assert
+        var frame = _sink.Frames[^1];
+        Assert.InRange(VoiceFrames.ReadSample(frame, 0), 0, 50);
+        Assert.Equal(10000, VoiceFrames.ReadLastSample(frame));
     }
 
     private sealed class ThrowingVoiceSink : IGameVoiceSink
