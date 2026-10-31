@@ -33,18 +33,38 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out MqttPropertyMapping? mapping)
     {
-        // Single-pass lookup to avoid LINQ allocation. ToMapping() contributes QoS/Retain only;
-        // the topic is the path segment resolved by the path-provider mapper.
-        foreach (var attribute in property.ReflectionAttributes)
+        // ToMapping() contributes QoS/Retain only; the topic is the path segment resolved by the path-provider mapper.
+        var topicAttribute = FindTopicAttribute(property.ReflectionAttributes);
+        mapping = topicAttribute?.ToMapping();
+        return mapping is not null;
+    }
+
+    // Indexed rather than enumerated: the MQTT server's change filter runs this for every change of a property
+    // without a topic, and an interface enumerator would allocate per call.
+    private MqttTopicAttribute? FindTopicAttribute(IReadOnlyCollection<Attribute> attributes)
+    {
+        if (attributes is IList<Attribute> list)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (list[i] is MqttTopicAttribute mqttTopic && mqttTopic.Name == _connectorName)
+                {
+                    return mqttTopic;
+                }
+            }
+
+            return null;
+        }
+
+        foreach (var attribute in attributes)
         {
             if (attribute is MqttTopicAttribute mqttTopic && mqttTopic.Name == _connectorName)
             {
-                mapping = mqttTopic.ToMapping();
-                return true;
+                return mqttTopic;
             }
         }
-        mapping = null;
-        return false;
+
+        return null;
     }
 
     public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(

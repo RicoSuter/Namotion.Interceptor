@@ -465,6 +465,30 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal(["Docs/Device|", "Docs/Pump.json|"], GetMatches(result));
     }
 
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, "The subject has no property 'Host'.")]
+    public async Task WhenMetadataBelongsToAConfigurationProperty_ThenSearchMetadataLeavesItOutAndOnlyAgentsCannotSetIt(
+        bool forAgents, string? expectedError)
+    {
+        // Arrange
+        WriteFile("Docs/Device.json", $$"""{ "$type": "{{typeof(MetadataSearchTestDevice).FullName}}" }""");
+        WriteFile("Docs/Device.metadata.json", """{ "$properties": { "Host": { "tags": ["floor-2"] } } }""");
+        var (tools, _) = await CreateToolsAsync(forAgents);
+
+        // Act
+        var search = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { tag = "floor-2" } });
+        var set = await CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Device", property = "Host", values = new { comment = "x" } }
+        });
+
+        // Assert
+        Assert.Empty(GetMatches(search));
+        Assert.Equal(expectedError, set.TryGetProperty("error", out var error) ? error.GetString() : null);
+        Assert.Equal(expectedError is null, set.TryGetProperty("success", out var success) && success.GetBoolean());
+    }
+
     [Fact]
     public async Task WhenARoleHidesABranchOrTheMetadataOfASubject_ThenSearchMetadataLeavesThemOut()
     {

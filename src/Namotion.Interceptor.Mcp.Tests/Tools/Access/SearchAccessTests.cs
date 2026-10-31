@@ -72,9 +72,10 @@ public class SearchAccessTests
     }
 
     [Fact]
-    public async Task WhenASubjectIsWrittenThroughAHiddenParent_ThenSearchLeavesItOut()
+    public async Task WhenOneParentOfASubjectIsHidden_ThenSearchReturnsItWithAPathThroughTheReadableParent()
     {
         // Arrange
+        // The device got Private first, so a path through Private would be written without a policy.
         var context = CreateContext();
         var house = new TestHouse(context) { Address = "Main Street" };
         var device = new TestDevice(context) { DeviceName = "Camera" };
@@ -86,7 +87,8 @@ public class SearchAccessTests
             new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.Empty(GetResultPaths(result));
+        Assert.Equal([nameof(TestHouse.Public)], GetResultPaths(result));
+        Assert.DoesNotContain("Private", result.GetRawText());
     }
 
     [Fact]

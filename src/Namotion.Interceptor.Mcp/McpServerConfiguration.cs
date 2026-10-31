@@ -11,7 +11,8 @@ namespace Namotion.Interceptor.Mcp;
 public class McpServerConfiguration
 {
     /// <summary>
-    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry.
+    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list and filter
+    /// on the properties it includes, and resolve and build paths with its segments through every property.
     /// </summary>
     public required IPathProvider PathProvider { get; init; }
 
@@ -82,9 +83,17 @@ public class McpServerConfiguration
     internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: true);
 
     /// <summary>
-    /// The path provider a requested path resolves through: with an <see cref="AccessPolicy"/>, it includes exactly
-    /// what the policy allows to read; without one it is <see cref="PathProvider"/>, whose inclusion resolution does
-    /// not apply.
+    /// <see cref="PathProvider"/>, which must extend <see cref="PathProviderBase"/>.
     /// </summary>
-    internal PathProviderBase ResolutionPathProvider => _resolutionPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: false);
+    internal PathProviderBase BasePathProvider =>
+        PathProvider as PathProviderBase ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+
+    /// <summary>
+    /// The path provider a requested path resolves through and the paths the tools return are built with: the
+    /// segments of <see cref="PathProvider"/>, including every property, or with an <see cref="AccessPolicy"/> exactly
+    /// what the policy allows to read.
+    /// </summary>
+    internal PathProviderBase ResolutionPathProvider => _resolutionPathProvider ??= AccessPolicy is null
+        ? new UnfilteredPathProvider(BasePathProvider)
+        : McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: false);
 }

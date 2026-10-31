@@ -173,9 +173,10 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenASubjectIsWrittenThroughAHiddenParent_ThenBrowseLeavesItOutAlsoUnderAReadableParent()
+    public async Task WhenOneParentOfASubjectIsHidden_ThenBrowseShowsItUnderTheReadableParentWithAPathThroughIt()
     {
         // Arrange
+        // The device got Private first, so a path through Private would be written without a policy.
         var context = CreateContext();
         var house = new TestHouse(context) { Address = "Main Street" };
         var device = new TestDevice(context) { DeviceName = "Camera" };
@@ -189,7 +190,8 @@ public class BrowseAccessTests
         // Assert
         var properties = result.GetProperty("result").GetProperty("properties");
         Assert.False(properties.TryGetProperty(nameof(TestHouse.Private), out _));
-        Assert.False(properties.TryGetProperty(nameof(TestHouse.Public), out _));
+        var child = properties.GetProperty(nameof(TestHouse.Public)).GetProperty("child");
+        Assert.Equal(nameof(TestHouse.Public), child.GetProperty("$path").GetString());
         Assert.DoesNotContain("Private", result.GetRawText());
     }
 
