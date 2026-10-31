@@ -85,6 +85,4 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         RequestIndexRebuild();
         return Task.CompletedTask;
     }
-
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
 }
