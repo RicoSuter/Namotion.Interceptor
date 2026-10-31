@@ -1,0 +1,84 @@
+using HomeBlaze.Game.Tests.Testing;
+using HomeBlaze.Game.View;
+
+namespace HomeBlaze.Game.Tests.View;
+
+public class GameViewTrackerTests
+{
+    private readonly GameTestContext _context = new();
+    private readonly GameViewTracker _tracker = new();
+
+    [Fact]
+    public void WhenTheViewIsFirstUpdated_ThenEveryObjectInTheRadiusIsAdded()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddWall(-20, 8, width: 19);
+        _context.AddWall(GameViewTracker.ViewRadius + 50, 0);
+
+        // Act
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        Assert.Equal(2, update.Upserted.Count);
+        var self = Assert.Single(update.Upserted, view => view.IsSelf);
+        Assert.Equal(GameViewObject.PlayerKind, self.Kind);
+        Assert.Equal((0, 0, 2, 2, 7), (self.X, self.Y, self.Width, self.Depth, self.Height));
+        var wall = Assert.Single(update.Upserted, view => view.Kind == GameViewObject.WallKind);
+        Assert.Equal((-20, 8, 19), (wall.X, wall.Y, wall.Width));
+        Assert.True(wall.IsBlocking);
+        Assert.Empty(update.Removed);
+    }
+
+    [Fact]
+    public void WhenNothingChanged_ThenTheUpdateIsEmpty()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.Game.UpdateView(_tracker, player);
+
+        // Act
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        Assert.True(update.IsEmpty);
+    }
+
+    [Fact]
+    public void WhenAnotherPlayerMoves_ThenOnlyItIsUpserted()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var other = _context.AddConnectedPlayer("tab-2", x: 10, y: 0);
+        _context.Game.UpdateView(_tracker, player);
+
+        // Act
+        _context.TimeProvider.Advance(Game.StepInterval);
+        _context.Game.TryMove(other, GameDirection.East, turnOnly: false);
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        var moved = Assert.Single(update.Upserted);
+        Assert.Equal(11, moved.X);
+        Assert.False(moved.IsSelf);
+    }
+
+    [Fact]
+    public void WhenAPlayerDisconnects_ThenItIsRemovedFromTheView()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10, y: 0);
+        var first = _context.Game.UpdateView(_tracker, player);
+        var otherId = Assert.Single(first.Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        _context.Clients.Set("tab-2", isNamed: false, isConnected: false);
+        _context.Game.ReconcilePlayers();
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        Assert.Equal(new[] { otherId }, update.Removed);
+        Assert.Single(_tracker.Known);
+    }
+}
