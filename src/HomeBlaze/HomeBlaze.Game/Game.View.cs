@@ -17,7 +17,7 @@ public partial class Game
         {
             _viewObjects.Clear();
             GetIndex().Query(GetViewArea(viewer?.X ?? 0, viewer?.Y ?? 0), _viewObjects);
-            return tracker.Update(_viewObjects, viewer);
+            return tracker.Update(_viewObjects, viewer, _logger);
         }
     }
 

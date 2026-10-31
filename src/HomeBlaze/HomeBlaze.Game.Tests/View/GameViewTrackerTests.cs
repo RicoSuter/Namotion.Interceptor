@@ -140,6 +140,71 @@ public class GameViewTrackerTests
     }
 
     [Fact]
+    public void WhenAnObjectGetsAnEqualVisual_ThenItIsNotSentAgain()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var gameObject = _context.AddObject("object", new VisualObject { X = 5, Y = 5, CustomVisual = GameVisual.Box(1, 2, 1) });
+        _context.Game.UpdateView(_tracker, player);
+
+        // Act
+        gameObject.CustomVisual = GameVisual.Box(1, 2, 1);
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        Assert.True(update.IsEmpty);
+    }
+
+    [Fact]
+    public void WhenAnObjectGetsAnotherVisual_ThenItIsUpsertedWithTheNewParts()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var gameObject = _context.AddObject("object", new VisualObject { X = 5, Y = 5 });
+        _context.Game.UpdateView(_tracker, player);
+
+        // Act
+        gameObject.CustomVisual = GameVisual.Box(1, 3, 1, "#112233");
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        var view = Assert.Single(update.Upserted);
+        var part = Assert.Single(view.Parts);
+        Assert.Equal(("box", 3d, "#112233"), (part.Shape, part.Height, part.Color));
+    }
+
+    [Fact]
+    public void WhenAnObjectHasAnInvalidVisual_ThenItIsSentAsTheDefaultBox()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddObject("object", new VisualObject { X = 5, Y = 5, CustomVisual = GameVisual.Box(2000, 1, 1) });
+
+        // Act
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        var view = Assert.Single(update.Upserted, view => !view.IsSelf);
+        var part = Assert.Single(view.Parts);
+        Assert.Equal((1d, 1d, 1d, GameVisual.DefaultColor), (part.Width, part.Height, part.Depth, part.Color));
+    }
+
+    [Fact]
+    public void WhenAPlayerIsInView_ThenItCarriesNoParts()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        var self = Assert.Single(update.Upserted);
+        Assert.Empty(self.Parts);
+        Assert.Null(self.Visual);
+    }
+
+    [Fact]
     public void WhenThePlayerColorIsRequested_ThenItIsTheColorOfItsViewObject()
     {
         // Arrange

@@ -24,6 +24,7 @@
 
     <ItemGroup>
         <Using Include="Xunit" />
+        <Using Include="HomeBlaze.Game.Visuals" />
     </ItemGroup>
 
     <ItemGroup>

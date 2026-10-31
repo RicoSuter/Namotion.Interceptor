@@ -54,4 +54,14 @@ internal sealed class GameTestContext
         Game.RequestIndexRebuild();
         return door;
     }
+
+    /// <summary>
+    /// Adds the object to the game under the name.
+    /// </summary>
+    public T AddObject<T>(string name, T gameObject) where T : GameObject
+    {
+        Game.Objects = new Dictionary<string, GameObject>(Game.Objects) { [name] = gameObject };
+        Game.RequestIndexRebuild();
+        return gameObject;
+    }
 }
