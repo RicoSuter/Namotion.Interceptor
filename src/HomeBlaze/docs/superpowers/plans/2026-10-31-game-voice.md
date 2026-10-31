@@ -4419,6 +4419,12 @@ git commit -m "feat: talk in the game with microphone and speaker buttons" -m "C
 git push
 ```
 
+- [ ] **Step 10: Echo checkpoint (controller and user)**
+
+The controller restarts the app on HTTP and HTTPS and asks the user to try voice on https://192.168.1.201:5281/pages/Demo/Game with two devices: Chrome on a laptop with speakers (no headphones) and a phone. The question is whether the other side hears itself back, because Chrome's echo canceller may not cover audio played through an `AudioWorklet`. Task 7 waits for the answer.
+
+If there is an echo, add the loopback route as a follow-up commit of this task: in `game-voice.js`, route the playback node into a `MediaStreamAudioDestinationNode`, send that stream through a pair of local `RTCPeerConnection`s connected to each other in the same tab (exchanging offer, answer and ICE candidates directly, no server), and play the received remote stream in a hidden `<audio autoplay>` element instead of connecting the playback node to `context.destination`. Chrome's echo canceller then treats it as WebRTC playback. Close both connections and remove the element when playback stops. Keep the direct route where `RTCPeerConnection` is missing. Rerun the E2E tests of this task, commit as `feat: route game voice playback through WebRTC so the echo canceller covers it`, push, and ask the user to test again. Note the route in the README voice section in Task 8.
+
 ---
 
 ## Task 7: Nearby by hearing range
