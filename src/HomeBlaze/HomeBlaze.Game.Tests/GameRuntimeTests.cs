@@ -230,7 +230,7 @@ public class GameRuntimeTests
             }, message: "The voice loop did not mix the frame");
 
             // Assert
-            Assert.Equal(500, VoiceFrames.ReadSample(sink.Frames[0], 0));
+            Assert.Equal(200, VoiceFrames.ReadSample(sink.Frames[0], 0));
         }
         finally
         {

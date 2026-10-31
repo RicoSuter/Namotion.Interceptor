@@ -39,8 +39,8 @@ public class GameVolumeTableTests
         // Assert
         var table = _context.Game.VolumeTable;
         Assert.True(isRebuilt);
-        Assert.Equal(0.75f, FindVolume(table, "tab-1", "tab-2"));
-        Assert.Equal(0.75f, FindVolume(table, "tab-2", "tab-1"));
+        Assert.Equal(0.4f, FindVolume(table, "tab-1", "tab-2"));
+        Assert.Equal(0.4f, FindVolume(table, "tab-2", "tab-1"));
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class GameVolumeTableTests
 
         // Assert
         var table = _context.Game.VolumeTable;
-        Assert.Equal(0.75f, before);
+        Assert.Equal(0.4f, before);
         Assert.True(isRebuilt);
         Assert.Equal(0, table.GetRow("tab-2").Length);
         Assert.Null(FindVolume(table, "tab-1", "tab-2"));
@@ -101,12 +101,13 @@ public class GameVolumeTableTests
     }
 
     [Fact]
-    public void WhenAPlayerStepsBehindAWall_ThenThePairLeavesTheTable()
+    public void WhenAPlayerStepsBehindAWall_ThenThePairGetsQuieter()
     {
         // Arrange
+        // The wall ends just north of the line between the players, next to the second one.
         _context.AddConnectedPlayer("tab-1");
-        var second = _context.AddConnectedPlayer("tab-2", x: 10);
-        _context.AddWall(5, 2, width: 1, depth: 4);
+        var second = _context.AddConnectedPlayer("tab-2", x: 6);
+        _context.AddWall(5, 2, width: 1, depth: 10);
         _context.Game.UpdateVolumeTable();
         var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
 
@@ -117,15 +118,46 @@ public class GameVolumeTableTests
         var isRebuilt = _context.Game.UpdateVolumeTable();
 
         // Assert
-        Assert.NotNull(before);
+        // The voice goes around the end of the wall, so it is quieter than the straight distance of 6.7 tiles gives.
+        var table = _context.Game.VolumeTable;
+        var after = FindVolume(table, "tab-1", "tab-2");
+        Assert.Equal((float)(4.0 / 6), before);
         Assert.True(isRebuilt);
-        Assert.Equal((10, 3), (second.X, second.Y));
+        Assert.Equal((6, 3), (second.X, second.Y));
+        Assert.NotNull(after);
+        Assert.InRange(after.Value, 0.01f, (float)(4 / Math.Sqrt(45)) * 0.9f);
+        Assert.Equal(after, FindVolume(table, "tab-2", "tab-1"));
+    }
+
+    [Fact]
+    public async Task WhenTheDoorOfARoomBetweenThemCloses_ThenThePairLeavesTheTable()
+    {
+        // Arrange
+        // A room with the inside from -2, 8 to 3, 13 around the second player and a door from -1 to 2 in its south wall.
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", y: 10);
+        _context.AddWall(-3, 7, width: 2);
+        _context.AddWall(3, 7, width: 2);
+        _context.AddWall(-3, 14, width: 8);
+        _context.AddWall(-3, 8, width: 1, depth: 6);
+        _context.AddWall(4, 8, width: 1, depth: 6);
+        var door = _context.AddDoor(-1, 7, isOpen: true);
+        _context.Game.UpdateVolumeTable();
+        var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
+
+        // Act
+        await door.CloseAsync(CancellationToken.None);
+        _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
+        _context.Game.UpdateVolumeTable();
+
+        // Assert
+        Assert.Equal(0.4f, before);
         Assert.Null(FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
         Assert.Null(FindVolume(_context.Game.VolumeTable, "tab-2", "tab-1"));
     }
 
     [Fact]
-    public async Task WhenADoorBetweenThemCloses_ThenThePairLeavesTheTable()
+    public async Task WhenADoorWithoutWallsBesideItCloses_ThenTheVoiceGoesAroundItAndGetsQuieter()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
@@ -140,8 +172,10 @@ public class GameVolumeTableTests
         _context.Game.UpdateVolumeTable();
 
         // Assert
-        Assert.Equal(0.75f, before);
-        Assert.Null(FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+        var after = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
+        Assert.Equal(0.4f, before);
+        Assert.NotNull(after);
+        Assert.InRange(after.Value, 0.01f, 0.4f * 0.9f);
     }
 
     [Fact]
@@ -162,7 +196,7 @@ public class GameVolumeTableTests
         // Assert
         Assert.False(isRebuiltAtOnce);
         Assert.True(isRebuiltAfterInterval);
-        Assert.Equal(0.7f, FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+        Assert.Equal((float)(4.0 / 12), FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
     }
 
     [Fact]

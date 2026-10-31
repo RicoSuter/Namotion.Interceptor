@@ -39,7 +39,7 @@ public class GameVoiceTests
         // Assert
         Assert.True(isAccepted);
         Assert.True(talker.IsMicrophoneOn);
-        Assert.Equal(750, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
+        Assert.Equal(400, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public class GameVoiceTests
         Mix();
 
         // Assert
-        Assert.Equal(1500, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
+        Assert.Equal(800, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
     }
 
     [Fact]
@@ -293,6 +293,6 @@ public class GameVoiceTests
 
         // Assert
         Assert.Null(exception);
-        Assert.Equal(500, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
+        Assert.Equal(200, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
     }
 }
