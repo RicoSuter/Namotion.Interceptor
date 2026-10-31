@@ -9,7 +9,7 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace HomeBlaze.Game.Objects.Buildings;
 
 /// <summary>
-/// A door that fills an opening in a wall, 4 by 1 tiles in a wall running east to west or 1 by 4 tiles in one running
+/// A door that fills an opening in a wall, one tile deep in a wall running east to west or one tile wide in one running
 /// north to south; it blocks the tiles it stands on while it is closed.
 /// </summary>
 [Category("Game")]
@@ -39,6 +39,16 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     /// The height in tiles, the height of a wall.
     /// </summary>
     public const int DefaultHeight = Wall.DefaultHeight;
+
+    /// <summary>
+    /// The narrowest door a wall takes in tiles, 50 cm.
+    /// </summary>
+    public const int MinimumWidth = 2;
+
+    /// <summary>
+    /// The widest door a wall takes in tiles, 2 m.
+    /// </summary>
+    public const int MaximumWidth = 8;
 
     [Configuration]
     [Range(1, MaximumSize)]
