@@ -122,9 +122,21 @@
             <h5>Nearby</h5>
             @foreach (var player in _nearby)
             {
-                <div class="game-nearby" data-testid="game-nearby-player">
+                <div class="@(player.IsSelf || _isAudioOn ? "game-nearby" : "game-nearby game-nearby-dimmed")" data-testid="game-nearby-player">
                     <span class="game-dot" style="background: @player.Color"></span>
-                    <span>@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
+                    <span class="game-nearby-title">@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
+                    @if (!player.IsMicrophoneOn)
+                    {
+                        <span class="game-nearby-icon" title="Microphone off" data-testid="game-nearby-microphone-off">
+                            <MudIcon Icon="@Icons.Material.Filled.MicOff" Size="Size.Small" />
+                        </span>
+                    }
+                    @if (!player.IsAudioOn)
+                    {
+                        <span class="game-nearby-icon" title="Speaker off" data-testid="game-nearby-audio-off">
+                            <MudIcon Icon="@Icons.Material.Filled.VolumeOff" Size="Size.Small" />
+                        </span>
+                    }
                 </div>
             }
         </section>
@@ -167,7 +179,8 @@
     private string? _error;
     private int _isFlushScheduled;
     private string _positionText = NoPosition;
-    private IReadOnlyList<GameViewObject> _nearby = [];
+    private IReadOnlyList<NearbyEntry> _nearby = [];
+    private int _isVolumeTableChanged;
     private IReadOnlyList<TargetEntry> _targets = [];
     private IReadOnlyList<MethodMetadata> _gameActions = [];
     private bool _isInvoking;
@@ -228,6 +241,7 @@
                 .GetPropertyChangeObservable(ImmediateScheduler.Instance)
                 .Where(change => change.Property.Subject is GameObject || ReferenceEquals(change.Property.Subject, game))
                 .Subscribe(_ => ScheduleFlush());
+            game.VolumeTableChanged += OnVolumeTableChanged;
             await FlushAsync();
             await StartVoiceAsync();
         }
@@ -316,7 +330,7 @@
     }
 
     // Stays enabled while a toggle runs, so the button keeps the focus; the toggle ignores clicks meanwhile.
-    private bool IsVoiceDisabled => _isVoiceSupported != true || _player is null;
+    private bool IsVoiceDisabled => _isVoiceSupported != true || (_player is null && !_isMicrophoneOn && !_isAudioOn);
 
     private string? VoiceMessage => _isAudioSuspended && (_isAudioOn || _isMicrophoneOn) ? ResumeMessage : _voiceError;
 
@@ -375,19 +389,27 @@
 
     private bool CanToggleVoice() => !_isDisposed && !_isVoiceBusy && _isVoiceSupported == true;
 
+    // Turning off works without a player, so a page that lost its player can still stop a live capture.
     private async Task ToggleMicrophoneAsync()
     {
-        if (!CanToggleVoice() || _voiceModule is not { } module || Game is not { } game || _player is not { } player)
+        if (!CanToggleVoice() || _voiceModule is not { } module || Game is not { } game)
         {
             return;
         }
 
-        await RunVoiceToggleAsync(() => _isMicrophoneOn ? StopMicrophoneAsync(module, game, player) : StartMicrophoneAsync(module, game, player));
+        if (_isMicrophoneOn)
+        {
+            await RunVoiceToggleAsync(() => StopMicrophoneAsync(module, game, _player));
+        }
+        else if (_player is { } player)
+        {
+            await RunVoiceToggleAsync(() => StartMicrophoneAsync(module, game, player));
+        }
     }
 
     private async Task ToggleAudioAsync()
     {
-        if (!CanToggleVoice() || _voiceModule is not { } module || Game is not { } game || _player is not { } player)
+        if (!CanToggleVoice() || _voiceModule is not { } module || Game is not { } game)
         {
             return;
         }
@@ -401,7 +423,14 @@
             return;
         }
 
-        await RunVoiceToggleAsync(() => _isAudioOn ? StopAudioAsync(module, game, player) : StartAudioAsync(module, game, player));
+        if (_isAudioOn)
+        {
+            await RunVoiceToggleAsync(() => StopAudioAsync(module, game, _player));
+        }
+        else if (_player is { } player)
+        {
+            await RunVoiceToggleAsync(() => StartAudioAsync(module, game, player));
+        }
     }
 
     private async Task RunVoiceToggleAsync(Func<Task> toggle)
@@ -418,10 +447,18 @@
             _isVoiceBusy = false;
         }
 
-        if (!_isDisposed)
+        if (_isDisposed)
         {
-            StateHasChanged();
+            return;
         }
+
+        // A volume table change that arrived during the toggle left the synchronization to the next flush.
+        if (Volatile.Read(ref _isVolumeTableChanged) == 1)
+        {
+            ScheduleFlush();
+        }
+
+        StateHasChanged();
     }
 
     // The game hears the page only once the browser captures.
@@ -450,10 +487,15 @@
         await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
     }
 
-    private async Task StopMicrophoneAsync(IJSObjectReference module, Game game, GamePlayer player)
+    // Without a player, the game already turned the voice of the page's former player off.
+    private async Task StopMicrophoneAsync(IJSObjectReference module, Game game, GamePlayer? player)
     {
         _isMicrophoneOn = false;
-        game.SetMicrophone(new GameCaller(player), _viewId, isOn: false);
+        if (player is not null)
+        {
+            game.SetMicrophone(new GameCaller(player), _viewId, isOn: false);
+        }
+
         await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
     }
 
@@ -485,10 +527,14 @@
         await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
     }
 
-    private async Task StopAudioAsync(IJSObjectReference module, Game game, GamePlayer player)
+    private async Task StopAudioAsync(IJSObjectReference module, Game game, GamePlayer? player)
     {
         _isAudioOn = false;
-        game.SetAudio(new GameCaller(player), _viewId, isOn: false);
+        if (player is not null)
+        {
+            game.SetAudio(new GameCaller(player), _viewId, isOn: false);
+        }
+
         _sinkRegistration?.Dispose();
         _sinkRegistration = null;
         await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
@@ -675,13 +721,74 @@
             return;
         }
 
-        if (!update.IsEmpty)
+        await RefreshPanelAsync(game, hasViewChanged: !update.IsEmpty);
+        StateHasChanged();
+    }
+
+    // Nearby follows both the view, which carries the toggles, and the volume table.
+    private async Task RefreshPanelAsync(Game game, bool hasViewChanged)
+    {
+        var isVolumeTableChanged = Interlocked.Exchange(ref _isVolumeTableChanged, 0) == 1;
+        if (hasViewChanged)
         {
-            RefreshNearby();
+            RefreshPosition();
+        }
+
+        if (hasViewChanged || isVolumeTableChanged)
+        {
+            RefreshNearby(game);
+        }
+
+        if (isVolumeTableChanged)
+        {
+            await SynchronizeVoiceAsync(game);
         }
 
         RefreshActions(game);
-        StateHasChanged();
+    }
+
+    // Raised on the voice loop, so it only schedules a flush.
+    private void OnVolumeTableChanged()
+    {
+        Volatile.Write(ref _isVolumeTableChanged, 1);
+        ScheduleFlush();
+    }
+
+    // Another page of the player took the microphone over, or a disconnect turned the toggles of every page off.
+    private async Task SynchronizeVoiceAsync(Game game)
+    {
+        if ((!_isMicrophoneOn && !_isAudioOn) || _voiceModule is not { } module)
+        {
+            return;
+        }
+
+        if (_isVoiceBusy)
+        {
+            // RunVoiceToggleAsync schedules the next flush once the running toggle ended.
+            Volatile.Write(ref _isVolumeTableChanged, 1);
+            return;
+        }
+
+        var (isMicrophonePage, isAudioPage) = _player is { } player ? game.GetVoicePages(player, _viewId) : (false, false);
+        var isMicrophoneLost = _isMicrophoneOn && !isMicrophonePage;
+        var isAudioLost = _isAudioOn && !isAudioPage;
+        if (isMicrophoneLost || isAudioLost)
+        {
+            await RunVoiceToggleAsync(() => StopLostVoiceAsync(module, game, isMicrophoneLost, isAudioLost));
+        }
+    }
+
+    private async Task StopLostVoiceAsync(IJSObjectReference module, Game game, bool isMicrophoneLost, bool isAudioLost)
+    {
+        if (isMicrophoneLost)
+        {
+            await StopMicrophoneAsync(module, game, _player);
+        }
+
+        if (isAudioLost)
+        {
+            await StopAudioAsync(module, game, _player);
+        }
     }
 
     // Returns false when the page went away or the view cannot take updates anymore.
@@ -706,16 +813,37 @@
         }
     }
 
-    private void RefreshNearby()
+    private void RefreshPosition()
     {
         GameViewObject? self = null;
-        var nearby = new List<GameViewObject>();
         foreach (var view in _tracker.Known)
         {
-            if (view.Kind == GameViewObject.PlayerKind)
+            if (view.IsSelf)
             {
-                nearby.Add(view);
-                self = view.IsSelf ? view : self;
+                self = view;
+                break;
+            }
+        }
+
+        _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
+    }
+
+    // The own player and the players it hears, by the same rule that mixes the voices.
+    private void RefreshNearby(Game game)
+    {
+        if (_player is not { } player)
+        {
+            _nearby = [];
+            return;
+        }
+
+        var players = game.Players;
+        var nearby = new List<NearbyEntry> { CreateNearbyEntry(player, isSelf: true) };
+        foreach (var entry in game.VolumeTable.GetRow(player.ClientId))
+        {
+            if (players.TryGetValue(entry.PlayerId, out var other))
+            {
+                nearby.Add(CreateNearbyEntry(other, isSelf: false));
             }
         }
 
@@ -723,8 +851,10 @@
             ? second.IsSelf.CompareTo(first.IsSelf)
             : StringComparer.CurrentCulture.Compare(first.Title, second.Title));
         _nearby = nearby;
-        _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
     }
+
+    private NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
+        new(player.Title ?? string.Empty, _tracker.GetPlayerColor(player), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
 
     private void RefreshActions(Game game)
     {
@@ -769,6 +899,11 @@
     {
         _isDisposed = true;
         _subscription?.Dispose();
+        if (Game is { } game)
+        {
+            game.VolumeTableChanged -= OnVolumeTableChanged;
+        }
+
         StopVoiceInGame();
         try
         {
@@ -815,6 +950,8 @@
     private sealed record StartResult(bool IsStarted, string? Error);
 
     private sealed record VoiceStartResult(bool IsStarted, string? Error);
+
+    private sealed record NearbyEntry(string Title, string Color, bool IsSelf, bool IsMicrophoneOn, bool IsAudioOn);
 
     // The page's speaker as the mixer sees it.
     private sealed class VoiceSink(GamePage page) : IGameVoiceSink

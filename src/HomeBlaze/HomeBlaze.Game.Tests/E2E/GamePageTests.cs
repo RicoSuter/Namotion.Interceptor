@@ -203,6 +203,55 @@ public class GamePageTests
         await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
     }
 
+    [Fact]
+    public async Task WhenTheSpeakerMovesOutOfRange_ThenNearbyDropsItAndItsFramesStop()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (speaker, speakerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        speakerPlayer.X = listenerPlayer.X + 4;
+        speakerPlayer.Y = listenerPlayer.Y;
+        await TurnOnVoiceAsync(speaker);
+        await TurnOnVoiceAsync(listener);
+        var speakerEntry = listener.GetByTestId("game-nearby-player").Filter(new() { HasText = speakerPlayer.Title });
+        await Expect(speakerEntry).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Expect(speakerEntry.GetByTestId("game-nearby-microphone-off")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
+
+        // Act
+        // 25 m east: beyond the hearing range of 10 m, but still within the view of 50 m.
+        speakerPlayer.X = listenerPlayer.X + 100;
+
+        // Assert
+        await Expect(speakerEntry).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        var received = await ReadCounterAsync(listener, ReceivedFramesAttribute);
+        var sent = await ReadCounterAsync(speaker, SentFramesAttribute);
+        await WaitForCounterAsync(speaker, SentFramesAttribute, sent + 50);
+        Assert.InRange(await ReadCounterAsync(listener, ReceivedFramesAttribute), received, received + GameVoiceSettings.MaximumPendingSends);
+    }
+
+    [Fact]
+    public async Task WhenAnotherPageOfThePlayerTakesTheMicrophoneOver_ThenThePageTurnsItsMicrophoneOff()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var microphone = page.GetByTestId("game-microphone");
+        await microphone.ClickAsync(new() { Timeout = Timeout });
+        await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+
+        // Act
+        // Page ids count up from 1, so no page of the server has this one.
+        Assert.True(world.Game.SetMicrophone(new GameCaller(player), pageId: -1, isOn: true));
+
+        // Assert
+        await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
+        Assert.True(player.IsMicrophoneOn);
+    }
+
     private static string FormatPosition(int x, int y, string facing) => $"X {x} · Y {y} · facing {facing}";
 
     private static BrowserNewContextOptions CreateMicrophoneContext() => new() { Permissions = ["microphone"] };
