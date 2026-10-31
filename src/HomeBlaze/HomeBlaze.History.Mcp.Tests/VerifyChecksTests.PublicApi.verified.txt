@@ -12,7 +12,7 @@ namespace HomeBlaze.History.Mcp
     }
     public class HistoryMcpToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
     {
-        public HistoryMcpToolProvider(System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Mcp.HistoryMcpToolProvider> logger) { }
+        public HistoryMcpToolProvider(System.Func<Namotion.Interceptor.IInterceptorSubject> rootSubjectProvider, Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Mcp.HistoryMcpToolProvider> logger) { }
         public System.Collections.Generic.IEnumerable<Namotion.Interceptor.Mcp.McpToolInfo> GetTools() { }
     }
     public static class HistoryToolFormatting
