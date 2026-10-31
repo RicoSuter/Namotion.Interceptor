@@ -148,7 +148,8 @@
     private const string ModulePath = "./_content/HomeBlaze.Game/game.js";
     private const string VoiceModulePath = "./_content/HomeBlaze.Game/game-voice.js";
     private const string InsecureMessage = "Voice needs HTTPS";
-    private const string ResumeMessage = "Tap the speaker to resume";
+    private const string ResumeMessage = "Tap the microphone or speaker to resume";
+    private const string MicrophoneEndedMessage = "The microphone was disconnected";
     private const string NotConnectedMessage = "Voice is not available while you are not connected";
     private const string NoPosition = "–";
     private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
@@ -195,6 +196,7 @@
     private bool _isAudioOn;
     private bool _isAudioSuspended;
     private bool _isResumeTried;
+    private bool _isCaptureEnded;
     private bool _isVoiceBusy;
     private string? _voiceError;
     private IDisposable? _sinkRegistration;
@@ -322,6 +324,16 @@
     public Task ToggleAudio() => ToggleAudioAsync();
 
     /// <summary>
+    /// Turns the microphone off after the browser lost its track, as when the device was unplugged.
+    /// </summary>
+    [JSInvokable]
+    public Task OnCaptureEnded()
+    {
+        _isCaptureEnded = true;
+        return StopEndedCaptureAsync();
+    }
+
+    /// <summary>
     /// Shows whether the browser suspended the audio context, which only a click resumes.
     /// </summary>
     [JSInvokable]
@@ -403,6 +415,11 @@
             return;
         }
 
+        if (await TryResumeAsync(module, _isMicrophoneOn))
+        {
+            return;
+        }
+
         if (_isMicrophoneOn)
         {
             await RunVoiceToggleAsync(() => StopMicrophoneAsync(module, game, _player));
@@ -420,12 +437,8 @@
             return;
         }
 
-        // The click already resumed the audio where the browser allows it; a second tap turns the speaker off, also
-        // when the browser keeps it suspended.
-        if (_isAudioOn && _isAudioSuspended && !_isResumeTried)
+        if (await TryResumeAsync(module, _isAudioOn))
         {
-            _isResumeTried = true;
-            await RunVoiceToggleAsync(() => TryInvokeVoiceAsync(module, "resume", GameVoiceSettings.BrowserCallTimeout));
             return;
         }
 
@@ -437,6 +450,20 @@
         {
             await RunVoiceToggleAsync(() => StartAudioAsync(module, game, player));
         }
+    }
+
+    // The click already resumed the audio where the browser allows it, so the first tap on a toggle that is on only asks
+    // once more; a second tap turns it off, also when the browser keeps the audio suspended.
+    private async Task<bool> TryResumeAsync(IJSObjectReference module, bool isOn)
+    {
+        if (!isOn || !_isAudioSuspended || _isResumeTried)
+        {
+            return false;
+        }
+
+        _isResumeTried = true;
+        await RunVoiceToggleAsync(() => TryInvokeVoiceAsync(module, "resume", GameVoiceSettings.BrowserCallTimeout));
+        return true;
     }
 
     private async Task RunVoiceToggleAsync(Func<Task> toggle)
@@ -465,6 +492,26 @@
         }
 
         StateHasChanged();
+        await StopEndedCaptureAsync();
+    }
+
+    // A capture that ended while a toggle ran waits for RunVoiceToggleAsync, which calls this again once it is done.
+    private async Task StopEndedCaptureAsync()
+    {
+        if (!_isCaptureEnded || !CanToggleVoice() || _voiceModule is not { } module || Game is not { } game)
+        {
+            return;
+        }
+
+        _isCaptureEnded = false;
+        if (_isMicrophoneOn)
+        {
+            await RunVoiceToggleAsync(async () =>
+            {
+                await StopMicrophoneAsync(module, game, _player);
+                _voiceError = MicrophoneEndedMessage;
+            });
+        }
     }
 
     // The game hears the page only once the browser captures.
