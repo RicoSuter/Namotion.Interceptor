@@ -37,6 +37,10 @@ public class GameRuntimeTests
         await _context.Game.StartAsync(CancellationToken.None);
         try
         {
+            // StartAsync returns once the loop reached its first wait, so its own index rebuild request is done. Querying
+            // the targets builds the index now, with the wall still at 10, 10.
+            _context.Game.GetTargetObjects(player);
+
             // Act
             wall.X = 2;
             wall.Y = 0;
