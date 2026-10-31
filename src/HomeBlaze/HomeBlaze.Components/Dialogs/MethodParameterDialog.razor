@@ -135,9 +135,6 @@
         null => null,
         // G29 drops the trailing zeros that the decimal multiplication keeps.
         _ when unit == StateUnit.Percent && TryGetFraction(value, out var fraction) => (fraction * 100m).ToString("G29", CultureInfo.InvariantCulture),
-        // The general format drops the fractions of a second.
-        DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
-        DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString()
     };

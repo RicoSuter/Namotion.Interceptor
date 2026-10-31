@@ -190,6 +190,9 @@
     private int _isVolumeTableChanged;
     private IReadOnlyList<TargetEntry> _targets = [];
     private IReadOnlyList<GameAction> _actions = [];
+    // The parameters this page entered last per operation, keyed by object type and operation, so that the next dialog
+    // of the same operation, also on another object of that type, starts from them.
+    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _lastParameters = new();
     private bool _isInvoking;
     private bool _isViewBroken;
     private IJSObjectReference? _voiceModule;
@@ -733,7 +736,10 @@
         try
         {
             var services = new GameCallerServiceProvider(ServiceProvider, new GameCaller(player));
-            await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token);
+            var key = $"{owner.GetType().FullName}.{method.PropertyName}";
+            await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token,
+                initialValues: _lastParameters.GetValueOrDefault(key),
+                parametersEntered: values => _lastParameters[key] = values);
         }
         finally
         {
