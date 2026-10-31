@@ -13,6 +13,8 @@ public partial class Game
     /// </summary>
     internal static readonly TimeSpan HousekeepingInterval = TimeSpan.FromSeconds(5);
 
+    // Never disposed: change observers may still signal a disposed game, and without AvailableWaitHandle the semaphore
+    // holds nothing to release.
     private readonly SemaphoreSlim _signal = new(0, 1);
 
     /// <summary>
@@ -30,12 +32,6 @@ public partial class Game
         }
     }
 
-    public override void Dispose()
-    {
-        _signal.Dispose();
-        base.Dispose();
-    }
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var subscription = ((IInterceptorSubject)this).Context
@@ -43,6 +39,9 @@ public partial class Game
             .Subscribe(OnPropertyChanged);
 
         RequestIndexRebuild();
+
+        // One wait outlives the passes that a delay ends; a new wait per pass would leave the old one queued to take the next signal.
+        Task? signalTask = null;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -63,13 +62,12 @@ public partial class Game
                 break;
             }
 
-            try
+            // WhenAny does not throw; a canceled wait ends the loop through the condition.
+            signalTask ??= _signal.WaitAsync(stoppingToken);
+            var completed = await Task.WhenAny(signalTask, Task.Delay(HousekeepingInterval, _timeProvider, stoppingToken));
+            if (completed == signalTask)
             {
-                await Task.WhenAny(_signal.WaitAsync(stoppingToken), Task.Delay(HousekeepingInterval, _timeProvider, stoppingToken));
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
+                signalTask = null;
             }
         }
     }

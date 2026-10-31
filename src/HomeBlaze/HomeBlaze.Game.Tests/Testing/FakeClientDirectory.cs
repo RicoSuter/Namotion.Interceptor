@@ -4,15 +4,14 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace HomeBlaze.Game.Tests.Testing;
 
+/// <summary>
+/// Thread-safe, because the running game loop reads the clients while the test changes them.
+/// </summary>
 internal sealed class FakeClientDirectory : IGameClientDirectory
 {
     private readonly Lock _lock = new();
     private readonly List<(string ClientId, Notification Notification)> _notifications = [];
-
-    /// <summary>
-    /// The clients; null stands for a missing installation.
-    /// </summary>
-    public List<GameClient>? Clients { get; set; } = [];
+    private List<GameClient>? _clients = [];
 
     public IReadOnlyList<(string ClientId, Notification Notification)> Notifications
     {
@@ -25,7 +24,13 @@ internal sealed class FakeClientDirectory : IGameClientDirectory
         }
     }
 
-    public IReadOnlyList<GameClient>? GetClients() => Clients?.ToList();
+    public IReadOnlyList<GameClient>? GetClients()
+    {
+        lock (_lock)
+        {
+            return _clients?.ToList();
+        }
+    }
 
     public Task SendNotificationAsync(string clientId, Notification notification, CancellationToken cancellationToken)
     {
@@ -41,10 +46,30 @@ internal sealed class FakeClientDirectory : IGameClientDirectory
 
     public void Set(string id, bool isNamed, bool isConnected, string? title = null)
     {
-        Clients ??= [];
-        Clients.RemoveAll(client => client.Id == id);
-        Clients.Add(new GameClient(id, title ?? id, isNamed, isConnected));
+        lock (_lock)
+        {
+            _clients ??= [];
+            _clients.RemoveAll(client => client.Id == id);
+            _clients.Add(new GameClient(id, title ?? id, isNamed, isConnected));
+        }
     }
 
-    public void Remove(string id) => Clients?.RemoveAll(client => client.Id == id);
+    public void Remove(string id)
+    {
+        lock (_lock)
+        {
+            _clients?.RemoveAll(client => client.Id == id);
+        }
+    }
+
+    /// <summary>
+    /// Stands for a missing installation, until the next <see cref="Set"/>.
+    /// </summary>
+    public void RemoveInstallation()
+    {
+        lock (_lock)
+        {
+            _clients = null;
+        }
+    }
 }

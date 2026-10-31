@@ -130,7 +130,7 @@ public class GamePlayersTests
         _context.Game.ReconcilePlayers();
 
         // Act
-        _context.Clients.Clients = null;
+        _context.Clients.RemoveInstallation();
         _context.Game.ReconcilePlayers();
 
         // Assert
