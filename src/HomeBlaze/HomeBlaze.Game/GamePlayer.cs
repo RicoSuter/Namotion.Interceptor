@@ -26,6 +26,11 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     /// </summary>
     public const int BodyHeight = 7;
 
+    /// <summary>
+    /// The most characters a message may have.
+    /// </summary>
+    public const int MaximumMessageLength = 500;
+
     [Configuration]
     public partial GameDirection Facing { get; set; }
 
@@ -61,6 +66,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
 
     internal StepRateLimiter? TurnRateLimiter { get; set; }
 
+    internal long? LastMessageTimestamp { get; set; }
+
     public GamePlayer()
     {
         Width = Size;
@@ -72,11 +79,23 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
         IsConnected = false;
     }
 
+    /// <summary>
+    /// Shows the message in the browser of this player; a player that sends it waits <see cref="Game.MessageInterval"/>
+    /// between two messages.
+    /// </summary>
+    /// <exception cref="ArgumentException">The message is empty or longer than <see cref="MaximumMessageLength"/>.</exception>
+    /// <exception cref="InvalidOperationException">The sender sent a message too recently, or the player cannot get it.</exception>
     [Operation(Title = "Send message", Icon = "Chat", Position = 1, Description = "Shows a message in the browser of this player.")]
     public Task SendMessageAsync(string message, [FromServices] GameCaller? caller, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        var trimmed = message.Trim();
+        if (trimmed.Length > MaximumMessageLength)
+        {
+            throw new ArgumentException($"A message has at most {MaximumMessageLength} characters.", nameof(message));
+        }
+
         var game = ParentGame ?? throw new InvalidOperationException("The player is not part of a game.");
-        return game.SendMessageAsync(this, game.ResolveActor(caller), message.Trim(), cancellationToken);
+        return game.SendMessageAsync(this, game.ResolveActor(caller), trimmed, cancellationToken);
     }
 }

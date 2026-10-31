@@ -113,4 +113,36 @@ public class GameActionsTests
         Assert.Equal("Message from Kitchen", notification.Title);
         Assert.Equal("Hello", notification.Message);
     }
+
+    [Fact]
+    public async Task WhenAMessageIsTooLong_ThenSendingIsRefused()
+    {
+        // Arrange
+        var sender = _context.AddConnectedPlayer("tab-1");
+        var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
+        var message = new string('a', GamePlayer.MaximumMessageLength + 1);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => recipient.SendMessageAsync(message, new GameCaller(sender), CancellationToken.None));
+        Assert.Empty(_context.Clients.Notifications);
+    }
+
+    [Fact]
+    public async Task WhenAPlayerSendsTwoMessagesWithinTheInterval_ThenTheSecondIsRefused()
+    {
+        // Arrange
+        var sender = _context.AddConnectedPlayer("tab-1");
+        var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
+        var caller = new GameCaller(sender);
+        await recipient.SendMessageAsync("First", caller, CancellationToken.None);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => recipient.SendMessageAsync("Second", caller, CancellationToken.None));
+        _context.TimeProvider.Advance(Game.MessageInterval);
+        await recipient.SendMessageAsync("Third", caller, CancellationToken.None);
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(new[] { "First", "Third" }, _context.Clients.Notifications.Select(notification => notification.Notification.Message));
+    }
 }
