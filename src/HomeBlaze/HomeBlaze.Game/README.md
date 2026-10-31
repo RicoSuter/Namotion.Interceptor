@@ -318,6 +318,11 @@ The voice E2E tests launch their own Chromium with `--use-fake-ui-for-media-stre
 - Without an installation the page keeps showing "Joining the game…" rather than saying it needs one.
 - Only one character model, and only walls and doors as object types.
 - A page receives every visible object within `ViewRadius` (200 tiles in each direction) of its player, although the camera shows only about 60 tiles around it and the fog hides the rest. With many objects, either lower `ViewRadius` or let the page report the area its camera covers and send that area plus a margin.
+- Scale: the cost per page, movement and hearing depend on what is near a player, not on the size of the world, and coordinates cover the whole `int` range. These parts grow with the whole world instead, which is fine for several thousand objects and a few dozen players:
+  - All objects live in the `Game` subject and every save rewrites the whole `Game.json`. Much larger worlds need regions in separate files or a database.
+  - A rebuild of the index, after an outside change, an applied configuration or a joining or leaving player, re-adds every object under `_lock`. An index that updates incrementally would avoid it.
+  - Every page subscribes to changes of all objects, so every step anywhere schedules a flush on every page; each flush only diffs its own area. Change notifications per region would keep distant changes away.
+  - Every object is its own mesh, so thousands of walls within the view radius mean thousands of draw calls. Instances of identical meshes would batch them.
 - `MaximumPendingSends` of 10 drops frames to a page once its round trip exceeds about 200 ms, because each send waits for the browser to acknowledge it.
 - Echo: the browser's echo canceller works on the microphone, but the playback goes through an `AudioWorklet`, which Chrome's echo canceller may not cover, so without headphones a listener's speaker may reach its own microphone. This is not yet tested with real devices. If confirmed, route the playback through a local loopback `RTCPeerConnection` pair into an `<audio>` element. Headphones avoid it.
 - A stop that a connection drop loses after a toggle can leave the browser capturing while the server shows the microphone off. The mixer drops those frames, because the game no longer counts that page, and the next toggle recovers.
