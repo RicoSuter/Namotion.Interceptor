@@ -31,6 +31,12 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     /// </summary>
     public const int MaximumMessageLength = 500;
 
+    public override int Width => Size;
+
+    public override int Depth => Size;
+
+    public override int Height => BodyHeight;
+
     [Configuration]
     public partial GameDirection Facing { get; set; }
 
@@ -87,9 +93,6 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
 
     public GamePlayer()
     {
-        Width = Size;
-        Depth = Size;
-        Height = BodyHeight;
         Facing = GameDirection.North;
         ClientId = string.Empty;
         ClientTitle = string.Empty;
