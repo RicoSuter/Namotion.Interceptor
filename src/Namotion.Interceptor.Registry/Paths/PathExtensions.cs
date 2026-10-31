@@ -402,41 +402,44 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Fills <paramref name="properties"/> with the chain of properties that
-    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> walks for
-    /// <paramref name="property"/> with a provider that includes every property, from the property owned by
-    /// <paramref name="rootSubject"/> (or by the absolute top when it is null) down to <paramref name="property"/>, each
-    /// with its collection position or dictionary key. The list is cleared first.
+    /// Gets whether a property on the path
+    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> builds for
+    /// <paramref name="property"/> is excluded by <paramref name="pathProvider"/> under the rule of
+    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>: the property itself or a property holding it up to the
+    /// root, an [InlinePaths] dictionary included. When a subject on the path has several parents and
+    /// <paramref name="rootSubject"/> is given, a property is excluded on every path that reaches the root.
     /// </summary>
     /// <param name="property">The property.</param>
+    /// <param name="pathProvider">The path provider.</param>
     /// <param name="rootSubject">The root subject or null.</param>
-    /// <param name="propertyIndex">Optional index of the last property, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
-    /// <param name="properties">The list to fill, which the caller may reuse.</param>
-    /// <returns>False, leaving the list empty, when a given root is not reachable or the parent chain has a cycle.</returns>
-    public static bool TryGetPathProperties(
+    /// <param name="propertyIndex">The index of the property, or null, as for <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</param>
+    /// <returns>
+    /// True when a path exists but none passes only properties the provider includes; false when one does, or when no
+    /// path exists because a given root is not reachable or the parent chain has a cycle.
+    /// </returns>
+    /// <remarks>
+    /// When a path exists, <c>TryGetPath</c> with the same provider and root returns null when this returns true. It
+    /// also returns null, while this returns false, when an [InlinePaths] key needs the explicit form while another
+    /// property's segment shadows the inline property.
+    /// </remarks>
+    public static bool IsAnyPropertyOnPathExcluded(
         this RegisteredSubjectProperty property,
+        PathProviderBase pathProvider,
         IInterceptorSubject? rootSubject,
-        object? propertyIndex,
-        List<(RegisteredSubjectProperty Property, object? Index)> properties)
+        object? propertyIndex)
     {
-        ArgumentNullException.ThrowIfNull(properties);
-        properties.Clear();
-
         var frames = PooledFrames.Rent();
         try
         {
-            if (!TryBuildPathFrames(property, property.BrowseName, DefaultPathProvider.Instance, rootSubject, propertyIndex, ref frames))
+            if (pathProvider.TryGetSegmentIncludedInPaths(property, out var leafSegment) &&
+                TryBuildPathFrames(property, leafSegment, pathProvider, rootSubject, propertyIndex, ref frames))
             {
                 return false;
             }
 
-            properties.EnsureCapacity(frames.Count);
-            for (var i = frames.Count - 1; i >= 0; i--)
-            {
-                properties.Add((frames[i].Property, frames[i].Index));
-            }
-
-            return true;
+            // No path passes only included properties; the same walk through every property tells whether one exists.
+            frames.Reset();
+            return TryBuildPathFrames(property, property.BrowseName, pathProvider: null, rootSubject, propertyIndex, ref frames);
         }
         finally
         {
@@ -486,7 +489,8 @@ public static class PathExtensions
     /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to
     /// <paramref name="rootSubject"/> (the topmost frame is owned by the root), or to the absolute top when
     /// <paramref name="rootSubject"/> is null, through properties <paramref name="pathProvider"/> includes (see
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), each with its segment; the leaf itself is not checked.
+    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), or through every property when it is null, each with
+    /// its segment; the leaf itself is not checked.
     /// Returns false when a root is requested but not reachable, or the chain passes an excluded property.
     /// <para>
     /// When a root is requested, the parent graph is searched across all parents so a shared subject (DAG)
@@ -495,7 +499,7 @@ public static class PathExtensions
     /// </para>
     /// </summary>
     private static bool TryBuildPathFrames(
-        RegisteredSubjectProperty property, string leafSegment, PathProviderBase pathProvider, IInterceptorSubject? rootSubject,
+        RegisteredSubjectProperty property, string leafSegment, PathProviderBase? pathProvider, IInterceptorSubject? rootSubject,
         object? propertyIndex, ref PooledFrames frames)
     {
         frames.Add((property, propertyIndex, leafSegment));
@@ -536,7 +540,7 @@ public static class PathExtensions
             }
 
             var parent = parents[0];
-            if (!pathProvider.TryGetSegmentIncludedInPaths(parent.Property, out var parentSegment))
+            if (!TryGetFrameSegment(pathProvider, parent.Property, out var parentSegment))
             {
                 return false;
             }
@@ -549,13 +553,13 @@ public static class PathExtensions
     /// <summary>
     /// Iterative (explicit-stack) depth-first search that fills <paramref name="frames"/> (leaf-first) with
     /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/> through properties
-    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), each with its
-    /// segment, returning false when the root is not reachable that way. Cycles are pruned per branch; unreachable
+    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), or every
+    /// property when it is null, each with its segment, returning false when the root is not reachable that way. Cycles are pruned per branch; unreachable
     /// owners are memoized so a shared subject in a DAG is explored once, keeping the search linear and overflow-free
     /// for arbitrarily deep graphs.
     /// </summary>
     private static bool TrySearchToRoot(
-        RegisteredSubjectProperty property, string leafSegment, PathProviderBase pathProvider, object? propertyIndex,
+        RegisteredSubjectProperty property, string leafSegment, PathProviderBase? pathProvider, object? propertyIndex,
         IInterceptorSubject rootSubject, ref PooledFrames frames)
     {
         frames.Add((property, propertyIndex, leafSegment));
@@ -587,7 +591,7 @@ public static class PathExtensions
                 stack[topIndex] = top; // top is a copy; write the advanced cursor back
 
                 var parentProperty = parent.Property;
-                if (!pathProvider.TryGetSegmentIncludedInPaths(parentProperty, out var parentSegment))
+                if (!TryGetFrameSegment(pathProvider, parentProperty, out var parentSegment))
                 {
                     continue;
                 }
@@ -622,6 +626,19 @@ public static class PathExtensions
         }
 
         return false;
+    }
+
+    // Without a provider every property is included and the segments are not used.
+    private static bool TryGetFrameSegment(
+        PathProviderBase? pathProvider, RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        if (pathProvider is null)
+        {
+            segment = property.BrowseName;
+            return true;
+        }
+
+        return pathProvider.TryGetSegmentIncludedInPaths(property, out segment);
     }
 
     /// <summary>

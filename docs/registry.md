@@ -304,6 +304,7 @@ A path provider defines a view of the graph: `IsPropertyIncluded` decides which 
 
 - `TryGetPath` and `GetPaths` build no path for a property when it or any property holding it up to the root is excluded, including an `[InlinePaths]` dictionary whose key is a bare segment. When a subject on the way has several parents and a root is given, the path is the first path, in parent order, that reaches the root through properties the provider includes, and there is none only when no such path exists. Without a root, the path follows the first parent of each subject.
 - `TryGetPropertyFromPath`, `TryGetSubjectFromPath` and `GetPropertiesFromPaths` resolve a path only when every segment names a property the provider includes.
+- `IsAnyPropertyOnPathExcluded` tells whether `TryGetPath` builds no path because a property on the path is excluded, without writing the text: it is true when a path exists but none passes only included properties, and false when one does or when no path exists at all, for example because the root is not reachable. `TryGetPath` also builds no path, while this is false, when an `[InlinePaths]` key needs the explicit form while another property's segment shadows the inline property.
 
 So a path built with a provider never passes an excluded property, and resolves back with the same provider to the same property when the provider's `TryGetPropertyFromSegment` finds each property by the segment `TryGetPropertySegment` gives it (or by its `BrowseName` when that is null), which the built-in providers do. Within that, the limits in [Path Syntax](#path-syntax) apply: a segment that contains the separator does not resolve back, and a key of a type other than string, integer, `Guid` or enum resolves to the first entry with the same text. A nested property has a path only when every level above it is included: with `AttributeBasedPathProvider`, every property holding a subject on the way needs a `[Path]` attribute of its own.
 
@@ -404,7 +405,6 @@ Sensors['Kitchen [north]'].Temperature
 #### Writing keys
 
 - `TryGetPath` writes a key's invariant text (`FormatPathIndex`), so a `double` key `1.5` is `[1.5]` on every machine.
-- `TryGetPathProperties` fills a list with the chain of properties `TryGetPath` walks with a provider that includes every property, from the root down, each with its position or key.
 - A key is quoted when its text is empty, starts with `'` or contains `]`: `Sensors['Kitchen [north]']`, `Sensors['''quoted']`, `Sensors['']`. Every other key is written as is.
 - A path `TryGetPath` writes resolves back to the same entry for collection positions and string, integer, `Guid` and enum keys. For other key types it does when the key's text is unique within its dictionary, otherwise the first entry with that text wins (for example the keys `5` and `"5"` in a `Dictionary<object, T>`, `DateTime` keys that differ below one second, or custom keys without a `ToString` override).
 

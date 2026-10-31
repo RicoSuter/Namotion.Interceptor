@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -16,8 +15,8 @@ internal sealed class McpVisibility
 {
     private readonly IMcpAccessPolicy? _policy;
     private readonly IInterceptorSubject? _rootSubject;
+    private readonly PathProviderBase? _readablePathProvider;
     private Dictionary<RegisteredSubject, bool>? _isShown;
-    private List<(RegisteredSubjectProperty Property, object? Index)>? _pathProperties;
     private ShownSubjectsPathProvider? _listingPathProvider;
     private ShownSubjectsPathProvider? _resolutionPathProvider;
 
@@ -25,10 +24,12 @@ internal sealed class McpVisibility
     {
     }
 
-    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject)
+    // readablePathProvider includes exactly what the policy allows to read.
+    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, PathProviderBase readablePathProvider)
     {
         _policy = policy;
         _rootSubject = rootSubject;
+        _readablePathProvider = readablePathProvider;
     }
 
     /// <summary>
@@ -41,7 +42,9 @@ internal sealed class McpVisibility
     /// <see cref="Unrestricted"/> instance.
     /// </summary>
     public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
-        configuration.AccessPolicy is { } policy ? new McpVisibility(policy, rootSubject) : Unrestricted;
+        configuration.AccessPolicy is { } policy
+            ? new McpVisibility(policy, rootSubject, configuration.ResolutionPathProvider)
+            : Unrestricted;
 
     /// <summary>
     /// The configuration's listing provider, <paramref name="listingPathProvider"/>, restricted with a policy to
@@ -115,9 +118,8 @@ internal sealed class McpVisibility
         return isShown;
     }
 
-    // The properties checked are exactly the chain the tools write the subject's path through, so a subject's own
-    // check never relies on an owner's, whose path may go through other parents. A subject the registry writes no
-    // path for has no path to check.
+    // The path checked is the one the tools write for the subject, through its first parent. A subject the registry
+    // writes no path for from the root has no path to check.
     private bool Evaluate(RegisteredSubject subject, IMcpAccessPolicy policy)
     {
         var parents = subject.Parents;
@@ -127,25 +129,7 @@ internal sealed class McpVisibility
         }
 
         var parent = parents[0];
-        var pathProperties = _pathProperties ??= [];
-        if (!parent.Property.TryGetPathProperties(_rootSubject, parent.Index, pathProperties))
-        {
-            return true;
-        }
-
-        var isReadable = true;
-        foreach (var (property, _) in CollectionsMarshal.AsSpan(pathProperties))
-        {
-            if (!McpAccessPathProvider.IsReadable(policy, property))
-            {
-                isReadable = false;
-                break;
-            }
-        }
-
-        // The entries pin their subjects, so the reused list is not kept filled.
-        pathProperties.Clear();
-        return isReadable;
+        return !parent.Property.IsAnyPropertyOnPathExcluded(_readablePathProvider!, _rootSubject, parent.Index);
     }
 
     private sealed class ShownSubjectsPathProvider(PathProviderBase inner, McpVisibility visibility) : PathProviderBase
