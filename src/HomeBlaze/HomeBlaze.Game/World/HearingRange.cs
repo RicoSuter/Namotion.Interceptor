@@ -1,10 +1,11 @@
 namespace HomeBlaze.Game.World;
 
 /// <summary>
-/// The only definition of who hears whom and how loud. Sound travels along the shortest open path between the footprint
-/// centers: the straight line while it touches no tile of an object whose <see cref="GameObject.IsSoundBlocking"/> is
-/// true, otherwise the path that <see cref="SoundPathSearch"/> finds around such objects. The volume is the distance gain of the path length times
-/// the occlusion gain of the detour, the length the path exceeds the straight distance by.
+/// The only definition of who hears whom and how loud. Sound travels along the shortest open path between the
+/// footprint centers: the straight line while it touches no tile of an object whose
+/// <see cref="GameObject.IsSoundBlocking"/> is true, otherwise the path that <see cref="SoundPathSearch"/> finds around
+/// such objects. The volume is the distance gain of the path length times the occlusion gain of the detour, the length
+/// the path exceeds the straight distance by.
 /// </summary>
 internal static class HearingRange
 {
@@ -25,7 +26,7 @@ internal static class HearingRange
     public const int EdgeFade = 8;
 
     /// <summary>
-    /// The detour in tiles that halves the volume, 1 m.
+    /// The detour in tiles at which the volume is halved, 1 m.
     /// </summary>
     public const int HalvingDetour = 4;
 
@@ -33,8 +34,8 @@ internal static class HearingRange
     /// Gets the volume from 0 to 1 at which the players hear each other; the same for both orders.
     /// </summary>
     /// <remarks>
-    /// Searches the paths from <paramref name="first"/> with <paramref name="search"/> when the straight line is blocked;
-    /// passing the same player first for its pairs reuses the search.
+    /// When the straight line is blocked, <paramref name="search"/> searches from the player with the ordinally smaller
+    /// client id, so the pairs of one player computed one after the other reuse its search.
     /// </remarks>
     public static double GetVolume(GamePlayer first, GamePlayer second, GameWorldIndex index, SoundPathSearch search)
     {
@@ -42,9 +43,9 @@ internal static class HearingRange
         var secondFootprint = second.Footprint;
         var start = GetDoubledCenter(firstFootprint);
         var end = GetDoubledCenter(secondFootprint);
-        var deltaX = end.X - start.X;
-        var deltaY = end.Y - start.Y;
-        var distance = Math.Sqrt((double)deltaX * deltaX + (double)deltaY * deltaY) / 2;
+        double deltaX = end.X - start.X;
+        double deltaY = end.Y - start.Y;
+        var distance = Math.Sqrt(deltaX * deltaX + deltaY * deltaY) / 2;
         if (distance >= HearingRadius)
         {
             return 0;
@@ -55,21 +56,26 @@ internal static class HearingRange
             return GetDistanceGain(distance);
         }
 
-        search.Prepare(firstFootprint, index);
-        var length = search.GetLength(secondFootprint);
+        // From one fixed end, so both orders get the same length also where a footprint overlaps a sound blocking
+        // object, whose tiles count as open only in the source footprint.
+        var isFirstSource = IsSearchedFrom(first, second);
+        search.Prepare(isFirstSource ? firstFootprint : secondFootprint, index);
+        var length = search.GetLength(isFirstSource ? secondFootprint : firstFootprint);
         if (length == SoundPathSearch.NoPath)
         {
             return 0;
         }
 
         // Against the grid length without walls, so the excess of grid lengths over straight ones cancels out.
-        var detour = Math.Max(0, length - SoundPathSearch.GetOpenLength(deltaX, deltaY)) / (double)SoundPathSearch.Unit;
+        var openLength = SoundPathSearch.GetOpenLength(firstFootprint, secondFootprint);
+        var detour = Math.Max(0, length - openLength) / (double)SoundPathSearch.Unit;
         return GetDistanceGain(distance + detour) * GetOcclusionGain(detour);
     }
 
     /// <summary>
     /// Gets the gain of a path length in tiles: 1 up to <see cref="ReferenceDistance"/>, then the reference distance
-    /// divided by the length, times a smooth fade over the last <see cref="EdgeFade"/> tiles to 0 at <see cref="HearingRadius"/>.
+    /// divided by the length, times a smooth fade over the last <see cref="EdgeFade"/> tiles to 0 at
+    /// <see cref="HearingRadius"/>.
     /// </summary>
     public static double GetDistanceGain(double distance)
     {
@@ -84,9 +90,24 @@ internal static class HearingRange
     }
 
     /// <summary>
-    /// Gets the gain of a detour in tiles, which halves the volume per <see cref="HalvingDetour"/>.
+    /// Gets the gain of a detour in tiles, 1 / (1 + detour / <see cref="HalvingDetour"/>), which halves the volume at a
+    /// detour of <see cref="HalvingDetour"/>.
     /// </summary>
     public static double GetOcclusionGain(double detour) => 1 / (1 + detour / HalvingDetour);
+
+    private static bool IsSearchedFrom(GamePlayer first, GamePlayer second)
+    {
+        var order = string.CompareOrdinal(first.ClientId, second.ClientId);
+        if (order != 0)
+        {
+            return order < 0;
+        }
+
+        var firstFootprint = first.Footprint;
+        var secondFootprint = second.Footprint;
+        return (firstFootprint.X, firstFootprint.Y, firstFootprint.Width, firstFootprint.Depth)
+            .CompareTo((secondFootprint.X, secondFootprint.Y, secondFootprint.Width, secondFootprint.Depth)) <= 0;
+    }
 
     /// <summary>
     /// Gets the area that every footprint of a player who may hear a player with this footprint intersects.

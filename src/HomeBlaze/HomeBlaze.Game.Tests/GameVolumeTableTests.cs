@@ -60,6 +60,28 @@ public class GameVolumeTableTests
     }
 
     [Fact]
+    public void WhenAPlayerHasASizeThatTheIndexLeavesOut_ThenItHearsNobodyAndNobodyHearsIt()
+    {
+        // Arrange
+        // A loaded configuration skips the range validation, as this replacement assigned before it joins the game does.
+        // Its id is the smaller one and its center 11.5 tiles away, so it would compute the pair as the listener.
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-0", x: 10);
+        var huge = new GamePlayer { X = -500, Width = GameObject.MaximumSize + 1 };
+        _context.Game.Players = new Dictionary<string, GamePlayer>(_context.Game.Players) { ["tab-0"] = huge };
+        _context.Game.ReconcilePlayers();
+
+        // Act
+        _context.Game.UpdateVolumeTable();
+
+        // Assert
+        var table = _context.Game.VolumeTable;
+        Assert.True(huge.IsConnected);
+        Assert.Equal(0, table.GetRow("tab-0").Length);
+        Assert.Equal(0, table.GetRow("tab-1").Length);
+    }
+
+    [Fact]
     public void WhenAPlayerIsOffline_ThenItHearsNobodyAndNobodyHearsIt()
     {
         // Arrange
