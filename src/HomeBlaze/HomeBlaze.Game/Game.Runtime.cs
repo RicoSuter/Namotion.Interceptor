@@ -72,8 +72,8 @@ public partial class Game
         }
     }
 
-    // Runs synchronously inside the write, possibly on a thread that holds another subject's lock, so it only signals
-    // or marks the index stale and never waits for the game.
+    // Runs synchronously inside the write while the change observable holds its own lock, which a write under _lock
+    // waits for; so it only signals or marks the index stale and never takes _lock.
     private void OnPropertyChanged(SubjectPropertyChange change)
     {
         if (_clients.IsClientChange(change))

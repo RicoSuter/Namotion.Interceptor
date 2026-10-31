@@ -41,7 +41,7 @@ public partial class Game
         if (!ReferenceEquals(next, current))
         {
             Players = next;
-            _isIndexStale = true;
+            RequestIndexRebuild();
             _isSaveRequested = true;
         }
     }
