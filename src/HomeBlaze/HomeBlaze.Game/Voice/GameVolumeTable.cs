@@ -13,12 +13,11 @@ internal readonly record struct GameVolumeEntry(string PlayerId, float Volume);
 /// </summary>
 internal sealed class GameVolumeTable
 {
-    public static readonly GameVolumeTable Empty = new(new Dictionary<string, GameVolumeEntry[]>());
+    public static readonly GameVolumeTable Empty = new([]);
 
     private readonly Dictionary<string, GameVolumeEntry[]> _rows;
 
-    /// <param name="rows">The rows by player id, which the table owns from then on.</param>
-    public GameVolumeTable(Dictionary<string, GameVolumeEntry[]> rows)
+    private GameVolumeTable(Dictionary<string, GameVolumeEntry[]> rows)
     {
         _rows = rows;
     }
@@ -34,10 +33,7 @@ internal sealed class GameVolumeTable
     public ReadOnlySpan<GameVolumeEntry> GetRow(string playerId) =>
         _rows.TryGetValue(playerId, out var row) ? row : ReadOnlySpan<GameVolumeEntry>.Empty;
 
-    /// <summary>
-    /// Builds the table from rows that are lists.
-    /// </summary>
-    public static GameVolumeTable Create(Dictionary<string, List<GameVolumeEntry>> rows)
+    private static GameVolumeTable Create(Dictionary<string, List<GameVolumeEntry>> rows)
     {
         var arrays = new Dictionary<string, GameVolumeEntry[]>(rows.Count);
         foreach (var (playerId, row) in rows)
@@ -50,11 +46,21 @@ internal sealed class GameVolumeTable
 
     /// <summary>
     /// Builds the table for the connected players, comparing only players within the hearing radius, which the index
-    /// finds. The index must be up to date; the caller guards it.
+    /// finds. The index must be up to date; the caller guards it, and also the <paramref name="candidates"/> list,
+    /// which is scratch space.
     /// </summary>
-    public static GameVolumeTable Build(Dictionary<string, GamePlayer> players, GameWorldIndex index)
+    public static GameVolumeTable Build(Dictionary<string, GamePlayer> players, GameWorldIndex index, List<GameObject> candidates)
     {
-        var rows = new Dictionary<string, List<GameVolumeEntry>>();
+        var connectedCount = 0;
+        foreach (var player in players.Values)
+        {
+            if (player.IsConnected)
+            {
+                connectedCount++;
+            }
+        }
+
+        var rows = new Dictionary<string, List<GameVolumeEntry>>(connectedCount);
         foreach (var player in players.Values)
         {
             if (player.IsConnected)
@@ -63,10 +69,9 @@ internal sealed class GameVolumeTable
             }
         }
 
-        var candidates = new List<GameObject>();
         foreach (var player in players.Values)
         {
-            if (player.IsConnected && rows.TryGetValue(player.ClientId, out var row))
+            if (rows.TryGetValue(player.ClientId, out var row))
             {
                 candidates.Clear();
                 index.Query(HearingRange.GetArea(player.Footprint), candidates);
