@@ -183,6 +183,55 @@ public class GameRuntimeTests
     }
 
     [Fact]
+    public async Task WhenAWallIsLoweredFromOutside_ThenItNoLongerBlocksSoundBetweenPlayers()
+    {
+        // Arrange
+        // Too long for the voice to go around within the hearing range.
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", y: 10);
+        var wall = _context.AddObject("wall", new Wall { X = -100, Y = 5, Width = 200, Height = 10 });
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            // See WhenAWallIsMovedFromOutside_ThenMovementSeesItsNewPosition: the index is built with the wall still tall.
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Root.WriteCount > 0, message: "The first pass did not run");
+            _context.Game.UpdateVolumeTable();
+            var before = FindVolume("tab-1", "tab-2");
+
+            // Act
+            wall.Height = 4;
+
+            // Assert
+            Assert.Null(before);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
+                _context.Game.UpdateVolumeTable();
+                return FindVolume("tab-1", "tab-2") is not null;
+            }, message: "The lowered wall still blocks the voice");
+            Assert.Equal(0.4f, FindVolume("tab-1", "tab-2"));
+            Assert.Equal(0.4f, FindVolume("tab-2", "tab-1"));
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private float? FindVolume(string listenerId, string talkerId)
+    {
+        foreach (var entry in _context.Game.VolumeTable.GetRow(listenerId))
+        {
+            if (entry.PlayerId == talkerId)
+            {
+                return entry.Volume;
+            }
+        }
+
+        return null;
+    }
+
+    [Fact]
     public async Task WhenADoorIsOpenedFromOutside_ThenMovementSeesItOpen()
     {
         // Arrange
