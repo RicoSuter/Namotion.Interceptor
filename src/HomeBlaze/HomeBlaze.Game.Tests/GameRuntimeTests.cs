@@ -181,4 +181,31 @@ public class GameRuntimeTests
             await _context.Game.StopAsync(CancellationToken.None);
         }
     }
+
+    [Fact]
+    public async Task WhenADoorIsOpenedFromOutside_ThenMovementSeesItOpen()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var door = _context.AddDoor(-1, 2);
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            // See WhenAWallIsMovedFromOutside_ThenMovementSeesItsNewPosition: the index is built with the door closed.
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Root.WriteCount > 0, message: "The first pass did not run");
+            _context.Game.GetTargetObjects(player);
+
+            // Act
+            door.IsOpen = true;
+            _context.TimeProvider.Advance(Game.StepInterval);
+            var result = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
+
+            // Assert
+            Assert.True(result.IsAccepted);
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
 }

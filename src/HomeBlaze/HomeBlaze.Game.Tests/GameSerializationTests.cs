@@ -10,7 +10,7 @@ public class GameSerializationTests
     public GameSerializationTests()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(Game), typeof(Wall), typeof(GamePlayer)]);
+        typeProvider.AddTypes([typeof(Game), typeof(Wall), typeof(Door), typeof(GamePlayer)]);
         var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         _serializer = new ConfigurableSubjectSerializer(typeProvider, services);
     }
@@ -75,5 +75,24 @@ public class GameSerializationTests
         Assert.False(player.IsBlocking);
         Assert.False(player.IsVisible);
         Assert.True(wall.IsBlocking);
+    }
+
+    [Fact]
+    public void WhenGameWithDoorRoundTrips_ThenTheDoorKeepsItsTypeFootprintAndState()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Objects = new Dictionary<string, GameObject> { ["door-1"] = new Door { X = 3, Y = -4, Width = 1, Depth = 4, IsOpen = true } }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+        var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Door\"", json);
+        var door = Assert.IsType<Door>(loaded.Objects["door-1"]);
+        Assert.Equal((3, -4, 1, 4, 10, true), (door.X, door.Y, door.Width, door.Depth, door.Height, door.IsOpen));
     }
 }

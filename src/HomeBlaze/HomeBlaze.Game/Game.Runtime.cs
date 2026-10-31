@@ -105,14 +105,17 @@ public partial class Game
         var name = change.Property.Name;
         return change.Property.Subject switch
         {
-            GameObject gameObject => IsFootprintProperty(name) && ReferenceEquals(gameObject.ParentGame, this),
+            GameObject gameObject => (IsFootprintProperty(name) || IsStateProperty(name)) && ReferenceEquals(gameObject.ParentGame, this),
             var subject => ReferenceEquals(subject, this) && IsCollectionProperty(name)
         };
     }
 
     private static bool IsFootprintProperty(string name) =>
-        name is nameof(GameObject.X) or nameof(GameObject.Y) or nameof(GameObject.Width) or nameof(GameObject.Depth)
-            || name == nameof(GamePlayer.IsConnected);
+        name is nameof(GameObject.X) or nameof(GameObject.Y) or nameof(GameObject.Width) or nameof(GameObject.Depth);
+
+    // The properties that IsBlocking or IsVisible follow.
+    private static bool IsStateProperty(string name) =>
+        name is nameof(GamePlayer.IsConnected) or nameof(Door.IsOpen);
 
     private static bool IsCollectionProperty(string name) =>
         name is nameof(Players) or nameof(Objects);

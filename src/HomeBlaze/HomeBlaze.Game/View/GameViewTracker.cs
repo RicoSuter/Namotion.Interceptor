@@ -1,3 +1,5 @@
+using HomeBlaze.Abstractions;
+
 namespace HomeBlaze.Game.View;
 
 /// <summary>
@@ -80,43 +82,45 @@ internal sealed class GameViewTracker
     }
 
     private bool IsUnchanged(GameViewObject known, GameObject gameObject, bool isSelf) =>
-        HasSameFootprint(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSameLabel(known, gameObject);
+        HasSameFootprint(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSamePassage(known, gameObject)
+            && HasSameLabel(known, gameObject);
 
     private static bool HasSameFootprint(GameViewObject known, GameObject gameObject) =>
         known.X == gameObject.X && known.Y == gameObject.Y && known.Width == gameObject.Width && known.Depth == gameObject.Depth;
 
     private static bool HasSameState(GameViewObject known, GameObject gameObject, bool isSelf) =>
-        known.Height == gameObject.Height && known.IsBlocking == gameObject.IsBlocking && known.IsSelf == isSelf
-            && known.Facing == GetFacing(gameObject);
+        known.Height == gameObject.Height && known.IsSelf == isSelf && known.Facing == GetFacing(gameObject);
+
+    private static bool HasSamePassage(GameViewObject known, GameObject gameObject) =>
+        known.IsBlocking == gameObject.IsBlocking && known.IsOpen == IsOpen(gameObject);
 
     private bool HasSameLabel(GameViewObject known, GameObject gameObject) =>
         known.Title == GetTitle(gameObject) && known.Color == GetColor(gameObject);
 
     private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf) =>
         new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
-            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsBlocking, isSelf);
+            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsBlocking, IsOpen(gameObject), isSelf);
 
     private static string GetKind(GameObject gameObject) => gameObject switch
     {
         GamePlayer => GameViewObject.PlayerKind,
         Wall => GameViewObject.WallKind,
+        Door => GameViewObject.DoorKind,
         _ => GameViewObject.ObjectKind
     };
 
     private static int GetFacing(GameObject gameObject) => gameObject is GamePlayer player ? (int)player.Facing : 0;
 
-    private static string GetTitle(GameObject gameObject) => gameObject switch
-    {
-        GamePlayer player => player.Title ?? string.Empty,
-        Wall wall => wall.Title ?? string.Empty,
-        _ => string.Empty
-    };
+    private static bool IsOpen(GameObject gameObject) => gameObject is Door { IsOpen: true };
+
+    private static string GetTitle(GameObject gameObject) =>
+        (gameObject as ITitleProvider)?.Title ?? string.Empty;
 
     private string GetColor(GameObject gameObject)
     {
         if (gameObject is not GamePlayer player)
         {
-            return GameColors.Wall;
+            return gameObject is Door ? GameColors.Door : GameColors.Wall;
         }
 
         if (!_playerColors.TryGetValue(player.ClientId, out var color))
