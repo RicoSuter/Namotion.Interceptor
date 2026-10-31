@@ -49,7 +49,7 @@ public class GameVolumeTableTests
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         _context.AddConnectedPlayer("tab-2", x: 10);
-        _context.AddObject("tree", new Tree { X = 5, Y = 0 });
+        _context.AddObject("tree", new Tree { X = 5, Y = 0, Variant = 6 });
 
         // Act
         _context.Game.UpdateVolumeTable();

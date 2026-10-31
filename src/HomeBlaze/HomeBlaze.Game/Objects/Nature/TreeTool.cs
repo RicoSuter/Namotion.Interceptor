@@ -35,7 +35,8 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
     public string? IconName => "Park";
 
     /// <summary>
-    /// Plants a tree with a random rotation and scale in front of the player.
+    /// Plants a tree with a random rotation and scale in front of the player, its whole trunk on the tiles right in front
+    /// and centered on the player.
     /// </summary>
     /// <param name="variant">The model, 0 to <see cref="Tree.VariantCount"/> - 1; null picks one at random.</param>
     /// <param name="caller">The acting player.</param>
@@ -53,15 +54,15 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
         }
 
         var game = GetGame();
-        var placement = game.GetPlacementInFront(caller, across: Tree.Size, along: Tree.Size);
         var tree = new Tree
         {
-            X = placement.X,
-            Y = placement.Y,
             Variant = variant ?? _random.Next(Tree.VariantCount),
             Rotation = _random.Next(360),
             Scale = _random.Next(Tree.MinimumScale, Tree.MaximumScale + 1)
         };
+        var placement = game.GetPlacementInFront(caller, across: tree.Width, along: tree.Depth);
+        tree.X = placement.X;
+        tree.Y = placement.Y;
         return game.PlaceAsync(caller, "tree", tree, cancellationToken);
     }
 }
