@@ -1,4 +1,8 @@
 using HomeBlaze.Game.Tests.Testing;
+using HomeBlaze.Game.World;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Game.Tests;
@@ -57,6 +61,46 @@ public class GameRuntimeTests
         finally
         {
             await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnObjectIsMovedWhileTheGameHoldsItsLock_ThenTheMoveDoesNotWaitForTheGame()
+    {
+        // Arrange
+        var timeProvider = new FrozenTimeProvider();
+        var clients = new FakeClientDirectory();
+        var root = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
+        var game = new Game(clients, timeProvider, NullLogger.Instance);
+        root.Game = game;
+        var wall = new Wall { X = 10, Y = 10 };
+        game.Objects = new Dictionary<string, GameObject> { ["wall"] = wall };
+        clients.Set("tab-1", isNamed: false, isConnected: true);
+        await game.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => game.Players.TryGetValue("tab-1", out var joined) && joined.IsConnected,
+                message: "The player did not join");
+            var player = game.Players["tab-1"];
+
+            // The clock stands still, so these steps use up the burst and the armed step is refused without a write of its own.
+            for (var step = 0; step < StepRateLimiter.Burst; step++)
+            {
+                game.TryMove(player, GameDirection.East, turnOnly: false);
+            }
+
+            var isWallMoved = false;
+            timeProvider.OnNextTimestamp(() => isWallMoved = Task.Run(() => wall.X = 20).Wait(TimeSpan.FromSeconds(2)));
+
+            // Act
+            game.TryMove(player, GameDirection.East, turnOnly: false);
+
+            // Assert
+            Assert.True(isWallMoved);
+        }
+        finally
+        {
+            await game.StopAsync(CancellationToken.None);
         }
     }
 
