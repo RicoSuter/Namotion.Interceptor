@@ -26,10 +26,8 @@ public class ReconcileRetentionWindowTests
     }
 
     /// <summary>
-    /// Reproduces the finding that a subject the write is about to re-commit is nonetheless released
-    /// mid-transition, and is claimable by another context while it is. The contract asserted here is
-    /// the remedy rather than the symptom: a subject the new value still holds stays attached for the
-    /// whole transition, so a concurrent claim from another context is refused rather than won.
+    /// A subject the new value still holds stays attached for the whole transition, so a concurrent
+    /// claim from another context is refused rather than won.
     ///
     /// The window is held open artificially by parking inside the detach callback of a second subject
     /// that the same removal pass genuinely drops. That callback is ordinary user code running inside

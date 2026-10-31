@@ -14,9 +14,8 @@ public class AttachmentStateCoherenceTests
     private static readonly TimeSpan HammerDuration = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Reproduces the finding that the attachment context and the anchor are not one coherent
-    /// state. Reproduces naturally: nothing holds a window open, the reader simply observes the
-    /// pair while a second thread transitions it. The window is two adjacent stores wide, so this
+    /// The attachment context and the anchor are read as one coherent state. Nothing holds a window
+    /// open: the reader simply observes the pair while a second thread transitions it. The window is two adjacent stores wide, so this
     /// hammers for a bounded time rather than a fixed iteration count.
     /// </summary>
     /// <remarks>

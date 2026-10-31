@@ -19,8 +19,7 @@ public class ReparentCascadeTests
     }
 
     /// <summary>
-    /// Passes on the current branch and is a regression guard rather than a repro. The subtree below
-    /// the reparent target survives only because the descent that runs after the new edge is
+    /// A regression guard: the subtree below the reparent target survives only because the descent that runs after the new edge is
     /// published re-reads the target's own structural getters, which rediscovers a grandchild that
     /// nothing captured and nothing else re-attaches.
     ///

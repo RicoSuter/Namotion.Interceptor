@@ -21,8 +21,8 @@ public class CrossContextGateDeadlockTests
     }
 
     /// <summary>
-    /// Reproduces the finding that a cross-context structural write from a lifecycle callback takes
-    /// the foreign gate before any guard runs. The rendezvous is artificial, because it lines both
+    /// A cross-context structural write from a lifecycle callback is rejected before it takes the
+    /// foreign gate, so two such callbacks cannot deadlock. The rendezvous is artificial, because it lines both
     /// callbacks up inside their own gates at the same time; the acquisition order they then take
     /// is the production one. A deadlock shows up as a bounded join failing rather than as a hung
     /// suite, and the worker threads are background threads so a deadlocked pair cannot keep the

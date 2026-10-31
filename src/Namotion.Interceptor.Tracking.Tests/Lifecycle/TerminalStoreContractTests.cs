@@ -83,7 +83,7 @@ public class TerminalStoreContractTests
     }
 
     /// <summary>
-    /// Parity guard, not a repro: a normalizing setter that stores a reordered subset of the
+    /// A normalizing setter that stores a reordered subset of the
     /// proposed subjects is legal and must keep working. This is also the only case that runs the
     /// stored-value claim on a value that has to pass.
     /// </summary>

@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 /// <summary>
 /// Proves the monitor's <c>[RunsAfter(typeof(LifecycleInterceptor))]</c> binds against the merged
-/// ordering seam. Registration order is deliberately adversarial: unordered resolution preserves
+/// ordering seam. Registration order is deliberately unfavorable: unordered resolution preserves
 /// registration order, so with an unbound constraint the monitor registered first would resolve
 /// ahead of the lifecycle, and the fan-out would run it before the descent.
 /// </summary>

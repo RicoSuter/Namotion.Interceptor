@@ -18,9 +18,8 @@ public class DetachCallbackAdmissionTests
     }
 
     /// <summary>
-    /// Reproduces the finding that <c>AddProperties</c> from a detach callback publishes ownership
-    /// under a parent that is already being released. Reproduces on a single thread with no
-    /// artificially held window: the release itself invokes the callback in that state. The
+    /// <c>AddProperties</c> from a detach callback publishes no ownership under a parent that is
+    /// already being released. The scenario runs on a single thread with no artificially held window: the release itself invokes the callback in that state. The
     /// departing subject is scalar-only, which is what makes the admission treat it as fully
     /// seeded and take the edge-publishing arm.
     /// </summary>
@@ -65,7 +64,7 @@ public class DetachCallbackAdmissionTests
         // Act: dropping every tire releases the departing one and runs its detach callback.
         car.Tires = [];
 
-        // Assert: the callback ran and the admission was accepted, so the repro is not vacuous.
+        // Assert: the callback ran and the admission was accepted, so the test is not vacuous.
         Assert.True(callbackRan, "the detach callback for the departing tire never ran");
         Assert.Null(admissionException);
         Assert.Null(((IInterceptorSubject)departingTire).TryGetContext());

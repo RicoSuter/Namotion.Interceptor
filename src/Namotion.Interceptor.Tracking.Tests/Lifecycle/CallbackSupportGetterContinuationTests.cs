@@ -264,4 +264,64 @@ public class CallbackSupportGetterContinuationTests
         Assert.Equal(1, replacement.GetReferenceCount());
         Assert.Null(stale.TryGetContext());
     }
+
+    [Fact]
+    public void WhenAChildGetterReplacesTheWritingProperty_ThenNoRemainingOldOccurrenceIsAttached()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new PayloadNode(context);
+        var stale = new PayloadNode();
+        var replacement = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
+        var branch = new PayloadNode { Payload = trigger };
+        trigger.OnRead = () =>
+        {
+            if (trigger.GetReferenceCount() > 0)
+            {
+                trigger.OnRead = null;
+                root.Payload = replacement;
+            }
+        };
+
+        // Act
+        root.Payload = new[] { branch, stale };
+
+        // Assert
+        Assert.Same(replacement, root.Payload);
+        Assert.Same(context, replacement.TryGetContext());
+        Assert.Equal(1, replacement.GetReferenceCount());
+        Assert.Null(branch.TryGetContext());
+        Assert.Null(trigger.TryGetContext());
+        Assert.Null(stale.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenAChildGetterKeepsAnOccurrenceTheWriteHadNotAttachedYet_ThenThatOccurrenceStillAttaches()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new PayloadNode(context);
+        var retained = new PayloadNode();
+        var trigger = new ReadHookSegmentHolder();
+        var branch = new PayloadNode { Payload = trigger };
+        trigger.OnRead = () =>
+        {
+            if (trigger.GetReferenceCount() > 0)
+            {
+                trigger.OnRead = null;
+                root.Payload = new[] { retained };
+            }
+        };
+
+        // Act
+        root.Payload = new[] { branch, retained };
+
+        // Assert
+        Assert.Same(retained, Assert.Single((PayloadNode[])root.Payload));
+        Assert.Same(context, retained.TryGetContext());
+        Assert.Equal(1, retained.GetReferenceCount());
+        Assert.Null(branch.TryGetContext());
+        Assert.Null(trigger.TryGetContext());
+    }
 }

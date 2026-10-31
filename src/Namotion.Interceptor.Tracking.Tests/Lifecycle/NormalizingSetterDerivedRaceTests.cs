@@ -12,8 +12,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 public class NormalizingSetterDerivedRaceTests
 {
     /// <summary>
-    /// Reproduces the reported defect that a derived recalculation convicts a subject a normalizing
-    /// setter stored before the reconcile attached it. The store-to-reconcile window is held open
+    /// A derived recalculation does not convict a subject that a normalizing setter stored before the
+    /// reconcile attached it. The store-to-reconcile window is held open
     /// artificially; the window itself is real and the write is legal, so the recalculating thread
     /// must not report the transient exposure as a contract violation.
     ///
@@ -81,7 +81,7 @@ public class NormalizingSetterDerivedRaceTests
         release.Set();
         var writerCompleted = writer.Join(WriteProtocolDeadlines.RendezvousTimeout);
 
-        // Assert: the window was actually open while the recalculation ran, so the repro cannot
+        // Assert: the window was actually open while the recalculation ran, so the test cannot
         // pass by the two writes serializing or by the park landing outside the window.
         Assert.True(reachedPark, "the normalizing write never parked inside the store-to-reconcile window");
         Assert.True(Volatile.Read(ref storedValueAtPark) == 1,

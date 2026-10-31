@@ -171,7 +171,7 @@ public class CallbackContractTests
     [Fact]
     public void WhenTwoLifecyclesAttachIntoEachOtherFromCallbacks_ThenNeitherDeadlocks()
     {
-        // Arrange: the reproduction of the cross-lifecycle gate deadlock. Each thread holds its
+        // Arrange: the shape of a cross-lifecycle gate deadlock. Each thread holds its
         // own gate inside a callback and reaches for the other's. The contract must reject the
         // attach before either gate is requested, so both threads finish.
         var first = CreateContext();

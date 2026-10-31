@@ -126,8 +126,7 @@ public class DictionaryOccurrenceTests
 
         // Assert: the subject the new value still holds never leaves the graph, so nothing below it
         // is torn down and rebuilt either, and a Registry projection sees the key move rather than an
-        // eviction followed by a fresh registration of the whole subtree. Master behaves the same way
-        // on this shape, except that it leaves the published index on the old key.
+        // eviction followed by a fresh registration of the whole subtree.
         Assert.Empty(detached);
         Assert.Empty(attached);
         Assert.Equal(1, car.GetReferenceCount());

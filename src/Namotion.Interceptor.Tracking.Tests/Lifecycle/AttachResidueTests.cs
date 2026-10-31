@@ -27,12 +27,7 @@ public class AttachResidueTests
     }
 
     /// <summary>
-    /// A user enumerable that runs a callback when its enumeration starts, which is where the
-    /// discovery scan invokes user code.
-    /// </summary>
-    /// <summary>
-    /// Reproduces the finding that a rejected explicit attach leaves residue behind. The rollback
-    /// contract is that a rejected attach publishes nothing at all, so this asserts each kind of
+    /// A rejected explicit attach leaves no residue behind. The rollback contract is that a rejected attach publishes nothing at all, so this asserts each kind of
     /// state the attach would have written separately rather than probing one of them and inferring
     /// the rest: no committed baseline for the root's structural property, no ownership record, no
     /// root anchor, and no claim on the context. Asserting them one by one is what makes a partial
@@ -90,7 +85,7 @@ public class AttachResidueTests
         var attachException = Record.Exception(() => ((IInterceptorSubject)holder).AttachToContext(context));
         var mutatorCompleted = mutator.Join(WriteProtocolDeadlines.RendezvousTimeout);
 
-        // Assert: the race actually happened, so the repro cannot pass without it.
+        // Assert: the race actually happened, so the test cannot pass without it.
         Assert.True(mutatorCompleted, "the mutating thread never finished");
         Assert.True(mutationObserved, "the discovery scan never observed the concurrent mutation");
         Assert.True(rootWasUnattachedAtScan, "the scan ran after the root was already claimed");
