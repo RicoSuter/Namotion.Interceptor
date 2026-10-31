@@ -112,8 +112,13 @@ internal sealed class GameWorldIndex
 
         foreach (var gameObject in objects)
         {
+            if (gameObject is GamePlayer)
+            {
+                continue;
+            }
+
             var entry = _entries[gameObject];
-            if (entry.IsBlocking && gameObject is not GamePlayer && entry.Footprint.Contains(x, y))
+            if (entry.IsBlocking && entry.Footprint.Contains(x, y))
             {
                 return true;
             }
