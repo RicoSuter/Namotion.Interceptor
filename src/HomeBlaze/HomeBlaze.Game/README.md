@@ -4,27 +4,31 @@ Maintainer documentation for the game library: how it is built, which invariants
 
 ## Overview
 
-A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every browser client of the installation is a player on an infinite grid of 25 cm tiles. Players walk in 8 directions, look at the tiles in front of them and invoke the operations of the objects standing there, such as building and demolishing walls, opening doors and sending messages. The page renders the world with Babylon.js as a tilted perspective scene centered on the own player. Players within 10 m in line of sight talk to each other with their microphones; the server mixes the audio for every listener. Several `Game` subjects may exist; each is an independent world with its own players.
+A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every browser client of the installation is a player on an infinite grid of 25 cm tiles. Players walk in 8 directions, look at the tiles in front of them and invoke the operations of the objects standing there, such as demolishing walls, adding doors to them, opening doors and sending messages, and use the tools of the game to build walls and plant trees. Object types such as walls, doors and trees use only the public API of the core; see [Objects and extension points](#objects-and-extension-points). The page renders the world with Babylon.js as a tilted perspective scene centered on the own player. Players within 10 m along an open path talk to each other with their microphones; the server mixes the audio for every listener. Several `Game` subjects may exist; each is an independent world with its own players.
 
 | Project | Contents |
 |---|---|
 | `HomeBlaze.Game` (Razor SDK) | Subjects, the page component, the JS modules and the vendored assets under `wwwroot/` |
 | `HomeBlaze.Game.Tests` | Unit tests and E2E tests |
 
-The app registers the library with a project reference in `HomeBlaze.csproj` and `.AddAssembly(typeof(HomeBlaze.Game.Game).Assembly)` in `Program.cs`. `Data/Files/Demo/Game.json` of the app holds a demo world with a house of walls and door openings, served at `/pages/Demo/Game`.
+The app registers the library with a project reference in `HomeBlaze.csproj` and `.AddAssembly(typeof(HomeBlaze.Game.Game).Assembly)` in `Program.cs`. `Data/Files/Demo/Game.json` of the app holds the demo world, served at `/pages/Demo/Game`: a house of 56 x 40 tiles (14 x 10 m) with six rooms (living room, hall, kitchen, two bedrooms and a bathroom), brick outer walls, concrete inner walls and doors 4 to 6 tiles wide, a wooden shed with a closed door to the west, a forest of 32 trees to the east, 7 more trees around the house, and the tools `wall-tool` and `tree-tool`. New players spawn at 0, 0, just south of the open entrance. A script generated the file once with a fixed random seed; the script is not part of the repository, and the file is edited like any saved world. `DemoWorldTests` checks that it loads, that every room is reachable from the spawn point and that no tree blocks a door.
 
 The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`OperationInvoker`), `HomeBlaze.Services` (`CurrentClientConnection`, the configuration serializer), `HomeBlaze.Installation` (clients), `HomeBlaze.Storage.Abstractions` (`IConfigurationWriter`) and the Namotion.Interceptor generator, tracking and registry libraries. Dependency rule: `HomeBlaze.Game` may reference `HomeBlaze.AI` for agent players; `HomeBlaze.AI` never references or mentions the game.
 
 | Folder | Contents |
 |---|---|
-| `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loops, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs`, `Game.Persistence.cs`, `Game.View.cs`, `Game.Volume.cs` (volume table), `Game.Voice.cs` (toggles, voice loop) |
-| `GameObject.cs`, `Wall.cs`, `Door.cs`, `GamePlayer.cs` | The objects on the grid |
+| `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loops, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs` (`ResolveActor`, messages), `Game.Objects.cs` (object API), `Game.Placement.cs` (placement API), `Game.Persistence.cs`, `Game.View.cs`, `Game.Volume.cs` (volume table), `Game.Voice.cs` (toggles, voice loop) |
+| `GameObject.cs`, `GamePlayer.cs`, `GameObjectSnapshot.cs` | The base of every object on the grid, the player, and the snapshot with which `UpdateAsync` undoes a refused change |
+| `Visuals/` | `GameVisual`, `GameVisualPart`, `GameVisualVector`, `GameVisualPoint`, `GameVisualShape`, `GameVisualEffect`, `GameVisualCache`, `GameAssets`, `GameVisualValidator` |
+| `Tools/` | `GameTool`, `GamePlacement` |
+| `Objects/Buildings/` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures` |
+| `Objects/Nature/` | `Tree`, `TreeVariant`, `TreeTool` |
 | `Clients/` | `IGameClientDirectory` and its installation implementation |
-| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `WallPlacement` |
-| `View/` | `GameViewTracker` and the objects and updates sent to the browser |
+| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `FrontPlacement` |
+| `View/` | `GameViewTracker` and what it sends to the browser: `GameViewObject`, `GameViewPart`, `GameViewUpdate`, and `GameColors` for players |
 | `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVolumeTable`, `TalkerQueue`, `GameVoiceMixer`, `IGameVoiceSink` |
 | `Components/` | `GamePage.razor` and `GameCallerServiceProvider` |
-| `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (meshes, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/` |
+| `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera, frame rate), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (parts, models, wind, glides, fading, players, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/`, `objects/` (assets of the object types) |
 
 ## Model
 
@@ -35,13 +39,19 @@ North is +Y and east is +X. An object covers the tiles from `X` to `X + Width - 
 | `Game` | `Name` | Configuration | Title falls back to "Game" |
 | | `Players` | Configuration | `Dictionary<string, GamePlayer>` keyed by client id, managed by the game |
 | | `Objects` | Configuration | `Dictionary<string, GameObject>` keyed by object name, managed by the user and by player actions |
+| | `Tools` | Configuration | `Dictionary<string, GameTool>` keyed by tool name, managed by the user; the game never changes it |
 | `GameObject` (abstract) | `X`, `Y` | Configuration | South-west corner of the footprint |
-| | `Width`, `Depth`, `Height` | Virtual, not persisted | In tiles; `Height` is only used for rendering. Walls and doors override them as configuration |
+| | `Width`, `Depth`, `Height` | Virtual, not persisted | In tiles, 1 to `MaximumSize` (1024); `Height` is used for rendering, for the size check of the index and by walls for sound blocking. Walls and doors override them as configuration, trees compute them from variant and scale, players fix them |
+| | `Visual` | Virtual, not persisted | A `GameVisual`, by default a gray box of the footprint and `Height`; see [Objects and extension points](#objects-and-extension-points) |
 | | `IsMovementBlocking`, `IsVisible` | Virtual, not persisted | `true` by default |
 | | `IsSoundBlocking` | Virtual, not persisted | Whether the object stops sound, `false` by default, so an object that blocks movement, such as a plant or a chair, lets sound through; see the hearing range under [Voice](#voice) |
-| `Wall` | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | Defaults 4 x 1 x 10 tiles (1 m long, 25 cm thick, 2.5 m tall). `IsSoundBlocking => true` |
+| `Wall` | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | Defaults 4 x 1 x 10 tiles (1 m long, 25 cm thick, 2.5 m tall). `IsSoundBlocking` is `Height >= 8`: a wall of 2 m or more blocks sound, a lower one lets it pass over |
+| | `Material` | Configuration | `Bricks` (default), `Concrete` or `Wood` |
 | `Door` | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | Defaults 4 x 1 x 10; use 1 x 4 in a north-south wall |
-| | `IsOpen` | Configuration | Closed by default. `IsMovementBlocking` and `IsSoundBlocking` are `!IsOpen` |
+| | `Material` | Configuration | The material of the lintel, `Bricks` by default; "Add door" copies the wall's |
+| | `IsOpen` | Configuration | Closed by default. `IsMovementBlocking` and `IsSoundBlocking` are `!IsOpen`, whatever the height |
+| `Tree` | `Variant`, `Rotation`, `Scale` | Configuration, `[Range]` | 0 to 6, 0 to 359 degrees clockwise, 80 to 120 percent; defaults 0, 0, 100. A loaded value outside the range shows variant 0, the rotation modulo 360 or the nearest scale |
+| | `Width`, `Depth`, `Height` | Computed | The trunk footprint and height of the variant times the scale; not configurable. Blocks movement, not sound |
 | `GamePlayer` | `Facing` | Configuration | `GameDirection`, north by default |
 | | `ClientId`, `ClientTitle`, `IsConnected` | State | `ClientId` is set from the dictionary key in `OnPlayersChanging` |
 | | `IsMicrophoneOn`, `IsAudioOn` | State | Switched only by the player's own pages, not persisted, reset when the client disconnects |
@@ -50,15 +60,76 @@ North is +Y and east is +X. An object covers the tiles from `X` to `X + Width - 
 
 `GamePlayer` derives from `GameObject`, so one index covers players and objects and the renderer treats both alike. They still live in two collections because different parties manage them. The player's footprint is square, so turning never changes the tiles it covers. `GamePlayer` is `[ExcludeFromCreation]`.
 
-`Objects` is typed as the abstract `GameObject`, which relies on `ConfigurationJsonTypeInfoResolver` writing and reading `$type` for properties declared as an abstract `IConfigurable` class.
+`Objects` and `Tools` are typed as the abstract `GameObject` and `GameTool`, which relies on `ConfigurationJsonTypeInfoResolver` writing and reading `$type` for properties declared as an abstract `IConfigurable` class.
 
 Persistence:
 
 - The game writes its configuration through the first parent `IConfigurationWriter`. Without one it logs a warning and does not retry.
-- Building, demolishing, opening and closing write immediately, outside the lock.
+- `PlaceAsync`, `RemoveAsync`, `UpdateAsync` and `ReplaceAsync`, and with them building, planting, demolishing, adding doors, opening and closing, write immediately, outside the lock. Canceling their token only stops the write: the change stays applied and a later pass saves it.
 - Joins, moves and turns only set `_isSaveRequested`; the next loop pass writes them in one go. `StopAsync` writes what is still pending and logs a warning when it is canceled.
 - A write that fails or returns false logs a warning and sets the request again, so the next pass retries; the game keeps running.
 - Anonymous players are written like any other but dropped by the first reconcile after a load, because their client no longer exists.
+
+## Objects and extension points
+
+The core (`Game*.cs`, `GameObject`, `GamePlayer`, `Visuals/`, `Tools/`, `World/`, `View/`, `Voice/`, `Components/`) names no object type. Every object type lives in a folder of `Objects/` with a namespace of its own and uses only public and protected members of the core, so a later split into libraries only moves files and changes the `$type` names in saved worlds. Reviews check this rule; members an object folder declares itself may be internal, such as `WallTextures` or `Tree.Variants`.
+
+| Folder | Namespace | Types |
+|---|---|---|
+| `Objects/Buildings/` | `HomeBlaze.Game.Objects.Buildings` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures`; walls and doors share a folder because "Add door" creates doors |
+| `Objects/Nature/` | `HomeBlaze.Game.Objects.Nature` | `Tree`, `TreeVariant`, `TreeTool` |
+
+Moving `Wall` and `Door` into `Objects/Buildings` changed their `$type` from `HomeBlaze.Game.Wall` and `HomeBlaze.Game.Door` to `HomeBlaze.Game.Objects.Buildings.Wall` and `HomeBlaze.Game.Objects.Buildings.Door`. The loader has no rename mapping, so a world saved before needs those names replaced in its file.
+
+Extension points:
+
+| Member | Contract |
+|---|---|
+| `GameObject.Visual` | How the object looks, a `GameVisual`; by default a gray box (`GameVisual.DefaultColor`) filling the footprint and `Height` |
+| `GameObject.GetGame()` | Protected: the game whose `Objects` holds the object, to call the object API from an operation |
+| `GameTool` | An abstract configurable subject in `Game.Tools`, saved with `$type` like objects. It reaches its game through the protected `GetGame()`, which follows the subject graph rather than a constructor, and offers operations with a nullable `[FromServices] GameCaller` parameter, which the page lists for every player |
+| `GameAssets.Url(type, path)` | `_content/<assembly of type>/<path>`, so the URL of an asset under `wwwroot/` follows its type into another library |
+| `Game.ResolveActor(caller)` | The player of this game the caller acts as, or null |
+
+Tool and operation parameters with a default are nullable, so an empty dialog field means the default, both in the dialog and over MCP. `[Range]` documents the limits; `MethodParameterDialog` does not enforce it, so the operations check again.
+
+Visuals (`Visuals/`):
+
+- `GameVisual` is an immutable record of `GameVisualPart`s that compares by value, parts included. `GameVisual.Box(width, height, depth, color)` creates one box.
+- A part is a `Box` or a `Model` (`GameVisualShape`) with `Offset` and `Size` in tiles (`GameVisualVector`, relative to the south-west corner of the footprint at ground level; as a size, X is the width, Y the height and Z the depth), a `Pivot` (`GameVisualPoint`) and a `Rotation` around it in degrees clockwise seen from above, `Texture`, `TextureScale` (tiles per repeat horizontally and vertically) and `Color` (`#rrggbb`, which tints the texture) for boxes, `Model` for models, `Effect` (`None` or `Wind`) and `Animation` (the name of a model animation that loops). A model is scaled uniformly to the largest size whose bounding box fits in `Size`, with its origin at the horizontal center of the part's box and its lowest point at the box's bottom.
+- An object computes its visual from configuration or state properties only, because the page observes exactly those, and caches it per state with `GameVisualCache<TKey>`, which returns the same instance for an unchanged key, so the tracker's comparison stops at the reference and allocates nothing.
+- `GameViewTracker` validates a visual when it builds a view object (`GameVisualValidator`). More than 16 parts (`MaximumParts`), offsets, sizes or pivots outside -1024 to 1024 tiles (`MaximumExtent`), negative sizes, a rotation that is not finite, undefined enum values, a texture scale outside 0 (exclusive) to 1024, a color other than `#rrggbb`, an animation name over 64 characters, a model part without a model, and URLs that do not start with `_content/`, are longer than 512 characters or contain `..` or `%` make the object show as its default box. The server logs a warning once per object type and process, remembering the types in a `ConditionalWeakTable` so that an unloaded plugin type is not kept alive. The browser receives the parts with short property names (`GameViewPart`).
+
+Object API on `Game`:
+
+| Member | Behavior |
+|---|---|
+| `GetPlacementInFront(caller, across, along)` | Returns a `GamePlacement(X, Y, Width, Depth, Facing)` for an object `across` tiles wide across the facing direction and `along` tiles deep along it, starting on the tile right in front of the caller's player and centered on the player's center across the facing (an odd remainder goes east or north). Does not check whether the tiles are free. Refuses without a player ("Only a player in the game can place objects."), when facing diagonally ("Face north, east, south or west to place objects.") and beyond the `int` range ("Something is in the way.") |
+| `PlaceAsync(caller, namePrefix, gameObject, cancellationToken)` | Adds the object under the prefix, a dash and 8 random hex digits. Refuses without a player, and with "Something is in the way." when the object blocks movement and a movement blocking object covers one of its tiles |
+| `RemoveAsync(gameObject, cancellationToken)` | Removes an object of this game |
+| `UpdateAsync(gameObject, change, cancellationToken)` | Runs `change` under `_lock` and updates the index. When the change throws, or the object then blocks movement and overlaps another movement blocking object, `GameObjectSnapshot` writes back the writable configuration and state properties that differ from before through the registry, and the call throws ("Something is in the way." for the overlap). The change may only set properties of the object and must not call into the game |
+| `ReplaceAsync(gameObject, replacements, cancellationToken)` | Removes the object and adds the replacements under new names in one step under `_lock`, so no page sees an intermediate state. Refuses, changing nothing, when a movement blocking replacement overlaps a movement blocking object other than the replaced one or another replacement, and when a replacement is listed twice or already part of the game |
+
+All five take `_lock` themselves; the four that change the world save right away outside it, and canceling only stops the write, so the change stays applied and a later pass saves it. Refusals throw `InvalidOperationException` with a message for the player, which the error dialog shows; an object that is not part of this game is refused with "The object is not part of this game.". Invalid arguments, such as an empty name prefix or a size outside 1 to 1024, throw `ArgumentException`.
+
+Objects:
+
+- `Wall`: one box of its material's texture, bricks 8, concrete 10 and wooden planks 6 tiles per repeat (2 m, 2.5 m and 1.5 m); a `Material` outside the enum looks like bricks. `IsSoundBlocking` is `Height >= 8` (the private `SoundBlockingHeight`, 2 m, above head height).
+- "Add door" replaces a wall one tile thick by a wall, a door and a wall, named `wall-` and `door-` plus 8 random hex digits, all with the wall's height and material. The door is centered on the caller's player along the wall, with the extra tile of an odd width to the east or north as in `GetPlacementInFront`, or on the wall's center without a player (subject page, MCP), and moved inward so that one wall tile (`DoorMargin`) remains on each side. It is disabled through `KnownAttributes.IsEnabled` while the wall is thicker than one tile or shorter than 4 tiles (`MinimumDoorWallLength`). It refuses a width outside 2 to 8, a wall thicker than one tile ("Only a wall one tile thick can take a door."), a width that does not fit ("This wall is too short for a door of N tiles; it fits up to M."), a wall that reaches past the `int` range and pieces that would overlap another object ("Something is in the way."). Several doors per wall come naturally, because the remaining pieces are ordinary walls.
+- `Door`: a lintel of its `Material` above the leaf height of 8.4 tiles (2.1 m, `LeafHeight`), left out when the door is not taller, and a wooden leaf 0.3 tiles thick with its pivot at the hinge, at the west end of a door running east to west or the south end of one running north to south, turned by -90 degrees while open, so it opens toward the north or the west.
+- `Tree`: `Variant` picks a row of the variant table `Tree.Variants`, `Rotation` turns the model around the trunk's center and `Scale` scales the row's sizes. `Width` and `Depth` are the trunk size times the scale, rounded to an even number of at least 2, so the trunk's center is a tile corner like a player's center; `Height` is the height times the scale, rounded up. The visual is one model part with the `Wind` effect in a box of crown by height by crown tiles, centered on the trunk. The crown is at least as wide as the model, so fitting it scales the model to the row's height, and the box holds the crown at every rotation. `TreeTool` takes a `Random` in an internal constructor, so tests seed it.
+
+| Variant | Model | Height at 100 % | Trunk | Crown |
+|---:|---|---:|---:|---:|
+| 0 | `common_tree_1.glb` | 24 | 6 | 26 |
+| 1 | `common_tree_2.glb` | 21 | 4 | 19 |
+| 2 | `common_tree_3.glb` | 24 | 4 | 17 |
+| 3 | `common_tree_1_autumn.glb` | 22 | 4 | 24 |
+| 4 | `pine_tree_1.glb` | 22 | 4 | 13 |
+| 5 | `pine_tree_2.glb` | 24 | 2 | 12 |
+| 6 | `pine_tree_3.glb` | 16 | 2 | 8 |
+
+All sizes are in tiles at a scale of 100 percent: the height is the shown height, the trunk the width and depth of the footprint, and the crown the diameter around the trunk that holds the whole crown at that height, taken from the model files.
 
 ## Clients and players
 
@@ -87,16 +158,18 @@ Moving is not an operation. The page calls the internal `Game.TryMove(player, di
 
 The target area (`TargetArea`) is the footprint shifted one tile toward the facing, minus the footprint itself: 2 tiles straight ahead, 3 tiles around the corner when facing diagonally. `GetTargetObjects` returns the visible objects there, ordered from south-west to north-east.
 
-Operations are the actions. Those that need to know who acts take `[FromServices] GameCaller? caller`; the page invokes through `GameCallerServiceProvider`, which returns its `GameCaller` and delegates every other service to the circuit. `Game.ResolveActor` is the single place that turns a caller into a player of this game and returns null otherwise, also for a player of another game. The subject page, MCP and agents pass no caller.
+Operations are the actions, those of the objects and those of the tools in `Game.Tools`; the game itself has none. Those that need to know who acts take `[FromServices] GameCaller? caller`; the page invokes through `GameCallerServiceProvider`, which returns its `GameCaller` and delegates every other service to the circuit. `Game.ResolveActor` is the single place that turns a caller into a player of this game and returns null otherwise, also for a player of another game. The subject page, MCP and agents pass no caller.
 
 | Operation | Actor | Behavior |
 |---|---|---|
-| `Game.BuildWallAsync` | Required | Places a default wall across the facing, right in front of and centered on the actor (`WallPlacement`), named `wall-` plus 8 random hex digits. Refuses diagonal facing and blocked tiles |
-| `Wall.DemolishAsync` | None | Removes the wall from its parent game |
-| `Door.OpenAsync`, `Door.CloseAsync` | None | `Game.SetDoorOpenAsync` under the lock. Refuses the current state, and refuses closing while another blocking object covers a door tile |
+| `WallTool.BuildWallAsync` ("Build wall") | Required | `length` 1 to 40 (4 when empty), `height` 1 to 20 (10), `material` (`Bricks`). Builds a wall one tile thick right in front of the actor, across the facing and centered on it (`GetPlacementInFront(caller, length, 1)`, `PlaceAsync`), so a length of 40 reaches about 20 tiles to each side; named `wall-` plus 8 random hex digits. Refuses parameters out of range, diagonal facing and blocked tiles |
+| `TreeTool.PlantTreeAsync` ("Plant tree") | Required | `variant` 0 to 6, random when empty. Plants a tree with a random rotation and a random scale of 80 to 120 percent, its trunk footprint right in front of and centered on the actor; named `tree-` plus 8 random hex digits |
+| `Wall.DemolishAsync`, `Tree.DemolishAsync` | None | `Game.RemoveAsync` |
+| `Wall.AddDoorAsync` ("Add door") | Optional | `width` 2 to 8 (4 when empty). Replaces the wall by a wall, a door and a wall through `Game.ReplaceAsync`; see [Objects and extension points](#objects-and-extension-points) |
+| `Door.OpenAsync`, `Door.CloseAsync` | None | `Game.UpdateAsync`. Refuses the current state, and refuses closing with "Something is in the way." while another movement blocking object covers a door tile |
 | `GamePlayer.SendMessageAsync` | Optional | Notification "Message from {sender}" to the player's client, "Message" without actor. At most 500 characters after trimming; one message per second per sending player |
 
-The panel offers every operation except those excluded from the user interface and those disabled through their `KnownAttributes.IsEnabled` attribute (`Door.Open_IsEnabled`, `Door.Close_IsEnabled`). Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply. Invoking goes through `OperationInvoker.InvokeAsync`, so parameter, confirmation, error and result dialogs behave as in the subject browser. Before invoking, the page checks that the object is still in the target area; while a dialog is open the browser does not move the player.
+The panel offers every operation except those excluded from the user interface and those disabled through their `KnownAttributes.IsEnabled` attribute (`Door.Open_IsEnabled`, `Door.Close_IsEnabled`, `Wall.AddDoor_IsEnabled`). Disabled operations are left out rather than shown disabled, so the number keys only reach operations that apply. Invoking goes through `OperationInvoker.InvokeAsync`, so parameter, confirmation, error and result dialogs behave as in the subject browser. Before invoking, the page checks that the object is still in the target area; while a dialog is open the browser does not move the player. The page remembers the parameters entered per operation, keyed by object type and operation (`{type}.{method}`), so "Add door" remembers its width across walls, for as long as the page lives. It prefills the next dialog of that operation through `initialValues` of `OperationInvoker.InvokeAsync`, which reports the entered values through `parametersEntered`; only parameters entered in one field are prefilled.
 
 ## Voice
 
@@ -108,7 +181,7 @@ Hearing range (`World/HearingRange`, the only definition of who hears whom and h
 
 - Sound travels along the shortest open path between the footprint centers. Players whose centers are `HearingRadius` (40 tiles, 10 m) or more apart never hear each other.
 - The volume is the distance gain of the path length times the occlusion gain of the detour, the length by which the path exceeds the straight distance. The distance gain is 1 up to `ReferenceDistance` (4 tiles, 1 m) and `ReferenceDistance / length` beyond, so 2 m give 0.5 and 5 m give 0.2, times a smoothstep fade from 1 to 0 over the last `EdgeFade` (8 tiles, 2 m) before the radius. The occlusion gain is `1 / (1 + detour / HalvingDetour)`, so a detour of `HalvingDetour` (4 tiles, 1 m) halves the volume. The four constants live in `HearingRange`.
-- Sound follows `GameObject.IsSoundBlocking`, not the movement rule `IsMovementBlocking`: `GameWorldIndex.IsSoundBlocked` blocks a tile that an object with `IsSoundBlocking` covers. Walls and closed doors block sound; open doors, players and objects that only block movement do not. The index stores the flag in its entry, so opening or closing a door increases its `Version` and rebuilds the volume table. Visibility does not matter, and the height does not either, so a low wall blocks like a full one. A player in a room whose walls and doors are all closed is silent outside it.
+- Sound follows `GameObject.IsSoundBlocking`, not the movement rule `IsMovementBlocking`: `GameWorldIndex.IsSoundBlocked` blocks a tile that an object with `IsSoundBlocking` covers. Walls of at least 8 tiles (2 m) and closed doors block sound; lower walls, open doors, players, trees and objects that only block movement do not. The index stores the flag in its entry, so opening or closing a door increases its `Version` and rebuilds the volume table. Visibility does not matter, and the height matters only through an object's own rule, such as the wall's. A player in a room whose walls and doors are all closed is silent outside it.
 - While the straight line between the centers touches no blocking tile, the path is that line and its exact length counts, with no detour. The walk takes every tile that the closed segment touches, also only at an edge or a corner, so the line slips neither between two walls that touch at a corner nor along the face of a wall. A line between two players at the same `Y` runs on the grid line between two rows and touches both. Tiles inside either player's footprint are skipped. The walk computes in half tiles, where every footprint center is a whole number, with `long` arithmetic, so it is exact, symmetric and safe near the `int` limits.
 - Otherwise `World/SoundPathSearch` finds the path. It runs Dijkstra between the centers of the tiles within the radius plus 2 tiles around the source footprint, 86 by 86 tiles for a player. A tile is open while no object with `IsSoundBlocking` covers it. Steps go to the 16 tiles at the offsets (1, 0), (1, 1) and (2, 1) in every orientation, with integer lengths in thousandths of a tile, and need every tile that the segment between the two centers passes or touches to be open: a straight step only its target, a diagonal step also both tiles beside its corner, so it never cuts through a joint where two walls meet at a corner, and a step to (2, 1) also the tiles (1, 0) and (1, 1), since it passes through no corner point. The path keeps half a tile from a wall instead of only not touching it, so unlike the line it may run beside the face of a wall, and a gap of one tile passes sound although players, 2 tiles wide, cannot walk through it.
 - The search starts at every tile of the source footprint with its grid length from the footprint center, and a target's length is the shortest over its footprint tiles of the length there plus the grid length to its center. The tiles of the source footprint count as open even where a sound blocking object overlaps them, like the line walk skips them, and a target tile that is not open still gets the length of a step into it but continues no path. So that both orders agree also there, the search always runs from the player with the ordinally smaller client id.
@@ -132,7 +205,7 @@ Volume table (`Voice/GameVolumeTable`, `Game.Volume.cs`):
 
 - An immutable snapshot with a row for every connected player, regardless of its toggles, listing the players it hears and their volume above 0. Nearby uses it too.
 - `GameVolumeTable.Build` compares only the players within `HearingRange.GetArea`, which the chunk index finds, and computes each pair once, from the player with the ordinally smaller client id, adding it to both rows. That player goes first, so its blocked pairs share one search, which runs only when the straight line of one of them is blocked. A rebuild therefore costs at most one bounded search per player, at most every `VolumeTableInterval` (100 ms): about 0.07 ms per search and 1.5 ms per rebuild for 10 players near each other in a walled area, measured with an optimized build. `GameVolumeTable.Create` builds a table from given rows; tests use it as a factory.
-- `UpdateVolumeTable`, called only by the voice loop, first checks without the lock that `VolumeTableInterval` passed since the last rebuild, so a stale index is not rebuilt on every tick. The gate only limits rebuilds: once the interval passed without a change, every tick of the idle voice loop still takes `_lock` to compare the version, which is uncontended and short. Under `_lock` it then rebuilds when the index `Version` changed or `_isVolumeTableDirty` is set. The version increases with every change of the index, which covers moves, joins, leaves, walls and doors, also from outside through the lazy index rebuild. Toggles, resets and released players set the flag although rows ignore toggles, so that `VolumeTableChanged` tells the pages about them.
+- `UpdateVolumeTable`, called only by the voice loop, first checks without the lock that `VolumeTableInterval` passed since the last rebuild, so a stale index is not rebuilt on every tick. The gate only limits rebuilds: once the interval passed without a change, every tick of the idle voice loop still takes `_lock` to compare the version, which is uncontended and short. Under `_lock` it then rebuilds when the index `Version` changed or `_isVolumeTableDirty` is set. The version increases with every change of the index, which covers moves, joins, leaves and changed objects, also from outside through the lazy index rebuild. Toggles, resets and released players set the flag although rows ignore toggles, so that `VolumeTableChanged` tells the pages about them.
 - It publishes the table through a `volatile` field and then raises `VolumeTableChanged` outside the lock.
 
 Mixer (`Voice/GameVoiceMixer`, one per game, with its own lock):
@@ -207,11 +280,11 @@ Browser (`game-voice.js`, per view id like `game.js`):
 
 ## Threading invariants
 
-`_lock` guards `Players`, `Objects`, the positions and door states of their objects, the index, `_pendingPlayers`, `_pendingObjects`, `_isSaveRequested`, the per-player rate limiters and message timestamps, the per-player microphone page and speaker pages, `_voicePlayers`, and the volume table's dirty flag, index version and scratch list. Every game write that two players could race on (move, join, build, demolish, open, close) happens under it, so two players never take one tile.
+`_lock` guards `Players`, `Objects`, the positions of their objects and the states that `UpdateAsync` changes, the index, `_pendingPlayers`, `_pendingObjects`, `_isSaveRequested`, the per-player rate limiters and message timestamps, the per-player microphone page and speaker pages, `_voicePlayers`, and the volume table's dirty flag, index version and scratch list. Every game write that two players could race on (move, join, place, remove, update, replace) happens under it, so two players never take one tile.
 
 The property change observer (`Game.OnPropertyChanged`, and the page's handler) runs synchronously inside the write that caused it, on the writer's thread, while the change observable holds its own synchronization gate. A write under `_lock` waits for that gate. If an observer took `_lock`, an outside write delivering its change (holding the gate, waiting for `_lock`) and a game write (holding `_lock`, waiting for the gate) would deadlock. So observers never take `_lock` and never block: they call `SignalReconcile` or `RequestIndexRebuild`, and the page only schedules a flush. Apart from client changes, `OnPropertyChanged` ignores writes made on a thread that holds `_lock`, because the game keeps the index up to date for its own writes.
 
-The index is rebuilt lazily. `RequestIndexRebuild` sets `_isIndexStale` with `Volatile.Write`, without the lock. `GetIndex`, called under the lock, clears the flag with `Interlocked.Exchange` before rebuilding from `Players` and `Objects`, so a request that arrives during a rebuild causes another one on the next use. A rebuild is requested by outside changes (a replaced `Players` or `Objects`, a changed `X`, `Y`, `Width`, `Depth`, `IsConnected` or `IsOpen` of an object of this game), by an applied configuration of the game or an object, and by reconciling when the player set changes. The game's other changes update the index incrementally. Two blocking objects on one tile, possible through hand edits, simply keep it blocked. An object with a width, depth or height outside 1 to 1024, possible in a loaded file that skips validation, is left out of the index, so it neither blocks nor renders.
+The index is rebuilt lazily. `RequestIndexRebuild` sets `_isIndexStale` with `Volatile.Write`, without the lock. `GetIndex`, called under the lock, clears the flag with `Interlocked.Exchange` before rebuilding from `Players` and `Objects`, so a request that arrives during a rebuild causes another one on the next use. A rebuild is requested by outside changes (a replaced `Players` or `Objects`, or any property change of an object of this game on a thread that does not hold `_lock`, because the core knows no object type and cannot tell which properties its footprint and blocking follow), by an applied configuration of the game or an object, and by reconciling when the player set changes. The game's other changes update the index incrementally. Two blocking objects on one tile, possible through hand edits, simply keep it blocked. An object with a width, depth or height outside 1 to 1024, possible in a loaded file that skips validation, is left out of the index, so it neither blocks nor renders.
 
 Outside replacements of `Players` or `Objects` (configuration editor, reload) happen without `_lock`. `OnPlayersChanging` and `OnObjectsChanging` run in the generated setter before the write reaches the interceptor chain, so they may take `_lock`; when the writing thread does not hold it, they record the new value as pending. `CurrentPlayers` and `CurrentObjects` return the pending value when there is one, and every copy-on-write of the game starts from them and clears the pending value through `ReplacePlayers` and `ReplaceObjects`. This keeps a game write that runs between an outside write's hook and its landing from discarding the outside value.
 
@@ -248,7 +321,7 @@ Voice has its own module, `game-voice.js`; see Voice.
 
 Flushing: the page subscribes to property changes of the game and of every `GameObject`. The handler only sets a flag and starts a 50 ms delay, after which `FlushAsync` runs on the renderer dispatcher, so updates go out in batches of at most about 20 per second. A flush asks `Game.UpdateView` for the diff of the visible objects within `ViewRadius` (200 tiles, 50 m) of the own player, or of the origin without one, found through the chunk index. A `JSException` from `applyUpdate` marks the view broken and stops the subscription; later flushes skip the view but keep the voice and the actions in step, although Position and the toggle icons of Nearby may stay stale. `VolumeTableChanged` schedules a flush too, which rebuilds Nearby from the new table.
 
-`GameViewTracker` keeps one `GameViewObject` per known object with an id unique within the page. It recreates a view object only when a sent field changed and returns a shared empty update when nothing changed, so an unchanged view allocates nothing. Player colors derive from the client id with FNV-1a and are cached per client id; walls and doors have fixed colors.
+`GameViewTracker` keeps one `GameViewObject` per known object with an id unique within the page. It recreates a view object only when a sent field changed and returns a shared empty update when nothing changed, so an unchanged view allocates nothing. Player colors derive from the client id with FNV-1a and are cached per client id. Other objects carry their colors and textures in their visual, which the tracker compares by value after a reference check, and send the parts of the validated visual; players carry no visual, because the page draws them itself. View objects have two kinds, `player` and `object`.
 
 Prediction and reconciliation (`game-input.js`): each step carries an increasing sequence number rather than key down and up, so a delayed message never makes a player walk further. The browser applies the step at once with `predictStep`, which mirrors `Game.TryGetStep` against the blocking objects it knows (not the rate limit). When the answer arrives, it drops the answered steps, starts again from the server's position and replays the steps still pending. A server update of the own player is taken only while no step is pending. When the own player leaves the view or stops being the own player, `reset` drops the prediction and pending steps, and a generation counter discards answers to steps sent before.
 
@@ -268,22 +341,28 @@ Rendering:
 
 - One world unit is one tile. The camera looks at a point 3 tiles above the own player from 28 tiles above and 30 tiles south of it, follows smoothly and snaps on jumps over 20 tiles. Fog runs from 110 to 230 tiles. There are no shadow maps; a soft blob under each player gives depth.
 - The ground is one 600 tile plane that follows the player in whole meters, so its grass texture and the 1 m grid drawn into the texture border stay on the tiles. The target area is marked tile by tile.
-- Walls are individual boxes with per-face UVs scaled to their size (one brick repeat per 8 x 4 tiles), not thin instances, so the texture keeps its size on every wall length.
-- Doors are a brick lintel from 8.4 tiles up to the full height and a wooden panel 8.4 tiles tall and 0.3 thick, hinged at the west end of an east-west opening or the south end of a north-south one. Opening swings it a quarter turn over 300 ms.
-- Walls and doors that the segment from the camera to the own player's head crosses fade to 30 % visibility.
+- Every object but a player is a node at the south-west corner of its footprint with one child per part of its visual: a pivot node that turns the part and an offset node below it. A box part is a box mesh with per-face UVs scaled to its size by `TextureScale`, so the texture keeps its size on every wall length; boxes share one material per texture and color. A model part instantiates the glTF of its URL, loaded once per URL, as cloned meshes that share geometry and materials (`instantiateModelsToScene` with `doNotInstantiate`). A model that fails to load shows a gray box of the part's size, and the console logs the URL once.
+- A change of a part's offset or rotation glides over 300 ms (`GLIDE_MS`), easing out, which swings a door leaf; any other change of a part, or of the number of parts, rebuilds the object.
+- `Wind` parts use a clone of each of their materials, cached per material, with a material plugin that moves each vertex sideways by the square of its height above its mesh's origin times `WIND_STRENGTH`, swaying at `WIND_SPEED` and gusting at `GUST_SPEED` with a phase from the mesh's world position, so neighboring trees do not sway in step. The phases wrap on the CPU, so a 32-bit float keeps them precise after hours. `Animation` plays the named animation group of a model in a loop.
+- Every object but a player fades to 30 % visibility (`FADED_VISIBILITY`) while it hides the own player's head, at 80 % of the player's height, from the camera. Every 100 ms (`SIGHTLINE_CHECK_MS`) the segment from the camera to the head is tested exactly against the triangles of each mesh whose bounding box it crosses; the boxes only preselect, because the bounds of a trunk with leaning branches can cross the segment where no triangle does. An object stays faded for 300 ms (`FADE_HOLD_MS`) after its last hit, so it does not blink while the camera follows a step, and its visibility glides over 200 ms (`FADE_MS`). An object is tested only after the scene rendered once since it was added, rebuilt or placed, because until then its meshes keep the bounds of the origin, next to the own player.
+- A glTF material has a fixed transparency mode, in which Babylon ignores the mesh visibility for blending, so a faded mesh shows a blending copy of its material instead, created on first use and drawn with a depth pre-pass; the shared materials stay untouched, so fading one object never changes another.
 - Players are instances of the glTF character, scaled to their `Height`, rotated to their facing, with the shirt tinted and a billboard label.
+- The frame rate shows at the top left of the view in the element marked `data-game-fps`, which `game.js` updates every 500 ms.
+- For tests and diagnosis the canvas carries `data-game-parts` (parts of the objects in view), `data-game-models` (model parts showing their model), `data-game-model-failures` (model parts showing the fallback box) and `data-game-faded` (objects faded now).
 
-Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** with the pad, **Voice** (microphone and speaker buttons, errors below the top of the panel), **Looking at** (only while targets exist, actions numbered 1 to 9 across all targets), **Actions** (operations of the `Game`, disabled without a player) and **Nearby** (the own player first, then the players in its row of the volume table by title, each with a crossed-out microphone or speaker while that one is off, dimmed while the own speaker is off). A new table with the same players keeps the list, because their toggles and titles reach it through the view.
+Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** with the pad, **Voice** (microphone and speaker buttons, errors below the top of the panel), **Actions** (operations of the `Game`, then of every tool ordered by its name in `Tools`, disabled without a player; they come first, so they keep their place while targets come and go), **Looking at** (only while targets exist, actions numbered 1 to 9 across all targets) and **Nearby** (the own player first, then the players in its row of the volume table by title, each with a crossed-out microphone or speaker while that one is off, dimmed while the own speaker is off). A new table with the same players keeps the list, because their toggles and titles reach it through the view.
 
 ## Assets and licenses
 
-Everything is vendored under `wwwroot/`, served by `MapStaticAssets` (compressed and fingerprinted at build time). Each folder has a `LICENSE.md` with source and terms.
+Everything is vendored under `wwwroot/`, served by `MapStaticAssets` (compressed and fingerprinted at build time). Each folder has a `LICENSE.md` with source and terms, which lists every file of the folder. The assets of an object type live under `objects/<folder>/`, apart from those of the core, so they move with the type into another library.
 
 | Folder | Asset | License |
 |---|---|---|
 | `lib/babylonjs/` | Babylon.js 9.31.0 core and glTF loader (UMD builds) | Apache 2.0 |
 | `models/` | `Casual_2.glb` from the Ultimate Modular Men pack by Quaternius, only `Idle_Neutral` and `Walk` kept | CC0 |
-| `textures/` | ambientCG Grass004 (`grass.jpg`) and Bricks097 (`bricks.jpg`), re-encoded | CC0 |
+| `textures/` | ambientCG Grass004 (`grass.jpg`), re-encoded | CC0 |
+| `objects/buildings/textures/` | ambientCG Bricks097 (`bricks.jpg`, stacked to a square), Concrete046 (`concrete.jpg`) and Planks021 (`wood.jpg`), re-encoded to 512 x 512 | CC0 |
+| `objects/nature/models/` | Seven trees of the low poly nature pack by flo-bit, unchanged GLB files from a pinned commit | CC0 |
 
 To swap the character, replace the GLB and its license, then update `game-entities.js`: the file name in `LoadAssetContainerAsync`, `IDLE_ANIMATION`, `WALKING_ANIMATION`, `SHIRT_MATERIAL` (the material tinted with the player color) and `WALKING_SPEED_RATIO` so the feet keep pace with one tile per step. The model is scaled from its bounding box to the player's `Height` and must face north (+z) after the loader's handedness conversion.
 
@@ -300,7 +379,11 @@ The E2E tests need Playwright's Chromium (`playwright.ps1 install chromium` from
 |---|---|
 | `TestRoot` | A root subject that holds the game and counts configuration writes; `FailsToWrite` simulates failures |
 | `FakeClientDirectory` | Thread-safe clients and recorded notifications; `RemoveInstallation` simulates a missing installation |
-| `GameTestContext` | A game in a `TestRoot` with a `FakeTimeProvider` and fake clients; adds connected players, walls and doors |
+| `GameTestContext` | A game in a `TestRoot` with a `FakeTimeProvider` and fake clients; adds connected players, walls, doors, other objects and tools |
+| `MovementBlocker` | An object that blocks movement but lets sound through, like a plant or a chair |
+| `VisualObject`, `WarnedVisualObject` | Objects whose visual a test sets; the second is a type of its own for the warning that is logged once per type |
+| `RecordingLogger` | A thread-safe logger that records its entries |
+| `RepositoryPaths` | Finds repository files, such as the demo world and the tree models, from the test output |
 | `FrozenTimeProvider` | A stopped clock that runs a callback inside its next reading, which lets a test act while the game holds its lock |
 | `VoiceFrames` | Builds and reads frames of 16-bit little-endian samples |
 | `RecordingVoiceSink` | A thread-safe sink that records the frames the mixer sends |
@@ -312,17 +395,23 @@ The voice E2E tests launch their own Chromium with `--use-fake-ui-for-media-stre
 ## Known limits and follow-ups
 
 - The door panel swing is visual only: blocking uses the door's footprint, and the swung panel can pass through walls or players.
-- The lintel can still cover the player in some camera positions; fading tests only the segment from the camera to the head.
+- Fading tests only the segment from the camera to the head, so a lintel or a crown can still cover the body while the head is visible. The test uses the meshes without the sway of the wind shader, so a swaying crown fades a little early or late.
 - The walking character is wider than its 2 x 2 tile footprint, so arms and legs can reach into neighboring walls.
 - An outside replacement of `Objects` that lands after a game write that started from its pending value wins, discarding that game change (for example a wall built in that window). The same race on `Players` heals on the next reconcile.
 - Without an installation the page keeps showing "Joining the game…" rather than saying it needs one.
-- Only one character model, and only walls and doors as object types.
+- Only one character model.
+- A tree blocks only the tiles of its trunk; its crown passes through walls and players.
+- The footprint of a tree follows its variant and scale from its south-west corner, so changing `Variant` or `Scale` on the subject page grows or shrinks it toward the north-east rather than around the trunk, and nothing checks that the new tiles are free.
+- "Add door" reads the wall's geometry before the game takes its lock, so a wall edited from outside in between is replaced by pieces of its former geometry.
+- `UpdateAsync` restores only the configuration and state properties that differ from the snapshot, so a loaded value that validation rejects, such as a size out of range, does not make the restore throw. A refused change that set such a property itself still does: the restore writes the invalid value back, which throws and hides the exception that refused the change.
+- Remembered dialog parameters live as long as the page; a reload starts with empty fields.
 - A page receives every visible object within `ViewRadius` (200 tiles in each direction) of its player, although the camera shows only about 60 tiles around it and the fog hides the rest. With many objects, either lower `ViewRadius` or let the page report the area its camera covers and send that area plus a margin.
 - Scale: the cost per page, movement and hearing depend on what is near a player, not on the size of the world, and coordinates cover the whole `int` range. These parts grow with the whole world instead, which is fine for several thousand objects and a few dozen players:
   - All objects live in the `Game` subject and every save rewrites the whole `Game.json`. Much larger worlds need regions in separate files or a database.
   - A rebuild of the index, after an outside change, an applied configuration or a joining or leaving player, re-adds every object under `_lock`. An index that updates incrementally would avoid it.
   - Every page subscribes to changes of all objects, so every step anywhere schedules a flush on every page; each flush only diffs its own area. Change notifications per region would keep distant changes away.
-  - Every object is its own mesh, so thousands of walls within the view radius mean thousands of draw calls. Instances of identical meshes would batch them.
+  - Every box part is its own mesh and every model part one mesh per model node, so thousands of walls and trees within the view radius mean thousands of draw calls. Thin instances of identical meshes would batch them.
+  - Fading tests every object in view each 100 ms, the bounding box of each mesh first; a spatial lookup along the sightline would keep it cheap in dense forests.
 - `MaximumPendingSends` of 10 drops frames to a page once its round trip exceeds about 200 ms, because each send waits for the browser to acknowledge it.
 - Echo: the browser's echo canceller works on the microphone, but the playback goes through an `AudioWorklet`, which Chrome's echo canceller may not cover, so without headphones a listener's speaker may reach its own microphone. This is not yet tested with real devices. If confirmed, route the playback through a local loopback `RTCPeerConnection` pair into an `<audio>` element. Headphones avoid it.
 - A stop that a connection drop loses after a toggle can leave the browser capturing while the server shows the microphone off. The mixer drops those frames, because the game no longer counts that page, and the next toggle recovers.
