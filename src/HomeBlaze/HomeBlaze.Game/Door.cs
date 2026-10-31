@@ -36,6 +36,8 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
 
     public override bool IsBlocking => !IsOpen;
 
+    public override bool IsSoundBlocking => !IsOpen;
+
     [Derived]
     [PropertyAttribute("Open", KnownAttributes.IsEnabled)]
     public bool Open_IsEnabled => !IsOpen;

@@ -29,6 +29,8 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
 
     public string? IconName => "ViewColumn";
 
+    public override bool IsSoundBlocking => true;
+
     public Wall()
     {
         Width = DefaultLength;
