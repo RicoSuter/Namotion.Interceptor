@@ -92,6 +92,32 @@ public class PathProviderBaseTests
         Assert.Equal(unitIncluded, unit.TryGetPath(pathProvider, person) is not null);
     }
 
+    [Fact]
+    public void WhenAttributesBelongToEachOtherInACycle_ThenPathsPassNeitherOfThem()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new CyclicAttributeHolder(context) { First = "a", Second = "b" };
+        var registered = subject.TryGetRegisteredSubject()!;
+        var first = registered.TryGetProperty(nameof(CyclicAttributeHolder.First))!;
+        var second = registered.TryGetProperty(nameof(CyclicAttributeHolder.Second))!;
+        var pathProvider = DefaultPathProvider.Instance;
+
+        // Act
+        var firstIncluded = pathProvider.IsPropertyIncludedInPaths(first);
+        var secondIncluded = pathProvider.IsPropertyIncludedInPaths(second);
+        var firstPath = first.TryGetPath(pathProvider, subject);
+        var resolved = pathProvider.TryGetPropertyFromPath(registered, first.BrowseName);
+
+        // Assert
+        Assert.True(first.IsAttribute);
+        Assert.True(second.IsAttribute);
+        Assert.False(firstIncluded);
+        Assert.False(secondIncluded);
+        Assert.Null(firstPath);
+        Assert.Null(resolved);
+    }
+
     private static PathProviderBase CreateProvider(string name) => name switch
     {
         "Default" => DefaultPathProvider.Instance,
@@ -127,4 +153,14 @@ public class PathProviderBaseTests
     {
         public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
+}
+
+[Namotion.Interceptor.Attributes.InterceptorSubject]
+public partial class CyclicAttributeHolder
+{
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Second), "First")]
+    public partial string? First { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(First), "Second")]
+    public partial string? Second { get; set; }
 }

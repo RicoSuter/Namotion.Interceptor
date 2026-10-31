@@ -32,8 +32,8 @@ public abstract class PathProviderBase : IPathProvider
 
     /// <summary>
     /// Gets whether paths may pass the property: <see cref="IsPropertyIncluded"/> includes it and, for an attribute,
-    /// the property it belongs to, recursively up to a property that is no attribute. The properties holding its
-    /// subject are not checked.
+    /// the property it belongs to, recursively up to a property that is no attribute. Attributes that belong to each
+    /// other in a cycle are not included. The properties holding its subject are not checked.
     /// </summary>
     /// <param name="property">The property to check.</param>
     /// <returns>True when paths may pass the property; otherwise, false.</returns>
@@ -80,12 +80,15 @@ public abstract class PathProviderBase : IPathProvider
 
     private bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute)
     {
+        // Attributes can name each other in a cycle; a chain longer than the subject's properties is one, and it
+        // belongs to no included property.
+        var remainingSteps = attribute.Parent.Properties.Length;
         var property = attribute;
         do
         {
             // An attribute whose property is missing belongs to no included property.
             property = property.Parent.TryGetProperty(property.AttributeMetadata.PropertyName);
-            if (property is null || !IsPropertyIncluded(property))
+            if (property is null || --remainingSteps < 0 || !IsPropertyIncluded(property))
             {
                 return false;
             }
