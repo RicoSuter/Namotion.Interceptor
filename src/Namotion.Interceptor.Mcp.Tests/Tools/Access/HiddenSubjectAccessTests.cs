@@ -176,20 +176,22 @@ public class HiddenSubjectAccessTests
         return (root, device);
     }
 
-    public static TheoryData<string, string> HiddenInsideAndHeldOutsideCalls => new()
+    // The text the answer without a policy contains, so the case reaches the device, or for the where filter the house
+    // through it.
+    public static TheoryData<string, string, string> HiddenInsideAndHeldOutsideCalls => new()
     {
-        { "browse", JsonSerializer.Serialize(new { format = "json", depth = 10, includeProperties = true, includeAttributes = true }) },
-        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[house].Private", depth = 0, includeProperties = true }) },
-        { "search", JsonSerializer.Serialize(new { format = "json", includeProperties = true }) },
-        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestDevice) }, includeProperties = true }) },
-        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestHouse) }, where = "Private.DeviceName == \"Camera\"" }) },
-        { "get_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName" }) },
-        { "set_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName", value = "Changed" }) }
+        { "browse", JsonSerializer.Serialize(new { format = "json", depth = 10, includeProperties = true, includeAttributes = true }), "Camera" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[house].Private", depth = 0, includeProperties = true }), "Camera" },
+        { "search", JsonSerializer.Serialize(new { format = "json", includeProperties = true }), "Camera" },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestDevice) }, includeProperties = true }), "Camera" },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestHouse) }, where = "Private.DeviceName == \"Camera\"" }), "\"Items[house]\"" },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName" }), "Camera" },
+        { "set_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName", value = "Changed" }), "Camera" }
     };
 
     [Theory]
     [MemberData(nameof(HiddenInsideAndHeldOutsideCalls))]
-    public async Task WhenASubjectsOnlyPathInsideTheRootIsHiddenAndItsOtherParentIsOutside_ThenNoToolRevealsIt(string toolName, string input)
+    public async Task WhenASubjectsOnlyPathInsideTheRootIsHiddenAndItsOtherParentIsOutside_ThenNoToolRevealsIt(string toolName, string input, string expectedTextWithoutPolicy)
     {
         // Arrange
         var (rootWithoutPolicy, _) = CreateHiddenInsideAndHeldOutside();
@@ -201,8 +203,8 @@ public class HiddenSubjectAccessTests
         var withPolicy = await McpToolCaller.CallAsync(rootWithPolicy, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private))), toolName, request);
 
         // Assert
-        // Without a policy the call reaches the device, or for the where filter the house through it.
         Assert.False(withoutPolicy.TryGetProperty("error", out _));
+        Assert.Contains(expectedTextWithoutPolicy, withoutPolicy.GetRawText());
         Assert.DoesNotContain("Camera", withPolicy.GetRawText());
         Assert.Equal("Camera", device.DeviceName);
         if (request.TryGetProperty("path", out var path))
