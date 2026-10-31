@@ -76,7 +76,13 @@ Compilation cannot catch every pattern that matches nothing, because it does not
 
 ### Subjects with several paths
 
-The policy enumerates every path of a member's subject, at most 64, and an allow rule with paths matches through any of them. When the paths cannot all be listed (a path passes a property the path provider excludes, or an attribute of an excluded property, through which the registry builds and resolves no path either, the subject has parents but no chain to a root, the subject or one on a chain is no longer attached because it is being detached or was detached, more than 64 paths exist, or the parents are too densely connected for the search budget), every deny rule with paths matches and allow rules match only through the paths that were listed. Denies with paths fail closed.
+The policy enumerates every path of a member's subject, at most 64, and an allow rule with paths matches through any of them. When the paths cannot all be listed, every deny rule with paths matches and allow rules match only through the paths that were listed, so denies with paths fail closed. The paths cannot all be listed when:
+
+- a path passes a property the path provider excludes, or an attribute of an excluded property, through which the registry builds and resolves no path either;
+- the subject has parents but no chain to a root;
+- the subject or one on a chain is no longer attached because it is being detached or was detached;
+- more than 64 paths exist; or
+- the parents are too densely connected for the search budget.
 
 A root is a subject without parents that the registry still counts as attached (`RegisteredSubject.IsAttached`); the paths of its members have one segment. The registry clears that flag on a subject before it removes the subject's last parent, which it does only when the subject detaches, and a detach takes the subjects below the detached one with it. A subject being detached, a subject below it, and a detached subject whose member a caller still holds are therefore never taken for a root: a question asked during or after the detach sees such a subject either on its old path or with paths that cannot be listed, and a path deny applies either way.
 
