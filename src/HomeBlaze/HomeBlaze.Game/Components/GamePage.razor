@@ -44,22 +44,24 @@
             <section class="game-voice">
                 <h5>Voice</h5>
                 <div class="game-voice-buttons">
-                    <MudTooltip Text="@MicrophoneTooltip" Placement="Placement.Left">
+                    @* Native titles instead of popover tooltips: at the panel's edge a popover overflowed the page, and after a tap
+                       on touch devices it stayed open over the neighboring button. The span keeps the title on a disabled button. *@
+                    <span title="@MicrophoneTooltip">
                         <MudIconButton Icon="@(_isMicrophoneOn ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
-                                       Variant="@(_isMicrophoneOn ? Variant.Filled : Variant.Text)"
+                                       Variant="Variant.Filled"
                                        Color="@(_isMicrophoneOn ? Color.Primary : Color.Default)"
                                        Size="Size.Small" Disabled="@IsMicrophoneDisabled"
                                        aria-label="Microphone" aria-pressed="@(_isMicrophoneOn ? "true" : "false")" aria-keyshortcuts="M"
                                        data-game-voice data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
-                    </MudTooltip>
-                    <MudTooltip Text="@AudioTooltip" Placement="Placement.Left">
+                    </span>
+                    <span title="@AudioTooltip">
                         <MudIconButton Icon="@(_isAudioOn ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
-                                       Variant="@(_isAudioOn ? Variant.Filled : Variant.Text)"
+                                       Variant="Variant.Filled"
                                        Color="@(_isAudioOn ? Color.Primary : Color.Default)"
                                        Size="Size.Small" Disabled="@IsAudioDisabled"
                                        aria-label="Speaker" aria-pressed="@(_isAudioOn ? "true" : "false")" aria-keyshortcuts="N"
                                        data-game-voice data-testid="game-audio" OnClick="ToggleAudioAsync" />
-                    </MudTooltip>
+                    </span>
                 </div>
             </section>
             @* game-input.js handles the presses without a round trip, and sets aria-pressed on the turn button itself. *@
