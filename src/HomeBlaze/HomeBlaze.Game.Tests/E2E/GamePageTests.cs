@@ -182,53 +182,53 @@ public class GamePageTests
     }
 
     [Fact]
-    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheSpeakersFrames()
+    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheTalkersFrames()
     {
         // Arrange
         await using var browser = await MediaBrowser.LaunchAsync();
         await using var world = await GameWorld.CreateAsync(_fixture);
-        var (speaker, speakerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
         var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
 
         // One meter east of the listener, well within the hearing range.
-        speakerPlayer.X = listenerPlayer.X + 4;
-        speakerPlayer.Y = listenerPlayer.Y;
+        talkerPlayer.X = listenerPlayer.X + 4;
+        talkerPlayer.Y = listenerPlayer.Y;
 
         // Act
-        await TurnOnVoiceAsync(speaker);
+        await TurnOnVoiceAsync(talker);
         await TurnOnVoiceAsync(listener);
 
         // Assert
-        await WaitForCounterAsync(speaker, SentFramesAttribute, 25);
+        await WaitForCounterAsync(talker, SentFramesAttribute, 25);
         await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
     }
 
     [Fact]
-    public async Task WhenTheSpeakerMovesOutOfRange_ThenNearbyDropsItAndItsFramesStop()
+    public async Task WhenTheTalkerMovesOutOfRange_ThenNearbyDropsItAndItsFramesStop()
     {
         // Arrange
         await using var browser = await MediaBrowser.LaunchAsync();
         await using var world = await GameWorld.CreateAsync(_fixture);
-        var (speaker, speakerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
         var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
-        speakerPlayer.X = listenerPlayer.X + 4;
-        speakerPlayer.Y = listenerPlayer.Y;
-        await TurnOnVoiceAsync(speaker);
+        talkerPlayer.X = listenerPlayer.X + 4;
+        talkerPlayer.Y = listenerPlayer.Y;
+        await TurnOnVoiceAsync(talker);
         await TurnOnVoiceAsync(listener);
-        var speakerEntry = listener.GetByTestId("game-nearby-player").Filter(new() { HasText = speakerPlayer.Title });
-        await Expect(speakerEntry).ToHaveCountAsync(1, new() { Timeout = Timeout });
-        await Expect(speakerEntry.GetByTestId("game-nearby-microphone-off")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        var talkerEntry = listener.GetByTestId("game-nearby-player").Filter(new() { HasText = talkerPlayer.Title });
+        await Expect(talkerEntry).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await Expect(talkerEntry.GetByTestId("game-nearby-microphone-off")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
 
         // Act
         // 25 m east: beyond the hearing range of 10 m, but still within the view of 50 m.
-        speakerPlayer.X = listenerPlayer.X + 100;
+        talkerPlayer.X = listenerPlayer.X + 100;
 
         // Assert
-        await Expect(speakerEntry).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Expect(talkerEntry).ToHaveCountAsync(0, new() { Timeout = Timeout });
         var received = await ReadCounterAsync(listener, ReceivedFramesAttribute);
-        var sent = await ReadCounterAsync(speaker, SentFramesAttribute);
-        await WaitForCounterAsync(speaker, SentFramesAttribute, sent + 50);
+        var sent = await ReadCounterAsync(talker, SentFramesAttribute);
+        await WaitForCounterAsync(talker, SentFramesAttribute, sent + 50);
         Assert.InRange(await ReadCounterAsync(listener, ReceivedFramesAttribute), received, received + GameVoiceSettings.MaximumPendingSends);
     }
 
@@ -250,6 +250,55 @@ public class GamePageTests
         // Assert
         await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
         Assert.True(player.IsMicrophoneOn);
+    }
+
+    [Fact]
+    public async Task WhenThePageLosesItsSpeakerInTheGame_ThenThePageTurnsItsSpeakerOff()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var audio = page.GetByTestId("game-audio");
+        await audio.ClickAsync(new() { Timeout = Timeout });
+        await Expect(audio).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+        var pageId = Assert.Single(player.AudioPageIds!);
+
+        // Act
+        Assert.True(world.Game.SetAudio(new GameCaller(player), pageId, isOn: false));
+
+        // Assert
+        await Expect(audio).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
+        Assert.False(player.IsAudioOn);
+    }
+
+    [Fact]
+    public async Task WhenAPageWithVoiceOnCloses_ThenItsTogglesDropAndTheListenerKeepsItsSpeaker()
+    {
+        // Arrange
+        await using var browser = await MediaBrowser.LaunchAsync();
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (talker, talkerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        var (listener, listenerPlayer) = await world.JoinAsync(CreateMicrophoneContext(), browser.Browser);
+        talkerPlayer.X = listenerPlayer.X + 4;
+        talkerPlayer.Y = listenerPlayer.Y;
+        await TurnOnVoiceAsync(talker);
+        await TurnOnVoiceAsync(listener);
+        var isTalkerOn = talkerPlayer.IsMicrophoneOn && talkerPlayer.IsAudioOn;
+
+        // Act
+        await talker.CloseAsync();
+
+        // Assert
+        Assert.True(isTalkerOn);
+        await AsyncTestHelpers.WaitUntilAsync(() => !talkerPlayer.IsMicrophoneOn && !talkerPlayer.IsAudioOn,
+            message: "The toggles of the closed page stayed on");
+        // The listener's page heard of the change once Nearby no longer shows the talker with its microphone on.
+        var talkerWithMicrophone = listener.GetByTestId("game-nearby-player")
+            .Filter(new() { HasText = talkerPlayer.Title, HasNot = listener.GetByTestId("game-nearby-microphone-off") });
+        await Expect(talkerWithMicrophone).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await Expect(listener.GetByTestId("game-audio")).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
+        Assert.True(listenerPlayer.IsAudioOn);
     }
 
     private static string FormatPosition(int x, int y, string facing) => $"X {x} · Y {y} · facing {facing}";
