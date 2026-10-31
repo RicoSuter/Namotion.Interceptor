@@ -56,6 +56,15 @@ public partial class Game
 
             try
             {
+                await FlushPendingSaveAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            try
+            {
                 await Task.WhenAny(_signal.WaitAsync(stoppingToken), Task.Delay(HousekeepingInterval, _timeProvider, stoppingToken));
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
