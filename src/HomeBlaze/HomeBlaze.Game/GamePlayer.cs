@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Game;
@@ -54,6 +55,9 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     public override bool IsBlocking => IsConnected;
 
     public override bool IsVisible => IsConnected;
+
+    // Not intercepted: runtime state of the movement, created by the game under its lock.
+    internal StepRateLimiter? RateLimiter { get; set; }
 
     public GamePlayer()
     {

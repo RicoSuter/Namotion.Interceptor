@@ -28,6 +28,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     private readonly Lock _lock = new();
     private readonly IGameClientDirectory _clients;
     private readonly ILogger _logger;
+    private readonly TimeProvider _timeProvider;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -50,13 +51,14 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     public string? IconName => "SportsEsports";
 
     public Game(ILogger<Game> logger)
-        : this(null, logger)
+        : this(null, TimeProvider.System, logger)
     {
     }
 
-    internal Game(IGameClientDirectory? clients, ILogger logger)
+    internal Game(IGameClientDirectory? clients, TimeProvider timeProvider, ILogger logger)
     {
         _clients = clients ?? new InstallationClientDirectory(() => ((IInterceptorSubject)this).Context);
+        _timeProvider = timeProvider;
         _logger = logger;
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
