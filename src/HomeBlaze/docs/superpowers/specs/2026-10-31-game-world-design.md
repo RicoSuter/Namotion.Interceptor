@@ -6,7 +6,7 @@ This document is a working spec for the game pull request (#876), which also con
 
 ## Goals
 
-- Players plant trees (one of several models, chosen at random unless the player picks one) and build walls with a chosen length, height and material (bricks, concrete, wood).
+- Players add doors to walls they look at, and plant trees (one of several models, chosen at random unless the player picks one) and build walls with a chosen length, height and material (bricks, concrete, wood).
 - Trees sway in the wind.
 - The parameter dialog of an action is prefilled with the values the player used last on that page.
 - Every object type, its building tool and its look are defined through public extension points of the core: a data-driven visual description (`GameVisual`) and configurable tools (`GameTool`). Walls, doors and trees are built that way.
@@ -22,13 +22,12 @@ This document is a working spec for the game pull request (#876), which also con
 
 - Core, namespace `HomeBlaze.Game` with the folders `World/`, `View/`, `Voice/`, and the new `Visuals/` (namespace `HomeBlaze.Game.Visuals`) and `Tools/` (namespace `HomeBlaze.Game.Tools`): `Game`, `GameObject`, `GamePlayer`, `GameVisual`, `GameVisualPart`, `GameAssets`, `GameTool`, and the placement API.
 - Objects, each in its own folder and namespace, using only public members of the core:
-  - `Objects/Walls/` (`HomeBlaze.Game.Objects.Walls`): `Wall`, `WallMaterial`, `WallTool`.
-  - `Objects/Doors/` (`HomeBlaze.Game.Objects.Doors`): `Door`.
+  - `Objects/Buildings/` (`HomeBlaze.Game.Objects.Buildings`): `Wall`, `WallMaterial`, `WallTool`, `Door`. Walls and doors share a folder because the wall's "Add door" creates doors; later windows or gates join them, and a split would make this one library.
   - `Objects/Nature/` (`HomeBlaze.Game.Objects.Nature`): `Tree`, `TreeTool`.
-- Assets per object folder: `wwwroot/objects/walls/textures/` (bricks, moved from `wwwroot/textures/`, concrete, wood) and `wwwroot/objects/nature/models/` (tree models), each with a `LICENSE.md`. The grass texture and the character stay where they are.
+- Assets per object folder: `wwwroot/objects/buildings/textures/` (bricks, moved from `wwwroot/textures/`, concrete, wood) and `wwwroot/objects/nature/models/` (tree models), each with a `LICENSE.md`. The grass texture and the character stay where they are.
 - The README states the rule that object folders use no internal members of the core; reviews check it.
 
-Moving `Wall` and `Door` changes their `$type` to `HomeBlaze.Game.Objects.Walls.Wall` and `HomeBlaze.Game.Objects.Doors.Door`. The demo world is rewritten with the new names, and the README notes that worlds saved before need them.
+Moving `Wall` and `Door` changes their `$type` to `HomeBlaze.Game.Objects.Buildings.Wall` and `HomeBlaze.Game.Objects.Buildings.Door`. The demo world is rewritten with the new names, and the README notes that worlds saved before need them.
 
 ## Visual description
 
@@ -75,12 +74,14 @@ Moving `Wall` and `Door` changes their `$type` to `HomeBlaze.Game.Objects.Walls.
 - Public object API on `Game`, so that object types use no internal members:
   - `Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken)` removes the object from the world; it throws `InvalidOperationException` when the object is not part of this game.
   - `Task UpdateAsync(GameObject gameObject, Action change, CancellationToken cancellationToken)` runs `change` under the game's lock and updates the index; when the object blocks movement afterwards and its footprint overlaps another movement-blocking object, the change is undone by restoring the object's configuration and state properties captured before, and the call throws "Something is in the way.". The door's "Close" becomes `UpdateAsync(this, () => IsOpen = false, …)`, so the occupied doorway check is generic.
+  - `Task ReplaceAsync(GameObject gameObject, IReadOnlyList<(string NamePrefix, GameObject Replacement)> replacements, CancellationToken cancellationToken)` removes the object and adds the replacements under new unique names in one step under the game's lock, so no other page sees an intermediate state; it refuses with "Something is in the way." when a movement-blocking replacement would overlap another movement-blocking object than the replaced one, and then changes nothing.
   - The current internal `RemoveObjectAsync` and `SetDoorOpenAsync` are replaced by these.
 - The current "Build wall" operation of `Game` moves to `WallTool`.
 
 ## Objects
 
 - `Wall`: "Demolish" through `Game.RemoveAsync`; `[Configuration] WallMaterial Material` (`Bricks`, `Concrete`, `Wood`, default `Bricks`), configurable `Width`, `Depth`, `Height` as today, `IsMovementBlocking` and `IsSoundBlocking` true. `Visual`: one box with the material's texture.
+- `Wall` also has "Add door" with a parameter `width` (2 to 8 tiles, default 4, remembered like other parameters). The door is centered on the caller's player center along the wall's axis and shifted inward so that at least one wall tile remains on each side; the wall is replaced through `Game.ReplaceAsync` by up to three objects: a wall before the door, the door, a wall after it, keeping the wall's material and height (the door's height is the wall's height, so its lintel fills up to the top). Walls run along their longer side; a wall with `Width` and `Depth` both above 1 is not a line and refuses. The operation is disabled (the `IsEnabled` attribute, as for the door's actions) when the wall is shorter than 4 tiles, and a width that does not fit refuses with "This wall is too short for a door of N tiles; it fits up to M.". Several doors per original wall come naturally, because the remaining pieces are ordinary walls.
 - `Door`: behavior as today (`IsOpen`, the "Open" and "Close" operations, closing refused while the doorway is occupied), implemented through `Game.UpdateAsync`. `Visual`: a brick lintel above the opening and a wooden leaf with its pivot at the hinge, rotated 0 or 90 degrees by `IsOpen`.
 - `Tree`: a "Demolish" operation through `Game.RemoveAsync`; `[Configuration] int Variant`, `int Rotation`, `int Scale` (percent); fixed footprint 2 x 2 like players (sizes not configurable), `IsMovementBlocking` true, `IsSoundBlocking` false. `Visual`: one `Model` part with the variant's model, rotation and scale, effect `Wind`, height from the variant table. A variant outside the table falls back to variant 0.
 - Tree models: 5 to 8 CC0 models (Quaternius or Kenney nature packs), each a small `.glb`, with a table of model file and height per variant in `Tree`.
@@ -113,6 +114,7 @@ Unit tests (`HomeBlaze.Game.Tests`, `HomeBlaze.Components.Tests`):
 - `GameAssets.Url` uses the assembly name.
 - `Door.Visual` follows `IsOpen`; `Wall.Visual` follows `Material`.
 - `Tree` blocks movement but not sound, has a fixed size, falls back to variant 0.
+- "Add door" splits a wall into wall, door, wall around the caller's position, keeps one wall tile on each side, shifts the door inward near an end, keeps material and height, works on east-west and north-south walls, is disabled below 4 tiles, refuses a width that does not fit, and `Game.ReplaceAsync` refuses blocked replacements without changing anything.
 - `WallTool` builds the requested wall in the facing direction and refuses blocked or diagonal placement; ranges are enforced on the server.
 - `TreeTool` picks a random variant only without one, sets rotation and scale within range, refuses blocked placement.
 - `Game.RemoveAsync` removes an object of the game and refuses a foreign one; `Game.UpdateAsync` applies a change, and undoes and refuses one that would make a movement-blocking object overlap another.
