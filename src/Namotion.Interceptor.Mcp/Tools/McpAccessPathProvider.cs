@@ -39,13 +39,30 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     }
 
     /// <summary>
-    /// Whether the policy allows to read the member, and for an attribute also its property.
+    /// Whether the policy allows to read the member and, for an attribute, the property it belongs to, recursively up
+    /// to a property that is no attribute. Attributes that belong to each other in a cycle are not readable.
     /// </summary>
-    public static bool IsReadable(IMcpAccessPolicy policy, RegisteredSubjectProperty member) =>
-        policy.IsAllowed(member, McpAccessActions.Read) &&
-        (!member.IsAttribute ||
-         member.Parent.TryGetProperty(member.AttributeMetadata.PropertyName) is { } attributedProperty &&
-         IsReadable(policy, attributedProperty));
+    public static bool IsReadable(IMcpAccessPolicy policy, RegisteredSubjectProperty member)
+    {
+        // Attributes can name each other in a cycle; a chain longer than the subject's properties is one.
+        var remainingSteps = member.Parent.Properties.Length;
+        var current = member;
+        while (policy.IsAllowed(current, McpAccessActions.Read))
+        {
+            if (!current.IsAttribute)
+            {
+                return true;
+            }
+
+            current = current.Parent.TryGetProperty(current.AttributeMetadata.PropertyName);
+            if (current is null || --remainingSteps < 0)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
 
     public override char PathSeparator => _inner.PathSeparator;
 

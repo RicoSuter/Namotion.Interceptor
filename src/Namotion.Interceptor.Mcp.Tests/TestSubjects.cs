@@ -158,3 +158,23 @@ public partial class TestAttributedRoom
         Name = string.Empty;
     }
 }
+
+/// <summary>
+/// Two attributes that belong to each other, so neither belongs to a property that is no attribute.
+/// </summary>
+[InterceptorSubject]
+public partial class TestCyclicAttributes
+{
+    public partial string Name { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Second), "First")]
+    public partial string? First { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(First), "Second")]
+    public partial string? Second { get; set; }
+
+    public TestCyclicAttributes()
+    {
+        Name = string.Empty;
+    }
+}
