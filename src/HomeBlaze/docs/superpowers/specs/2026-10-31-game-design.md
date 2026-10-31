@@ -215,10 +215,10 @@ All assets are vendored under `HomeBlaze.Game/wwwroot/` with their license files
 
 `src/HomeBlaze/HomeBlaze/Data/Files/Demo/Game.json` holds a `Game` with a house built from walls, so the game can be tried right away when running from source:
 
-- A house of about 40 by 31 tiles (10 by 8 m) north of the spawn position 0,0, so a new player starts outside and looks at it.
-- Outer walls on its north and west sides, built from wall segments.
-- A hall wall with door gaps of 4 tiles (1 m) and two dividers behind it that split the rear into rooms.
-- A pillar, a fence and a few freestanding walls outside, to try blocking and the diagonal squeeze rule.
+- A house of 40 by 32 tiles (10 by 8 m) north of the spawn position 0,0, so a new player starts outside and looks at it.
+- Outer walls built from wall segments, 10 tiles (2.5 m) tall, with a door gap of 4 tiles (1 m) in the south wall in front of the spawn position.
+- Inner walls that divide it into a hall and two rooms behind it, connected by door gaps of 4 tiles.
+- A pillar, a fence and two blocks touching at a corner outside, to try blocking and the diagonal squeeze rule.
 
 The seed folder of fresh installations stays unchanged.
 
