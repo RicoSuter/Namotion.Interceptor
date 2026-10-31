@@ -8,6 +8,9 @@ const KEYS = {
     ArrowRight: 'east', KeyD: 'east',
 };
 
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
+
 export function getTargetTiles(x, y, width, depth, facing) {
     const [offsetX, offsetY] = DIRECTIONS[facing];
     const tiles = [];
@@ -32,12 +35,45 @@ export function isInputBlocked() {
     return document.querySelector('.mud-dialog-container') !== null;
 }
 
+function intersects(x, y, width, depth, other) {
+    return x < other.x + other.width && other.x < x + width && y < other.y + other.depth && other.y < y + depth;
+}
+
+function isFree(x, y, width, depth, blockers) {
+    if (x < INT_MIN || y < INT_MIN || x + width - 1 > INT_MAX || y + depth - 1 > INT_MAX) {
+        return false;
+    }
+
+    return !blockers.some(blocker => intersects(x, y, width, depth, blocker));
+}
+
+// Mirrors Game.TryGetStep, so a prediction only differs from the server when the world changed in between.
+export function predictStep(state, direction, blockers) {
+    const [offsetX, offsetY] = DIRECTIONS[direction];
+    const { x, y, width, depth } = state;
+    if (!isFree(x + offsetX, y + offsetY, width, depth, blockers)) {
+        return { ...state, facing: direction };
+    }
+
+    if (offsetX !== 0 && offsetY !== 0) {
+        const isHorizontalBlocked = !isFree(x + offsetX, y, width, depth, blockers);
+        const isVerticalBlocked = !isFree(x, y + offsetY, width, depth, blockers);
+        if (isHorizontalBlocked && isVerticalBlocked) {
+            return { ...state, facing: direction };
+        }
+    }
+
+    return { ...state, x: x + offsetX, y: y + offsetY, facing: direction };
+}
+
 export function createInput(dotNet, options, entities) {
     const pressed = new Set();
+    const pending = [];
     let isShiftHeld = false;
     let timer = null;
     let sequence = 0;
     let isDisposed = false;
+    let predicted = null;
 
     function heldDirection() {
         const offsetX = (pressed.has('east') ? 1 : 0) - (pressed.has('west') ? 1 : 0);
@@ -45,21 +81,55 @@ export function createInput(dotNet, options, entities) {
         return DIRECTIONS.findIndex(([x, y]) => x === offsetX && y === offsetY && (x !== 0 || y !== 0));
     }
 
-    function updateTarget() {
-        const self = entities.getSelf();
-        entities.setTarget(self ? getTargetTiles(self.x, self.y, self.width, self.depth, self.facing) : []);
+    function show(state, animate) {
+        entities.setSelf(state.x, state.y, state.facing, animate);
+        entities.setTarget(getTargetTiles(state.x, state.y, state.width, state.depth, state.facing));
+    }
+
+    function apply(state, step) {
+        return step.turnOnly ? { ...state, facing: step.direction } : predictStep(state, step.direction, entities.getBlockers());
+    }
+
+    // Starts again from the server's verdict and replays the steps it has not answered yet.
+    function reconcile(serverState) {
+        let state = serverState;
+        for (const step of pending) {
+            state = apply(state, step);
+        }
+
+        const isDifferent = !predicted || state.x !== predicted.x || state.y !== predicted.y || state.facing !== predicted.facing;
+        predicted = state;
+        if (isDifferent) {
+            show(predicted, true);
+        }
     }
 
     async function send(direction, turnOnly) {
-        const stepSequence = ++sequence;
+        if (!predicted) {
+            return;
+        }
+
+        const step = { sequence: ++sequence, direction, turnOnly };
+        pending.push(step);
+        predicted = apply(predicted, step);
+        show(predicted, true);
         try {
-            const result = await dotNet.invokeMethodAsync('Step', stepSequence, direction, turnOnly);
-            if (result && !isDisposed && stepSequence === sequence) {
-                entities.setSelf(result.x, result.y, result.facing, true);
-                updateTarget();
+            const result = await dotNet.invokeMethodAsync('Step', step.sequence, direction, turnOnly);
+            if (isDisposed) {
+                return;
+            }
+
+            while (pending.length > 0 && pending[0].sequence <= step.sequence) {
+                pending.shift();
+            }
+
+            // Null: the page had no player for the step, so the next server position decides.
+            if (result) {
+                reconcile({ ...predicted, x: result.x, y: result.y, facing: result.facing });
             }
         } catch {
             // The circuit is gone; the page reconnects or reloads on its own.
+            pending.length = 0;
         }
     }
 
@@ -149,9 +219,18 @@ export function createInput(dotNet, options, entities) {
     window.addEventListener('blur', onBlur);
 
     return {
+        // The server's position wins only while no step is on the way; otherwise the step results reconcile.
         onServerSelf(view) {
-            entities.setSelf(view.x, view.y, view.facing, true);
-            updateTarget();
+            const serverState = { x: view.x, y: view.y, facing: view.facing, width: view.width, depth: view.depth };
+            if (!predicted) {
+                predicted = serverState;
+                show(predicted, false);
+                return;
+            }
+
+            if (pending.length === 0) {
+                reconcile(serverState);
+            }
         },
 
         dispose() {
