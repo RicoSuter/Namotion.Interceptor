@@ -71,6 +71,87 @@ public class WallDoorTests
     }
 
     [Fact]
+    public async Task WhenThePlayerStandsNearTheFarEnd_ThenTheDoorMovesInwardKeepingOneWallTile()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1", x: 20);
+        var wall = _context.AddWall(0, 2, width: 8);
+
+        // Act
+        await wall.AddDoorAsync(4, new GameCaller(player), CancellationToken.None);
+
+        // Assert
+        var (before, door, after) = GetPieces();
+        Assert.Equal((0, 3), (before.X, before.Width));
+        Assert.Equal((3, 4), (door.X, door.Width));
+        Assert.Equal((7, 1), (after.X, after.Width));
+    }
+
+    [Fact]
+    public async Task WhenTheDoorWidthIsOdd_ThenTheExtraTileGoesEast()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var wall = _context.AddWall(-4, 2, width: 16);
+
+        // Act
+        await wall.AddDoorAsync(3, new GameCaller(player), CancellationToken.None);
+
+        // Assert
+        var (before, door, after) = GetPieces();
+        Assert.Equal((-4, 4), (before.X, before.Width));
+        Assert.Equal((0, 3), (door.X, door.Width));
+        Assert.Equal((3, 9), (after.X, after.Width));
+    }
+
+    [Fact]
+    public async Task WhenTheDoorFitsExactly_ThenOneWallTileRemainsOnEachSide()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var wall = _context.AddWall(-2, 2, width: 6);
+
+        // Act
+        await wall.AddDoorAsync(4, new GameCaller(player), CancellationToken.None);
+
+        // Assert
+        var (before, door, after) = GetPieces();
+        Assert.Equal((-2, 1), (before.X, before.Width));
+        Assert.Equal((-1, 4), (door.X, door.Width));
+        Assert.Equal((3, 1), (after.X, after.Width));
+    }
+
+    [Fact]
+    public async Task WhenTheCallersPlayerIsNotInThisGame_ThenTheDoorIsCenteredOnTheWall()
+    {
+        // Arrange
+        var foreignPlayer = new GameTestContext().AddConnectedPlayer("tab-1", x: -100);
+        var wall = _context.AddWall(0, 20, width: 10);
+
+        // Act
+        await wall.AddDoorAsync(4, new GameCaller(foreignPlayer), CancellationToken.None);
+
+        // Assert
+        var (before, door, after) = GetPieces();
+        Assert.Equal((3, 3, 3), (before.Width, door.X, after.Width));
+    }
+
+    [Fact]
+    public async Task WhenTheWallReachesPastTheIntegerRange_ThenAddingIsRefused()
+    {
+        // Arrange
+        var wall = _context.AddWall(int.MaxValue - 3, 20, width: 8);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => wall.AddDoorAsync(4, null, CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Equal(0, _context.Root.WriteCount);
+    }
+
+    [Fact]
     public async Task WhenADoorIsAdded_ThenThePiecesKeepTheMaterialAndHeight()
     {
         // Arrange
