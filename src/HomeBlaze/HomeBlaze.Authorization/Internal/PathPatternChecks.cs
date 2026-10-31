@@ -7,11 +7,45 @@ using Namotion.Interceptor.Registry.Paths;
 namespace HomeBlaze.Authorization.Internal;
 
 /// <summary>
-/// Checks path patterns: whether those of a role start with the separator as the application writes them, and whether
-/// they name subjects instead of members.
+/// Checks path patterns: whether one is valid, whether those of a role start with the separator as the application
+/// writes them, and whether one or those of a role name subjects instead of members.
 /// </summary>
 internal static class PathPatternChecks
 {
+    private static readonly HomeBlazeMemberTagProvider TagProvider = new();
+
+    // The name of the role a pattern is validated in, removed from the error since the pattern belongs to no role.
+    private const string PatternValidationRoleName = "PatternValidation";
+
+    /// <summary>
+    /// Gets why a path pattern is invalid, or null when it is valid: the application refuses it, see
+    /// <see cref="GetLeadingSeparatorErrors"/>, or it does not compile in a role with one rule holding it, as the
+    /// library parses patterns only while compiling.
+    /// </summary>
+    public static string? Validate(string pattern, PathProviderBase pathProvider)
+    {
+        if (GetLeadingSeparatorError(pattern, roleName: null, pathProvider.PathSeparator) is { } error)
+        {
+            return error;
+        }
+
+        var role = new AuthorizationRole
+        {
+            Name = PatternValidationRoleName,
+            Allow = [new PermissionRule { Paths = [pattern], Actions = [PermissionAction.Read] }]
+        };
+
+        try
+        {
+            AuthorizationPolicy.Compile([role], [PatternValidationRoleName], [], [], TagProvider, pathProvider);
+            return null;
+        }
+        catch (AuthorizationException exception)
+        {
+            return exception.Message.Replace($" of role '{PatternValidationRoleName}'", "", StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>
     /// Gets the error of each of <paramref name="roles"/> with a path pattern that does not start with
     /// <paramref name="separator"/> or is the separator alone, by role name ignoring case, or null when there is none.
@@ -92,10 +126,41 @@ internal static class PathPatternChecks
             return null;
         }
 
-        var separator = pathProvider.PathSeparator;
-        return string.Join(' ', entryPatterns.Select(pattern =>
-            $"Path pattern '{pattern}' names a subject, not a member, and matches nothing; use '{pattern}{separator}**' for the subject and everything below it, or '{pattern}{separator}*' for its members."));
+        return string.Join(' ', entryPatterns.Select(pattern => FormatWarning(pattern, pathProvider.PathSeparator)));
     }
+
+    /// <summary>
+    /// Gets the warning of one valid path pattern that names an entry below one of <paramref name="roots"/>, as
+    /// <see cref="GetWarning(AuthorizationRole, IReadOnlyDictionary{IInterceptorSubject, RegisteredSubject}, PathProviderBase, ref List{RegisteredSubject}?)"/>
+    /// gives it for a role, or null.
+    /// </summary>
+    public static string? GetWarning(string pattern, List<RegisteredSubject> roots, PathProviderBase pathProvider)
+    {
+        if (pattern.Contains('*'))
+        {
+            return null;
+        }
+
+        // Left out when resolving fails, as for a role.
+        try
+        {
+            return NamesEntry(pattern, roots, pathProvider) ? FormatWarning(pattern, pathProvider.PathSeparator) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the attached subjects without parents among <paramref name="knownSubjects"/>, which patterns are resolved below.
+    /// </summary>
+    // Parents before IsAttached, see RegisteredSubject.IsAttached.
+    public static List<RegisteredSubject> GetRoots(IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects) =>
+        knownSubjects.Values.Where(static subject => subject.Parents.Length == 0 && subject.IsAttached).ToList();
+
+    private static string FormatWarning(string pattern, char separator) =>
+        $"Path pattern '{pattern}' names a subject, not a member, and matches nothing; use '{pattern}{separator}**' for the subject and everything below it, or '{pattern}{separator}*' for its members.";
 
     private static void AddEntryPatterns(
         ImmutableArray<PermissionRule> rules,
@@ -126,10 +191,6 @@ internal static class PathPatternChecks
             }
         }
     }
-
-    // Parents before IsAttached, see RegisteredSubject.IsAttached.
-    private static List<RegisteredSubject> GetRoots(IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> knownSubjects) =>
-        knownSubjects.Values.Where(static subject => subject.Parents.Length == 0 && subject.IsAttached).ToList();
 
     // A pattern matches the member paths below every root, so it names an entry when it resolves to an entry holding a
     // subject below one root and to a member below none.

@@ -9,17 +9,22 @@ namespace HomeBlaze.Authorization.Internal;
 
 /// <summary>
 /// The roles of the graph at one version, with the policies compiled from them and the statuses they give the
-/// <see cref="Authorization"/> and <see cref="Role"/> subjects. Immutable apart from the policy cache, which is thread-safe.
+/// <see cref="Authorization"/> and <see cref="Role"/> subjects. Immutable apart from the caches of policies and
+/// previews, which are thread-safe.
 /// </summary>
 internal sealed class AuthorizationSnapshot
 {
     private static readonly HomeBlazeMemberTagProvider TagProvider = new();
+
+    // A role's name is a segment of its path, where these separate segments and enclose indexes.
+    private static readonly char[] RoleNamePathCharacters = ['/', '[', ']'];
 
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
     private readonly Dictionary<string, string> _unavailableRoles;
     private readonly string? _customRolesError;
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
+    private readonly PreviewCache _previews = new();
 
     // The error of each role with a path pattern the application refuses, see PathPatternChecks; null when there is none.
     private readonly Dictionary<string, string>? _leadingSeparatorErrors;
@@ -165,6 +170,36 @@ internal sealed class AuthorizationSnapshot
         return _policies.GetOrAdd(key, Compile(key.Names));
     }
 
+    /// <summary>
+    /// Compiles the policy of a principal holding only <paramref name="editedRole"/>, which replaces the custom role of
+    /// the same name ignoring case, or is added. Only the result of the last previewed instance is kept; its error is the
+    /// status the role would have once saved.
+    /// </summary>
+    public AuthorizationResult Preview(AuthorizationRole editedRole)
+    {
+        if (!_previews.TryGet(editedRole, out var result))
+        {
+            result = CompilePreview(editedRole);
+            _previews.Set(editedRole, result);
+        }
+
+        return result;
+    }
+
+    private AuthorizationResult CompilePreview(AuthorizationRole editedRole)
+    {
+        var name = editedRole.Name;
+        var reason = GetNameError(name, count: 1) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
+        if (reason is not null)
+        {
+            return new AuthorizationResult(AuthorizationPolicy.DenyAll, reason);
+        }
+
+        var index = IndexOfRole(name);
+        var roles = index >= 0 ? _roles.SetItem(index, editedRole) : _roles.Add(editedRole);
+        return Compile(roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator));
+    }
+
     private AuthorizationResult Compile(string[] roleNames)
     {
         foreach (var name in roleNames)
@@ -177,8 +212,14 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
-        if (_leadingSeparatorErrors is not null &&
-            PathPatternChecks.FindLeadingSeparatorError(roleNames, _roles, _leadingSeparatorErrors) is { } patternError)
+        return Compile(_roles, roleNames, _leadingSeparatorErrors);
+    }
+
+    private AuthorizationResult Compile(
+        ImmutableArray<AuthorizationRole> roles, string[] roleNames, Dictionary<string, string>? leadingSeparatorErrors)
+    {
+        if (leadingSeparatorErrors is not null &&
+            PathPatternChecks.FindLeadingSeparatorError(roleNames, roles, leadingSeparatorErrors) is { } patternError)
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
         }
@@ -186,13 +227,26 @@ internal sealed class AuthorizationSnapshot
         try
         {
             var policy = AuthorizationPolicy.Compile(
-                _roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
+                roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
             return new AuthorizationResult(policy, null);
         }
         catch (AuthorizationException exception)
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, exception.Message);
         }
+    }
+
+    private int IndexOfRole(string name)
+    {
+        for (var index = 0; index < _roles.Length; index++)
+        {
+            if (string.Equals(_roles[index].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     // Each usable role compiled on its own gives its status and is the policy of a principal holding only it.
@@ -230,7 +284,11 @@ internal sealed class AuthorizationSnapshot
         return roles;
     }
 
-    private static string? GetNameError(string name, int count)
+    /// <summary>
+    /// Gets why <paramref name="name"/> cannot name a custom role held by <paramref name="count"/> roles of the
+    /// <see cref="Authorization"/>, ignoring case, or null.
+    /// </summary>
+    public static string? GetNameError(string name, int count)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -245,6 +303,11 @@ internal sealed class AuthorizationSnapshot
         if (string.Equals(name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
         {
             return $"The name '{name}' is reserved for the system rules.";
+        }
+
+        if (name.IndexOfAny(RoleNamePathCharacters) >= 0)
+        {
+            return $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
         }
 
         return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;

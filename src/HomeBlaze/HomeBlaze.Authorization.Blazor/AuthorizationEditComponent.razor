@@ -1,0 +1,534 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Authorization))]
+@implements ISubjectEditComponent
+
+@using System.Text
+
+@inject AuthorizationService AuthorizationService
+
+@if (Authorization is { } authorization)
+{
+    @if (authorization.Status is { } status)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4" data-testid="authorization-status">@status</MudAlert>
+    }
+
+    <MudText Typo="Typo.subtitle2">Custom roles</MudText>
+    <MudText Typo="Typo.body2" Class="mb-2">
+        The roles agents can be given besides the built-in ones. A role's rules are edited in its own dialog once it is saved.
+    </MudText>
+
+    @if (HasDuplicateNames())
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="authorization-duplicate-names">
+            Several roles have the same name, ignoring case. Rename or remove one to save.
+        </MudAlert>
+    }
+
+    <MudStack Spacing="2">
+        @if (_entries.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="authorization-no-roles">No custom roles yet.</MudText>
+        }
+        @foreach (var entry in _entries)
+        {
+            <MudPaper @key="entry" Outlined="true" Class="pa-2" data-testid="@($"authorization-role-row-{entry.Name}")" data-role="@entry.Name">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    @RenderStatusIcon(entry)
+                    <div class="flex-grow-1">
+                        <MudText Typo="Typo.body1">
+                            @entry.Name
+                            @if (entry.OriginalName is null)
+                            {
+                                <span class="mud-text-secondary"> (new)</span>
+                            }
+                            else if (IsRenamed(entry))
+                            {
+                                <span class="mud-text-secondary"> (was @entry.OriginalName)</span>
+                            }
+                        </MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            <span data-testid="authorization-role-rules">@DescribeRules(entry.Role)</span>,
+                            <span data-testid="authorization-role-used-by">@DescribeUsage(entry)</span>
+                        </MudText>
+                    </div>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Disabled="@_isNameEditorOpen"
+                                   aria-label="@($"Rename {entry.Name}")" OnClick="@(() => StartRename(entry))"
+                                   data-testid="@($"authorization-role-rename-{entry.Name}")" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   aria-label="@($"Remove {entry.Name}")" OnClick="@(() => Remove(entry))"
+                                   data-testid="@($"authorization-role-remove-{entry.Name}")" />
+                </MudStack>
+                @if (ReferenceEquals(entry, _removedEntry))
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-remove-warning">
+                        @GetReferenceWarning(entry, isRename: false)
+                    </MudAlert>
+                    <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                        <MudButton Variant="Variant.Text" OnClick="@(() => _removedEntry = null)"
+                                   data-testid="authorization-role-remove-cancel">Cancel</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="@(() => ConfirmRemove(entry))"
+                                   data-testid="authorization-role-remove-confirm">Remove</MudButton>
+                    </MudStack>
+                }
+                @if (_isNameEditorOpen && ReferenceEquals(entry, _renamedEntry))
+                {
+                    @RenderNameEditor()
+                }
+            </MudPaper>
+        }
+    </MudStack>
+
+    @if (_isNameEditorOpen && _renamedEntry is null)
+    {
+        <MudPaper Outlined="true" Class="pa-2 mt-2">
+            @RenderNameEditor()
+        </MudPaper>
+    }
+    else
+    {
+        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
+                   Disabled="@_isNameEditorOpen" OnClick="StartAdd" data-testid="authorization-add-role">Add role</MudButton>
+    }
+
+    <MudText Typo="Typo.subtitle2" Class="mt-6">Built-in roles</MudText>
+    <MudText Typo="Typo.body2" Class="mb-2">Defined in code, always available and not editable. The system rules apply to every role.</MudText>
+    <MudStack Spacing="1">
+        @foreach (var (name, description) in BuiltInRoleDescriptions)
+        {
+            <MudText Typo="Typo.body2" data-testid="@($"authorization-builtin-role-{name}")"><b>@name</b>: @description</MudText>
+        }
+    </MudStack>
+}
+
+@code {
+    private static readonly (string Name, string Description)[] BuiltInRoleDescriptions =
+    [
+        (BuiltInRoles.ReaderName, "Reads every member and its history and executes queries."),
+        (BuiltInRoles.OperatorName, "Includes Reader, writes every member and executes operations."),
+        (BuiltInRoles.EverythingName, "Allows every action on every member.")
+    ];
+
+    private readonly List<RoleEntry> _entries = [];
+
+    // The dictionary the entries were read from; a reload replaces it.
+    private Dictionary<string, Role>? _loadedRoles;
+    private bool _isNameEditorOpen;
+    private RoleEntry? _renamedEntry;
+    private string _nameText = string.Empty;
+    private string? _nameError;
+    private bool _isNameChanged;
+    private RoleEntry? _removedEntry;
+    private bool _isDirty;
+    private bool _wasValid = true;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public bool IsDirty => _isDirty;
+
+    /// <summary>
+    /// Gets whether the roles can be saved: their names differ ignoring case, and a name typed into the open name field is
+    /// valid or, when adding, empty.
+    /// </summary>
+    public bool IsValid => !HasDuplicateNames() && (!_isNameEditorOpen || _nameError is null || IsDiscardableName());
+
+    private Authorization? Authorization => Subject as Authorization;
+
+    protected override void OnInitialized()
+    {
+        if (Authorization is not { } authorization)
+        {
+            return;
+        }
+
+        if (!IsCreating)
+        {
+            // Reading the role names also writes the statuses and agent counts of the roles.
+            AuthorizationService.GetRoleNames();
+        }
+
+        _loadedRoles = authorization.Roles;
+        foreach (var (name, role) in authorization.Roles ?? [])
+        {
+            _entries.Add(new RoleEntry(name, role));
+        }
+
+        _wasValid = IsValid;
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Authorization is not { } authorization)
+        {
+            return Task.CompletedTask;
+        }
+
+        // A name typed but not confirmed would otherwise be lost.
+        if (_isNameEditorOpen && _nameError is null)
+        {
+            ConfirmName();
+        }
+        else if (_isNameEditorOpen && IsDiscardableName())
+        {
+            CloseNameEditor();
+        }
+
+        // The host saves only while the roles are valid, so this is a defect to report rather than a save to skip.
+        if (!IsValid)
+        {
+            throw new InvalidOperationException("The roles are invalid and cannot be saved.");
+        }
+
+        Dictionary<string, Role> roles;
+        lock (AuthorizationEditLock.Instance)
+        {
+            // Saving the roles as read when the dialog opened would revert a reload of the file or the save of another
+            // Authorization dialog since.
+            if (!ReferenceEquals(authorization.Roles, _loadedRoles))
+            {
+                throw new InvalidOperationException(RoleEditComponent.ConcurrentChangeMessage);
+            }
+
+            // Existing instances under their new keys keep their rules; a new dictionary, as only a replaced one is
+            // noticed.
+            roles = new Dictionary<string, Role>(_entries.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in _entries)
+            {
+                entry.Role ??= new Role();
+                roles.Add(entry.Name, entry.Role);
+            }
+
+            // In one update, so that no policy sees the roles left out in between.
+            using (AuthorizationService.BeginUpdate())
+            {
+                // The registry keeps the key a role was attached under while the role stays in the dictionary, which
+                // would leave a renamed role with its old path and name. Left out once, it is attached again under its
+                // new key.
+                if (_entries.Exists(IsRenamed))
+                {
+                    authorization.Roles = _entries
+                        .Where(entry => !IsRenamed(entry))
+                        .ToDictionary(entry => entry.Name, entry => entry.Role!, StringComparer.OrdinalIgnoreCase);
+                }
+
+                authorization.Roles = roles;
+            }
+        }
+
+        _loadedRoles = roles;
+        foreach (var entry in _entries)
+        {
+            entry.OriginalName = entry.Name;
+        }
+
+        _isDirty = false;
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+
+    private static RenderFragment RenderStatusIcon(RoleEntry entry) => __builder =>
+    {
+        var (icon, color, status, text) = entry.Role switch
+        {
+            null => (Icons.Material.Filled.FiberNew, Color.Info, "new", "Added; saved with this dialog."),
+            { Status: { } error } => (Icons.Material.Filled.ErrorOutline, Color.Error, "error", error),
+            { Warning: { } warning } => (Icons.Material.Filled.WarningAmber, Color.Warning, "warning", $"Can be used, but: {warning}"),
+            _ => (Icons.Material.Filled.CheckCircleOutline, Color.Success, "ok", "Can be used.")
+        };
+
+        <MudTooltip Text="@text">
+            <span role="img" aria-label="@text" data-testid="authorization-role-status" data-status="@status">
+                <MudIcon Icon="@icon" Color="@color" Size="Size.Small" />
+            </span>
+        </MudTooltip>
+    };
+
+    private RenderFragment RenderNameEditor() => __builder =>
+    {
+        <div data-testid="authorization-role-name" @onkeyup="OnNameKeyUp" class="mt-2">
+            <MudTextField T="string" Value="@_nameText" ValueChanged="@OnNameChanged" Label="Name" Immediate="true" AutoFocus="true"
+                          Error="@(_isNameChanged && _nameError is not null)" ErrorText="@_nameError"
+                          HelperText="Unique ignoring case; not the name of a built-in role or System; without /, [ and ]." />
+        </div>
+        @* Names compare ignoring case, so a name changed only in case still names the role. *@
+        @if (_renamedEntry is { } renamed && !string.Equals(_nameText.Trim(), renamed.OriginalName, StringComparison.OrdinalIgnoreCase) &&
+             GetReferenceWarning(renamed, isRename: true) is { } renameWarning)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-rename-warning">@renameWarning</MudAlert>
+        }
+        @if (GetUsedNameWarning() is { } usedNameWarning)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="authorization-role-name-used-warning">@usedNameWarning</MudAlert>
+        }
+        <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+            <MudButton Variant="Variant.Text" OnClick="CloseNameEditor" data-testid="authorization-role-name-cancel">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_nameError is not null)" OnClick="ConfirmName"
+                       data-testid="authorization-role-name-confirm">@(_renamedEntry is null ? "Add" : "Rename")</MudButton>
+        </MudStack>
+    };
+
+    private static string DescribeRules(Role? role)
+    {
+        var allow = role?.Allow?.Count ?? 0;
+        var deny = role?.Deny?.Count ?? 0;
+        return $"{allow} allow {(allow == 1 ? "rule" : "rules")}, {deny} deny {(deny == 1 ? "rule" : "rules")}";
+    }
+
+    private static string DescribeUsage(RoleEntry entry)
+    {
+        var count = entry.Role?.UsedByAgents ?? 0;
+        return $"used by {count} {(count == 1 ? "agent" : "agents")}";
+    }
+
+    // Agents and the roles that include it name a role by the name it was saved under; once it is removed or renamed,
+    // the agents are denied everything and the including roles cannot be used, so the change is confirmed first.
+    private string? GetReferenceWarning(RoleEntry entry, bool isRename)
+    {
+        if (entry.OriginalName is not { } name)
+        {
+            return null;
+        }
+
+        var warning = new StringBuilder();
+        var agentCount = entry.Role?.UsedByAgents ?? 0;
+        if (agentCount > 0)
+        {
+            warning.Append(agentCount == 1 ? "1 agent uses" : $"{agentCount} agents use")
+                .Append(isRename
+                    ? " this role under its old name. After saving, they are denied everything and show \"Invalid roles\" until they are given the new name or another role."
+                    : " this role. After saving, they are denied everything and show \"Invalid roles\" until they are given another role.");
+        }
+
+        var includingRoles = GetIncludingRoles(name, entry);
+        if (includingRoles.Count > 0)
+        {
+            var isSingle = includingRoles.Count == 1;
+            warning.Append(warning.Length > 0 ? " " : "")
+                .Append(DescribeRoles(includingRoles))
+                .Append(isSingle ? " includes this role" : " include this role")
+                .Append(isRename ? " under its old name." : ".")
+                .Append(isSingle
+                    ? " After saving, it cannot be used and its agents are denied everything until its includes are changed."
+                    : " After saving, they cannot be used and their agents are denied everything until their includes are changed.");
+        }
+
+        return warning.Length > 0 ? warning.ToString() : null;
+    }
+
+    // Agents and roles may still name a role that was removed or renamed, and get the rules of the role added under it.
+    private string? GetUsedNameWarning()
+    {
+        var name = _nameText.Trim();
+        if (_nameError is not null || name.Length == 0 ||
+            string.Equals(_renamedEntry?.OriginalName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var warning = new StringBuilder();
+        var agentCount = AuthorizationService.GetPrincipalCount(name);
+        if (agentCount > 0)
+        {
+            warning.Append(agentCount == 1 ? "1 agent already names" : $"{agentCount} agents already name")
+                .Append(" this role and will get its rules after saving.");
+        }
+
+        var includingRoles = GetIncludingRoles(name, _renamedEntry);
+        if (includingRoles.Count > 0)
+        {
+            warning.Append(warning.Length > 0 ? " " : "")
+                .Append(DescribeRoles(includingRoles))
+                .Append(includingRoles.Count == 1 ? " includes" : " include")
+                .Append(" a role of this name and will get its rules after saving.");
+        }
+
+        return warning.Length > 0 ? warning.ToString() : null;
+    }
+
+    // The listed roles other than the given one whose includes name the role, ignoring case, as roles resolve.
+    private List<RoleEntry> GetIncludingRoles(string roleName, RoleEntry? except) =>
+        _entries
+            .Where(entry => !ReferenceEquals(entry, except) &&
+                entry.Role?.Includes?.Contains(roleName, StringComparer.OrdinalIgnoreCase) == true)
+            .ToList();
+
+    // Such as "Kitchen (used by 1 agent) and Garden (used by 2 agents)".
+    private static string DescribeRoles(List<RoleEntry> roles)
+    {
+        var descriptions = roles.Select(entry => $"{entry.Name} ({DescribeUsage(entry)})").ToList();
+        return descriptions.Count == 1
+            ? descriptions[0]
+            : $"{string.Join(", ", descriptions.Take(descriptions.Count - 1))} and {descriptions[^1]}";
+    }
+
+    private void StartAdd() => OpenNameEditor(null, string.Empty);
+
+    private void StartRename(RoleEntry entry) => OpenNameEditor(entry, entry.Name);
+
+    private void OpenNameEditor(RoleEntry? renamedEntry, string name)
+    {
+        _isNameEditorOpen = true;
+        _renamedEntry = renamedEntry;
+        _nameText = name;
+        _isNameChanged = false;
+        _nameError = ValidateName(name);
+        ReportValidity();
+    }
+
+    private void CloseNameEditor()
+    {
+        _isNameEditorOpen = false;
+        _renamedEntry = null;
+        _nameText = string.Empty;
+        _nameError = null;
+        ReportValidity();
+    }
+
+    private void OnNameChanged(string? text)
+    {
+        _nameText = text ?? string.Empty;
+        _isNameChanged = true;
+        _nameError = ValidateName(_nameText);
+        MarkDirty();
+        ReportValidity();
+    }
+
+    private void OnNameKeyUp(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && _nameError is null)
+        {
+            ConfirmName();
+        }
+    }
+
+    private void ConfirmName()
+    {
+        var name = _nameText.Trim();
+        if (ValidateName(name) is not null)
+        {
+            return;
+        }
+
+        if (_renamedEntry is { } entry)
+        {
+            entry.Name = name;
+        }
+        else
+        {
+            _entries.Add(new RoleEntry(null, null) { Name = name });
+        }
+
+        CloseNameEditor();
+        MarkDirty();
+    }
+
+    // Agents and roles name roles, so removing a role they name takes access away and is confirmed first.
+    private void Remove(RoleEntry entry)
+    {
+        if (GetReferenceWarning(entry, isRename: false) is not null)
+        {
+            _removedEntry = entry;
+            return;
+        }
+
+        ConfirmRemove(entry);
+    }
+
+    private void ConfirmRemove(RoleEntry entry)
+    {
+        _removedEntry = null;
+        if (ReferenceEquals(entry, _renamedEntry))
+        {
+            CloseNameEditor();
+        }
+
+        _entries.Remove(entry);
+        if (_isNameEditorOpen)
+        {
+            // The typed name may have been taken by the removed role.
+            _nameError = ValidateName(_nameText);
+        }
+
+        MarkDirty();
+        ReportValidity();
+    }
+
+    // The renamed role may keep its name in another case; the other names are compared ignoring case, as roles resolve.
+    private string? ValidateName(string text)
+    {
+        var name = text.Trim();
+        if (name.Length == 0)
+        {
+            return "Enter a name.";
+        }
+
+        if (AuthorizationService.GetRoleNameError(name) is { } error)
+        {
+            return error;
+        }
+
+        return _entries.Exists(entry => !ReferenceEquals(entry, _renamedEntry) && string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase))
+            ? "A role with this name exists already."
+            : null;
+    }
+
+    private static bool IsRenamed(RoleEntry entry) =>
+        entry.OriginalName is { } originalName && !string.Equals(originalName, entry.Name, StringComparison.Ordinal);
+
+    // An empty field of a role being added is discarded on save rather than blocking it.
+    private bool IsDiscardableName() => _renamedEntry is null && string.IsNullOrWhiteSpace(_nameText);
+
+    // Possible in a file edited by hand; a case-insensitive dictionary cannot hold both.
+    private bool HasDuplicateNames()
+    {
+        for (var index = 1; index < _entries.Count; index++)
+        {
+            for (var other = 0; other < index; other++)
+            {
+                if (string.Equals(_entries[index].Name, _entries[other].Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void MarkDirty()
+    {
+        if (!_isDirty)
+        {
+            _isDirty = true;
+            IsDirtyChanged?.Invoke(true);
+        }
+    }
+
+    private void ReportValidity()
+    {
+        // Raised on transitions only, because the host re-renders its save button on each event.
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    // A role as listed: the key it was saved under, or null when added, its instance, or null until saved, and its name.
+    private sealed class RoleEntry(string? originalName, Role? role)
+    {
+        public string? OriginalName { get; set; } = originalName;
+
+        public Role? Role { get; set; } = role;
+
+        public string Name { get; set; } = originalName ?? string.Empty;
+    }
+}

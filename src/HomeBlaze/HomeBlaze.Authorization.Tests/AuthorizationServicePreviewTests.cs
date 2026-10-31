@@ -1,0 +1,402 @@
+using HomeBlaze.Authorization.Tests.Subjects;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
+using Xunit;
+
+namespace HomeBlaze.Authorization.Tests;
+
+public sealed class AuthorizationServicePreviewTests : IDisposable
+{
+    private readonly IInterceptorSubjectContext _context;
+    private readonly AuthorizationService _service;
+    private readonly TestRoot _root;
+    private readonly RegisteredSubject _subject;
+
+    public AuthorizationServicePreviewTests()
+    {
+        _context = TestContext.Create();
+        _service = new AuthorizationService(_context, new DefaultPathProvider('/'));
+        _root = new TestRoot(_context);
+        _subject = new TagTestSubject(_context).TryGetRegisteredSubject()!;
+    }
+
+    public void Dispose() => _service.Dispose();
+
+    [Fact]
+    public void WhenTheEditedRoleAllowsAMemberItsSavedVersionDoesNot_ThenThePreviewAllowsIt()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role()));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.False(result.Policy.CanRead(Member(nameof(TagTestSubject.Temperature))));
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleIsNotSaved_ThenThePreviewCompilesItWithTheSavedRoles()
+    {
+        // Arrange
+        AddAuthorization(("Saved", new Role { Allow = [ReadPlain()] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "New", Includes = ["Saved", BuiltInRoles.ReaderName] });
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Temperature))));
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleIsNamedInAnotherCase_ThenItReplacesTheSavedRole()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role { Allow = [ReadPlain()] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "custom" });
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.False(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleAllowsWhatASystemRuleDenies_ThenThePreviewDeniesIt()
+    {
+        // Arrange
+        var allowEverything = new PermissionRule { Actions = AuthorizationActions.All };
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Allow = [allowEverything] });
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.False(result.Policy.CanRead(Member(nameof(TagTestSubject.Password))));
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleCompletesAnIncludeCycle_ThenThePreviewReturnsTheError()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role()), ("Other", new Role { Includes = ["Custom"] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Includes = ["Other"] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Contains("includes itself", result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleIncludesAnUnknownRole_ThenThePreviewReturnsTheError()
+    {
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Includes = ["Missing"] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Contains("'Missing'", result.Error);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(BuiltInRoles.ReaderName)]
+    [InlineData("everything")]
+    [InlineData(AuthorizationPolicy.SystemRoleName)]
+    public void WhenTheEditedRoleHasAnUnusableName_ThenThePreviewReturnsTheReason(string name)
+    {
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = name, Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleSharesItsNameWithAnotherSavedRole_ThenThePreviewReturnsTheReason()
+    {
+        // Arrange
+        AddAuthorization(("Twin", new Role()), ("TWIN", new Role()));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Twin", Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Contains("more than one role", result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleHasAPathPatternWithoutALeadingSeparator_ThenThePreviewReturnsTheError()
+    {
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Allow = [ReadHome()] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("Path pattern 'Home/**' of role 'Custom' must start with '/'.", result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleIncludesASavedRoleWithAPathPatternWithoutALeadingSeparator_ThenThePreviewReturnsItsError()
+    {
+        // Arrange
+        AddAuthorization(("Bad", new Role { Allow = [ReadHome()] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "Custom", Includes = ["Bad"], Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal("Path pattern 'Home/**' of role 'Bad' must start with '/'.", result.Error);
+    }
+
+    [Fact]
+    public void WhenTheEditedRoleFixesTheSavedRoleWithAPathPatternWithoutALeadingSeparator_ThenThePreviewHasNoError()
+    {
+        // Arrange
+        AddAuthorization(("Bad", new Role { Allow = [ReadHome()] }));
+
+        // Act
+        var result = _service.PreviewPolicy(new AuthorizationRole { Name = "bad", Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
+    public async Task WhenAPreviewIsCompiled_ThenThePoliciesAndStatusesOfTheSavedRolesDoNotChange()
+    {
+        // Arrange
+        var good = new Role { Allow = [ReadPlain()] };
+        var bad = new Role { Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }] };
+        AddAuthorization(("Good", good), ("Bad", bad));
+        var goodBefore = _service.GetPolicy(["Good"]);
+        await StatusAssert.NotNullAsync(() => bad.Status);
+        var badStatusBefore = bad.Status;
+
+        // Act
+        var badPreview = _service.PreviewPolicy(new AuthorizationRole { Name = "Good", Includes = ["Missing"] });
+        var fixedPreview = _service.PreviewPolicy(new AuthorizationRole { Name = "Bad", Allow = [ReadPlain()] });
+
+        // Assert
+        Assert.NotNull(badPreview.Error);
+        Assert.Null(fixedPreview.Error);
+        Assert.Same(goodBefore.Policy, _service.GetPolicy(["Good"]).Policy);
+
+        // Read right away rather than awaited: the statuses were final before the previews, so a change would show here.
+        Assert.Null(good.Status);
+        Assert.Equal(badStatusBefore, bad.Status);
+        Assert.NotNull(_service.GetPolicy(["Bad"]).Error);
+    }
+
+    [Theory]
+    [InlineData("/Devices/**")]
+    [InlineData("/Devices/Motor")]
+    public void WhenAPathPatternIsValid_ThenValidationReturnsNoError(string pattern)
+    {
+        // Act
+        var error = _service.ValidatePathPattern(pattern);
+
+        // Assert
+        Assert.Null(error);
+    }
+
+    [Theory]
+    [InlineData("", "A rule has an empty path.")]
+    [InlineData("Devices", "Path pattern 'Devices' must start with '/'.")]
+    [InlineData("/ a", "Path pattern '/ a' has a segment with leading or trailing whitespace.")]
+    [InlineData("/Devices[", "Path pattern '/Devices[' is malformed: ")]
+    [InlineData("/", "Path pattern '/' matches no member; use '/**' for every member, or '/*' for the members of the root.")]
+    [InlineData("/a//b", "Path pattern '/a//b' has an empty segment; '/' may only start a pattern and separate segments.")]
+    [InlineData("/Devices/", "Path pattern '/Devices/' has an empty segment; '/' may only start a pattern and separate segments.")]
+    public void WhenAPathPatternIsInvalid_ThenValidationReturnsTheErrorWithoutNamingARole(string pattern, string expectedStart)
+    {
+        // Act
+        var error = _service.ValidatePathPattern(pattern);
+
+        // Assert
+        Assert.NotNull(error);
+        Assert.StartsWith(expectedStart, error);
+        Assert.DoesNotContain("role", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void WhenAPathPatternIsValidatedAgain_ThenTheCachedErrorIsReturned()
+    {
+        // Arrange
+        var first = _service.ValidatePathPattern("Devices");
+
+        // Act
+        var second = _service.ValidatePathPattern("Devices");
+
+        // Assert
+        Assert.NotNull(first);
+        Assert.Same(first, second);
+    }
+
+    [Fact]
+    public void WhenAPathPatternNamesAnEntry_ThenItsWarningSaysSoAsTheRoleWarningDoes()
+    {
+        // Arrange
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() };
+
+        // Act
+        var warning = _service.GetPathPatternWarning("/Kitchen");
+
+        // Assert
+        Assert.Equal(
+            "Path pattern '/Kitchen' names a subject, not a member, and matches nothing; use '/Kitchen/**' for the subject and everything below it, or '/Kitchen/*' for its members.",
+            warning);
+    }
+
+    [Theory]
+    [InlineData("/Kitchen/**")]
+    [InlineData("/Kitchen*")]
+    [InlineData("/Kitchen/Plain")]
+    [InlineData("/Missing")]
+    [InlineData("Kitchen")]
+    public void WhenAPathPatternHasAWildcardIsInvalidOrNamesNoEntry_ThenItHasNoWarning(string pattern)
+    {
+        // Arrange
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() };
+
+        // Act
+        var warning = _service.GetPathPatternWarning(pattern);
+
+        // Assert
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void WhenTheGraphChangesAfterAPatternWasChecked_ThenItsWarningFollowsTheGraph()
+    {
+        // Arrange
+        Assert.Null(_service.GetPathPatternWarning("/Kitchen"));
+
+        // Act
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() };
+        var warningWithKitchen = _service.GetPathPatternWarning("/Kitchen");
+        _root.Children = new Dictionary<string, IInterceptorSubject>();
+        var warningWithoutKitchen = _service.GetPathPatternWarning("/Kitchen");
+
+        // Assert
+        Assert.NotNull(warningWithKitchen);
+        Assert.Null(warningWithoutKitchen);
+    }
+
+    [Fact]
+    public void WhenAGetterOnThePathOfAPatternThrows_ThenItHasNoWarning()
+    {
+        // Arrange
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new ThrowingGetterSubject() };
+
+        // Act
+        var warning = _service.GetPathPatternWarning("/Kitchen/Broken/Plain");
+
+        // Assert
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void WhenTheSameRoleIsPreviewedAgain_ThenItGetsTheSameResultWithoutCompilingAgain()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role()));
+        var role = new AuthorizationRole { Name = "Custom", Allow = [ReadPlain()] };
+        var first = _service.PreviewPolicy(role);
+
+        // Act
+        var second = _service.PreviewPolicy(role);
+        var ofEqualRole = _service.PreviewPolicy(role with { });
+
+        // Assert
+        Assert.Same(first.Policy, second.Policy);
+        Assert.NotSame(first.Policy, ofEqualRole.Policy);
+    }
+
+    [Fact]
+    public void WhenTheRolesChangeBetweenPreviewsOfTheSameRole_ThenItIsCompiledWithTheChangedRoles()
+    {
+        // Arrange
+        var saved = new Role();
+        AddAuthorization(("Saved", saved));
+        var role = new AuthorizationRole { Name = "New", Includes = ["Saved"] };
+        Assert.False(_service.PreviewPolicy(role).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+
+        // Act
+        saved.Allow = [ReadPlain()];
+        var result = _service.PreviewPolicy(role);
+
+        // Assert
+        Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
+    public void WhenACollectionIsReordered_ThenTheWarningFollowsTheNewPositions()
+    {
+        // Arrange
+        var withKitchen = new TestRoot { Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() } };
+        var withoutKitchen = new TestRoot();
+        var folder = new CollectionTestSubject { Items = [withKitchen, withoutKitchen] };
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Folder"] = folder };
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/Items[0]/Kitchen"));
+
+        // Act: the same entries in another order, which attaches and detaches nothing.
+        folder.Items = [withoutKitchen, withKitchen];
+
+        // Assert
+        Assert.Null(_service.GetPathPatternWarning("/Folder/Items[0]/Kitchen"));
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/Items[1]/Kitchen"));
+    }
+
+    [Fact]
+    public void WhenADictionaryEntryMovesToAnotherKey_ThenTheWarningFollows()
+    {
+        // Arrange
+        var withKitchen = new TestRoot { Children = new Dictionary<string, IInterceptorSubject> { ["Kitchen"] = new TagTestSubject() } };
+        var other = new TestRoot();
+        var folder = new TestRoot { Children = new Dictionary<string, IInterceptorSubject> { ["A"] = withKitchen, ["B"] = other } };
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Folder"] = folder };
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/A/Kitchen"));
+        Assert.Null(_service.GetPathPatternWarning("/Folder/B/Kitchen"));
+
+        // Act: the same subjects swapped between the keys, which attaches and detaches nothing.
+        folder.Children = new Dictionary<string, IInterceptorSubject> { ["A"] = other, ["B"] = withKitchen };
+
+        // Assert
+        Assert.Null(_service.GetPathPatternWarning("/Folder/A/Kitchen"));
+        Assert.NotNull(_service.GetPathPatternWarning("/Folder/B/Kitchen"));
+    }
+
+    private void AddAuthorization(params (string Name, Role Role)[] roles)
+    {
+        var authorization = new Authorization
+        {
+            Roles = roles.ToDictionary(entry => entry.Name, entry => entry.Role)
+        };
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = authorization };
+    }
+
+    private RegisteredSubjectProperty Member(string name) => _subject.TryGetProperty(name)!;
+
+    private static PermissionRule ReadHome() =>
+        new() { Paths = ["Home/**"], Actions = [PermissionAction.Read] };
+
+    private static PermissionRule ReadPlain() =>
+        new() { Members = [nameof(TagTestSubject.Plain)], Actions = [PermissionAction.Read] };
+}

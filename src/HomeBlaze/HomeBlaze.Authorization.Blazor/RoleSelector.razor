@@ -1,0 +1,137 @@
+@* Selects role names of the AuthorizationService: a multi-select plus a chip per selected name; a name that is not a usable role shows as a red chip with the reason as tooltip. *@
+@inject AuthorizationService AuthorizationService
+
+<MudSelect T="string" Label="@Label" MultiSelection="true" SelectedValues="@_selected" SelectedValuesChanged="@SelectAsync"
+           MultiSelectionTextFunc="@(_ => _selected.Count == 1 ? "1 role" : $"{_selected.Count} roles")"
+           HelperText="@HelperText" Error="@Error" ErrorText="@ErrorText">
+    @foreach (var name in GetOptions())
+    {
+        <MudSelectItem T="string" Value="@name">
+            @if (IsKnownRole(name))
+            {
+                @name
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error">@name (@(IsUnavailableRole(name) ? "unavailable" : "unknown"))</MudText>
+            }
+        </MudSelectItem>
+    }
+</MudSelect>
+<MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="mt-2">
+    @foreach (var role in _selected)
+    {
+        if (IsKnownRole(role))
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" OnClose="@(() => RemoveAsync(role))"
+                     data-testid="@($"{TestId}-{role}")">@role</MudChip>
+        }
+        else
+        {
+            <MudTooltip Text="@GetRoleError(role)">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
+                         Class="ma-0" OnClose="@(() => RemoveAsync(role))" data-testid="@($"{TestId}-{role}")">@role</MudChip>
+            </MudTooltip>
+        }
+    }
+</MudStack>
+
+@code {
+    private IReadOnlyList<string> _roleNames = [];
+    private IReadOnlyDictionary<string, string> _unavailableRoles = new Dictionary<string, string>();
+    private IReadOnlyList<string> _selected = [];
+    private IReadOnlyList<string>? _normalizedSelected;
+
+    /// <summary>The selected role names, shown normalized as <see cref="Normalize"/> does.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Selected { get; set; } = [];
+
+    /// <summary>Raised with the new selection, normalized, as a new list.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> SelectedChanged { get; set; }
+
+    /// <summary>The role names not offered, compared ignoring case; a selected one stays selected.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string>? Excluded { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Roles";
+
+    [Parameter]
+    public string? HelperText { get; set; }
+
+    [Parameter]
+    public bool Error { get; set; }
+
+    [Parameter]
+    public string? ErrorText { get; set; }
+
+    /// <summary>The prefix of the chips' <c>data-testid</c>, which is followed by a dash and the role name.</summary>
+    [Parameter]
+    public string TestId { get; set; } = "role";
+
+    /// <summary>
+    /// Normalizes role names as the selector shows them: blank names dropped, a name of <paramref name="roleNames"/> in its
+    /// casing there, and each name once, ignoring case, at its first position.
+    /// </summary>
+    public static IReadOnlyList<string> Normalize(IEnumerable<string> names, IReadOnlyList<string> roleNames)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        ArgumentNullException.ThrowIfNull(roleNames);
+
+        return names
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => roleNames.FirstOrDefault(roleName => string.Equals(roleName, name, StringComparison.OrdinalIgnoreCase)) ?? name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    protected override void OnInitialized()
+    {
+        _roleNames = AuthorizationService.GetRoleNames();
+        _unavailableRoles = AuthorizationService.GetUnavailableRoles();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Normalized only when the parent passes another list, which is not the case for the selection it got from here.
+        if (!ReferenceEquals(Selected, _normalizedSelected))
+        {
+            _selected = Normalize(Selected, _roleNames);
+            _normalizedSelected = Selected;
+        }
+    }
+
+    // The selected names that are not offered stay selectable, so they can be removed in the list as well.
+    private IEnumerable<string> GetOptions()
+    {
+        var offered = _roleNames.Where(name => !IsExcluded(name));
+        return offered.Concat(_selected.Where(name => !IsKnownRole(name) || IsExcluded(name)));
+    }
+
+    private bool IsExcluded(string name) => Excluded?.Contains(name, StringComparer.OrdinalIgnoreCase) == true;
+
+    private bool IsKnownRole(string name) => _roleNames.Contains(name, StringComparer.Ordinal);
+
+    // A custom role that exists but cannot be used, such as one whose name another role has as well.
+    private bool IsUnavailableRole(string name) => _unavailableRoles.ContainsKey(name);
+
+    private string GetRoleError(string name) => _unavailableRoles.GetValueOrDefault(name) ?? "Unknown role";
+
+    // Keeps the order of the names already selected and appends new ones.
+    private Task SelectAsync(IEnumerable<string>? selected)
+    {
+        var selectedNames = selected?.ToList() ?? [];
+        return SetSelectionAsync([.. _selected.Where(selectedNames.Contains), .. selectedNames.Where(name => !_selected.Contains(name))]);
+    }
+
+    private Task RemoveAsync(string name) =>
+        SetSelectionAsync([.. _selected.Where(role => !string.Equals(role, name, StringComparison.Ordinal))]);
+
+    private Task SetSelectionAsync(List<string> names)
+    {
+        _selected = names;
+        _normalizedSelected = names;
+        return SelectedChanged.InvokeAsync(names);
+    }
+}

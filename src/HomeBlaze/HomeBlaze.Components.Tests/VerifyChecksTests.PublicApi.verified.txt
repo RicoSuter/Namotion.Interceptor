@@ -1844,6 +1844,8 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool ListsPropertiesWithoutState { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject>? LocalSubjects { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Placeholder { get; set; }
@@ -1866,6 +1868,8 @@ namespace HomeBlaze.Components.Inputs
         public System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? IsPropertyVisible { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ListsPropertiesWithoutState { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject>? LocalSubjects { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

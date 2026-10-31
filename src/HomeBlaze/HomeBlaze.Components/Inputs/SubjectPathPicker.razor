@@ -98,6 +98,13 @@
     [Parameter]
     public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
 
+    /// <summary>
+    /// Whether a property without a State attribute, such as a configuration property, is listed when it can be
+    /// selected. By default only state properties, operations and properties that expand are listed.
+    /// </summary>
+    [Parameter]
+    public bool ListsPropertiesWithoutState { get; set; }
+
     private readonly List<TreeItemData<PathTreeItem>> _treeItems = [];
 
     private PathTreeItem? _selectedItem;
@@ -325,7 +332,8 @@
                 var isListedMethod = IsListedMethod(property, method);
 
                 // Include if: has State attribute OR is expandable, also by its attributes, OR is an operation that can be selected
-                if (!hasState && !isExpandable && !isListedMethod)
+                // OR is another property that can be selected and is asked for
+                if (!hasState && !isExpandable && !isListedMethod && !IsListedValue(property, method))
                     continue;
 
                 var propertyPath = $"{basePath.TrimEnd('/')}/{property.Name}";
@@ -510,7 +518,7 @@
             // Operation that can be selected - will be shown; skip the metadata lookup when no predicate is
             // set, as it evaluates getters for interface- and object-typed properties.
             var method = CanSelectProperty is not null ? p.TryGetMethodMetadata() : null;
-            if (IsListedMethod(p, method))
+            if (IsListedMethod(p, method) || IsListedValue(p, method))
                 return true;
 
             // Collection/Dictionary with children that are offered - will be shown
@@ -543,6 +551,14 @@
     private bool IsListedMethod(RegisteredSubjectProperty property, MethodMetadata? method)
     {
         return method is not null && !method.IsExcludedFrom(ExclusionTarget.UserInterface) && CanSelectProperty is not null && CanSelectProperty(property);
+    }
+
+    // A property without a State attribute is listed only when asked for; an operation is never listed as a value, and
+    // without a predicate the metadata lookup is skipped, so a method is listed only when its type tells.
+    private bool IsListedValue(RegisteredSubjectProperty property, MethodMetadata? method)
+    {
+        return ListsPropertiesWithoutState && method is null && property.Type != typeof(MethodMetadata) &&
+            (CanSelectProperty is null || CanSelectProperty(property));
     }
 
     private static string GetMethodIcon(MethodMetadata method)
@@ -604,7 +620,9 @@
             // Then try absolute/root resolution (e.g., "/Demo/Conveyor/Temperature")
             value ??= PathResolver.ResolveValue(Value, PathStyle.Canonical);
 
-            if (value != null)
+            // A secret property resolves to no value; a value whose text can show a secret, such as a record with a
+            // secret property, is not previewed either.
+            if (value != null && !SecretValueTypes.HoldsSecret(value))
             {
                 _previewValue = value;
                 _isValidPath = true;

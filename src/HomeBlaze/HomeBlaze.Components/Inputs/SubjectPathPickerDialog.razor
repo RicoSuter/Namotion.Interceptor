@@ -8,7 +8,8 @@
                            Placeholder="@Placeholder"
                            IsPropertyVisible="IsPropertyVisible"
                            CanSelectProperty="CanSelectProperty"
-                           CanSelectSubject="CanSelectSubject" />
+                           CanSelectSubject="CanSelectSubject"
+                           ListsPropertiesWithoutState="ListsPropertiesWithoutState" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
@@ -42,6 +43,10 @@
 
     [Parameter]
     public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
+
+    /// <summary>See <see cref="SubjectPathPicker.ListsPropertiesWithoutState"/>.</summary>
+    [Parameter]
+    public bool ListsPropertiesWithoutState { get; set; }
 
     private string? _selectedPath;
 

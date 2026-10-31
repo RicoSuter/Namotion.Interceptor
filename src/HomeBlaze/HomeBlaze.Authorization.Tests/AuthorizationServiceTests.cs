@@ -213,6 +213,46 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(goodResult.Error);
     }
 
+    [Theory]
+    [InlineData("Kitchen/Lights")]
+    [InlineData("Lights[0]")]
+    [InlineData("Lights]")]
+    public async Task WhenACustomRoleNameHasAPathCharacter_ThenItIsUnavailableWithAStatusAndOtherRolesStillCompile(string name)
+    {
+        // Arrange
+        var invalid = new Role { Allow = [ReadPlain()] };
+        AddAuthorization((name, invalid), ("Good", new Role { Allow = [ReadPlain()] }));
+        var expectedStatus = $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
+
+        // Act
+        var invalidResult = _service.GetPolicy([name]);
+        var goodResult = _service.GetPolicy(["Good"]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, invalidResult.Policy);
+        Assert.Equal($"Role '{name}' is unavailable: {expectedStatus}", invalidResult.Error);
+        Assert.Equal(expectedStatus, _service.GetUnavailableRoles()[name]);
+        Assert.DoesNotContain(name, _service.GetRoleNames());
+        Assert.Null(goodResult.Error);
+        await StatusAssert.EqualAsync(expectedStatus, () => invalid.Status);
+    }
+
+    [Theory]
+    [InlineData("LightOperator", null)]
+    [InlineData("Light Operator.2", null)]
+    [InlineData(" ", "A role needs a name.")]
+    [InlineData("OPERATOR", "The name 'OPERATOR' is reserved for a built-in role.")]
+    [InlineData("System", "The name 'System' is reserved for the system rules.")]
+    [InlineData("a/b", "The name 'a/b' cannot contain '/', '[' or ']', because it is part of the role's path.")]
+    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedAndPathCharacterNamesHaveAnError(string name, string? expectedError)
+    {
+        // Act
+        var error = AuthorizationService.GetRoleNameError(name);
+
+        // Assert
+        Assert.Equal(expectedError, error);
+    }
+
     [Fact]
     public async Task WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
     {
@@ -455,6 +495,96 @@ public sealed class AuthorizationServiceTests : IDisposable
         await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref raised) > 0, message: "PoliciesChanged should be raised.");
         Assert.True(policyBefore.CanRead(Member(nameof(TagTestSubject.Plain))));
         Assert.False(_service.GetPolicy(["Custom"]).Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
+    public void WhenAnUpdateIsOpen_ThenPoliciesAndRoleNamesStayAsBeforeItUntilItEnds()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        var authorization = AddAuthorization(("Custom", role));
+        var before = _service.GetPolicy(["Custom"]).Policy;
+
+        // Act
+        var update = _service.BeginUpdate();
+        role.Includes = ["Added"];
+        role.Allow = [];
+        authorization.Roles = new Dictionary<string, Role> { ["Custom"] = role, ["Added"] = new Role() };
+        var during = _service.GetPolicy(["Custom"]);
+        var namesDuring = _service.GetRoleNames();
+        var previewDuring = _service.PreviewPolicy(new AuthorizationRole { Name = "Other", Includes = ["Added"] });
+        update.Dispose();
+        var after = _service.GetPolicy(["Custom"]);
+
+        // Assert
+        Assert.Same(before, during.Policy);
+        Assert.DoesNotContain("Added", namesDuring);
+        Assert.NotNull(previewDuring.Error);
+        Assert.Null(after.Error);
+        Assert.NotSame(before, after.Policy);
+        Assert.False(after.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Contains("Added", _service.GetRoleNames());
+    }
+
+    [Fact]
+    public void WhenUpdatesAreNested_ThenTheChangeTakesEffectOnceTheLastEnds()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        var before = _service.GetPolicy(["Custom"]).Policy;
+        var outer = _service.BeginUpdate();
+        var inner = _service.BeginUpdate();
+        role.Allow = [];
+
+        // Act
+        inner.Dispose();
+        inner.Dispose();
+        var afterInner = _service.GetPolicy(["Custom"]).Policy;
+        outer.Dispose();
+        var afterOuter = _service.GetPolicy(["Custom"]).Policy;
+
+        // Assert
+        Assert.Same(before, afterInner);
+        Assert.NotSame(before, afterOuter);
+        Assert.False(afterOuter.CanRead(Member(nameof(TagTestSubject.Plain))));
+    }
+
+    [Fact]
+    public async Task WhenAnUpdateEnds_ThenTheStatusesAreUpdatedWithoutAPolicyBeingAsked()
+    {
+        // Arrange
+        var role = new Role { Allow = [ReadPlain()] };
+        AddAuthorization(("Custom", role));
+        _ = _service.GetRoleNames();
+        var update = _service.BeginUpdate();
+        role.Allow = [new PermissionRule { Paths = ["Home"], Actions = [PermissionAction.Read] }];
+
+        // Act
+        update.Dispose();
+
+        // Assert
+        await StatusAssert.ContainsAsync("'Custom'", () => role.Status);
+    }
+
+    [Fact]
+    public void WhenPrincipalsAreCountedForAName_ThenEachNamingItIgnoringCaseCountsOnceWhetherOrNotTheRoleExists()
+    {
+        // Arrange
+        AddAuthorization(("Custom", new Role()));
+        _service.SetPrincipalRoles(new object(), ["Custom", "CUSTOM"]);
+        _service.SetPrincipalRoles(new object(), ["custom", "Missing"]);
+        _service.SetPrincipalRoles(new object(), [BuiltInRoles.ReaderName]);
+
+        // Act
+        var customCount = _service.GetPrincipalCount("Custom");
+        var missingCount = _service.GetPrincipalCount("MISSING");
+        var otherCount = _service.GetPrincipalCount("Other");
+
+        // Assert
+        Assert.Equal(2, customCount);
+        Assert.Equal(1, missingCount);
+        Assert.Equal(0, otherCount);
     }
 
     [Fact]

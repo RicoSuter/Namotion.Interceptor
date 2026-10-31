@@ -225,6 +225,7 @@ namespace HomeBlaze.Services
         public const string OtherGroup = "Other";
         public SubjectTypeCatalog(HomeBlaze.Services.SubjectTypeRegistry typeRegistry) { }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> GetCreatableTypes(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> existingSubjects) { }
+        public System.Collections.Generic.IReadOnlyList<string> GetTypeNames() { }
         public static HomeBlaze.Services.SubjectTypeDescriptor Describe(System.Type type) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeGroup> GetGroups(System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> descriptors, string? searchText) { }
     }
@@ -396,6 +397,10 @@ namespace HomeBlaze.Services.Display
     public static class RawValueFormatter
     {
         public static string Format(object? value) { }
+    }
+    public static class SecretValueTypes
+    {
+        public static bool HoldsSecret(object value) { }
     }
     public static class StateUnitExtensions
     {
