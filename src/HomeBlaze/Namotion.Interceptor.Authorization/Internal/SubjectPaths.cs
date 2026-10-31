@@ -17,6 +17,7 @@ internal static class SubjectPaths
     /// <summary>
     /// The segment of the property as the registry's path writer spells it: the provider's segment, or the browse name
     /// when the provider gives none. An attribute is spelled the same way, so attribute paths follow the registry's syntax.
+    /// Inclusion is not checked: a member paths may not pass still has a segment a deny can match.
     /// </summary>
     public static string GetSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
         => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
@@ -25,9 +26,11 @@ internal static class SubjectPaths
     /// Gets every path of the subject: one per chain of parents from the subject up to a subject without parents, a
     /// root, in the order the parents are listed. Every subject a chain passes above the starting subject must be
     /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
-    /// it. A path is its links from the root's property down to the property holding
-    /// the subject, each in every spelling the path reader resolves. When the chain of first parents ends at a subject
-    /// without parents and every property on it is included, the first path is the one the registry's
+    /// it. A path is its links from the root's property down to the property holding the subject, each in every
+    /// spelling the path reader resolves. A chain passes only properties
+    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/> admits, as the registry's paths do, so a chain through
+    /// an excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
+    /// subject without parents and has a path, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
     /// writes for the subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
     /// </summary>
@@ -36,11 +39,11 @@ internal static class SubjectPaths
     /// <param name="paths">Receives the paths that could be written, each as its links in root-to-subject order.</param>
     /// <param name="maxPaths">The most paths to write; positive.</param>
     /// <returns>
-    /// True when every chain was written; false when a chain could not be written (a property on it is excluded, an
-    /// [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, or the
-    /// chain passes a subject that is no longer attached), more than
-    /// <paramref name="maxPaths"/> chains exist, or the search took more than 64 parent links per allowed path before
-    /// every chain was found. A subject without parents has no paths and returns true.
+    /// True when every chain was written; false when a chain could not be written (it passes a property paths may not
+    /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, or
+    /// the chain passes a subject that is no longer attached), more than <paramref name="maxPaths"/> chains exist, or
+    /// the search took more than 64 parent links per allowed path before every chain was found. A subject without
+    /// parents has no paths and returns true.
     /// </returns>
     public static bool TryGetPaths(RegisteredSubject subject, PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths)
     {
@@ -240,13 +243,13 @@ internal static class SubjectPaths
             return IsComplete || _written < _maxPaths;
         }
 
-        /// <summary>The links of the chain root first; null when a property on it is excluded or a link is unwritable.</summary>
+        /// <summary>The links of the chain root first; null when paths may not pass a property on it or a link is unwritable.</summary>
         private readonly PathLink[]? TryGetLinks(List<SubjectPropertyParent> frames)
         {
-            // Resolution that respects IsPropertyIncluded checks every segment, so a chain through an excluded property has no path.
+            // The registry builds and resolves no path through such a property, nor through an attribute of an excluded property.
             foreach (var frame in frames)
             {
-                if (!_pathProvider.IsPropertyIncluded(frame.Property))
+                if (!_pathProvider.IsPropertyIncludedInPaths(frame.Property))
                 {
                     return null;
                 }
