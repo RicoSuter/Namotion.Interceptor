@@ -214,7 +214,7 @@ public class GamePageTests
 
         // Assert
         var tree = Assert.IsType<Tree>(Assert.Single(world.Game.Objects.Values));
-        Assert.Equal((x, y + GamePlayer.Size), (tree.X, tree.Y));
+        Assert.Equal((x + GamePlayer.Size / 2, y + GamePlayer.Size), (tree.X + tree.Width / 2, tree.Y));
         await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x, y, "W"), new() { Timeout = Timeout });
         var canvas = page.GetByTestId("game-canvas");
         await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
@@ -233,7 +233,7 @@ public class GamePageTests
         // Two meters east of the listener, with a tree right between them.
         talkerPlayer.X = listenerPlayer.X + 8;
         talkerPlayer.Y = listenerPlayer.Y;
-        world.Game.Objects = new Dictionary<string, GameObject> { ["tree"] = new Tree { X = listenerPlayer.X + 4, Y = listenerPlayer.Y } };
+        world.Game.Objects = new Dictionary<string, GameObject> { ["tree"] = new Tree { X = listenerPlayer.X + 4, Y = listenerPlayer.Y, Variant = 6 } };
 
         // Act
         await TurnOnVoiceAsync(talker);

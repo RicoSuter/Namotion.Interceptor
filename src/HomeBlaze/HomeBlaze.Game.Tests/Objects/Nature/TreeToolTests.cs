@@ -23,7 +23,7 @@ public class TreeToolTests
 
         // Assert
         var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal((0, 2), (tree.X, tree.Y));
+        Assert.Equal((GamePlayer.Size / 2, 2), (tree.X + tree.Width / 2, tree.Y));
         Assert.InRange(tree.Variant, 0, Tree.VariantCount - 1);
         Assert.InRange(tree.Rotation, 0, 359);
         Assert.InRange(tree.Scale, Tree.MinimumScale, Tree.MaximumScale);
@@ -42,6 +42,23 @@ public class TreeToolTests
 
         // Assert
         Assert.Equal(5, Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value).Variant);
+    }
+
+    [Theory]
+    [InlineData(0, 4)]
+    [InlineData(6, 2)]
+    public async Task WhenATreeOfAVariantIsPlanted_ThenItsWholeTrunkStandsInFrontCenteredOnThePlayer(int variant, int smallestSize)
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        await _tool.PlantTreeAsync(variant, new GameCaller(player), CancellationToken.None);
+
+        // Assert
+        var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
+        Assert.InRange(tree.Width, smallestSize, smallestSize * 2);
+        Assert.Equal((GamePlayer.Size / 2, 2), (tree.X + tree.Width / 2, tree.Y));
     }
 
     [Fact]
