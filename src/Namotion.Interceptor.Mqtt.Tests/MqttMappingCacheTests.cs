@@ -377,6 +377,30 @@ public class MqttMappingCacheTests
         Assert.Equal("child/inner/value", server.TryGetTopicForProperty(value.Reference, value).Topic);
     }
 
+    [Fact]
+    public async Task WhenTheServerFiltersAChangeOfAPropertyWithoutATopic_ThenNothingIsAllocated()
+    {
+        // Arrange: a property without a topic is looked up again on every change, so the lookup must not allocate.
+        var subject = CreateRootSubject();
+        await using var server = CreateServer(subject, CreateMapper());
+        var comment = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Comment))!.Reference;
+
+        // Warm up: the JIT and the provider's per-type caches are one-time costs.
+        for (var warmup = 0; warmup < 100; warmup++)
+        {
+            server.IsPropertyIncluded(comment);
+        }
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var included = server.IsPropertyIncluded(comment);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.False(included);
+        Assert.Equal(0, allocated);
+    }
+
     private static MqttCacheTestRoot CreateRootSubject()
     {
         var context = InterceptorSubjectContext
