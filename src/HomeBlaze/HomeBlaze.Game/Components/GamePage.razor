@@ -22,6 +22,7 @@
 <div class="game-layout">
     <div class="game-stage">
         <canvas @ref="_canvas" class="game-canvas" data-testid="game-canvas"></canvas>
+        <div class="game-fps" data-game-fps aria-hidden="true"></div>
         @if (_error is not null)
         {
             <div class="game-message"><MudAlert Severity="Severity.Error" data-testid="game-error">@_error</MudAlert></div>
