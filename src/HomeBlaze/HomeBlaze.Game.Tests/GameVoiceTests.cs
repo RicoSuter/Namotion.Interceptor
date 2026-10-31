@@ -227,7 +227,7 @@ public class GameVoiceTests
     }
 
     [Fact]
-    public void WhenPlayersAreReplacedFromOutside_ThenTheNewInstanceKeepsItsOwnSpeaker()
+    public void WhenPlayersAreReplacedFromOutside_ThenTheNewInstanceCanSpeak()
     {
         // Arrange
         var speaker = _context.AddConnectedPlayer("tab-1");
@@ -267,5 +267,33 @@ public class GameVoiceTests
         // Assert
         Assert.False(isRebuiltWithoutChange);
         Assert.True(isRebuilt);
+    }
+
+    [Fact]
+    public void WhenAVolumeTableChangedHandlerThrows_ThenTheTickSurvivesAndTheNextTickMixes()
+    {
+        // Arrange
+        var speaker = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 20);
+        var sink = new RecordingVoiceSink();
+        using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
+        _context.Game.SetMicrophone(Caller(speaker), pageId: 1, isOn: true);
+        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+        var calls = 0;
+        _context.Game.VolumeTableChanged += () =>
+        {
+            if (++calls == 1)
+            {
+                throw new InvalidOperationException("The handler failed.");
+            }
+        };
+
+        // Act
+        var exception = Record.Exception(() => _context.Game.TickVoice());
+        _context.Game.TickVoice();
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Equal(500, VoiceFrames.ReadSample(Assert.Single(sink.Frames), 0));
     }
 }
