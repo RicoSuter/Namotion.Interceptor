@@ -14,7 +14,7 @@ namespace HomeBlaze.Authorization.Internal;
 /// </summary>
 // After the registry, so that a warning computed after a change sees the changed graph.
 [RunsAfter(typeof(SubjectRegistry))]
-internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandler
+internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler
 {
     private const int MaxCachedPathPatterns = 1024;
 
@@ -92,16 +92,9 @@ internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandle
     {
     }
 
-    // A reorder of a collection attaches and detaches nothing, but changes the paths of its entries. The registry does
-    // not tell whether an entry moved, so every assignment that keeps an entry counts, also one in the same order. It
-    // moves no entry of a dictionary, which some subjects assign again on every poll.
-    public void RefreshCollectionProperty(PropertyReference property, object? value)
-    {
-        if (property.TryGetRegisteredProperty() is { IsSubjectCollection: true })
-        {
-            Interlocked.Increment(ref _graphVersion);
-        }
-    }
+    // A move to another key or position attaches and detaches nothing, but changes the paths of the moved entries.
+    public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+        => Interlocked.Increment(ref _graphVersion);
 
     private List<RegisteredSubject> GetRoots(long graphVersion)
     {
