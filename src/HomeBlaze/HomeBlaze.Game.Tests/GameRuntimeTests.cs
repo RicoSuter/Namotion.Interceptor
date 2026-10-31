@@ -29,6 +29,38 @@ public class GameRuntimeTests
     }
 
     [Fact]
+    public async Task WhenTheHousekeepingIntervalPassedBeforeASignal_ThenTheSignalStillReconcilesPromptly()
+    {
+        // Arrange
+        _context.Clients.Set("tab-1", isNamed: false, isConnected: true);
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Game.Players.ContainsKey("tab-1"), message: "The first pass did not run");
+
+            // Only a pass that a won delay starts picks up tab-2; the clock advances until the loop waits on its delay.
+            _context.Clients.Set("tab-2", isNamed: false, isConnected: true);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                _context.TimeProvider.Advance(Game.HousekeepingInterval);
+                return _context.Game.Players.ContainsKey("tab-2");
+            }, message: "The housekeeping pass did not run");
+            _context.Clients.Set("tab-3", isNamed: false, isConnected: true);
+
+            // Act
+            _context.Game.SignalReconcile();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => _context.Game.Players.ContainsKey("tab-3"), timeout: TimeSpan.FromSeconds(2),
+                message: "The signal did not wake the loop");
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenAWallIsMovedFromOutside_ThenMovementSeesItsNewPosition()
     {
         // Arrange
