@@ -47,12 +47,12 @@ public abstract partial class GameObject : IConfigurable
     public partial int Height { get; set; }
 
     /// <summary>
-    /// Whether no other blocking object may enter the tiles of this one.
+    /// Whether this object blocks movement, which means no other movement blocking object may enter the tiles of its footprint.
     /// </summary>
-    public virtual bool IsBlocking => true;
+    public virtual bool IsMovementBlocking => true;
 
     /// <summary>
-    /// Whether the object stops sound; unlike <see cref="IsBlocking"/>, which is about movement.
+    /// Whether the object stops sound; unlike <see cref="IsMovementBlocking"/>, which is about movement.
     /// </summary>
     public virtual bool IsSoundBlocking => false;
 

@@ -129,7 +129,7 @@ public partial class Game
     private static bool IsFootprintProperty(string name) =>
         name is nameof(GameObject.X) or nameof(GameObject.Y) or nameof(GameObject.Width) or nameof(GameObject.Depth);
 
-    // The properties that IsBlocking, IsSoundBlocking or IsVisible follow.
+    // The properties that IsMovementBlocking, IsSoundBlocking or IsVisible follow.
     private static bool IsStateProperty(string name) =>
         name is nameof(GamePlayer.IsConnected) or nameof(Door.IsOpen);
 

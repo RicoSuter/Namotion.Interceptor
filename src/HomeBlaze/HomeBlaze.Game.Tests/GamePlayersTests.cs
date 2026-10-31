@@ -51,7 +51,7 @@ public class GamePlayersTests
         // Assert
         var player = _context.Game.Players["kitchen"];
         Assert.False(player.IsConnected);
-        Assert.False(player.IsBlocking);
+        Assert.False(player.IsMovementBlocking);
         Assert.False(player.IsVisible);
     }
 
