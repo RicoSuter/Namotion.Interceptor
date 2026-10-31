@@ -187,3 +187,17 @@
     text-align: center;
     background: rgba(255, 255, 255, .25);
 }
+
+.game-panel .game-voice {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+}
+
+.game-voice-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+::deep .game-voice-message {
+    margin: -8px 0 16px;
+}
