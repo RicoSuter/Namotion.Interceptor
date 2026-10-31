@@ -30,6 +30,10 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     private readonly ILogger _logger;
     private readonly TimeProvider _timeProvider;
 
+    // Guarded by _lock: an outside replacement of Players or Objects that a copy-on-write of the game starts from.
+    private Dictionary<string, GamePlayer>? _pendingPlayers;
+    private Dictionary<string, GameObject>? _pendingObjects;
+
     [Configuration]
     public partial string Name { get; set; }
 
@@ -73,16 +77,57 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         {
             player.ClientId = id;
         }
+
+        // A reload or the configuration editor assigns outside the lock, so a copy-on-write on another thread may read
+        // Players before this write lands and assign its copy after it; it starts from this dictionary instead.
+        if (!_lock.IsHeldByCurrentThread)
+        {
+            lock (_lock)
+            {
+                _pendingPlayers = newValue;
+            }
+        }
     }
 
     partial void OnObjectsChanging(ref Dictionary<string, GameObject> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, GameObject>();
+
+        // See OnPlayersChanging.
+        if (!_lock.IsHeldByCurrentThread)
+        {
+            lock (_lock)
+            {
+                _pendingObjects = newValue;
+            }
+        }
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         RequestIndexRebuild();
+        SignalReconcile();
         return Task.CompletedTask;
+    }
+
+    // Callers hold _lock. The latest assigned players, also when an outside assignment has not landed yet; a pending
+    // value is always the latest, because every write of the game clears it.
+    private Dictionary<string, GamePlayer> CurrentPlayers => _pendingPlayers ?? Players;
+
+    // Callers hold _lock.
+    private Dictionary<string, GameObject> CurrentObjects => _pendingObjects ?? Objects;
+
+    // Callers hold _lock.
+    private void ReplacePlayers(Dictionary<string, GamePlayer> players)
+    {
+        _pendingPlayers = null;
+        Players = players;
+    }
+
+    // Callers hold _lock.
+    private void ReplaceObjects(Dictionary<string, GameObject> objects)
+    {
+        _pendingObjects = null;
+        Objects = objects;
     }
 }

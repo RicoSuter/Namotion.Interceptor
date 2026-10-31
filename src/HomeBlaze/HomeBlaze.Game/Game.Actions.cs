@@ -42,7 +42,8 @@ public partial class Game
             }
 
             var wall = new Wall { X = footprint.X, Y = footprint.Y, Width = footprint.Width, Depth = footprint.Depth };
-            Objects = new Dictionary<string, GameObject>(Objects) { [CreateObjectName("wall")] = wall };
+            var objects = CurrentObjects;
+            ReplaceObjects(new Dictionary<string, GameObject>(objects) { [CreateObjectName(objects, "wall")] = wall });
             index.AddOrUpdate(wall);
         }
 
@@ -57,10 +58,11 @@ public partial class Game
     {
         lock (_lock)
         {
-            var name = FindObjectName(gameObject) ?? throw new InvalidOperationException("The object is not part of this game.");
-            var next = new Dictionary<string, GameObject>(Objects);
+            var objects = CurrentObjects;
+            var name = FindObjectName(objects, gameObject) ?? throw new InvalidOperationException("The object is not part of this game.");
+            var next = new Dictionary<string, GameObject>(objects);
             next.Remove(name);
-            Objects = next;
+            ReplaceObjects(next);
             GetIndex().Remove(gameObject);
         }
 
@@ -77,10 +79,9 @@ public partial class Game
         return _clients.SendNotificationAsync(recipient.ClientId, notification, cancellationToken);
     }
 
-    // Callers hold _lock.
-    private string? FindObjectName(GameObject gameObject)
+    private static string? FindObjectName(Dictionary<string, GameObject> objects, GameObject gameObject)
     {
-        foreach (var (name, candidate) in Objects)
+        foreach (var (name, candidate) in objects)
         {
             if (ReferenceEquals(candidate, gameObject))
             {
@@ -91,15 +92,14 @@ public partial class Game
         return null;
     }
 
-    // Callers hold _lock.
-    private string CreateObjectName(string prefix)
+    private static string CreateObjectName(Dictionary<string, GameObject> objects, string prefix)
     {
         string name;
         do
         {
             name = $"{prefix}-{Guid.NewGuid():N}"[..(prefix.Length + 9)];
         }
-        while (Objects.ContainsKey(name));
+        while (objects.ContainsKey(name));
 
         return name;
     }

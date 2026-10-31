@@ -23,6 +23,22 @@ public class GameActionsTests
     }
 
     [Fact]
+    public async Task WhenObjectsWereReplacedFromOutside_ThenBuildingAWallKeepsThem()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var existing = new Wall { X = 20, Y = 20 };
+        _context.Game.Objects = new Dictionary<string, GameObject> { ["loaded"] = existing };
+
+        // Act
+        await _context.Game.BuildWallAsync(new GameCaller(player), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, _context.Game.Objects.Count);
+        Assert.Same(existing, _context.Game.Objects["loaded"]);
+    }
+
+    [Fact]
     public async Task WhenSomethingIsInTheWay_ThenBuildingIsRefused()
     {
         // Arrange

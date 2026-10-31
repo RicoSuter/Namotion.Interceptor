@@ -36,11 +36,11 @@ public partial class Game
     // Callers hold _lock. Replaces Players only when a player is added or removed.
     private void SynchronizePlayerSet(IReadOnlyList<GameClient> clients)
     {
-        var current = Players;
+        var current = CurrentPlayers;
         var next = AddMissingPlayers(clients, RemoveStalePlayers(clients, current));
         if (!ReferenceEquals(next, current))
         {
-            Players = next;
+            ReplacePlayers(next);
             RequestIndexRebuild();
             _isSaveRequested = true;
         }

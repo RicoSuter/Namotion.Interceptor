@@ -91,6 +91,12 @@ public partial class Game
         if (IsOutsideChange(change))
         {
             RequestIndexRebuild();
+
+            // Reloaded players of connected clients join again right away.
+            if (ReferenceEquals(change.Property.Subject, this) && change.Property.Name == nameof(Players))
+            {
+                SignalReconcile();
+            }
         }
     }
 
