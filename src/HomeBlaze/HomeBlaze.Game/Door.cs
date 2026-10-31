@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.Visuals;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -18,6 +19,17 @@ namespace HomeBlaze.Game;
 [InterceptorSubject]
 public partial class Door : GameObject, ITitleProvider, IIconProvider
 {
+    private const double LeafThickness = 0.3;
+    private const string LeafColor = "#8b5a2b";
+    private const double OpenRotation = -90;
+
+    private readonly GameVisualCache<(int Width, int Depth, int Height, bool IsOpen)> _visual = new();
+
+    /// <summary>
+    /// The height of the door leaf in tiles, 2.1 m; a lintel of the wall fills the opening above it.
+    /// </summary>
+    public const double LeafHeight = 8.4;
+
     /// <summary>
     /// The width of the opening in tiles, 1 m.
     /// </summary>
@@ -51,6 +63,9 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
 
     public override bool IsSoundBlocking => !IsOpen;
 
+    public override GameVisual Visual => _visual.Get((Width, Depth, Height, IsOpen),
+        static state => CreateVisual(state.Width, state.Depth, state.Height, state.IsOpen));
+
     [Derived]
     [PropertyAttribute("Open", KnownAttributes.IsEnabled)]
     public bool Open_IsEnabled => !IsOpen;
@@ -78,4 +93,33 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         GetGame().SetDoorOpenAsync(this, isOpen: false, cancellationToken);
 
     private Game GetGame() => ParentGame ?? throw new InvalidOperationException("The door is not part of a game.");
+
+    private static GameVisual CreateVisual(int width, int depth, int height, bool isOpen)
+    {
+        var leafHeight = Math.Min(LeafHeight, height);
+        var leaf = CreateLeaf(width, depth, leafHeight, isOpen ? OpenRotation : 0);
+        if (height - leafHeight < 0.01)
+        {
+            return new GameVisual([leaf]);
+        }
+
+        var lintel = WallTextures.CreateBricks(new GameVisualVector(0, leafHeight, 0), new GameVisualVector(width, height - leafHeight, depth));
+        return new GameVisual([lintel, leaf]);
+    }
+
+    // The leaf hangs on a hinge at the west end of an opening running east to west, or at the south end of one running
+    // north to south, and opens toward the north or the west.
+    private static GameVisualPart CreateLeaf(int width, int depth, double height, double rotation)
+    {
+        var isAlongX = width >= depth;
+        return new GameVisualPart
+        {
+            Shape = GameVisualShape.Box,
+            Offset = isAlongX ? new GameVisualVector(0, 0, (depth - LeafThickness) / 2) : new GameVisualVector((width - LeafThickness) / 2, 0, 0),
+            Size = isAlongX ? new GameVisualVector(width, height, LeafThickness) : new GameVisualVector(LeafThickness, height, depth),
+            Pivot = isAlongX ? new GameVisualPoint(0, depth / 2.0) : new GameVisualPoint(width / 2.0, 0),
+            Rotation = rotation,
+            Color = LeafColor
+        };
+    }
 }

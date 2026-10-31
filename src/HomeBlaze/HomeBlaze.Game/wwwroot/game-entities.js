@@ -1,14 +1,11 @@
-// Draws the objects of the view: walls as brick boxes, doors as a brick lintel over a swinging wooden panel, players as
-// animated people. World coordinates are relative to an
-// integer origin near the own player, so the GPU's 32-bit floats stay precise anywhere in the int range. One unit is
-// one tile of 25 cm.
+// Draws the objects of the view. Every object but a player is built from the parts of its visual description: boxes with
+// shared materials and glTF models, each loaded once per URL. Players are animated people. World coordinates are relative
+// to an integer origin near the own player, so the GPU's 32-bit floats stay precise anywhere in the int range. One unit
+// is one tile of 25 cm.
 const REBASE_DISTANCE = 2048;
 const TELEPORT_DISTANCE = 6;
 // One meter, the size of one grass repeat and the spacing of the ground grid.
 const METER = 4;
-// The brick texture shows about 2 m by 1 m of wall.
-const BRICK_REPEAT_WIDTH = 8;
-const BRICK_REPEAT_HEIGHT = 4;
 const FADED_VISIBILITY = 0.3;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
@@ -19,16 +16,84 @@ const WALKING_SPEED_RATIO = 1.05;
 const IDLE_ANIMATION = 'Idle_Neutral';
 const WALKING_ANIMATION = 'Walk';
 const SHIRT_MATERIAL = 'LightBrown';
-// A door panel leaves the top of the opening to the lintel, and swings by a quarter turn when it opens.
-const DOOR_PANEL_HEIGHT = 8.4;
-const DOOR_PANEL_THICKNESS = 0.3;
-const DOOR_OPEN_ANGLE = -Math.PI / 2;
-const DOOR_SWING_MS = 300;
+// A part glides this long to a new offset or rotation, such as a door leaf that swings open.
+const GLIDE_MS = 300;
+const RADIANS_PER_DEGREE = Math.PI / 180;
+// The color of a box without texture or color, and of the box that replaces a model that failed to load.
+const FALLBACK_COLOR = '#8d8577';
+// Wind bends a part by this many tiles per square tile of height above the object's base, swaying at the first speed and
+// gusting at the second, both in radians per second.
+const WIND_STRENGTH = 0.0015;
+const WIND_SPEED = 1.7;
+const GUST_SPEED = 0.37;
+// Runs after the vertex is in world space; finalWorld[3] is the mesh's world position, which spreads the phase so that
+// neighboring trees do not sway in step.
+const WIND_SHADER = `
+#ifdef GAME_WIND
+    float gameWindHeight = max(worldPos.y - finalWorld[3].y, 0.0);
+    float gameWindPhase = finalWorld[3].x * 0.13 + finalWorld[3].z * 0.07;
+    float gameWindSway = sin(gameWindTime * ${toGlsl(WIND_SPEED)} + gameWindPhase) * 0.7
+        + sin(gameWindTime * ${toGlsl(GUST_SPEED)} + gameWindPhase * 0.5) * 0.3;
+    float gameWindBend = gameWindHeight * gameWindHeight * ${toGlsl(WIND_STRENGTH)} * gameWindSway;
+    worldPos.x += gameWindBend;
+    worldPos.z += gameWindBend * 0.4;
+#endif
+`;
+
+// Seconds of the render clock, which the wind shader reads; the views of a tab share it.
+let windTime = 0;
+let WindPlugin = null;
+
+function toGlsl(value) {
+    return value.toFixed(6);
+}
+
+// Defined on first use, because Babylon is loaded after this module.
+function getWindPlugin() {
+    const BABYLON = window.BABYLON;
+    WindPlugin ??= class extends BABYLON.MaterialPluginBase {
+        constructor(material) {
+            super(material, 'GameWind', 200, { GAME_WIND: false });
+            this._enable(true);
+        }
+
+        prepareDefines(defines) {
+            defines.GAME_WIND = true;
+        }
+
+        getClassName() {
+            return 'GameWindPluginMaterial';
+        }
+
+        getUniforms() {
+            return {
+                ubo: [{ name: 'gameWindTime', size: 1, type: 'float' }],
+                vertex: '#ifdef GAME_WIND\nuniform float gameWindTime;\n#endif\n',
+            };
+        }
+
+        bindForSubMesh(uniformBuffer) {
+            uniformBuffer.updateFloat('gameWindTime', windTime);
+        }
+
+        getCustomCode(shaderType) {
+            return shaderType === 'vertex' ? { CUSTOM_VERTEX_UPDATE_WORLDPOS: WIND_SHADER } : null;
+        }
+    };
+    return WindPlugin;
+}
 
 export async function createEntities(scene, options) {
     const BABYLON = window.BABYLON;
     const entities = new Map();
     const targetMarkers = [];
+    // Shared by the objects of the view: box materials by texture and color, model loads by URL, and the wind variant of
+    // each model material.
+    const boxMaterials = new Map();
+    const models = new Map();
+    const windMaterials = new Map();
+    // Written to the canvas for tests and diagnosis.
+    const stats = { parts: 0, models: 0, failures: 0 };
     // Reused by every frame, so the render loop does not allocate.
     const selfPosition = { x: 0, z: 0 };
     const segment = { enter: 0, exit: 1 };
@@ -40,14 +105,6 @@ export async function createEntities(scene, options) {
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
     ground.material = await createGroundMaterial();
     ground.isPickable = false;
-
-    const wallMaterial = new BABYLON.StandardMaterial('wall', scene);
-    wallMaterial.diffuseTexture = new BABYLON.Texture(`${options.baseUrl}textures/bricks.jpg`, scene);
-    wallMaterial.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
-
-    const doorMaterial = new BABYLON.StandardMaterial('door', scene);
-    doorMaterial.diffuseColor = new BABYLON.Color3(0.55, 0.34, 0.18);
-    doorMaterial.specularColor = new BABYLON.Color3(0.06, 0.05, 0.04);
 
     const targetMaterial = new BABYLON.StandardMaterial('target', scene);
     targetMaterial.emissiveColor = new BABYLON.Color3(1, 0.88, 0.4);
@@ -61,6 +118,7 @@ export async function createEntities(scene, options) {
 
     // Not added to the scene; every player instantiates its own copy.
     const character = await BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/Casual_2.glb`, scene);
+    updateStats();
 
     async function createGroundMaterial() {
         // The border of each repeat draws the meter grid; half of the stroke lies outside, so each edge shows half of it.
@@ -87,6 +145,15 @@ export async function createEntities(scene, options) {
         return material;
     }
 
+    function updateStats() {
+        const element = options.statsElement;
+        if (element) {
+            element.dataset.gameParts = String(stats.parts);
+            element.dataset.gameModels = String(stats.models);
+            element.dataset.gameModelFailures = String(stats.failures);
+        }
+    }
+
     function ensureOrigin(x, y) {
         if (originX === null || Math.abs(x - originX) > REBASE_DISTANCE || Math.abs(y - originY) > REBASE_DISTANCE) {
             originX = x;
@@ -97,85 +164,196 @@ export async function createEntities(scene, options) {
         }
     }
 
-    function centerOf(view, x, y) {
-        // Walls stand on their center, players on their feet.
-        const height = view.kind === 'player' ? 0 : view.height / 2;
-        return new BABYLON.Vector3(x - originX + view.width / 2, height, y - originY + view.depth / 2);
+    // Players stand on the center of their footprint; the parts of other objects start at its south-west corner.
+    function positionOf(view, x, y) {
+        return view.kind === 'player'
+            ? new BABYLON.Vector3(x - originX + view.width / 2, 0, y - originY + view.depth / 2)
+            : new BABYLON.Vector3(x - originX, 0, y - originY);
     }
 
-    function createBrickBox(name, width, height, depth) {
-        const sideUv = new BABYLON.Vector4(0, 0, width / BRICK_REPEAT_WIDTH, height / BRICK_REPEAT_HEIGHT);
-        const endUv = new BABYLON.Vector4(0, 0, depth / BRICK_REPEAT_WIDTH, height / BRICK_REPEAT_HEIGHT);
-        const topUv = new BABYLON.Vector4(0, 0, width / BRICK_REPEAT_WIDTH, depth / BRICK_REPEAT_HEIGHT);
+    function getBoxMaterial(texture, color) {
+        const key = `${texture ?? ''}|${color ?? ''}`;
+        let material = boxMaterials.get(key);
+        if (!material) {
+            material = new BABYLON.StandardMaterial(`box-${boxMaterials.size}`, scene);
+            if (texture) {
+                material.diffuseTexture = new BABYLON.Texture(texture, scene);
+            }
+
+            // The diffuse color tints the texture, so a textured box without a color stays white.
+            material.diffuseColor = BABYLON.Color3.FromHexString(color ?? (texture ? '#ffffff' : FALLBACK_COLOR));
+            material.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+            boxMaterials.set(key, material);
+        }
+
+        return material;
+    }
+
+    // The UVs follow the size of each face, so the texture keeps its scale on every box.
+    function createBox(name, part) {
+        const scale = part.ts > 0 ? part.ts : 1;
+        const sideUv = new BABYLON.Vector4(0, 0, part.w / scale, part.h / scale);
+        const endUv = new BABYLON.Vector4(0, 0, part.d / scale, part.h / scale);
+        const topUv = new BABYLON.Vector4(0, 0, part.w / scale, part.d / scale);
         const box = BABYLON.MeshBuilder.CreateBox(name, {
-            width,
-            height,
-            depth,
+            width: part.w,
+            height: part.h,
+            depth: part.d,
             faceUV: [sideUv, sideUv, endUv, endUv, topUv, topUv],
             wrap: true,
         }, scene);
-        box.material = wallMaterial;
+        box.material = getBoxMaterial(part.t, part.c);
         return box;
     }
 
-    function createWall(view) {
-        const box = createBrickBox(view.id, view.width, view.height, view.depth);
-        box.metadata = { kind: 'wall' };
-        return { root: box };
-    }
-
-    // The root stands in the middle of the opening; the panel hangs on a hinge at the west end of an opening running
-    // east to west, or at the south end of one running north to south.
-    function createDoor(view) {
-        const root = new BABYLON.TransformNode(view.id, scene);
-        root.metadata = { kind: 'door' };
-        const parts = [];
-        const panelHeight = Math.min(DOOR_PANEL_HEIGHT, view.height);
-        const lintelHeight = view.height - panelHeight;
-        if (lintelHeight > 0.01) {
-            const lintel = createBrickBox(`${view.id}-lintel`, view.width, lintelHeight, view.depth);
-            lintel.parent = root;
-            lintel.position.y = (view.height - lintelHeight) / 2;
-            lintel.isPickable = false;
-            parts.push(lintel);
+    function loadModel(url) {
+        let loading = models.get(url);
+        if (!loading) {
+            // Logged once per URL, because the failed load stays cached.
+            loading = BABYLON.LoadAssetContainerAsync(url, scene).catch(error => {
+                console.warn(`The model ${url} could not be loaded: ${error?.message ?? error}`);
+                return null;
+            });
+            models.set(url, loading);
         }
 
-        const isAlongX = view.width >= view.depth;
-        const length = isAlongX ? view.width : view.depth;
-        const hinge = new BABYLON.TransformNode(`${view.id}-hinge`, scene);
-        hinge.parent = root;
-        hinge.position.copyFromFloats(isAlongX ? -view.width / 2 : 0, -view.height / 2, isAlongX ? 0 : -view.depth / 2);
-        const panel = BABYLON.MeshBuilder.CreateBox(`${view.id}-panel`, {
-            width: isAlongX ? length : DOOR_PANEL_THICKNESS,
-            height: panelHeight,
-            depth: isAlongX ? DOOR_PANEL_THICKNESS : length,
-        }, scene);
-        panel.material = doorMaterial;
-        panel.parent = hinge;
-        panel.position.copyFromFloats(isAlongX ? length / 2 : 0, panelHeight / 2, isAlongX ? 0 : length / 2);
-        panel.isPickable = false;
-        parts.push(panel);
-
-        const angle = view.isOpen ? DOOR_OPEN_ANGLE : 0;
-        hinge.rotation.y = angle;
-        return { root, parts, door: { hinge, from: angle, to: angle, start: 0, isSwinging: false } };
+        return loading;
     }
 
-    function swingDoor(door, isOpen) {
-        door.from = door.hinge.rotation.y;
-        door.to = isOpen ? DOOR_OPEN_ANGLE : 0;
-        door.start = performance.now();
-        door.isSwinging = true;
-    }
-
-    function animateDoor(door, now) {
-        const progress = Math.min(1, (now - door.start) / DOOR_SWING_MS);
-        // Eases out, so the panel slows down before it stops.
-        const eased = 1 - (1 - progress) * (1 - progress);
-        door.hinge.rotation.y = door.from + (door.to - door.from) * eased;
-        if (progress >= 1) {
-            door.isSwinging = false;
+    function getWindMaterial(material) {
+        let windMaterial = windMaterials.get(material);
+        if (!windMaterial) {
+            windMaterial = material.clone(`${material.name}-wind`);
+            const Plugin = getWindPlugin();
+            windMaterial.gameWind = new Plugin(windMaterial);
+            windMaterials.set(material, windMaterial);
         }
+
+        return windMaterial;
+    }
+
+    function addMeshes(entity, meshes) {
+        const visibility = entity.isFaded ? FADED_VISIBILITY : 1;
+        for (const mesh of meshes) {
+            mesh.isPickable = false;
+            mesh.visibility = visibility;
+            entity.meshes.push(mesh);
+        }
+    }
+
+    // A part hangs on a pivot node that turns it, with an offset node at the south-west bottom corner of its box below,
+    // so that gliding moves only these two nodes.
+    function createPart(entity, part, index) {
+        const name = `${entity.view.id}-${index}`;
+        const pivot = new BABYLON.TransformNode(`${name}-pivot`, scene);
+        pivot.parent = entity.root;
+        pivot.position.copyFromFloats(part.px, 0, part.pz);
+        pivot.rotation.y = part.r * RADIANS_PER_DEGREE;
+        const offset = new BABYLON.TransformNode(`${name}-offset`, scene);
+        offset.parent = pivot;
+        offset.position.copyFromFloats(part.x - part.px, part.y, part.z - part.pz);
+        const node = { part, pivot, offset, instance: null, state: null, glide: null };
+        stats.parts++;
+        if (part.k === 'model') {
+            addModel(entity, node, name).catch(error => console.warn(`The model ${part.m} could not be shown: ${error?.message ?? error}`));
+        } else {
+            const box = createBox(name, part);
+            box.parent = offset;
+            box.position.copyFromFloats(part.w / 2, part.h / 2, part.d / 2);
+            addMeshes(entity, [box]);
+        }
+
+        return node;
+    }
+
+    async function addModel(entity, node, name) {
+        const container = await loadModel(node.part.m);
+        if (entity.isDisposed) {
+            return;
+        }
+
+        if (container) {
+            showModel(entity, node, name, container);
+        } else {
+            showFallback(entity, node, name);
+        }
+
+        updateStats();
+    }
+
+    function showModel(entity, node, name, container) {
+        const part = node.part;
+        const prefix = `${name}-`;
+        const instance = container.instantiateModelsToScene(nodeName => prefix + nodeName, false, { doNotInstantiate: true });
+        // The root keeps the loader's handedness conversion; its bounds are measured before it gets a parent or a scale.
+        const root = instance.rootNodes[0];
+        const { min, max } = root.getHierarchyBoundingVectors(true);
+        const scale = Math.min(
+            part.w / Math.max(max.x - min.x, 1e-6),
+            part.h / Math.max(max.y - min.y, 1e-6),
+            part.d / Math.max(max.z - min.z, 1e-6));
+        root.scaling.scaleInPlace(scale);
+        root.parent = node.offset;
+        root.position.copyFromFloats(part.w / 2, -min.y * scale, part.d / 2);
+        const meshes = root.getChildMeshes(false);
+        if (part.e === 'wind') {
+            for (const mesh of meshes) {
+                if (mesh.material) {
+                    mesh.material = getWindMaterial(mesh.material);
+                }
+            }
+        }
+
+        playAnimation(instance, prefix, part.a);
+        addMeshes(entity, meshes);
+        node.instance = instance;
+        node.state = 'model';
+        stats.models++;
+    }
+
+    function playAnimation(instance, prefix, animation) {
+        for (const group of instance.animationGroups) {
+            if (animation && group.name === prefix + animation) {
+                group.start(true);
+            } else {
+                group.stop();
+            }
+        }
+    }
+
+    function showFallback(entity, node, name) {
+        const part = node.part;
+        const box = createBox(`${name}-fallback`, { ...part, t: undefined, c: FALLBACK_COLOR });
+        box.parent = node.offset;
+        box.position.copyFromFloats(part.w / 2, part.h / 2, part.d / 2);
+        addMeshes(entity, [box]);
+        node.state = 'fallback';
+        stats.failures++;
+    }
+
+    // The box around all parts relative to the object's corner, which fading tests; rotations are left out.
+    function getBounds(parts) {
+        if (parts.length === 0) {
+            return { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
+        }
+
+        const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+        for (const part of parts) {
+            bounds.minX = Math.min(bounds.minX, part.x);
+            bounds.minY = Math.min(bounds.minY, part.y);
+            bounds.minZ = Math.min(bounds.minZ, part.z);
+            bounds.maxX = Math.max(bounds.maxX, part.x + part.w);
+            bounds.maxY = Math.max(bounds.maxY, part.y + part.h);
+            bounds.maxZ = Math.max(bounds.maxZ, part.z + part.d);
+        }
+
+        return bounds;
+    }
+
+    function createObject(entity) {
+        entity.root = new BABYLON.TransformNode(entity.view.id, scene);
+        entity.bounds = getBounds(entity.view.parts);
+        entity.partNodes = entity.view.parts.map((part, index) => createPart(entity, part, index));
     }
 
     function createLabel(view, parent) {
@@ -207,9 +385,9 @@ export async function createEntities(scene, options) {
         return material;
     }
 
-    function createPlayer(view) {
+    function createPlayer(entity) {
+        const view = entity.view;
         const holder = new BABYLON.TransformNode(view.id, scene);
-        holder.metadata = { kind: 'player' };
         const prefix = `${view.id}-`;
         const instance = character.instantiateModelsToScene(name => prefix + name, true);
         // The root keeps the loader's handedness conversion, which leaves the character looking north (+z).
@@ -254,53 +432,79 @@ export async function createEntities(scene, options) {
         }
 
         idle?.start(true);
-        return { root: holder, animations: { idle, walking, isWalking: false }, instance, meshes, materials };
+        entity.root = holder;
+        entity.animations = { idle, walking, isWalking: false };
+        entity.instance = instance;
+        entity.meshes = meshes;
+        entity.materials = materials;
     }
 
     function createEntity(view) {
-        let created;
+        const entity = {
+            view, root: null, tween: null, idleAt: 0, isFaded: false, isDisposed: false,
+            meshes: [], materials: [], partNodes: [], bounds: null, animations: null, instance: null,
+        };
         if (view.kind === 'player') {
-            created = createPlayer(view);
-        } else if (view.kind === 'door') {
-            created = createDoor(view);
+            createPlayer(entity);
         } else {
-            created = createWall(view);
+            createObject(entity);
         }
 
-        return { view, tween: null, idleAt: 0, isFaded: false, parts: null, door: null, ...created };
+        updateStats();
+        return entity;
     }
 
+    function disposeInstance(instance, meshes) {
+        for (const group of instance.animationGroups) {
+            group.dispose();
+        }
+
+        for (const skeleton of instance.skeletons) {
+            skeleton.dispose();
+        }
+
+        for (const mesh of meshes) {
+            mesh.morphTargetManager?.dispose();
+        }
+    }
+
+    function disposePart(node) {
+        stats.parts--;
+        if (node.state === 'model') {
+            stats.models--;
+            disposeInstance(node.instance, []);
+        } else if (node.state === 'fallback') {
+            stats.failures--;
+        }
+    }
+
+    // Shared box, model and wind materials stay; the scene disposes them.
     function disposeEntity(entity) {
-        const instance = entity.instance;
-        if (instance) {
-            for (const group of instance.animationGroups) {
-                group.dispose();
-            }
+        entity.isDisposed = true;
+        if (entity.instance) {
+            disposeInstance(entity.instance, entity.meshes);
+        }
 
-            for (const skeleton of instance.skeletons) {
-                skeleton.dispose();
-            }
+        for (const material of entity.materials) {
+            material.dispose(true, true);
+        }
 
-            for (const mesh of entity.meshes) {
-                mesh.morphTargetManager?.dispose();
-            }
-
-            for (const material of entity.materials) {
-                material.dispose(true, true);
-            }
+        for (const node of entity.partNodes) {
+            disposePart(node);
         }
 
         entity.root.dispose(false, false);
+        updateStats();
     }
 
     function place(entity, x, y) {
-        entity.root.position = centerOf(entity.view, x, y);
+        entity.root.position = positionOf(entity.view, x, y);
         entity.tween = null;
         setWalking(entity, false);
     }
 
     function moveTo(entity, x, y) {
-        const target = centerOf(entity.view, x, y);
+        const target = positionOf(entity.view, x, y);
         if (BABYLON.Vector3.Distance(entity.root.position, target) > TELEPORT_DISTANCE) {
             place(entity, x, y);
             return;
@@ -346,21 +550,63 @@ export async function createEntities(scene, options) {
 
         entity.isFaded = isFaded;
         const visibility = isFaded ? FADED_VISIBILITY : 1;
-        // A door's root is a transform node without visibility of its own.
-        if (entity.parts) {
-            for (const part of entity.parts) {
-                part.visibility = visibility;
-            }
-        } else {
-            entity.root.visibility = visibility;
+        for (const mesh of entity.meshes) {
+            mesh.visibility = visibility;
         }
+    }
+
+    // What a glide cannot animate: a change of any of it rebuilds the object.
+    function getPartShape(part) {
+        return [part.k, part.w, part.h, part.d, part.px, part.pz, part.t, part.ts, part.c, part.m, part.e, part.a].join('|');
+    }
+
+    function haveSameShapes(previous, parts) {
+        return previous.length === parts.length && previous.every((part, index) => getPartShape(part) === getPartShape(parts[index]));
     }
 
     // The own player's label reads "(you)", so becoming or ceasing to be the own player recreates it.
     function hasShapeChanged(previous, view) {
-        return previous.kind !== view.kind || previous.width !== view.width || previous.depth !== view.depth
-            || previous.height !== view.height || previous.color !== view.color || previous.title !== view.title
-            || previous.isSelf !== view.isSelf;
+        if (previous.kind !== view.kind) {
+            return true;
+        }
+
+        if (view.kind !== 'player') {
+            return !haveSameShapes(previous.parts, view.parts);
+        }
+
+        return previous.width !== view.width || previous.depth !== view.depth || previous.height !== view.height
+            || previous.color !== view.color || previous.title !== view.title || previous.isSelf !== view.isSelf;
+    }
+
+    function updateParts(entity, parts) {
+        entity.partNodes.forEach((node, index) => {
+            const part = parts[index];
+            const previous = node.part;
+            if (part.x !== previous.x || part.y !== previous.y || part.z !== previous.z || part.r !== previous.r) {
+                node.glide = {
+                    fromOffset: node.offset.position.clone(),
+                    toOffset: new BABYLON.Vector3(part.x - part.px, part.y, part.z - part.pz),
+                    fromRotation: node.pivot.rotation.y,
+                    toRotation: part.r * RADIANS_PER_DEGREE,
+                    start: performance.now(),
+                };
+            }
+
+            node.part = part;
+        });
+        entity.bounds = getBounds(parts);
+    }
+
+    function animateGlide(node, now) {
+        const glide = node.glide;
+        const progress = Math.min(1, (now - glide.start) / GLIDE_MS);
+        // Eases out, so a door leaf slows down before it stops.
+        const eased = 1 - (1 - progress) * (1 - progress);
+        BABYLON.Vector3.LerpToRef(glide.fromOffset, glide.toOffset, eased, node.offset.position);
+        node.pivot.rotation.y = glide.fromRotation + (glide.toRotation - glide.fromRotation) * eased;
+        if (progress >= 1) {
+            node.glide = null;
+        }
     }
 
     function clearSelf() {
@@ -371,21 +617,19 @@ export async function createEntities(scene, options) {
         }
     }
 
-    // Whether the segment from the start by the offset crosses the box of the entity, clipping the part of the segment
-    // inside the box one axis at a time; allocation free for the render loop.
+    // Whether the segment from the start by the offset crosses the bounds of the entity, clipping the part of the segment
+    // inside them one axis at a time; allocation free for the render loop.
     function crosses(entity, startX, startY, startZ, offsetX, offsetY, offsetZ) {
-        const center = entity.root.position;
-        const view = entity.view;
+        const position = entity.root.position;
+        const bounds = entity.bounds;
         segment.enter = 0;
         segment.exit = 1;
-        return clip(startX, offsetX, center.x, view.width / 2)
-            && clip(startY, offsetY, center.y, view.height / 2)
-            && clip(startZ, offsetZ, center.z, view.depth / 2);
+        return clip(startX, offsetX, position.x + bounds.minX, position.x + bounds.maxX)
+            && clip(startY, offsetY, bounds.minY, bounds.maxY)
+            && clip(startZ, offsetZ, position.z + bounds.minZ, position.z + bounds.maxZ);
     }
 
-    function clip(start, offset, middle, half) {
-        const low = middle - half;
-        const high = middle + half;
+    function clip(start, offset, low, high) {
         if (Math.abs(offset) < 1e-6) {
             return start >= low && start <= high;
         }
@@ -436,8 +680,8 @@ export async function createEntities(scene, options) {
 
             const hasMoved = entity.view.x !== view.x || entity.view.y !== view.y;
             const previousFacing = entity.view.facing;
-            if (entity.door && entity.view.isOpen !== view.isOpen) {
-                swingDoor(entity.door, view.isOpen);
+            if (view.kind !== 'player') {
+                updateParts(entity, view.parts);
             }
 
             // The own player's position and facing belong to the input, which predicts them.
@@ -472,6 +716,9 @@ export async function createEntities(scene, options) {
         /** Releases what the scene does not own; call before disposing the scene. */
         dispose() {
             character.dispose();
+            for (const loading of models.values()) {
+                loading.then(container => container?.dispose());
+            }
         },
 
         setSelf(x, y, facing, animate) {
@@ -528,9 +775,12 @@ export async function createEntities(scene, options) {
         },
 
         animate(now) {
+            windTime = now / 1000;
             for (const entity of entities.values()) {
-                if (entity.door?.isSwinging) {
-                    animateDoor(entity.door, now);
+                for (const node of entity.partNodes) {
+                    if (node.glide) {
+                        animateGlide(node, now);
+                    }
                 }
 
                 const tween = entity.tween;
@@ -559,7 +809,7 @@ export async function createEntities(scene, options) {
             return selfPosition;
         },
 
-        // Fades the walls and doors between the camera and the own player's head.
+        // Fades the movement blocking objects between the camera and the own player's head.
         afterCameraMoved(camera) {
             const self = entities.get(selfId);
             if (!self) {
@@ -572,7 +822,7 @@ export async function createEntities(scene, options) {
             const offsetZ = self.root.position.z - eye.z;
             for (const entity of entities.values()) {
                 if (entity.view.kind !== 'player') {
-                    setFaded(entity, crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ));
+                    setFaded(entity, entity.view.isMovementBlocking && crosses(entity, eye.x, eye.y, eye.z, offsetX, offsetY, offsetZ));
                 }
             }
         },

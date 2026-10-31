@@ -103,6 +103,7 @@ public class GamePageTests
         // Right in front of the player, who faces north.
         world.Game.Objects = new Dictionary<string, GameObject> { ["wall"] = new Wall { X = x - 1, Y = y + GamePlayer.Size } };
         await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Wall", new() { Timeout = Timeout });
+        await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-parts", "1", new() { Timeout = Timeout });
 
         // Act
         await page.Keyboard.PressAsync("ArrowUp");
@@ -145,6 +146,8 @@ public class GamePageTests
         var door = new Door { X = x - 1, Y = y + GamePlayer.Size };
         world.Game.Objects = new Dictionary<string, GameObject> { ["door"] = door };
         await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Door", new() { Timeout = Timeout });
+        // The lintel and the leaf.
+        await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-parts", "2", new() { Timeout = Timeout });
         await Expect(page.GetByTestId("game-target-action")).ToHaveTextAsync(["1Open"], new() { Timeout = Timeout });
 
         // Act

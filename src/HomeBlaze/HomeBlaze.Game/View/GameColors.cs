@@ -4,9 +4,6 @@ namespace HomeBlaze.Game.View;
 
 internal static class GameColors
 {
-    public const string Wall = "#8d8577";
-    public const string Door = "#8b5a2b";
-
     /// <summary>
     /// Gets a color that stays the same for the id across sessions and processes.
     /// </summary>
