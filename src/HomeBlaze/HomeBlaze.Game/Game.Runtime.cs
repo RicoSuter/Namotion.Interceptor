@@ -116,22 +116,13 @@ public partial class Game
         }
     }
 
-    private bool IsOutsideChange(SubjectPropertyChange change)
+    // The game knows no object type, so any outside change of one of its objects may move it or change its blocking or
+    // visibility, which the index holds.
+    private bool IsOutsideChange(SubjectPropertyChange change) => change.Property.Subject switch
     {
-        var name = change.Property.Name;
-        return change.Property.Subject switch
-        {
-            GameObject gameObject => (IsFootprintProperty(name) || IsStateProperty(name)) && ReferenceEquals(gameObject.ParentGame, this),
-            var subject => ReferenceEquals(subject, this) && IsCollectionProperty(name)
-        };
-    }
-
-    private static bool IsFootprintProperty(string name) =>
-        name is nameof(GameObject.X) or nameof(GameObject.Y) or nameof(GameObject.Width) or nameof(GameObject.Depth);
-
-    // The properties that IsMovementBlocking, IsSoundBlocking or IsVisible follow.
-    private static bool IsStateProperty(string name) =>
-        name is nameof(GamePlayer.IsConnected) or nameof(Door.IsOpen);
+        GameObject gameObject => ReferenceEquals(gameObject.ParentGame, this),
+        var subject => ReferenceEquals(subject, this) && IsCollectionProperty(change.Property.Name)
+    };
 
     private static bool IsCollectionProperty(string name) =>
         name is nameof(Players) or nameof(Objects);

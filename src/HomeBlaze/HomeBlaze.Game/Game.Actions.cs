@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
+using HomeBlaze.Game.Objects.Buildings;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game;
@@ -55,57 +56,6 @@ public partial class Game
         await WriteOrRequestSaveAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Removes the object from <see cref="Objects"/> and saves the game.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>
-    internal async Task RemoveObjectAsync(GameObject gameObject, CancellationToken cancellationToken)
-    {
-        lock (_lock)
-        {
-            var objects = CurrentObjects;
-            var name = FindObjectName(objects, gameObject) ?? throw new InvalidOperationException("The object is not part of this game.");
-            var next = new Dictionary<string, GameObject>(objects);
-            next.Remove(name);
-            ReplaceObjects(next);
-            GetIndex().Remove(gameObject);
-        }
-
-        await WriteOrRequestSaveAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Opens or closes the door and saves the game.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The door is not part of this game or already in that state, or a
-    /// blocking object stands in it while closing.</exception>
-    internal async Task SetDoorOpenAsync(Door door, bool isOpen, CancellationToken cancellationToken)
-    {
-        lock (_lock)
-        {
-            if (FindObjectName(CurrentObjects, door) is null)
-            {
-                throw new InvalidOperationException("The door is not part of this game.");
-            }
-
-            if (door.IsOpen == isOpen)
-            {
-                throw new InvalidOperationException(isOpen ? "The door is already open." : "The door is already closed.");
-            }
-
-            var index = GetIndex();
-            if (!isOpen && index.IsBlocked(door.Footprint, door))
-            {
-                throw new InvalidOperationException("Someone is in the way of the door.");
-            }
-
-            door.IsOpen = isOpen;
-            index.AddOrUpdate(door);
-        }
-
-        await WriteOrRequestSaveAsync(cancellationToken);
-    }
-
     /// <exception cref="InvalidOperationException">The sender sent a message less than <see cref="MessageInterval"/> ago.</exception>
     internal Task SendMessageAsync(GamePlayer recipient, GamePlayer? sender, string message, CancellationToken cancellationToken)
     {
@@ -134,30 +84,5 @@ public partial class Game
 
             sender.LastMessageTimestamp = now;
         }
-    }
-
-    private static string? FindObjectName(Dictionary<string, GameObject> objects, GameObject gameObject)
-    {
-        foreach (var (name, candidate) in objects)
-        {
-            if (ReferenceEquals(candidate, gameObject))
-            {
-                return name;
-            }
-        }
-
-        return null;
-    }
-
-    private static string CreateObjectName(Dictionary<string, GameObject> objects, string prefix)
-    {
-        string name;
-        do
-        {
-            name = $"{prefix}-{Guid.NewGuid():N}"[..(prefix.Length + 9)];
-        }
-        while (objects.ContainsKey(name));
-
-        return name;
     }
 }

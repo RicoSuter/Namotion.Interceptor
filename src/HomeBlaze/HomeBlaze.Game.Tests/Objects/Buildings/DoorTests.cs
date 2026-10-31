@@ -2,9 +2,9 @@ using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry;
 
-namespace HomeBlaze.Game.Tests;
+namespace HomeBlaze.Game.Tests.Objects.Buildings;
 
-public class GameDoorTests
+public class DoorTests
 {
     private readonly GameTestContext _context = new();
 
@@ -89,7 +89,7 @@ public class GameDoorTests
         var exception = await Record.ExceptionAsync(() => door.CloseAsync(CancellationToken.None));
 
         // Assert
-        Assert.Equal("Someone is in the way of the door.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.True(door.IsOpen);
         Assert.Equal(0, _context.Root.WriteCount);
     }
