@@ -1682,10 +1682,12 @@ namespace HomeBlaze.Components.Dialogs
     {
         public MethodParameterDialog() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?>? InitialValues { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Abstractions.Metadata.MethodMetadata? Method { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnInitialized() { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Collections.Generic.IReadOnlyDictionary<string, object?>? initialValues = null) { }
     }
     public class MethodResultDialog : Microsoft.AspNetCore.Components.ComponentBase
     {
@@ -1881,7 +1883,7 @@ namespace HomeBlaze.Components.Operations
     public static class OperationInvoker
     {
         public static string GetIconName(HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
-        public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationOutcome> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime, System.Action<bool>? isRunningChanged = null) { }
+        public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationOutcome> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime, System.Action<bool>? isRunningChanged = null, System.Collections.Generic.IReadOnlyDictionary<string, object?>? initialValues = null, System.Action<System.Collections.Generic.IReadOnlyDictionary<string, object?>>? parametersEntered = null) { }
     }
     public enum OperationOutcome
     {

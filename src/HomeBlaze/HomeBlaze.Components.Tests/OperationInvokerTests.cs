@@ -462,4 +462,77 @@ public class OperationInvokerTests
         Assert.Equal(1, invocationCount);
         VerifyShown<MethodErrorDialog>(dialogService, Times.Never());
     }
+
+    [Fact]
+    public async Task WhenInitialValuesAreGiven_ThenTheParameterDialogGetsThem()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        DialogParameters? shownParameters = null;
+        dialogService
+            .Setup(service => service.ShowAsync<MethodParameterDialog>(It.IsAny<string>(), It.IsAny<DialogParameters>(), It.IsAny<DialogOptions>()))
+            .Callback<string, DialogParameters, DialogOptions>((_, parameters, _) => shownParameters = parameters)
+            .ReturnsAsync(() =>
+            {
+                var reference = new Mock<IDialogReference>();
+                reference.Setup(dialogReference => dialogReference.Result).Returns(Task.FromResult<DialogResult?>(DialogResult.Cancel()));
+                return reference.Object;
+            });
+        var method = new MethodMetadata(_ => null) { Title = "Set Speed", Parameters = [InputParameter("speed", typeof(int))] };
+        var initialValues = new Dictionary<string, object?> { ["speed"] = 5 };
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None, initialValues: initialValues);
+
+        // Assert
+        Assert.NotNull(shownParameters);
+        Assert.Same(initialValues, shownParameters.Get<IReadOnlyDictionary<string, object?>>(nameof(MethodParameterDialog.InitialValues)));
+    }
+
+    [Fact]
+    public async Task WhenParametersAreEntered_ThenTheyAreReportedByName()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        SetupDialog<MethodParameterDialog>(dialogService, () => DialogResult.Ok(new object?[] { 5, "fast" }));
+        IReadOnlyDictionary<string, object?>? reported = null;
+        var method = new MethodMetadata(_ => null)
+        {
+            Title = "Set Speed",
+            Parameters =
+            [
+                InputParameter("speed", typeof(int)),
+                new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true },
+                InputParameter("mode", typeof(string))
+            ]
+        };
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None,
+            parametersEntered: values => reported = values);
+
+        // Assert
+        Assert.NotNull(reported);
+        Assert.Equal(2, reported.Count);
+        Assert.Equal(5, reported["speed"]);
+        Assert.Equal("fast", reported["mode"]);
+    }
+
+    [Fact]
+    public async Task WhenTheParameterDialogIsCanceled_ThenNoParametersAreReported()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        SetupDialog<MethodParameterDialog>(dialogService, DialogResult.Cancel);
+        var isReported = false;
+        var method = new MethodMetadata(_ => null) { Title = "Set Speed", Parameters = [InputParameter("speed", typeof(int))] };
+
+        // Act
+        var outcome = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None,
+            parametersEntered: _ => isReported = true);
+
+        // Assert
+        Assert.Equal(OperationOutcome.Canceled, outcome);
+        Assert.False(isReported);
+    }
 }

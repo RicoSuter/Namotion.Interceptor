@@ -138,6 +138,34 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenAWallIsBuiltThroughTheDialog_ThenItHasTheChosenLengthAndMaterialAndTheNextDialogIsPrefilled()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        world.Game.Tools = new Dictionary<string, GameTool> { ["wall-tool"] = new WallTool() };
+        var (page, player) = await world.JoinAsync();
+        var buildWall = page.GetByTestId("game-action").Filter(new() { HasText = "Build wall" });
+        var dialog = page.Locator(".mud-dialog");
+
+        // Act
+        await buildWall.ClickAsync(new() { Timeout = Timeout });
+        await dialog.GetByLabel("Length", new() { Exact = true }).FillAsync("8", new() { Timeout = Timeout });
+        // Material is the only select of the dialog.
+        await dialog.Locator(".mud-select .mud-input-control").ClickAsync(new() { Timeout = Timeout });
+        await page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasTextString = "Concrete" }).ClickAsync(new() { Timeout = Timeout });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Execute" }).ClickAsync(new() { Timeout = Timeout });
+        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 1, message: "The wall was not built");
+        await Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await buildWall.ClickAsync(new() { Timeout = Timeout });
+
+        // Assert
+        var wall = Assert.IsType<Wall>(Assert.Single(world.Game.Objects.Values));
+        Assert.Equal((player.X - 3, player.Y + GamePlayer.Size, 8, 1, WallMaterial.Concrete), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Material));
+        await Expect(dialog.GetByLabel("Length", new() { Exact = true })).ToHaveValueAsync("8", new() { Timeout = Timeout });
+        await Expect(dialog.Locator(".mud-select input").First).ToHaveValueAsync("Concrete", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAClosedDoorIsOpenedWithItsNumberKey_ThenThePlayerStepsThroughIt()
     {
         // Arrange
