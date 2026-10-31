@@ -69,4 +69,12 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
         ClientTitle = string.Empty;
         IsConnected = false;
     }
+
+    [Operation(Title = "Send message", Icon = "Chat", Position = 1, Description = "Shows a message in the browser of this player.")]
+    public Task SendMessageAsync(string message, [FromServices] GameCaller? caller, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        var game = ParentGame ?? throw new InvalidOperationException("The player is not part of a game.");
+        return game.SendMessageAsync(this, game.ResolveActor(caller), message.Trim(), cancellationToken);
+    }
 }

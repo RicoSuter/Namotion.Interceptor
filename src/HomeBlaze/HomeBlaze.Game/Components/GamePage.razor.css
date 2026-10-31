@@ -79,3 +79,22 @@
         border-top: 1px solid var(--mud-palette-divider);
     }
 }
+
+.game-target-title {
+    margin: 6px 0 4px;
+}
+
+::deep .game-action {
+    margin: 2px 4px 2px 0;
+}
+
+.game-key {
+    display: inline-block;
+    min-width: 16px;
+    margin-right: 6px;
+    padding: 0 3px;
+    border-radius: 3px;
+    font-size: 10px;
+    text-align: center;
+    background: rgba(255, 255, 255, .25);
+}
