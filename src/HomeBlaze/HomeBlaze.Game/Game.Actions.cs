@@ -74,6 +74,38 @@ public partial class Game
         await WriteOrRequestSaveAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Opens or closes the door and saves the game.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The door is not part of this game or already in that state, or a
+    /// blocking object stands in it while closing.</exception>
+    internal async Task SetDoorOpenAsync(Door door, bool isOpen, CancellationToken cancellationToken)
+    {
+        lock (_lock)
+        {
+            if (FindObjectName(CurrentObjects, door) is null)
+            {
+                throw new InvalidOperationException("The door is not part of this game.");
+            }
+
+            if (door.IsOpen == isOpen)
+            {
+                throw new InvalidOperationException(isOpen ? "The door is already open." : "The door is already closed.");
+            }
+
+            var index = GetIndex();
+            if (!isOpen && index.IsBlocked(door.Footprint, door))
+            {
+                throw new InvalidOperationException("Someone is in the way of the door.");
+            }
+
+            door.IsOpen = isOpen;
+            index.AddOrUpdate(door);
+        }
+
+        await WriteOrRequestSaveAsync(cancellationToken);
+    }
+
     /// <exception cref="InvalidOperationException">The sender sent a message less than <see cref="MessageInterval"/> ago.</exception>
     internal Task SendMessageAsync(GamePlayer recipient, GamePlayer? sender, string message, CancellationToken cancellationToken)
     {

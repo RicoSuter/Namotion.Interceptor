@@ -46,4 +46,12 @@ internal sealed class GameTestContext
         Game.RequestIndexRebuild();
         return wall;
     }
+
+    public Door AddDoor(int x, int y, bool isOpen = false, int width = Door.DefaultLength, int depth = 1)
+    {
+        var door = new Door { X = x, Y = y, Width = width, Depth = depth, IsOpen = isOpen };
+        Game.Objects = new Dictionary<string, GameObject>(Game.Objects) { [$"door-{Game.Objects.Count}"] = door };
+        Game.RequestIndexRebuild();
+        return door;
+    }
 }

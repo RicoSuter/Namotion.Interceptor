@@ -101,4 +101,24 @@ public class GameViewTrackerTests
         Assert.Equal(new[] { otherId }, update.Removed);
         Assert.Single(_tracker.Known);
     }
+
+    [Fact]
+    public async Task WhenADoorOpens_ThenItIsUpsertedOpenAndNotBlocking()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var door = _context.AddDoor(-1, 2);
+        var first = _context.Game.UpdateView(_tracker, player);
+        var closed = Assert.Single(first.Upserted, view => view.Kind == GameViewObject.DoorKind);
+
+        // Act
+        await door.OpenAsync(CancellationToken.None);
+        var update = _context.Game.UpdateView(_tracker, player);
+
+        // Assert
+        Assert.Equal(("Door", false, true), (closed.Title, closed.IsOpen, closed.IsBlocking));
+        var open = Assert.Single(update.Upserted);
+        Assert.Equal((closed.Id, GameViewObject.DoorKind, true, false), (open.Id, open.Kind, open.IsOpen, open.IsBlocking));
+        Assert.Equal(GameColors.Door, open.Color);
+    }
 }
