@@ -13,6 +13,7 @@ public partial class Game
 
     // Guarded by _lock: scratch space of the rebuild.
     private readonly List<GameObject> _volumeCandidates = [];
+    private readonly SoundPathSearch _soundPathSearch = new();
 
     // Guarded by _lock: the index version of the last rebuild.
     private long _volumeTableIndexVersion = -1;
@@ -66,7 +67,7 @@ public partial class Game
                 return false;
             }
 
-            _volumeTable = GameVolumeTable.Build(Players, index, _volumeCandidates);
+            _volumeTable = GameVolumeTable.Build(Players, index, _volumeCandidates, _soundPathSearch);
             _isVolumeTableDirty = false;
             _volumeTableIndexVersion = index.Version;
             Volatile.Write(ref _lastVolumeTableRebuild, now);

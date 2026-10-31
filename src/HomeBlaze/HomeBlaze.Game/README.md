@@ -20,7 +20,7 @@ The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`Operat
 | `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loops, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs`, `Game.Persistence.cs`, `Game.View.cs`, `Game.Volume.cs` (volume table), `Game.Voice.cs` (toggles, voice loop) |
 | `GameObject.cs`, `Wall.cs`, `Door.cs`, `GamePlayer.cs` | The objects on the grid |
 | `Clients/` | `IGameClientDirectory` and its installation implementation |
-| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `WallPlacement` |
+| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `WallPlacement` |
 | `View/` | `GameViewTracker` and the objects and updates sent to the browser |
 | `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVolumeTable`, `TalkerQueue`, `GameVoiceMixer`, `IGameVoiceSink` |
 | `Components/` | `GamePage.razor` and `GameCallerServiceProvider` |
@@ -101,12 +101,16 @@ Players talk to each other with their microphones. Here a talker is a player who
 
 Voice needs a secure context (HTTPS or `localhost`), because browsers offer `getUserMedia` and `AudioWorklet` nowhere else. On plain HTTP both buttons are disabled with the tooltip "Voice needs HTTPS". For manual testing from other devices on the LAN, start the app with an HTTPS URL as well, for example `--urls "http://0.0.0.0:5280;https://0.0.0.0:5281"`. Kestrel then serves HTTPS with the ASP.NET development certificate, which is issued for `localhost`, so each browser shows a certificate warning once.
 
-Hearing range (`World/HearingRange`, the only definition of who hears whom):
+Hearing range (`World/HearingRange`, the only definition of who hears whom and how loud):
 
-- A player hears another while their footprint centers are less than `HearingRadius` (40 tiles, 10 m) apart and the straight line between the centers touches no tile that blocks sound. The volume falls linearly from 1 up close to 0 at 40 tiles.
-- `GameWorldIndex.IsSoundBlocked` blocks a tile that a blocking object other than a player covers. Walls and closed doors block, open doors and players do not, and the height does not matter, so a low wall blocks like a full one.
-- The walk takes every tile that the closed segment touches, also only at an edge or a corner. Sound therefore slips neither between two walls that touch at a corner nor along the face of a wall. A line between two players at the same `Y` runs on the grid line between two rows and touches both. Tiles inside either player's footprint are skipped.
-- The walk computes in half tiles, where every footprint center is a whole number, with `long` arithmetic. It is exact and symmetric: both orders of the players visit the same tiles and give the same volume, and footprints near the `int` limits are safe. It runs only within the hearing radius, which keeps the products far inside the `long` range.
+- Sound travels along the shortest open path between the footprint centers. Players whose centers are `HearingRadius` (40 tiles, 10 m) or more apart never hear each other.
+- The volume is the distance gain of the path length times the occlusion gain of the detour, the length by which the path exceeds the straight distance. The distance gain is 1 up to `ReferenceDistance` (4 tiles, 1 m) and `ReferenceDistance / length` beyond, so 2 m give 0.5 and 5 m give 0.2, times a smoothstep fade from 1 to 0 over the last `EdgeFade` (8 tiles, 2 m) before the radius. The occlusion gain is `1 / (1 + detour / HalvingDetour)`, so a detour of `HalvingDetour` (4 tiles, 1 m) halves the volume. The four constants live in `HearingRange`.
+- `GameWorldIndex.IsSoundBlocked` blocks a tile that a blocking object other than a player covers. Walls and closed doors block, open doors and players do not, and the height does not matter, so a low wall blocks like a full one. A player in a room whose walls and doors are all closed is silent outside it.
+- While the straight line between the centers touches no blocking tile, the path is that line and its exact length counts, with no detour. The walk takes every tile that the closed segment touches, also only at an edge or a corner, so the line slips neither between two walls that touch at a corner nor along the face of a wall. A line between two players at the same `Y` runs on the grid line between two rows and touches both. Tiles inside either player's footprint are skipped. The walk computes in half tiles, where every footprint center is a whole number, with `long` arithmetic, so it is exact, symmetric and safe near the `int` limits.
+- Otherwise `World/SoundPathSearch` finds the path. It runs Dijkstra over the corners of the tiles within the radius plus 2 tiles around the source footprint, 87 by 87 corners for a player. A corner is open while none of its four tiles blocks sound, so a path keeps the same rule as the line: it never touches a blocking tile, cuts no corner and slips through no joint where two walls meet at a corner. Steps go to the 16 corners at the offsets (1, 0), (1, 1) and (2, 1) in every orientation, with integer lengths in thousandths of a tile; every tile such a step touches belongs to one of its two corners, so a step needs no other check. The search starts at the open corners of the source footprint with their grid length from its center and ends at the open corners of the target footprint the same way.
+- A grid path exceeds the straight length by up to 2.75 % depending on its direction. The detour is therefore the grid length of the path minus the grid length without walls between the two centers, which cancels most of that excess, so moving a player across the boundary of the line of sight changes the volume only slightly. A detour that bends only within the freedom the grid directions leave counts as none.
+- Both orders give the same volume: the line walk visits the same tiles, and the search sums integer lengths over an undirected graph with the same start and end rule at both footprints. Paths longer than the radius plus 2 tiles count as none, which cannot hide an audible path, because the grid excess within the radius stays below 1.1 tiles.
+- The search reads the blocking footprints of the area once from the index (`GameWorldIndex.QuerySoundBlocking`) into a bitmap, not one index lookup per tile. Its buffers live in a `SoundPathSearch` that the game reuses under `_lock`, so a rebuild allocates nothing in it in steady state. The vertex range is clamped to the corners of the `int` range, as `GetArea` clamps the area.
 
 Audio and transport:
 
@@ -123,7 +127,7 @@ Toggles: only the player's own pages switch `IsMicrophoneOn` and `IsAudioOn`, th
 Volume table (`Voice/GameVolumeTable`, `Game.Volume.cs`):
 
 - An immutable snapshot with a row for every connected player, regardless of its toggles, listing the players it hears and their volume above 0. Nearby uses it too.
-- `GameVolumeTable.Build` compares only the players within `HearingRange.GetArea`, which the chunk index finds, and computes each pair once, from the player with the ordinally smaller client id, adding it to both rows. `GameVolumeTable.Create` builds a table from given rows; tests use it as a factory.
+- `GameVolumeTable.Build` compares only the players within `HearingRange.GetArea`, which the chunk index finds, and computes each pair once, from the player with the ordinally smaller client id, adding it to both rows. That player goes first, so its blocked pairs share one search, which runs only when the straight line of one of them is blocked. A rebuild therefore costs at most one bounded search per player, at most every `VolumeTableInterval` (100 ms): about 0.05 ms per search and 1 to 2 ms per rebuild for 10 players near each other in a walled area, measured with an optimized build. `GameVolumeTable.Create` builds a table from given rows; tests use it as a factory.
 - `UpdateVolumeTable`, called only by the voice loop, first checks without the lock that `VolumeTableInterval` passed since the last rebuild, so a stale index is not rebuilt on every tick. The gate only limits rebuilds: once the interval passed without a change, every tick of the idle voice loop still takes `_lock` to compare the version, which is uncontended and short. Under `_lock` it then rebuilds when the index `Version` changed or `_isVolumeTableDirty` is set. The version increases with every change of the index, which covers moves, joins, leaves, walls and doors, also from outside through the lazy index rebuild. Toggles, resets and released players set the flag although rows ignore toggles, so that `VolumeTableChanged` tells the pages about them.
 - It publishes the table through a `volatile` field and then raises `VolumeTableChanged` outside the lock.
 
@@ -315,7 +319,6 @@ The voice E2E tests launch their own Chromium with `--use-fake-ui-for-media-stre
 Voice follow-ups:
 
 - Opus compression (Concentus on the server, WebCodecs in the browser) to cut the bandwidth about tenfold.
-- Sound traveling around corners and through openings by path length instead of line of sight.
 - Walls that muffle instead of block.
 - Stereo panning by the talker's position relative to the listener.
 - A speaking indicator in the 3D scene, which needs audio levels from the server.

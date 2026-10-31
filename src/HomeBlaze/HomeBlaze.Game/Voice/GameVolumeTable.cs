@@ -44,10 +44,11 @@ internal sealed class GameVolumeTable
 
     /// <summary>
     /// Builds the table for the connected players, comparing only players within the hearing radius, which the index
-    /// finds. The index must be up to date; the caller guards it, and also the <paramref name="candidates"/> list,
-    /// which is scratch space.
+    /// finds. The index must be up to date; the caller guards it, and also the <paramref name="candidates"/> list and
+    /// the <paramref name="search"/>, which are scratch space.
     /// </summary>
-    public static GameVolumeTable Build(Dictionary<string, GamePlayer> players, GameWorldIndex index, List<GameObject> candidates)
+    public static GameVolumeTable Build(Dictionary<string, GamePlayer> players, GameWorldIndex index, List<GameObject> candidates,
+        SoundPathSearch search)
     {
         var connectedCount = 0;
         foreach (var player in players.Values)
@@ -73,16 +74,17 @@ internal sealed class GameVolumeTable
             {
                 candidates.Clear();
                 index.Query(HearingRange.GetArea(player.Footprint), candidates);
-                AddAudible(player, row, candidates, rows, index);
+                AddAudible(player, row, candidates, rows, index, search);
             }
         }
 
         return Create(rows);
     }
 
-    // Computes each pair once, from the player with the smaller id, and adds it to both rows.
+    // Computes each pair once, from the player with the smaller id, and adds it to both rows. The listener goes first,
+    // so the paths of its pairs come from one search.
     private static void AddAudible(GamePlayer listener, List<GameVolumeEntry> listenerRow, List<GameObject> candidates,
-        Dictionary<string, List<GameVolumeEntry>> rows, GameWorldIndex index)
+        Dictionary<string, List<GameVolumeEntry>> rows, GameWorldIndex index, SoundPathSearch search)
     {
         foreach (var candidate in candidates)
         {
@@ -92,7 +94,7 @@ internal sealed class GameVolumeTable
                 continue;
             }
 
-            var volume = (float)HearingRange.GetVolume(listener, talker, index);
+            var volume = (float)HearingRange.GetVolume(listener, talker, index, search);
             if (volume > 0)
             {
                 listenerRow.Add(new GameVolumeEntry(talker.ClientId, volume));

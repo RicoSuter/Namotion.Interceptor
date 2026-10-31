@@ -121,19 +121,32 @@ internal sealed class GameWorldIndex
 
         foreach (var gameObject in objects)
         {
-            if (gameObject is GamePlayer)
-            {
-                continue;
-            }
-
-            var entry = _entries[gameObject];
-            if (entry.IsBlocking && entry.Footprint.Contains(x, y))
+            if (IsSoundBlocking(gameObject, out var footprint) && footprint.Contains(x, y))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Adds the footprint of each object that stops sound by <see cref="IsSoundBlocked"/> and covers a tile of the area
+    /// to <paramref name="results"/>, once.
+    /// </summary>
+    public void QuerySoundBlocking(Footprint area, List<Footprint> results)
+    {
+        _found.Clear();
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        {
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
+            {
+                if (_chunks.TryGetValue((chunkX, chunkY), out var objects))
+                {
+                    AddSoundBlockingIntersecting(objects, area, results);
+                }
+            }
+        }
     }
 
     private static bool HasValidSize(GameObject gameObject) =>
@@ -165,6 +178,24 @@ internal sealed class GameWorldIndex
                 results.Add(gameObject);
             }
         }
+    }
+
+    private void AddSoundBlockingIntersecting(List<GameObject> objects, Footprint area, List<Footprint> results)
+    {
+        foreach (var gameObject in objects)
+        {
+            if (IsSoundBlocking(gameObject, out var footprint) && footprint.Intersects(area) && _found.Add(gameObject))
+            {
+                results.Add(footprint);
+            }
+        }
+    }
+
+    private bool IsSoundBlocking(GameObject gameObject, out Footprint footprint)
+    {
+        var entry = _entries[gameObject];
+        footprint = entry.Footprint;
+        return entry.IsBlocking && gameObject is not GamePlayer;
     }
 
     private void AddToChunks(GameObject gameObject, Footprint footprint)
