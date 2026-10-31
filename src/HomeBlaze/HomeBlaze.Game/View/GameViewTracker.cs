@@ -1,4 +1,6 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Game.Visuals;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.View;
 
@@ -24,15 +26,18 @@ internal sealed class GameViewTracker
 
     public IEnumerable<GameViewObject> Known => _known.Values;
 
-    public GameViewUpdate Update(IReadOnlyList<GameObject> objects, GamePlayer? self)
+    /// <param name="objects">The visible objects in view.</param>
+    /// <param name="self">The page's own player, or null.</param>
+    /// <param name="logger">Warns about object types with an invalid visual.</param>
+    public GameViewUpdate Update(IReadOnlyList<GameObject> objects, GamePlayer? self, ILogger logger)
     {
-        var upserted = UpsertChanged(objects, self);
+        var upserted = UpsertChanged(objects, self, logger);
         var removed = RemoveUnseen();
         return upserted is null && removed is null ? Empty : new GameViewUpdate(upserted ?? [], removed ?? []);
     }
 
     // Returns null when nothing changed, so an unchanged view allocates nothing.
-    private List<GameViewObject>? UpsertChanged(IReadOnlyList<GameObject> objects, GamePlayer? self)
+    private List<GameViewObject>? UpsertChanged(IReadOnlyList<GameObject> objects, GamePlayer? self, ILogger logger)
     {
         List<GameViewObject>? upserted = null;
         _seen.Clear();
@@ -47,7 +52,7 @@ internal sealed class GameViewTracker
                 continue;
             }
 
-            var view = CreateView(gameObject, known?.Id ?? $"o{++_nextId}", isSelf);
+            var view = CreateView(gameObject, known?.Id ?? $"o{++_nextId}", isSelf, logger);
             _known[gameObject] = view;
             (upserted ??= []).Add(view);
         }
@@ -83,8 +88,11 @@ internal sealed class GameViewTracker
     }
 
     private bool IsUnchanged(GameViewObject known, GameObject gameObject, bool isSelf) =>
-        HasSameFootprint(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSamePassage(known, gameObject)
-            && HasSameLabel(known, gameObject);
+        HasSameFootprint(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSameLook(known, gameObject);
+
+    // A cached visual is the same instance, so the comparison stops at the reference and allocates nothing.
+    private bool HasSameLook(GameViewObject known, GameObject gameObject) =>
+        HasSamePassage(known, gameObject) && HasSameLabel(known, gameObject) && Equals(known.Visual, GetVisual(gameObject));
 
     private static bool HasSameFootprint(GameViewObject known, GameObject gameObject) =>
         known.X == gameObject.X && known.Y == gameObject.Y && known.Width == gameObject.Width && known.Depth == gameObject.Depth;
@@ -101,10 +109,18 @@ internal sealed class GameViewTracker
     private bool HasSameLabel(GameViewObject known, GameObject gameObject) =>
         known.Title == GetTitle(gameObject) && known.Color == GetColor(gameObject);
 
-    private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf) =>
-        new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
+    private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf, ILogger logger)
+    {
+        var visual = GetVisual(gameObject);
+        return new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
             GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsMovementBlocking, IsOpen(gameObject), isSelf,
-            IsMicrophoneOn(gameObject), IsAudioOn(gameObject));
+            IsMicrophoneOn(gameObject), IsAudioOn(gameObject), visual, GetParts(gameObject, visual, logger));
+    }
+
+    private static GameVisual? GetVisual(GameObject gameObject) => gameObject is GamePlayer ? null : gameObject.Visual;
+
+    private static IReadOnlyList<GameViewPart> GetParts(GameObject gameObject, GameVisual? visual, ILogger logger) =>
+        visual is null ? [] : GameViewPart.FromVisual(GameVisualValidator.GetValidVisual(gameObject, visual, logger));
 
     private static string GetKind(GameObject gameObject) => gameObject switch
     {

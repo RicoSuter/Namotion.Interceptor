@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.Visuals;
 using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
@@ -13,6 +14,9 @@ namespace HomeBlaze.Game;
 [InterceptorSubject]
 public abstract partial class GameObject : IConfigurable
 {
+    // Created on first use, because most object types override Visual.
+    private GameVisualCache<(int Width, int Height, int Depth)>? _defaultVisual;
+
     /// <summary>
     /// The largest width, depth and height in tiles.
     /// </summary>
@@ -60,6 +64,14 @@ public abstract partial class GameObject : IConfigurable
     /// Whether players see this object.
     /// </summary>
     public virtual bool IsVisible => true;
+
+    /// <summary>
+    /// How the object looks; a gray box filling the footprint and <see cref="Height"/> by default. An override computes it
+    /// from configuration or state properties only, which the page observes, and caches it per state, for example with
+    /// <see cref="GameVisualCache{TKey}"/>. Players are drawn by the page itself and ignore it.
+    /// </summary>
+    public virtual GameVisual Visual =>
+        (_defaultVisual ??= new()).Get((Width, Height, Depth), static size => GameVisual.Box(size.Width, size.Height, size.Depth));
 
     internal Footprint Footprint => new(X, Y, Width, Depth);
 
