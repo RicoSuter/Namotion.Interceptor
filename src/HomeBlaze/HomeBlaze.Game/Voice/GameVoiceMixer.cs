@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using HomeBlaze.Game.World;
 using Microsoft.Extensions.Logging;
 
@@ -28,6 +29,10 @@ internal sealed class GameVoiceMixer
     private readonly Stack<short[]> _spareFrames = new();
     private readonly List<KeyValuePair<string, IGameVoiceSink[]>> _listeners = [];
     private readonly int[] _sum = new int[GameVoiceSettings.SamplesPerFrame];
+
+    // Used only by Mix: per listener the gain of each talker in the tick it was last mixed, to glide from.
+    private readonly Dictionary<string, ListenerGains> _gains = new();
+    private long _tick;
 
     public GameVoiceMixer(TimeProvider timeProvider, ILogger logger)
     {
@@ -101,10 +106,16 @@ internal sealed class GameVoiceMixer
     /// talkers in its row of the table, scaled by their volume and without its own; sends nothing to a listener that
     /// hears no frame. Exceptions of sinks are logged. Must not run concurrently with itself.
     /// </summary>
+    /// <remarks>
+    /// A volume that changed since the previous tick glides linearly across the frame from the previous volume to the
+    /// new one. A pair new in the row, or one after a tick in which no talker had a frame, glides up from 0. A pair that
+    /// left the row glides down to 0 over one more frame of the talker if it has one, and is dropped otherwise.
+    /// </remarks>
     public void Mix(GameVolumeTable table)
     {
         try
         {
+            _tick++;
             TakeFrames();
             if (_frames.Count == 0)
             {
@@ -115,6 +126,8 @@ internal sealed class GameVoiceMixer
             {
                 MixFor(listenerId, sinks, table);
             }
+
+            DropGainsOfLeftListeners();
         }
         finally
         {
@@ -164,7 +177,14 @@ internal sealed class GameVoiceMixer
 
     private void MixFor(string listenerId, IGameVoiceSink[] sinks, GameVolumeTable table)
     {
-        if (!TrySum(listenerId, table.GetRow(listenerId)))
+        if (!_gains.TryGetValue(listenerId, out var gains))
+        {
+            gains = new ListenerGains();
+            _gains[listenerId] = gains;
+        }
+
+        gains.Tick = _tick;
+        if (!TrySum(listenerId, table.GetRow(listenerId), gains.Talkers))
         {
             return;
         }
@@ -177,27 +197,77 @@ internal sealed class GameVoiceMixer
         }
     }
 
-    private bool TrySum(string listenerId, ReadOnlySpan<GameVolumeEntry> row)
+    private bool TrySum(string listenerId, ReadOnlySpan<GameVolumeEntry> row, Dictionary<string, TalkerGain> gains)
     {
         Array.Clear(_sum);
         var isAudible = false;
         foreach (var entry in row)
         {
-            if (entry.PlayerId != listenerId && _frames.TryGetValue(entry.PlayerId, out var frame))
+            if (entry.PlayerId == listenerId)
             {
-                AddScaled(frame, entry.Volume);
+                continue;
+            }
+
+            var previous = UpdateGain(gains, entry.PlayerId, entry.Volume);
+            if (_frames.TryGetValue(entry.PlayerId, out var frame))
+            {
+                AddGliding(frame, previous, entry.Volume);
                 isAudible = true;
             }
+        }
+
+        return FadeOutLeftTalkers(gains) || isAudible;
+    }
+
+    // Returns the gain of the previous tick, or 0 when the pair was not mixed in it.
+    private float UpdateGain(Dictionary<string, TalkerGain> gains, string talkerId, float volume)
+    {
+        ref var gain = ref CollectionsMarshal.GetValueRefOrAddDefault(gains, talkerId, out var exists);
+        var previous = exists && gain.Tick == _tick - 1 ? gain.Volume : 0;
+        gain = new TalkerGain(volume, _tick);
+        return previous;
+    }
+
+    private bool FadeOutLeftTalkers(Dictionary<string, TalkerGain> gains)
+    {
+        var isAudible = false;
+        foreach (var (talkerId, gain) in gains)
+        {
+            if (gain.Tick == _tick)
+            {
+                continue;
+            }
+
+            if (gain.Tick == _tick - 1 && _frames.TryGetValue(talkerId, out var frame))
+            {
+                AddGliding(frame, gain.Volume, 0);
+                isAudible = true;
+            }
+
+            gains.Remove(talkerId);
         }
 
         return isAudible;
     }
 
-    private void AddScaled(short[] frame, float volume)
+    private void DropGainsOfLeftListeners()
     {
+        foreach (var (listenerId, gains) in _gains)
+        {
+            if (gains.Tick != _tick)
+            {
+                _gains.Remove(listenerId);
+            }
+        }
+    }
+
+    // Counts back from the last sample, which gets exactly the new volume, so the next frame continues without a step.
+    private void AddGliding(short[] frame, float from, float to)
+    {
+        var step = (to - from) / _sum.Length;
         for (var index = 0; index < _sum.Length; index++)
         {
-            _sum[index] += (int)(frame[index] * volume);
+            _sum[index] += (int)(frame[index] * (to - step * (_sum.Length - 1 - index)));
         }
     }
 
@@ -263,6 +333,15 @@ internal sealed class GameVoiceMixer
         }
 
         return -1;
+    }
+
+    private readonly record struct TalkerGain(float Volume, long Tick);
+
+    private sealed class ListenerGains
+    {
+        public long Tick { get; set; }
+
+        public Dictionary<string, TalkerGain> Talkers { get; } = new();
     }
 
     private sealed class Talker(int microphonePageId, TimeProvider timeProvider)

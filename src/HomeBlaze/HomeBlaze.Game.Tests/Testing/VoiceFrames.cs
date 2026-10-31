@@ -24,4 +24,9 @@ internal static class VoiceFrames
 
     public static short ReadSample(byte[] frame, int index) =>
         BinaryPrimitives.ReadInt16LittleEndian(frame.AsSpan(index * 2));
+
+    /// <summary>
+    /// Reads the last sample, which the mixer scales by the full new volume after a gain glide.
+    /// </summary>
+    public static short ReadLastSample(byte[] frame) => ReadSample(frame, GameVoiceSettings.SamplesPerFrame - 1);
 }
