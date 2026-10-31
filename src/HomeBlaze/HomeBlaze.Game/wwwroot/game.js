@@ -6,6 +6,9 @@ const views = new Map();
 const NOT_STARTED = { isStarted: false, error: null };
 // A larger jump of the own player, such as a teleport or a rebase of the world origin, moves the camera at once.
 const CAMERA_SNAP_DISTANCE = 20;
+// Where the camera sits relative to the point it looks at, in tiles: above it and south of it.
+const CAMERA_HEIGHT = 28;
+const CAMERA_DISTANCE = 30;
 let babylonLoading = null;
 
 // The page also hosts an AMD loader with a global define, which would make the UMD builds register as anonymous AMD
@@ -137,14 +140,14 @@ class GameView {
         this.scene.clearColor = new BABYLON.Color4(sky.r, sky.g, sky.b, 1);
         this.scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
         this.scene.fogColor = sky;
-        this.scene.fogStart = 90;
-        this.scene.fogEnd = 200;
+        this.scene.fogStart = 110;
+        this.scene.fogEnd = 230;
 
         // One world unit is one tile of 25 cm; x grows to the east, z to the north, y up.
-        this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(0, 22, -20), this.scene);
+        this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(0, CAMERA_HEIGHT + 3, -CAMERA_DISTANCE), this.scene);
         this.camera.fov = 0.8;
         this.camera.minZ = 0.5;
-        this.camera.maxZ = 450;
+        this.camera.maxZ = 500;
         this.camera.setTarget(BABYLON.Vector3.Zero());
 
         const skyLight = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0.2, 1, -0.3), this.scene);
@@ -190,7 +193,7 @@ class GameView {
                 this.hasCameraTarget = true;
             }
 
-            this.camera.position.copyFromFloats(this.cameraTarget.x, this.cameraTarget.y + 19, this.cameraTarget.z - 20);
+            this.camera.position.copyFromFloats(this.cameraTarget.x, this.cameraTarget.y + CAMERA_HEIGHT, this.cameraTarget.z - CAMERA_DISTANCE);
             this.camera.setTarget(this.cameraTarget);
             this.entities.afterCameraMoved(this.camera, now);
         }
