@@ -47,7 +47,7 @@ These are follow-ups and are listed in the README once the feature is implemente
 | `BufferGrowth` | 1 frame | Growth of a buffer after it ran dry |
 | `BufferShrinkDelay` | 5 s | Time without running dry before a buffer shrinks by one frame |
 | `VolumeTableInterval` | 100 ms | Shortest time between two rebuilds of the volume table |
-| `MaximumPendingSends` | 3 | Sends to a page in flight beyond which new frames to it are dropped |
+| `MaximumPendingSends` | 10 | Sends to a page in flight beyond which new frames to it are dropped |
 | `FrameRateTolerance` | 1.5 | Allowed incoming frame rate as a multiple of the nominal rate |
 
 The page passes the browser-side values to `game-voice.js` when it starts, so JavaScript holds no copy. Expected delay from mouth to ear with these values: about 100 to 130 ms on the LAN and 150 to 220 ms over the internet, plus whatever Bluetooth headsets add.

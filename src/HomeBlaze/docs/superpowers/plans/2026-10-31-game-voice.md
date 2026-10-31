@@ -490,7 +490,7 @@ internal static class GameVoiceSettings
     /// <summary>
     /// Sends to a page in flight beyond which new frames to it are dropped.
     /// </summary>
-    public const int MaximumPendingSends = 3;
+    public const int MaximumPendingSends = 10;
 
     /// <summary>
     /// Allowed incoming frame rate as a multiple of the nominal rate.
@@ -4973,7 +4973,7 @@ Settings (`Voice/GameVoiceSettings`, the one place for every timing):
 | `BufferGrowth` | 1 frame | Growth of a buffer after it ran dry |
 | `BufferShrinkDelay` | 5 s | Time without running dry before a buffer shrinks by one frame |
 | `VolumeTableInterval` | 100 ms | Shortest time between two rebuilds of the volume table |
-| `MaximumPendingSends` | 3 | Sends to a page in flight beyond which new frames to it are dropped |
+| `MaximumPendingSends` | 10 | Sends to a page in flight beyond which new frames to it are dropped |
 | `FrameRateTolerance` | 1.5 | Allowed incoming frame rate as a multiple of the nominal rate |
 
 The page passes the browser's values to `game-voice.js` when it starts, so JavaScript holds no copy. Expected delay from mouth to ear: about 100 to 130 ms on the LAN and 150 to 220 ms over the internet, plus whatever Bluetooth headsets add.
@@ -5105,7 +5105,7 @@ with
 
 ```markdown
 - Only one character model, and only walls and doors as object types.
-- `MaximumPendingSends` of 3 drops frames to a page once its round trip exceeds about 60 ms, because each send waits for the browser to acknowledge it. Raise it for use over the internet.
+- `MaximumPendingSends` of 10 drops frames to a page once its round trip exceeds about 200 ms, because each send waits for the browser to acknowledge it.
 - Echo cancellation is up to the browser; without headphones some browsers let a listener's speaker reach its own microphone.
 
 Voice follow-ups:
