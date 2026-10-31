@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Game.Voice;
 using HomeBlaze.Installation;
@@ -20,6 +21,8 @@ public class GamePageTests
     private const string SelfSuffix = " (you)";
     private const string ReceivedFramesAttribute = "data-voice-received-frames";
     private const string SentFramesAttribute = "data-voice-sent-frames";
+    private const string TrimmedAttribute = "data-voice-trimmed";
+    private const string UnderrunsAttribute = "data-voice-underruns";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -182,7 +185,7 @@ public class GamePageTests
     }
 
     [Fact]
-    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheTalkersFrames()
+    public async Task WhenTwoPlayersTurnOnMicrophoneAndSpeaker_ThenTheListenerPlaysTheTalkersFramesAndCountsTrimsAndUnderruns()
     {
         // Arrange
         await using var browser = await MediaBrowser.LaunchAsync();
@@ -200,7 +203,12 @@ public class GamePageTests
 
         // Assert
         await WaitForCounterAsync(talker, SentFramesAttribute, 25);
-        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 25);
+        await WaitForCounterAsync(listener, ReceivedFramesAttribute, 100);
+        // Only present, not 0: headless Chromium renders audio in callbacks of 4096 samples (about 85 ms), so the playback
+        // buffer peaks near its maximum and trims although the frames arrive steadily.
+        var panel = listener.GetByTestId("game-panel");
+        await Expect(panel).ToHaveAttributeAsync(TrimmedAttribute, new Regex("^[0-9]+$"), new() { Timeout = Timeout });
+        await Expect(panel).ToHaveAttributeAsync(UnderrunsAttribute, new Regex("^[0-9]+$"), new() { Timeout = Timeout });
     }
 
     [Fact]
