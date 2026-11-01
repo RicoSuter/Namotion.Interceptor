@@ -10,7 +10,8 @@ namespace HomeBlaze.Game.Nature;
 /// <summary>
 /// An animal that wanders around its home in walking bouts: after a pause of 3 to 8 seconds it walks 4 to 12 tiles in a
 /// row in a direction close to its facing, one tile every 250 ms, until a step is blocked or would leave the
-/// <see cref="WanderRadius"/>. It turns by at most 90 degrees at once. It eats when fed and does not walk meanwhile. Its
+/// <see cref="WanderRadius"/>. It never turns around at once: mostly straight or 45 degrees, sometimes 90; 135 degrees
+/// only when every smaller turn is blocked. It eats when fed and does not walk meanwhile. Its
 /// body covers a square of tiles that blocks movement; its head and tail reach beyond it.
 /// </summary>
 [Category("Game")]
@@ -24,7 +25,7 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
 
     // The turns a bout tries, in steps of 45 degrees and multiplied by a random side, after the one it chose: straight,
     // then the smallest turns first. Turning around is left out; a boxed-in animal turns by 90 degrees instead.
-    private static readonly int[] FallbackTurns = [0, 1, -1, 2, -2, 3, -3];
+    private static ReadOnlySpan<int> FallbackTurns => [0, 1, -1, 2, -2, 3, -3];
 
     private static readonly AnimalModel DeerModel = new("deer.glb", 6, 6, TimeSpan.FromSeconds(6.5));
     private static readonly AnimalModel StagModel = new("stag.glb", 7, 8, TimeSpan.FromSeconds(12.5));
