@@ -28,6 +28,8 @@ const GLIDE_MS = 300;
 const RADIANS_PER_DEGREE = Math.PI / 180;
 // The color of a box without texture or color, and of the box that replaces a model that failed to load.
 const FALLBACK_COLOR = '#8d8577';
+// The animation mode of a part that plays its animation once; any other mode, or none, loops it.
+const ONCE_ANIMATION_MODE = 1;
 // Wind bends a part by this many tiles per square tile of height above the object's base, swaying at the first speed and
 // gusting at the second, both in radians per second.
 const WIND_STRENGTH = 0.0015;
@@ -107,7 +109,7 @@ export async function createEntities(scene, options) {
     const windMaterials = new Map();
     const fadeMaterials = new Map();
     // Written to the canvas for tests and diagnosis.
-    const stats = { parts: 0, models: 0, failures: 0, faded: 0 };
+    const stats = { parts: 0, models: 0, failures: 0, faded: 0, animationsOnce: 0 };
     // Reused by every frame, so the render loop does not allocate.
     const selfPosition = { x: 0, z: 0 };
     const segment = { enter: 0, exit: 1 };
@@ -173,6 +175,7 @@ export async function createEntities(scene, options) {
             element.dataset.gameModels = String(stats.models);
             element.dataset.gameModelFailures = String(stats.failures);
             element.dataset.gameFaded = String(stats.faded);
+            element.dataset.gameAnimationsOnce = String(stats.animationsOnce);
         }
     }
 
@@ -306,7 +309,7 @@ export async function createEntities(scene, options) {
         const offset = new BABYLON.TransformNode(`${name}-offset`, scene);
         offset.parent = pivot;
         offset.position.copyFromFloats(part.x - part.px, part.y, part.z - part.pz);
-        const node = { part, pivot, offset, instance: null, meshes: null, state: null, glide: null };
+        const node = { part, name, pivot, offset, instance: null, meshes: null, state: null, glide: null, animationGroup: null };
         stats.parts++;
         if (part.k === 'model') {
             addModel(entity, node, name).catch(error => console.warn(`The model ${part.m} could not be shown: ${error?.message ?? error}`));
@@ -358,21 +361,34 @@ export async function createEntities(scene, options) {
             }
         }
 
-        playAnimation(instance, prefix, part.a);
+        for (const group of instance.animationGroups) {
+            group.stop();
+        }
+
         addMeshes(entity, meshes);
         node.instance = instance;
         node.meshes = meshes;
         node.state = 'model';
         stats.models++;
+        playAnimation(node);
     }
 
-    function playAnimation(instance, prefix, animation) {
-        for (const group of instance.animationGroups) {
-            if (animation && group.name === prefix + animation) {
-                group.start(true);
-            } else {
-                group.stop();
-            }
+    // Plays the part's animation from the start: looping, or once, after which it holds its last frame, because a group that
+    // does not loop leaves its targets at the end.
+    function playAnimation(node) {
+        node.animationGroup?.stop();
+        const animation = node.part.a;
+        const name = `${node.name}-${animation}`;
+        const group = animation ? node.instance.animationGroups.find(candidate => candidate.name === name) ?? null : null;
+        node.animationGroup = group;
+        if (!group) {
+            return;
+        }
+
+        const isOnce = node.part.am === ONCE_ANIMATION_MODE;
+        group.start(!isOnce);
+        if (isOnce) {
+            stats.animationsOnce++;
         }
     }
 
@@ -609,9 +625,9 @@ export async function createEntities(scene, options) {
         }
     }
 
-    // What a glide cannot animate: a change of any of it rebuilds the object.
+    // What neither a glide nor a new animation can update: a change of any of it rebuilds the object.
     function getPartShape(part) {
-        return [part.k, part.w, part.h, part.d, part.px, part.pz, part.t, part.ts, part.c, part.m, part.e, part.a].join('|');
+        return [part.k, part.w, part.h, part.d, part.px, part.pz, part.t, part.ts, part.c, part.m, part.e].join('|');
     }
 
     function haveSameShapes(previous, parts) {
@@ -648,6 +664,12 @@ export async function createEntities(scene, options) {
             }
 
             node.part = part;
+            // A model still loading plays the latest animation once it is shown.
+            if (node.state === 'model'
+                && (part.a !== previous.a || (part.am === ONCE_ANIMATION_MODE) !== (previous.am === ONCE_ANIMATION_MODE))) {
+                playAnimation(node);
+                updateStats();
+            }
         });
     }
 
