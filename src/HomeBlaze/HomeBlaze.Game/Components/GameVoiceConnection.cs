@@ -334,7 +334,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
             return;
         }
 
-        await SwitchBackOffAsync(isOn, player, _game.SetMicrophoneAsync);
+        await SwitchBackOffAsync(isOn, player, isMicrophone: true);
         await module.TryInvokeAsync("stopCapture", GameVoiceSettings.BrowserCallTimeout);
     }
 
@@ -374,7 +374,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         }
 
         registration.Dispose();
-        await SwitchBackOffAsync(isOn, player, _game.SetAudioAsync);
+        await SwitchBackOffAsync(isOn, player, isMicrophone: false);
         await module.TryInvokeAsync("stopPlayback", GameVoiceSettings.BrowserCallTimeout);
     }
 
@@ -408,11 +408,13 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
     private bool IsPlayerKept(GamePlayer player) => !_isDisposed && ReferenceEquals(Player, player);
 
     // Switches a toggle that the game turned on back off, or shows why the game refused it.
-    private async Task SwitchBackOffAsync(bool isOn, GamePlayer player, Func<string, int, bool, CancellationToken, Task<bool>> setAsync)
+    private async Task SwitchBackOffAsync(bool isOn, GamePlayer player, bool isMicrophone)
     {
         if (isOn)
         {
-            await TrySetVoiceAsync(setAsync(player.ClientId, _viewId, false, CancellationToken.None));
+            await TrySetVoiceAsync(isMicrophone
+                ? _game.SetMicrophoneAsync(player.ClientId, _viewId, isOn: false, CancellationToken.None)
+                : _game.SetAudioAsync(player.ClientId, _viewId, isOn: false, CancellationToken.None));
         }
         else
         {

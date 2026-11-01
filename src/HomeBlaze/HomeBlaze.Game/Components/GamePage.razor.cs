@@ -232,7 +232,7 @@ public partial class GamePage
         view?.Close();
         if (view is not null || voice is not null)
         {
-            _detaching = DisposeConnectionsAsync(_detaching, view, voice);
+            _detaching = DisposeConnectionsAsync(_detaching, voice, view);
         }
 
         if (_subscribedGame is { } game)
@@ -255,18 +255,27 @@ public partial class GamePage
     }
 
     // After the disposal of connections left before. The voice first, separately from the view, so a voice module that
-    // the browser already dropped does not keep the game module.
-    private static async Task DisposeConnectionsAsync(Task previous, GameViewConnection? view, GameVoiceConnection? voice)
+    // the browser already dropped does not keep the game module. Never faults, since a start awaits it in
+    // OnAfterRenderAsync, where an exception would end the circuit.
+    private async Task DisposeConnectionsAsync(Task previous, IAsyncDisposable? voice, IAsyncDisposable? view)
     {
         await previous;
-        if (voice is not null)
-        {
-            await voice.DisposeAsync();
-        }
+        await TryDisposeAsync(voice);
+        await TryDisposeAsync(view);
+    }
 
-        if (view is not null)
+    private async Task TryDisposeAsync(IAsyncDisposable? connection)
+    {
+        try
         {
-            await view.DisposeAsync();
+            if (connection is not null)
+            {
+                await connection.DisposeAsync();
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.LogDebug(exception, "Disposing a connection of the game page failed");
         }
     }
 
