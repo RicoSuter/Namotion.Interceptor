@@ -1,6 +1,5 @@
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
-using RecordingLogger = HomeBlaze.Game.Tests.Testing.RecordingLogger;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
@@ -263,7 +262,7 @@ public class GameSimulationTests
     }
 
     [Fact]
-    public async Task WhenInvokedAfterTheRunStoppedOnTheSimulationThread_ThenNothingIsStranded()
+    public async Task WhenInvokedOffTheSimulationThreadAfterTheRunStopped_ThenTheTaskFaults()
     {
         // Arrange
         var simulation = CreateSimulation();
@@ -356,7 +355,7 @@ public class GameSimulationTests
         // Assert
         var warnings = _logger.Entries.Where(entry => entry.Level == LogLevel.Warning).ToArray();
         Assert.Equal(2, warnings.Length);
-        Assert.Contains("2", warnings[1].Message);
+        Assert.Contains("2 similar failures suppressed", warnings[1].Message);
     }
 
     [Fact]

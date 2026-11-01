@@ -81,7 +81,8 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
 
         _queue.Enqueue(new Item(null, work));
 
-        // The run sweeps the queue once after it set the flag, so either the sweep sees the work or this sees the flag.
+        // Pairs with the Interlocked.Exchange in Stop: the full fence makes either its sweep see the work or this see the flag.
+        Interlocked.MemoryBarrier();
         if (Volatile.Read(ref _isDrained) == 1)
         {
             work.Abandon();
@@ -150,7 +151,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         try
         {
             _tickTimestamp = timeProvider.GetTimestamp();
-            _schedules.BeginTick();
+            _schedules.BeginTick(_tickTimestamp);
             while (_schedules.TryTakeDue(_tickTimestamp, out var scheduled))
             {
                 RunLogged(scheduled);
@@ -207,12 +208,17 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     private void Stop()
     {
         _isStopped = true;
-        RunTick();
-
-        Interlocked.Exchange(ref _isDrained, 1);
-        while (_queue.TryDequeue(out var item))
+        try
         {
-            item.Work?.Abandon();
+            RunTick();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _isDrained, 1);
+            while (_queue.TryDequeue(out var item))
+            {
+                item.Work?.Abandon();
+            }
         }
     }
 
@@ -256,7 +262,11 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
             }
             else
             {
-                logger.LogDebug(exception, "An action of the game simulation failed: {Action}", Describe(action));
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "An action of the game simulation failed: {Action}", Describe(action));
+                }
+
                 _suppressedCount++;
             }
 

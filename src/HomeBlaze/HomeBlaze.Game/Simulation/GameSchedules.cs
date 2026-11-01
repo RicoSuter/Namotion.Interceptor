@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace HomeBlaze.Game.Simulation;
 
 /// <summary>
@@ -10,15 +12,19 @@ internal sealed class GameSchedules
     private readonly Dictionary<object, List<Entry>> _byOwner = new(ReferenceEqualityComparer.Instance);
     private long _sequence;
     private long _tickLimit;
+    private long _tickTimestamp;
 
     /// <summary>
     /// Queues the action for the owner; disposing the result from any thread keeps it from running and releases the action.
     /// </summary>
     /// <remarks>
-    /// A disposed entry stays in the owner's list until it comes due or the owner is canceled.
+    /// The due timestamp is never earlier than the current tick's timestamp, which <see cref="TryTakeDue"/> relies on to
+    /// leave entries added during a tick for the next one. A disposed entry stays in the owner's list until it comes due
+    /// or the owner is canceled.
     /// </remarks>
     public IDisposable Add(object owner, long dueTimestamp, Action action)
     {
+        Debug.Assert(dueTimestamp >= _tickTimestamp, "A schedule must not be due before the current tick.");
         var entry = new Entry(owner, action);
         if (!_byOwner.TryGetValue(owner, out var entries))
         {
@@ -32,9 +38,13 @@ internal sealed class GameSchedules
     }
 
     /// <summary>
-    /// Marks the start of a tick: entries added from now on are not taken before the next one.
+    /// Marks the start of the tick with the given timestamp: entries added from now on are not taken before the next one.
     /// </summary>
-    public void BeginTick() => _tickLimit = _sequence;
+    public void BeginTick(long tickTimestamp)
+    {
+        _tickTimestamp = tickTimestamp;
+        _tickLimit = _sequence;
+    }
 
     /// <summary>
     /// Cancels every pending action of the owner.
