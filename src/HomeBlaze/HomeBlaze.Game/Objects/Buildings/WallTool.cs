@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Game.Tools;
+using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Game.Objects.Buildings;
@@ -56,18 +56,17 @@ public partial class WallTool : GameTool, ITitleProvider, IIconProvider
         var wallMaterial = material ?? WallMaterial.Bricks;
         ValidateParameters(wallLength, wallHeight, wallMaterial);
 
-        var game = GetGame();
-        var placement = game.GetPlacementInFront(caller, across: wallLength, along: 1);
+        var spot = World.GetSpotInFront(caller, across: wallLength, along: 1);
         var wall = new Wall
         {
-            X = placement.X,
-            Y = placement.Y,
-            Width = placement.Width,
-            Depth = placement.Depth,
+            X = spot.X,
+            Y = spot.Y,
+            Width = spot.Width,
+            Depth = spot.Depth,
             Height = wallHeight,
             Material = wallMaterial
         };
-        return game.PlaceAsync(caller, "wall", wall, cancellationToken);
+        return World.PlaceAsync(wall, cancellationToken);
     }
 
     private static void ValidateParameters(int length, int height, WallMaterial material)

@@ -26,7 +26,6 @@
         <Using Include="Xunit" />
         <Using Include="HomeBlaze.Game.Abstractions" />
         <Using Include="HomeBlaze.Game.Objects.Buildings" />
-        <Using Include="HomeBlaze.Game.Tools" />
         <Using Include="HomeBlaze.Game.Objects.Nature" />
     </ItemGroup>
 

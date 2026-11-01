@@ -74,7 +74,7 @@ public class DemoWorldTests
         var keepClear = _game.Objects.Values.OfType<Door>().Select(GetApproach).Append(new GameArea(-2, -2, 6, 6)).ToArray();
 
         // Act
-        var blocking = _game.Objects.Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Footprint))).ToArray();
+        var blocking = _game.Objects.Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Area))).ToArray();
 
         // Assert
         Assert.Empty(blocking);

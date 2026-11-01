@@ -4,7 +4,7 @@ namespace HomeBlaze.Game.World;
 
 /// <summary>
 /// The only definition of who hears whom and how loud. Sound travels along the shortest open path between the
-/// footprint centers: the straight line while it touches no tile of an object whose
+/// area centers: the straight line while it touches no tile of an object whose
 /// <see cref="GameObject.IsSoundBlocking"/> is true, otherwise the path that <see cref="SoundPathSearch"/> finds around
 /// such objects. The volume is the distance gain of the path length times the occlusion gain of the detour, the length
 /// the path exceeds the straight distance by.
@@ -41,10 +41,10 @@ internal static class HearingRange
     /// </remarks>
     public static double GetVolume(GamePlayer first, GamePlayer second, GameWorldIndex index, SoundPathSearch search)
     {
-        var firstFootprint = first.Footprint;
-        var secondFootprint = second.Footprint;
-        var start = GetDoubledCenter(firstFootprint);
-        var end = GetDoubledCenter(secondFootprint);
+        var firstArea = first.Area;
+        var secondArea = second.Area;
+        var start = GetDoubledCenter(firstArea);
+        var end = GetDoubledCenter(secondArea);
         double deltaX = end.X - start.X;
         double deltaY = end.Y - start.Y;
         var distance = Math.Sqrt(deltaX * deltaX + deltaY * deltaY) / 2;
@@ -53,23 +53,23 @@ internal static class HearingRange
             return 0;
         }
 
-        if (!IsLineBlocked(start, end, firstFootprint, secondFootprint, index))
+        if (!IsLineBlocked(start, end, firstArea, secondArea, index))
         {
             return GetDistanceGain(distance);
         }
 
-        // From one fixed end, so both orders get the same length also where a footprint overlaps a sound blocking
-        // object, whose tiles count as open only in the source footprint.
+        // From one fixed end, so both orders get the same length also where an area overlaps a sound blocking
+        // object, whose tiles count as open only in the source area.
         var isFirstSource = IsSearchedFrom(first, second);
-        search.Prepare(isFirstSource ? firstFootprint : secondFootprint, index);
-        var length = search.GetLength(isFirstSource ? secondFootprint : firstFootprint);
+        search.Prepare(isFirstSource ? firstArea : secondArea, index);
+        var length = search.GetLength(isFirstSource ? secondArea : firstArea);
         if (length == SoundPathSearch.NoPath)
         {
             return 0;
         }
 
         // Against the grid length without walls, so the excess of grid lengths over straight ones cancels out.
-        var openLength = SoundPathSearch.GetOpenLength(firstFootprint, secondFootprint);
+        var openLength = SoundPathSearch.GetOpenLength(firstArea, secondArea);
         var detour = Math.Max(0, length - openLength) / (double)SoundPathSearch.Unit;
         return GetDistanceGain(distance + detour) * GetOcclusionGain(detour);
     }
@@ -105,24 +105,24 @@ internal static class HearingRange
             return order < 0;
         }
 
-        var firstFootprint = first.Footprint;
-        var secondFootprint = second.Footprint;
-        return (firstFootprint.X, firstFootprint.Y, firstFootprint.Width, firstFootprint.Depth)
-            .CompareTo((secondFootprint.X, secondFootprint.Y, secondFootprint.Width, secondFootprint.Depth)) <= 0;
+        var firstArea = first.Area;
+        var secondArea = second.Area;
+        return (firstArea.X, firstArea.Y, firstArea.Width, firstArea.Depth)
+            .CompareTo((secondArea.X, secondArea.Y, secondArea.Width, secondArea.Depth)) <= 0;
     }
 
     /// <summary>
-    /// Gets the area that every footprint of a player who may hear a player with this footprint intersects.
+    /// Gets the area that every area of a player who may hear a player with this area intersects.
     /// </summary>
     /// <remarks>
-    /// The footprint must have a width and depth from 1 to <see cref="GameObject.MaximumSize"/>; the index holds no others.
+    /// The area must have a width and depth from 1 to <see cref="GameObject.MaximumSize"/>; the index holds no others.
     /// </remarks>
-    public static GameArea GetArea(GameArea footprint)
+    public static GameArea GetArea(GameArea area)
     {
-        var minimumX = Math.Max(int.MinValue, (long)footprint.X - HearingRadius);
-        var maximumX = Math.Min(int.MaxValue, footprint.Right + HearingRadius);
-        var minimumY = Math.Max(int.MinValue, (long)footprint.Y - HearingRadius);
-        var maximumY = Math.Min(int.MaxValue, footprint.Top + HearingRadius);
+        var minimumX = Math.Max(int.MinValue, (long)area.X - HearingRadius);
+        var maximumX = Math.Min(int.MaxValue, area.Right + HearingRadius);
+        var minimumY = Math.Max(int.MinValue, (long)area.Y - HearingRadius);
+        var maximumY = Math.Min(int.MaxValue, area.Top + HearingRadius);
         return new GameArea(
             (int)minimumX,
             (int)minimumY,
@@ -130,9 +130,9 @@ internal static class HearingRange
             (int)Math.Min(int.MaxValue, maximumY - minimumY + 1));
     }
 
-    // In half tiles, so the center of every footprint is a whole number and the walk stays exact.
-    private static (long X, long Y) GetDoubledCenter(GameArea footprint) =>
-        (2L * footprint.X + footprint.Width, 2L * footprint.Y + footprint.Depth);
+    // In half tiles, so the center of every area is a whole number and the walk stays exact.
+    private static (long X, long Y) GetDoubledCenter(GameArea area) =>
+        (2L * area.X + area.Width, 2L * area.Y + area.Depth);
 
     // Walks every tile that the closed segment touches, also only at an edge or a corner, so sound slips neither
     // between two walls that touch at a corner nor along the face of a wall. Called only within the hearing radius,

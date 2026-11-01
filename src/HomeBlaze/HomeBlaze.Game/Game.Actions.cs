@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Messaging;
+using HomeBlaze.Game.Abstractions;
 
 namespace HomeBlaze.Game;
 
@@ -10,10 +11,10 @@ public partial class Game
     internal static readonly TimeSpan MessageInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Gets the player of this game the caller acts as, or null when it acts as none, for example from the subject page,
-    /// MCP or an agent.
+    /// Gets the connected player of this game the caller acts as, or null when it acts as none, for example from the
+    /// subject page, MCP or an agent.
     /// </summary>
-    public GamePlayer? ResolveActor(GameCaller? caller)
+    internal GamePlayer? GetActor(GameCaller? caller)
     {
         if (caller is null)
         {
@@ -22,7 +23,7 @@ public partial class Game
 
         lock (_lock)
         {
-            return IsPlayerOfThisGame(caller.Player) ? caller.Player : null;
+            return Players.TryGetValue(caller.ClientId, out var player) && player.IsConnected ? player : null;
         }
     }
 

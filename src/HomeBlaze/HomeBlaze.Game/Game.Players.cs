@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Clients;
 using HomeBlaze.Game.World;
 using Microsoft.Extensions.Logging;
@@ -22,7 +23,7 @@ public partial class Game
     /// </summary>
     internal string? GetClientName(GameCaller? caller)
     {
-        if (ResolveActor(caller) is not { } player || _clients.GetClients() is not { } clients)
+        if (GetActor(caller) is not { } player || _clients.GetClients() is not { } clients)
         {
             return null;
         }
@@ -53,7 +54,7 @@ public partial class Game
             throw new ArgumentException($"A name has at most {MaximumNameLength} characters.", nameof(name));
         }
 
-        var player = ResolveActor(caller) ?? throw new InvalidOperationException(NoRenameActorMessage);
+        var player = GetActor(caller) ?? throw new InvalidOperationException(NoRenameActorMessage);
         await _clients.RenameAsync(player.ClientId, trimmed, cancellationToken);
 
         // Not every directory reports the rename as a client change.
@@ -153,7 +154,7 @@ public partial class Game
 
         if (isJoining)
         {
-            var position = SpawnFinder.FindFreePosition(player.Footprint, area => !index.IsBlocked(area, player));
+            var position = SpawnFinder.FindFreePosition(player.Area, area => !index.IsBlocked(area, player));
             player.X = position.X;
             player.Y = position.Y;
             _isSaveRequested = true;

@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Game;
 
@@ -18,7 +19,7 @@ namespace HomeBlaze.Game;
 public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
 {
     /// <summary>
-    /// The width and depth of the footprint in tiles, 50 cm.
+    /// The width and depth of the area in tiles, 50 cm.
     /// </summary>
     public const int Size = 2;
 
@@ -118,7 +119,7 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
             throw new ArgumentException($"A message has at most {MaximumMessageLength} characters.", nameof(message));
         }
 
-        var game = ParentGame ?? throw new InvalidOperationException("The player is not part of a game.");
-        return game.SendMessageAsync(this, game.ResolveActor(caller), trimmed, cancellationToken);
+        var game = this.TryGetFirstParent<Game>() ?? throw new InvalidOperationException("The player is not part of a game.");
+        return game.SendMessageAsync(this, game.GetActor(caller), trimmed, cancellationToken);
     }
 }

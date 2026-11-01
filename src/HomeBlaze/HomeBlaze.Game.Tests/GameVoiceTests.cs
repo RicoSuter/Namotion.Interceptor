@@ -7,7 +7,7 @@ public class GameVoiceTests
 {
     private readonly GameTestContext _context = new();
 
-    private static GameCaller Caller(GamePlayer player) => new(player);
+    private static GameCaller Caller(GamePlayer player) => new(player.ClientId);
 
     // One tick of the mixer with the table as it is now.
     private void Mix()
@@ -98,21 +98,20 @@ public class GameVoiceTests
     }
 
     [Fact]
-    public void WhenTheCallerPlaysAnotherGame_ThenTheTogglesAreRefused()
+    public void WhenTheCallersClientHasNoPlayerInTheGame_ThenTheTogglesAreRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        var stranger = new GameTestContext().AddConnectedPlayer("tab-1");
+        var stranger = new GameCaller("tab-2");
 
         // Act
-        var isMicrophoneAccepted = _context.Game.SetMicrophone(Caller(stranger), pageId: 1, isOn: true);
-        var isAudioAccepted = _context.Game.SetAudio(Caller(stranger), pageId: 1, isOn: true);
+        var isMicrophoneAccepted = _context.Game.SetMicrophone(stranger, pageId: 1, isOn: true);
+        var isAudioAccepted = _context.Game.SetAudio(stranger, pageId: 1, isOn: true);
 
         // Assert
         Assert.False(isMicrophoneAccepted);
         Assert.False(isAudioAccepted);
         Assert.False(player.IsMicrophoneOn || player.IsAudioOn);
-        Assert.False(stranger.IsMicrophoneOn || stranger.IsAudioOn);
     }
 
     [Fact]

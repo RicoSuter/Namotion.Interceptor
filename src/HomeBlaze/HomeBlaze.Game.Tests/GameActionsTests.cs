@@ -7,15 +7,44 @@ public class GameActionsTests
     private readonly GameTestContext _context = new();
 
     [Fact]
-    public void WhenTheCallerIsAPlayerOfAnotherGame_ThenThereIsNoActor()
+    public void WhenTheCallersClientHasNoPlayerInTheGame_ThenThereIsNoActor()
     {
         // Arrange
-        var stranger = new GamePlayer { IsConnected = true };
+        _context.AddConnectedPlayer("tab-1");
 
         // Act
-        var actor = _context.Game.ResolveActor(new GameCaller(stranger));
+        var actor = _context.Game.GetActor(new GameCaller("tab-2"));
 
         // Assert
+        Assert.Null(actor);
+    }
+
+    [Fact]
+    public void WhenTheCallersPlayerIsConnected_ThenItIsTheActor()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        var actor = _context.Game.GetActor(new GameCaller("tab-1"));
+
+        // Assert
+        Assert.Same(player, actor);
+    }
+
+    [Fact]
+    public void WhenTheCallersPlayerIsDisconnected_ThenThereIsNoActor()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1", isNamed: true);
+        _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
+        _context.Game.ReconcilePlayers();
+
+        // Act
+        var actor = _context.Game.GetActor(new GameCaller("tab-1"));
+
+        // Assert
+        Assert.False(player.IsConnected);
         Assert.Null(actor);
     }
 
@@ -43,7 +72,7 @@ public class GameActionsTests
         var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
 
         // Act
-        await recipient.SendMessageAsync("  Hello  ", new GameCaller(sender), CancellationToken.None);
+        await recipient.SendMessageAsync("  Hello  ", new GameCaller(sender.ClientId), CancellationToken.None);
 
         // Assert
         var (clientId, notification) = Assert.Single(_context.Clients.Notifications);
@@ -61,7 +90,7 @@ public class GameActionsTests
         var message = new string('a', GamePlayer.MaximumMessageLength + 1);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => recipient.SendMessageAsync(message, new GameCaller(sender), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => recipient.SendMessageAsync(message, new GameCaller(sender.ClientId), CancellationToken.None));
         Assert.Empty(_context.Clients.Notifications);
     }
 
@@ -71,7 +100,7 @@ public class GameActionsTests
         // Arrange
         var sender = _context.AddConnectedPlayer("tab-1");
         var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
-        var caller = new GameCaller(sender);
+        var caller = new GameCaller(sender.ClientId);
         await recipient.SendMessageAsync("First", caller, CancellationToken.None);
 
         // Act

@@ -1,8 +1,10 @@
 using System.Reactive.Concurrency;
+using HomeBlaze.Game.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Game;
 
@@ -120,7 +122,7 @@ public partial class Game
     // visibility, which the index holds.
     private bool IsOutsideChange(SubjectPropertyChange change) => change.Property.Subject switch
     {
-        GameObject gameObject => ReferenceEquals(gameObject.ParentGame, this),
+        GameObject gameObject => ReferenceEquals(gameObject.TryGetFirstParent<Game>(), this),
         var subject => ReferenceEquals(subject, this) && IsCollectionProperty(change.Property.Name)
     };
 

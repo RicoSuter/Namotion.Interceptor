@@ -551,7 +551,7 @@
             return;
         }
 
-        if (game.SetMicrophone(new GameCaller(player), _viewId, isOn: true))
+        if (game.SetMicrophone(new GameCaller(player.ClientId), _viewId, isOn: true))
         {
             _isMicrophoneOn = true;
             return;
@@ -567,7 +567,7 @@
         _isMicrophoneOn = false;
         if (player is not null)
         {
-            game.SetMicrophone(new GameCaller(player), _viewId, isOn: false);
+            game.SetMicrophone(new GameCaller(player.ClientId), _viewId, isOn: false);
         }
 
         await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
@@ -589,7 +589,7 @@
         }
 
         var registration = game.VoiceMixer.RegisterSink(player.ClientId, new VoiceSink(this));
-        if (game.SetAudio(new GameCaller(player), _viewId, isOn: true))
+        if (game.SetAudio(new GameCaller(player.ClientId), _viewId, isOn: true))
         {
             _sinkRegistration = registration;
             _isAudioOn = true;
@@ -606,7 +606,7 @@
         _isAudioOn = false;
         if (player is not null)
         {
-            game.SetAudio(new GameCaller(player), _viewId, isOn: false);
+            game.SetAudio(new GameCaller(player.ClientId), _viewId, isOn: false);
         }
 
         _sinkRegistration?.Dispose();
@@ -723,7 +723,7 @@
         _sinkRegistration = null;
         if (Game is { } game && _player is { } player)
         {
-            var caller = new GameCaller(player);
+            var caller = new GameCaller(player.ClientId);
             game.SetMicrophone(caller, _viewId, isOn: false);
             game.SetAudio(caller, _viewId, isOn: false);
         }
@@ -747,7 +747,7 @@
         StateHasChanged();
         try
         {
-            var services = new GameCallerServiceProvider(ServiceProvider, new GameCaller(player));
+            var services = new GameCallerServiceProvider(ServiceProvider, new GameCaller(player.ClientId));
             var key = $"{owner.GetType().FullName}.{method.PropertyName}";
             await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token,
                 initialValues: _lastParameters.GetValueOrDefault(key),
@@ -771,7 +771,7 @@
         _isRenaming = true;
         try
         {
-            var caller = new GameCaller(player);
+            var caller = new GameCaller(player.ClientId);
             var name = await GameNameDialog.ShowAsync(DialogService, game.GetClientName(caller));
             if (name is not null && !_isDisposed)
             {

@@ -104,7 +104,7 @@ public class GameViewTrackerTests
     }
 
     [Fact]
-    public async Task WhenADoorOpens_ThenItIsUpsertedNotBlockingWithItsLeafTurned()
+    public void WhenADoorOpens_ThenItIsUpsertedNotBlockingWithItsLeafTurned()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -113,7 +113,8 @@ public class GameViewTrackerTests
         var closed = Assert.Single(first.Upserted, view => !view.IsSelf);
 
         // Act
-        await door.OpenAsync(CancellationToken.None);
+        door.Open();
+        _context.Game.RequestIndexRebuild();
         var update = _context.Game.UpdateView(_tracker, player);
 
         // Assert
@@ -130,7 +131,7 @@ public class GameViewTrackerTests
         _context.Game.UpdateView(_tracker, player);
 
         // Act
-        _context.Game.SetMicrophone(new GameCaller(player), pageId: 1, isOn: true);
+        _context.Game.SetMicrophone(new GameCaller(player.ClientId), pageId: 1, isOn: true);
         var update = _context.Game.UpdateView(_tracker, player);
 
         // Assert

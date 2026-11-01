@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Clients;
-using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.Voice;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,7 +19,7 @@ namespace HomeBlaze.Game;
 [DisplayName("Game")]
 [SubjectIcon("SportsEsports")]
 [InterceptorSubject]
-public partial class Game : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
+public partial class Game : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IGameWorld
 {
     /// <summary>
     /// The time a player takes for a step of one tile, about 1.4 m/s.

@@ -98,7 +98,7 @@ public class GamePlayersTests
 
         // Assert
         var player = _context.Game.Players["tab-1"];
-        Assert.False(player.Footprint.Intersects(new GameArea(-1, 0, 4, 1)));
+        Assert.False(player.Area.Intersects(new GameArea(-1, 0, 4, 1)));
         Assert.True(Math.Abs(player.X) <= 2 && Math.Abs(player.Y) <= 2);
     }
 
@@ -119,7 +119,7 @@ public class GamePlayersTests
         // Assert
         var kitchen = _context.Game.Players["kitchen"];
         var other = _context.Game.Players["tab-2"];
-        Assert.False(kitchen.Footprint.Intersects(other.Footprint));
+        Assert.False(kitchen.Area.Intersects(other.Area));
     }
 
     [Fact]

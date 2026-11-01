@@ -1,11 +1,9 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Game.Abstractions;
-using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
-namespace HomeBlaze.Game;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// Something that stands on the tiles of a game. A tile is 25 cm; the object covers the tiles from <see cref="X"/> to
@@ -23,13 +21,13 @@ public abstract partial class GameObject : IConfigurable
     public const int MaximumSize = 1024;
 
     /// <summary>
-    /// The west edge of the footprint; X grows to the east.
+    /// The west edge of the area; X grows to the east.
     /// </summary>
     [Configuration]
     public partial int X { get; set; }
 
     /// <summary>
-    /// The south edge of the footprint; Y grows to the north.
+    /// The south edge of the area; Y grows to the north.
     /// </summary>
     [Configuration]
     public partial int Y { get; set; }
@@ -51,7 +49,7 @@ public abstract partial class GameObject : IConfigurable
     public virtual int Height { get; set; } = 1;
 
     /// <summary>
-    /// Whether this object blocks movement, which means no other movement blocking object may enter the tiles of its footprint.
+    /// Whether this object blocks movement, which means no other movement blocking object may enter the tiles of its area.
     /// </summary>
     public virtual bool IsMovementBlocking => true;
 
@@ -66,21 +64,29 @@ public abstract partial class GameObject : IConfigurable
     public virtual bool IsVisible => true;
 
     /// <summary>
-    /// How the object looks; a gray box filling the footprint and <see cref="Height"/> by default. An override computes it
+    /// How the object looks; a gray box filling the area and <see cref="Height"/> by default. An override computes it
     /// from configuration or state properties only, which the page observes, and caches it per state, for example with
     /// <see cref="GameVisualCache{TKey}"/>. Players are drawn by the page itself and ignore it.
     /// </summary>
     public virtual GameVisual Visual => DefaultVisual;
 
     /// <summary>
-    /// The gray box of the footprint and <see cref="Height"/>, which is also what an invalid visual falls back to.
+    /// The gray box of the area and <see cref="Height"/>, which is also what an invalid visual falls back to.
     /// </summary>
-    internal GameVisual DefaultVisual =>
+    public GameVisual DefaultVisual =>
         (_defaultVisual ??= new()).Get((Width, Height, Depth), static size => GameVisual.Box(size.Width, size.Height, size.Depth));
 
-    internal GameArea Footprint => new(X, Y, Width, Depth);
+    /// <summary>
+    /// The tiles the object covers.
+    /// </summary>
+    public GameArea Area => new(X, Y, Width, Depth);
 
-    internal Game? ParentGame => this.TryGetFirstParent<Game>();
+    /// <summary>
+    /// The game this object is part of.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The object is not part of a game.</exception>
+    protected IGameWorld World =>
+        this.TryGetFirstParent<IGameWorld>() ?? throw new InvalidOperationException("The object is not part of a game.");
 
     protected GameObject()
     {
@@ -88,15 +94,5 @@ public abstract partial class GameObject : IConfigurable
         Y = 0;
     }
 
-    /// <summary>
-    /// Gets the game this object is part of, for example to call <see cref="Game.RemoveAsync"/> from an operation.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The object is not part of a game.</exception>
-    protected Game GetGame() => ParentGame ?? throw new InvalidOperationException("The object is not part of a game.");
-
-    public virtual Task ApplyConfigurationAsync(CancellationToken cancellationToken)
-    {
-        ParentGame?.RequestIndexRebuild();
-        return Task.CompletedTask;
-    }
+    public virtual Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

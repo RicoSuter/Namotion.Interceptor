@@ -64,8 +64,8 @@ public partial class Game
         lock (_lock)
         {
             var tiles = new List<GameArea>(3);
-            TargetArea.GetTiles(player.Footprint, player.Facing, tiles);
-            if (tiles.Count == 0 || !player.Footprint.TryMove(player.Facing.GetOffsetX(), player.Facing.GetOffsetY(), out var shifted))
+            TargetArea.GetTiles(player.Area, player.Facing, tiles);
+            if (tiles.Count == 0 || !player.Area.TryMove(player.Facing.GetOffsetX(), player.Facing.GetOffsetY(), out var shifted))
             {
                 return [];
             }
@@ -74,7 +74,7 @@ public partial class Game
             GetIndex().Query(shifted, targets);
             for (var index = targets.Count - 1; index >= 0; index--)
             {
-                if (ReferenceEquals(targets[index], player) || !IntersectsAny(targets[index].Footprint, tiles))
+                if (ReferenceEquals(targets[index], player) || !IntersectsAny(targets[index].Area, tiles))
                 {
                     targets.RemoveAt(index);
                 }
@@ -85,11 +85,11 @@ public partial class Game
         }
     }
 
-    private static bool IntersectsAny(GameArea footprint, List<GameArea> tiles)
+    private static bool IntersectsAny(GameArea area, List<GameArea> tiles)
     {
         foreach (var tile in tiles)
         {
-            if (footprint.Intersects(tile))
+            if (area.Intersects(tile))
             {
                 return true;
             }
@@ -106,10 +106,10 @@ public partial class Game
     private bool TryGetStep(GamePlayer player, GameDirection direction, out GameArea moved)
     {
         var index = GetIndex();
-        var footprint = player.Footprint;
+        var area = player.Area;
         var offsetX = direction.GetOffsetX();
         var offsetY = direction.GetOffsetY();
-        if (!footprint.TryMove(offsetX, offsetY, out moved) || index.IsBlocked(moved, player))
+        if (!area.TryMove(offsetX, offsetY, out moved) || index.IsBlocked(moved, player))
         {
             return false;
         }
@@ -119,8 +119,8 @@ public partial class Game
             return true;
         }
 
-        var isHorizontalBlocked = !footprint.TryMove(offsetX, 0, out var horizontal) || index.IsBlocked(horizontal, player);
-        var isVerticalBlocked = !footprint.TryMove(0, offsetY, out var vertical) || index.IsBlocked(vertical, player);
+        var isHorizontalBlocked = !area.TryMove(offsetX, 0, out var horizontal) || index.IsBlocked(horizontal, player);
+        var isVerticalBlocked = !area.TryMove(0, offsetY, out var vertical) || index.IsBlocked(vertical, player);
         return !(isHorizontalBlocked && isVerticalBlocked);
     }
 }

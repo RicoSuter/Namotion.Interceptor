@@ -257,8 +257,8 @@ public class GameWorldIndexTests
 
         // Assert
         Assert.Equal(2, results.Count);
-        Assert.Contains(wall.Footprint, results);
-        Assert.Contains(closedDoor.Footprint, results);
+        Assert.Contains(wall.Area, results);
+        Assert.Contains(closedDoor.Area, results);
     }
 
     [Fact]

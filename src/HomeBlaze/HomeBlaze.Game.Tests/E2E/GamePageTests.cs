@@ -425,7 +425,7 @@ public class GamePageTests
 
         // Act
         // Page ids count up from 1, so no page of the server has this one.
-        Assert.True(world.Game.SetMicrophone(new GameCaller(player), pageId: -1, isOn: true));
+        Assert.True(world.Game.SetMicrophone(new GameCaller(player.ClientId), pageId: -1, isOn: true));
 
         // Assert
         await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
@@ -445,7 +445,7 @@ public class GamePageTests
         var pageId = Assert.Single(player.AudioPageIds!);
 
         // Act
-        Assert.True(world.Game.SetAudio(new GameCaller(player), pageId, isOn: false));
+        Assert.True(world.Game.SetAudio(new GameCaller(player.ClientId), pageId, isOn: false));
 
         // Assert
         await Expect(audio).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });

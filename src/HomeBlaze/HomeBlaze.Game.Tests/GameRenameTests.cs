@@ -12,7 +12,7 @@ public class GameRenameTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1", x: 7, y: -3);
-        var caller = new GameCaller(player);
+        var caller = new GameCaller(player.ClientId);
 
         // Act
         await _context.Game.RenameAsync(caller, "  Kitchen  ", CancellationToken.None);
@@ -33,7 +33,7 @@ public class GameRenameTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        var name = _context.Game.GetClientName(new GameCaller(player));
+        var name = _context.Game.GetClientName(new GameCaller(player.ClientId));
 
         // Assert
         Assert.Null(name);
@@ -44,13 +44,13 @@ public class GameRenameTests
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
-        var stranger = new GamePlayer { ClientId = "tab-1" };
+        var stranger = new GameCaller("tab-2");
 
         // Act & Assert
         var withoutCaller = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _context.Game.RenameAsync(null, "Kitchen", CancellationToken.None));
         var withStranger = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _context.Game.RenameAsync(new GameCaller(stranger), "Kitchen", CancellationToken.None));
+            () => _context.Game.RenameAsync(stranger, "Kitchen", CancellationToken.None));
         Assert.Equal(Game.NoRenameActorMessage, withoutCaller.Message);
         Assert.Equal(Game.NoRenameActorMessage, withStranger.Message);
         Assert.False(GetClient("tab-1").IsNamed);
@@ -66,7 +66,7 @@ public class GameRenameTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => _context.Game.RenameAsync(new GameCaller(player), name, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => _context.Game.RenameAsync(new GameCaller(player.ClientId), name, CancellationToken.None));
         Assert.False(GetClient("tab-1").IsNamed);
     }
 
@@ -78,7 +78,7 @@ public class GameRenameTests
         var name = new string('a', Game.MaximumNameLength + 1);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => _context.Game.RenameAsync(new GameCaller(player), name, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => _context.Game.RenameAsync(new GameCaller(player.ClientId), name, CancellationToken.None));
         Assert.False(GetClient("tab-1").IsNamed);
     }
 
@@ -90,7 +90,7 @@ public class GameRenameTests
         var name = new string('a', Game.MaximumNameLength);
 
         // Act
-        await _context.Game.RenameAsync(new GameCaller(player), $" {name} ", CancellationToken.None);
+        await _context.Game.RenameAsync(new GameCaller(player.ClientId), $" {name} ", CancellationToken.None);
 
         // Assert
         Assert.Equal(name, GetClient("tab-1").Title);
@@ -106,7 +106,7 @@ public class GameRenameTests
         var kitchen = _context.Game.Players["kitchen"];
 
         // Act
-        await _context.Game.RenameAsync(new GameCaller(player), "Office", CancellationToken.None);
+        await _context.Game.RenameAsync(new GameCaller(player.ClientId), "Office", CancellationToken.None);
         _context.Game.ReconcilePlayers();
 
         // Assert

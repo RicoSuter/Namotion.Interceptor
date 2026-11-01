@@ -86,12 +86,12 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
 
     /// <exception cref="InvalidOperationException">The wall is not part of a game.</exception>
     [Operation(Title = "Demolish", Icon = "Delete", Position = 1, Description = "Removes this wall from the game.")]
-    public Task DemolishAsync(CancellationToken cancellationToken) => GetGame().RemoveAsync(this, cancellationToken);
+    public Task DemolishAsync(CancellationToken cancellationToken) => World.RemoveAsync(this, cancellationToken);
 
     /// <summary>
     /// Replaces this wall by a wall before the door, the door and a wall after it, keeping material and height. The door
-    /// is centered on the caller's player along the wall, or on the wall without one, and moved inward so that at least
-    /// one wall tile remains on each side.
+    /// is centered on the spot in front of the caller's player along the wall, or on the wall without a caller, and moved
+    /// inward so that at least one wall tile remains on each side.
     /// </summary>
     /// <param name="width">The door width in tiles, <see cref="Door.MinimumWidth"/> to <see cref="Door.MaximumWidth"/>;
     /// null for <see cref="Door.DefaultLength"/>.</param>
@@ -99,7 +99,8 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
     /// <param name="cancellationToken">Cancels saving.</param>
     /// <exception cref="ArgumentOutOfRangeException">The width is out of range.</exception>
     /// <exception cref="InvalidOperationException">The wall is thicker than one tile, too short for the door, reaches past
-    /// the <see cref="int"/> range, is not part of a game, or a piece would overlap another movement blocking object.</exception>
+    /// the <see cref="int"/> range, is not part of a game, the caller is not a player of the game or faces diagonally, or a
+    /// piece would overlap another movement blocking object.</exception>
     [Operation(Title = "Add door", Icon = "DoorFront", Position = 2,
         Description = "Replaces the part of this wall in front of you by a door, keeping a wall tile on each side. An empty width makes a door of 1 m.")]
     public Task AddDoorAsync([Range(Door.MinimumWidth, Door.MaximumWidth)] int? width, [FromServices] GameCaller? caller, CancellationToken cancellationToken)
@@ -123,33 +124,33 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
 
         if ((long)(IsAlongX ? X : Y) + Length - 1 > int.MaxValue)
         {
-            throw new InvalidOperationException("Something is in the way.");
+            throw new InvalidOperationException(GameMessages.Blocked);
         }
 
-        var game = GetGame();
-        return game.ReplaceAsync(this, CreateDoorPieces(doorWidth, game.ResolveActor(caller)), cancellationToken);
+        var spot = caller is null ? (GameSpot?)null : World.GetSpotInFront(caller, doorWidth, 1);
+        return World.ReplaceAsync(this, CreateDoorPieces(doorWidth, spot), cancellationToken);
     }
 
-    // Works in doubled coordinates, where the center of a player, on the line between two tiles, is a whole number. Adding
-    // 1 before the flooring shift rounds half a tile up, so the extra tile of an odd door goes east or north, as for
-    // placing in front of a player.
-    private List<(string NamePrefix, GameObject Replacement)> CreateDoorPieces(int doorWidth, GamePlayer? actor)
+    // Works in doubled coordinates, where the center of a spot of an odd width, on the line between two tiles, is a whole
+    // number. Adding 1 before the flooring shift rounds half a tile up, so the extra tile of an odd door goes east or
+    // north, as for placing in front of a player.
+    private List<GameObject> CreateDoorPieces(int doorWidth, GameSpot? spot)
     {
         var isAlongX = IsAlongX;
         long start = isAlongX ? X : Y;
         var length = Length;
         var doubledCenter = 2 * start + length;
-        if (actor is not null)
+        if (spot is { } front)
         {
-            doubledCenter = 2L * (isAlongX ? actor.X : actor.Y) + GamePlayer.Size;
+            doubledCenter = 2L * (isAlongX ? front.X : front.Y) + doorWidth;
         }
 
         var doorStart = Math.Clamp((doubledCenter - doorWidth + 1) >> 1, start + DoorMargin, start + length - DoorMargin - doorWidth);
         return
         [
-            ("wall", CreatePiece(isAlongX, start, (int)(doorStart - start))),
-            ("door", CreateDoor(isAlongX, doorStart, doorWidth)),
-            ("wall", CreatePiece(isAlongX, doorStart + doorWidth, (int)(start + length - doorStart - doorWidth)))
+            CreatePiece(isAlongX, start, (int)(doorStart - start)),
+            CreateDoor(isAlongX, doorStart, doorWidth),
+            CreatePiece(isAlongX, doorStart + doorWidth, (int)(start + length - doorStart - doorWidth))
         ];
     }
 

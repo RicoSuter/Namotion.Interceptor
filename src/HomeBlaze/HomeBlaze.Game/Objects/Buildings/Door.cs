@@ -99,31 +99,34 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         Material = WallMaterial.Bricks;
     }
 
-    /// <exception cref="InvalidOperationException">The door is already open or not part of a game.</exception>
+    /// <exception cref="InvalidOperationException">The door is already open.</exception>
     [Operation(Title = "Open", Icon = "MeetingRoom", Position = 1, Description = "Opens this door, so players can walk through it.")]
-    public Task OpenAsync(CancellationToken cancellationToken) =>
-        GetGame().UpdateAsync(this, () =>
+    public void Open()
+    {
+        if (IsOpen)
         {
-            if (IsOpen)
-            {
-                throw new InvalidOperationException("The door is already open.");
-            }
+            throw new InvalidOperationException("The door is already open.");
+        }
 
-            IsOpen = true;
-        }, cancellationToken);
+        IsOpen = true;
+    }
 
     /// <exception cref="InvalidOperationException">The door is already closed, something stands in it, or it is not part of a game.</exception>
     [Operation(Title = "Close", Icon = "DoorFront", Position = 2, Description = "Closes this door, unless something stands in it.")]
-    public Task CloseAsync(CancellationToken cancellationToken) =>
-        GetGame().UpdateAsync(this, () =>
+    public void Close()
+    {
+        if (!IsOpen)
         {
-            if (!IsOpen)
-            {
-                throw new InvalidOperationException("The door is already closed.");
-            }
+            throw new InvalidOperationException("The door is already closed.");
+        }
 
-            IsOpen = false;
-        }, cancellationToken);
+        if (!World.IsFree(Area, this))
+        {
+            throw new InvalidOperationException(GameMessages.Blocked);
+        }
+
+        IsOpen = false;
+    }
 
     private static GameVisual CreateVisual(int width, int depth, int height, bool isOpen, WallMaterial material)
     {

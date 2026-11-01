@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Voice;
 using Microsoft.Extensions.Logging;
 
@@ -21,15 +23,14 @@ public partial class Game
 
     /// <summary>
     /// Turns the microphone of the caller's player on for the page, which makes it the only page whose frames count, or
-    /// off, which only acts when the page is that page. The caller must pass only the player of its own client.
+    /// off, which only acts when the page is that page. The page must pass only a caller of its own client.
     /// </summary>
-    /// <returns>False when the player is not a player of this game, or is disconnected while turning on.</returns>
+    /// <returns>False when the caller is not a player of this game, or is disconnected while turning on.</returns>
     internal bool SetMicrophone(GameCaller caller, int pageId, bool isOn)
     {
         lock (_lock)
         {
-            var player = caller.Player;
-            if (!CanSetVoice(player, isOn))
+            if (!TryGetVoicePlayer(caller, isOn, out var player))
             {
                 return false;
             }
@@ -58,16 +59,15 @@ public partial class Game
     }
 
     /// <summary>
-    /// Turns the speaker of the page on or off; the player's audio is on while any of its pages has it on. The caller
-    /// must pass only the player of its own client.
+    /// Turns the speaker of the page on or off; the player's audio is on while any of its pages has it on. The page
+    /// must pass only a caller of its own client.
     /// </summary>
-    /// <returns>False when the player is not a player of this game, or is disconnected while turning on.</returns>
+    /// <returns>False when the caller is not a player of this game, or is disconnected while turning on.</returns>
     internal bool SetAudio(GameCaller caller, int pageId, bool isOn)
     {
         lock (_lock)
         {
-            var player = caller.Player;
-            if (!CanSetVoice(player, isOn))
+            if (!TryGetVoicePlayer(caller, isOn, out var player))
             {
                 return false;
             }
@@ -158,8 +158,8 @@ public partial class Game
     }
 
     // Callers hold _lock. Turning off works while disconnected, so a closing page always removes its share.
-    private bool CanSetVoice(GamePlayer player, bool isOn) =>
-        IsPlayerOfThisGame(player) && (player.IsConnected || !isOn);
+    private bool TryGetVoicePlayer(GameCaller caller, bool isOn, [NotNullWhen(true)] out GamePlayer? player) =>
+        Players.TryGetValue(caller.ClientId, out player) && (player.IsConnected || !isOn);
 
     // Callers hold _lock. Turns the voice of a player off that disconnected.
     private void ResetVoice(GamePlayer player)

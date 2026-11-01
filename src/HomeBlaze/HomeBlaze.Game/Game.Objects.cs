@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game;
@@ -7,15 +8,11 @@ public partial class Game
     /// <summary>
     /// The message with which a change is refused because a movement blocking object stands in the way.
     /// </summary>
-    internal const string BlockedMessage = "Something is in the way.";
+    internal const string BlockedMessage = GameMessages.Blocked;
 
     private const string NotPartOfGameMessage = "The object is not part of this game.";
 
-    /// <summary>
-    /// Removes the object from <see cref="Objects"/> and saves the game.
-    /// Canceling only stops the write; the change stays applied and is saved later.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>
+    /// <inheritdoc />
     public async Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(gameObject);
@@ -32,47 +29,8 @@ public partial class Game
         await WriteOrRequestSaveAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Runs <paramref name="change"/> under the game's lock, updates the index and saves the game. When the change throws,
-    /// or the object blocks movement afterwards and overlaps another movement blocking object, its configuration and state
-    /// properties get back the values they had before.
-    /// Canceling only stops the write; the change stays applied and is saved later.
-    /// </summary>
-    /// <remarks>
-    /// The change runs under the game's lock: it may only set properties of the object and must not call into the game.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">The object is not part of this game, or the change makes it overlap
-    /// another movement blocking object.</exception>
-    public async Task UpdateAsync(GameObject gameObject, Action change, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(gameObject);
-        ArgumentNullException.ThrowIfNull(change);
-        lock (_lock)
-        {
-            if (FindObjectName(CurrentObjects, gameObject) is null)
-            {
-                throw new InvalidOperationException(NotPartOfGameMessage);
-            }
-
-            ApplyChange(gameObject, change);
-        }
-
-        await WriteOrRequestSaveAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Replaces the object by the replacements in one step under the game's lock, each under a new name of its prefix, a
-    /// dash and 8 random hex digits, and saves the game; no other page sees an intermediate state.
-    /// Canceling only stops the write; the change stays applied and is saved later.
-    /// </summary>
-    /// <exception cref="ArgumentException">A name prefix is empty, a replacement is listed twice or already part of this
-    /// game, or its size is outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
-    /// <exception cref="InvalidOperationException">The object is not part of this game, or a movement blocking replacement
-    /// overlaps a movement blocking object other than the replaced one; nothing changes then.</exception>
-    public async Task ReplaceAsync(
-        GameObject gameObject,
-        IReadOnlyList<(string NamePrefix, GameObject Replacement)> replacements,
-        CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public async Task ReplaceAsync(GameObject gameObject, IReadOnlyList<GameObject> replacements, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(gameObject);
         ArgumentNullException.ThrowIfNull(replacements);
@@ -84,14 +42,14 @@ public partial class Game
             ValidateReplacements(objects, index, gameObject, replacements);
             var next = new Dictionary<string, GameObject>(objects);
             next.Remove(name);
-            foreach (var (namePrefix, replacement) in replacements)
+            foreach (var replacement in replacements)
             {
-                next[CreateObjectName(next, namePrefix)] = replacement;
+                next[CreateObjectName(next, replacement)] = replacement;
             }
 
             ReplaceObjects(next);
             index.Remove(gameObject);
-            foreach (var (_, replacement) in replacements)
+            foreach (var replacement in replacements)
             {
                 index.AddOrUpdate(replacement);
             }
@@ -101,50 +59,17 @@ public partial class Game
     }
 
     // Callers hold _lock.
-    private void ApplyChange(GameObject gameObject, Action change)
-    {
-        var snapshot = GameObjectSnapshot.Capture(gameObject);
-        var isApplied = false;
-        try
-        {
-            change();
-            isApplied = true;
-        }
-        finally
-        {
-            if (!isApplied)
-            {
-                snapshot.Restore();
-            }
-        }
-
-        var index = GetIndex();
-        index.AddOrUpdate(gameObject);
-        if (gameObject.IsMovementBlocking && index.IsBlocked(gameObject.Footprint, gameObject))
-        {
-            snapshot.Restore();
-            index.AddOrUpdate(gameObject);
-            throw new InvalidOperationException(BlockedMessage);
-        }
-    }
-
-    // Callers hold _lock.
     private static void ValidateReplacements(
         Dictionary<string, GameObject> objects,
         GameWorldIndex index,
         GameObject replaced,
-        IReadOnlyList<(string NamePrefix, GameObject Replacement)> replacements)
+        IReadOnlyList<GameObject> replacements)
     {
         for (var i = 0; i < replacements.Count; i++)
         {
-            var (namePrefix, replacement) = replacements[i];
-            if (string.IsNullOrEmpty(namePrefix))
-            {
-                throw new ArgumentException("A name prefix is empty.", nameof(replacements));
-            }
-
+            var replacement = replacements[i];
             ValidateNewObject(objects, replacement, nameof(replacements));
-            if (replacement.IsMovementBlocking && index.IsBlocked(replacement.Footprint, replaced))
+            if (replacement.IsMovementBlocking && index.IsBlocked(replacement.Area, replaced))
             {
                 throw new InvalidOperationException(BlockedMessage);
             }
@@ -153,19 +78,18 @@ public partial class Game
         }
     }
 
-    private static void ValidateAgainstEarlierReplacements(
-        IReadOnlyList<(string NamePrefix, GameObject Replacement)> replacements, int position)
+    private static void ValidateAgainstEarlierReplacements(IReadOnlyList<GameObject> replacements, int position)
     {
-        var replacement = replacements[position].Replacement;
+        var replacement = replacements[position];
         for (var i = 0; i < position; i++)
         {
-            var earlier = replacements[i].Replacement;
+            var earlier = replacements[i];
             if (ReferenceEquals(earlier, replacement))
             {
                 throw new ArgumentException("A replacement is listed twice.", nameof(replacements));
             }
 
-            if (AreBothMovementBlocking(earlier, replacement) && earlier.Footprint.Intersects(replacement.Footprint))
+            if (AreBothMovementBlocking(earlier, replacement) && earlier.Area.Intersects(replacement.Area))
             {
                 throw new InvalidOperationException(BlockedMessage);
             }
@@ -206,8 +130,10 @@ public partial class Game
         return null;
     }
 
-    private static string CreateObjectName(Dictionary<string, GameObject> objects, string prefix)
+    // The type name in lowercase, a dash and 8 random hex digits.
+    private static string CreateObjectName(Dictionary<string, GameObject> objects, GameObject gameObject)
     {
+        var prefix = gameObject.GetType().Name.ToLowerInvariant();
         string name;
         do
         {

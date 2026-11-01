@@ -10,7 +10,7 @@ internal static class SpawnFinder
     public const int MaximumRadius = 256;
 
     /// <summary>
-    /// Returns the position nearest to <paramref name="start"/>, ring by ring, at which the footprint is free, or start
+    /// Returns the position nearest to <paramref name="start"/>, ring by ring, at which the area is free, or start
     /// when none is free within <paramref name="maximumRadius"/>.
     /// </summary>
     public static GameArea FindFreePosition(GameArea start, Func<GameArea, bool> isFree, int maximumRadius = MaximumRadius)

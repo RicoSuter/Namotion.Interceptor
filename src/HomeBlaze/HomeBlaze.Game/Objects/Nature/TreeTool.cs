@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Game.Tools;
+using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Game.Objects.Nature;
@@ -53,16 +53,15 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
             throw new ArgumentOutOfRangeException(nameof(variant), variant, $"The variant is from 0 to {Tree.VariantCount - 1}.");
         }
 
-        var game = GetGame();
         var tree = new Tree
         {
             Variant = variant ?? _random.Next(Tree.VariantCount),
             Rotation = _random.Next(360),
             Scale = _random.Next(Tree.MinimumScale, Tree.MaximumScale + 1)
         };
-        var placement = game.GetPlacementInFront(caller, across: tree.Width, along: tree.Depth);
-        tree.X = placement.X;
-        tree.Y = placement.Y;
-        return game.PlaceAsync(caller, "tree", tree, cancellationToken);
+        var spot = World.GetSpotInFront(caller, across: tree.Width, along: tree.Depth);
+        tree.X = spot.X;
+        tree.Y = spot.Y;
+        return World.PlaceAsync(tree, cancellationToken);
     }
 }

@@ -169,7 +169,7 @@ public class GameVolumeTableTests
     }
 
     [Fact]
-    public async Task WhenTheDoorOfARoomBetweenThemCloses_ThenThePairLeavesTheTable()
+    public void WhenTheDoorOfARoomBetweenThemCloses_ThenThePairLeavesTheTable()
     {
         // Arrange
         // A room with the inside from -2, 8 to 3, 13 around the second player and a door from -1 to 2 in its south wall.
@@ -185,7 +185,8 @@ public class GameVolumeTableTests
         var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
 
         // Act
-        await door.CloseAsync(CancellationToken.None);
+        door.Close();
+        _context.Game.RequestIndexRebuild();
         _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
         _context.Game.UpdateVolumeTable();
 
@@ -196,7 +197,7 @@ public class GameVolumeTableTests
     }
 
     [Fact]
-    public async Task WhenADoorWithoutWallsBesideItCloses_ThenTheVoiceGoesAroundItAndGetsQuieter()
+    public void WhenADoorWithoutWallsBesideItCloses_ThenTheVoiceGoesAroundItAndGetsQuieter()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
@@ -206,7 +207,8 @@ public class GameVolumeTableTests
         var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
 
         // Act
-        await door.CloseAsync(CancellationToken.None);
+        door.Close();
+        _context.Game.RequestIndexRebuild();
         _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
         _context.Game.UpdateVolumeTable();
 
@@ -237,7 +239,7 @@ public class GameVolumeTableTests
     }
 
     [Fact]
-    public async Task WhenALowWallBetweenTwoPlayersGrowsToTwoMeters_ThenThePairLeavesTheTable()
+    public void WhenALowWallBetweenTwoPlayersGrowsToTwoMeters_ThenThePairLeavesTheTable()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
@@ -247,7 +249,8 @@ public class GameVolumeTableTests
         var before = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
 
         // Act
-        await _context.Game.UpdateAsync(wall, () => wall.Height = 8, CancellationToken.None);
+        wall.Height = 8;
+        _context.Game.RequestIndexRebuild();
         _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
         var isRebuilt = _context.Game.UpdateVolumeTable();
 

@@ -19,7 +19,7 @@ public class WallToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        await _tool.BuildWallAsync(null, null, null, new GameCaller(player), CancellationToken.None);
+        await _tool.BuildWallAsync(null, null, null, new GameCaller(player.ClientId), CancellationToken.None);
 
         // Assert
         var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
@@ -40,7 +40,7 @@ public class WallToolTests
         _context.Game.TryMove(player, facing, turnOnly: true);
 
         // Act
-        await _tool.BuildWallAsync(8, null, null, new GameCaller(player), CancellationToken.None);
+        await _tool.BuildWallAsync(8, null, null, new GameCaller(player.ClientId), CancellationToken.None);
 
         // Assert
         var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
@@ -54,7 +54,7 @@ public class WallToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        await _tool.BuildWallAsync(8, 12, WallMaterial.Concrete, new GameCaller(player), CancellationToken.None);
+        await _tool.BuildWallAsync(8, 12, WallMaterial.Concrete, new GameCaller(player.ClientId), CancellationToken.None);
 
         // Assert
         var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
@@ -72,7 +72,7 @@ public class WallToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _tool.BuildWallAsync(length, height, null, new GameCaller(player), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _tool.BuildWallAsync(length, height, null, new GameCaller(player.ClientId), CancellationToken.None));
         Assert.Empty(_context.Game.Objects);
     }
 
@@ -83,7 +83,7 @@ public class WallToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _tool.BuildWallAsync(null, null, (WallMaterial)7, new GameCaller(player), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _tool.BuildWallAsync(null, null, (WallMaterial)7, new GameCaller(player.ClientId), CancellationToken.None));
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class WallToolTests
         _context.AddWall(1, 2, width: 1);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => _tool.BuildWallAsync(null, null, null, new GameCaller(player), CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => _tool.BuildWallAsync(null, null, null, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
@@ -109,7 +109,7 @@ public class WallToolTests
         _context.Game.TryMove(player, GameDirection.NorthEast, turnOnly: true);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _tool.BuildWallAsync(null, null, null, new GameCaller(player), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _tool.BuildWallAsync(null, null, null, new GameCaller(player.ClientId), CancellationToken.None));
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class WallToolTests
         _context.Game.Objects = new Dictionary<string, GameObject> { ["loaded"] = existing };
 
         // Act
-        await _tool.BuildWallAsync(null, null, null, new GameCaller(player), CancellationToken.None);
+        await _tool.BuildWallAsync(null, null, null, new GameCaller(player.ClientId), CancellationToken.None);
 
         // Assert
         Assert.Equal(2, _context.Game.Objects.Count);
@@ -142,6 +142,6 @@ public class WallToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new WallTool().BuildWallAsync(null, null, null, new GameCaller(player), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new WallTool().BuildWallAsync(null, null, null, new GameCaller(player.ClientId), CancellationToken.None));
     }
 }

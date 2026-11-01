@@ -13,7 +13,7 @@ public class FrontPlacementTests
         GameDirection facing, int x, int y, int width, int depth)
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new GameArea(0, 0, 2, 2), facing, across: 4, along: 1, out var footprint);
+        var isPlaced = FrontPlacement.TryGetArea(new GameArea(0, 0, 2, 2), facing, across: 4, along: 1, out var footprint);
 
         // Assert
         Assert.True(isPlaced);
@@ -29,7 +29,7 @@ public class FrontPlacementTests
         GameDirection facing, int x, int y, int width, int depth)
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new GameArea(0, 0, 2, 2), facing, across: 1, along: 1, out var footprint);
+        var isPlaced = FrontPlacement.TryGetArea(new GameArea(0, 0, 2, 2), facing, across: 1, along: 1, out var footprint);
 
         // Assert
         Assert.True(isPlaced);
@@ -45,7 +45,7 @@ public class FrontPlacementTests
         GameDirection facing, int x, int y, int width, int depth)
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new GameArea(0, 0, 2, 2), facing, across: 3, along: 1, out var footprint);
+        var isPlaced = FrontPlacement.TryGetArea(new GameArea(0, 0, 2, 2), facing, across: 3, along: 1, out var footprint);
 
         // Assert
         Assert.True(isPlaced);
@@ -56,7 +56,7 @@ public class FrontPlacementTests
     public void WhenTheFootprintIsAsWideAsThePlayer_ThenItIsCenteredInFront()
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new GameArea(0, 0, 2, 2), GameDirection.East, across: 2, along: 3, out var footprint);
+        var isPlaced = FrontPlacement.TryGetArea(new GameArea(0, 0, 2, 2), GameDirection.East, across: 2, along: 3, out var footprint);
 
         // Assert
         Assert.True(isPlaced);
@@ -67,7 +67,7 @@ public class FrontPlacementTests
     public void WhenFacingDiagonally_ThenNothingIsPlaced()
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new GameArea(0, 0, 2, 2), GameDirection.NorthEast, across: 4, along: 1, out _);
+        var isPlaced = FrontPlacement.TryGetArea(new GameArea(0, 0, 2, 2), GameDirection.NorthEast, across: 4, along: 1, out _);
 
         // Assert
         Assert.False(isPlaced);
@@ -77,7 +77,7 @@ public class FrontPlacementTests
     public void WhenTheFootprintWouldLeaveTheIntRange_ThenNothingIsPlaced()
     {
         // Act
-        var isPlaced = FrontPlacement.TryGetFootprint(new GameArea(0, int.MaxValue - 1, 2, 2), GameDirection.North, across: 1, along: 1, out _);
+        var isPlaced = FrontPlacement.TryGetArea(new GameArea(0, int.MaxValue - 1, 2, 2), GameDirection.North, across: 1, along: 1, out _);
 
         // Assert
         Assert.False(isPlaced);

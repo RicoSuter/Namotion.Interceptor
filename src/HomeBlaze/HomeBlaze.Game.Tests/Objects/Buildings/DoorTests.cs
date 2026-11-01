@@ -43,76 +43,88 @@ public class DoorTests
     }
 
     [Fact]
-    public async Task WhenADoorIsOpened_ThenItIsOpenWrittenAndThePlayerWalksThrough()
+    public void WhenADoorIsOpened_ThenItIsOpenAndThePlayerWalksThrough()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var door = _context.AddDoor(-1, 2);
 
         // Act
-        await door.OpenAsync(CancellationToken.None);
+        door.Open();
+        _context.Game.RequestIndexRebuild();
         var results = new[] { Step(player, GameDirection.North), Step(player, GameDirection.North), Step(player, GameDirection.North) };
 
         // Assert
         Assert.True(door.IsOpen);
         Assert.False(door.IsMovementBlocking);
-        Assert.Equal(1, _context.Root.WriteCount);
         Assert.All(results, result => Assert.True(result.IsAccepted));
         Assert.Equal((0, 3), (player.X, player.Y));
     }
 
     [Fact]
-    public async Task WhenAnOpenDoorIsClosed_ThenItBlocksAgainAndIsWritten()
+    public void WhenAnOpenDoorIsClosed_ThenItBlocksAgain()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var door = _context.AddDoor(-1, 2, isOpen: true);
 
         // Act
-        await door.CloseAsync(CancellationToken.None);
+        door.Close();
+        _context.Game.RequestIndexRebuild();
         var result = Step(player, GameDirection.North);
 
         // Assert
         Assert.False(door.IsOpen);
-        Assert.Equal(1, _context.Root.WriteCount);
         Assert.False(result.IsAccepted);
     }
 
     [Fact]
-    public async Task WhenAPlayerStandsInTheDoorway_ThenClosingIsRefused()
+    public void WhenAPlayerStandsInTheDoorway_ThenCloseIsRefusedAndTheDoorStaysOpen()
     {
         // Arrange
-        _context.AddConnectedPlayer("tab-1", x: 0, y: 1);
-        var door = _context.AddDoor(-1, 2, isOpen: true);
+        var door = _context.AddDoor(0, 4, isOpen: true);
+        _context.AddConnectedPlayer("tab-1", x: 1, y: 3);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => door.CloseAsync(CancellationToken.None));
+        var exception = Assert.Throws<InvalidOperationException>(door.Close);
 
         // Assert
-        Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.Equal("Something is in the way.", exception.Message);
         Assert.True(door.IsOpen);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
-    public async Task WhenTheDoorIsAlreadyInTheState_ThenTheOperationIsRefused()
+    public void WhenAnotherOpenDoorOverlapsTheDoor_ThenClosingWorks()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 4, isOpen: true);
+        _context.AddDoor(2, 4, isOpen: true);
+
+        // Act
+        door.Close();
+
+        // Assert
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenTheDoorIsAlreadyInTheState_ThenTheOperationIsRefused()
     {
         // Arrange
         var closed = _context.AddDoor(-1, 2);
         var open = _context.AddDoor(10, 2, isOpen: true);
 
         // Act
-        var closing = await Record.ExceptionAsync(() => closed.CloseAsync(CancellationToken.None));
-        var opening = await Record.ExceptionAsync(() => open.OpenAsync(CancellationToken.None));
+        var closing = Record.Exception(closed.Close);
+        var opening = Record.Exception(open.Open);
 
         // Assert
         Assert.Equal("The door is already closed.", Assert.IsType<InvalidOperationException>(closing).Message);
         Assert.Equal("The door is already open.", Assert.IsType<InvalidOperationException>(opening).Message);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
-    public async Task WhenTheDoorOpensAndCloses_ThenOnlyTheApplicableOperationIsEnabled()
+    public void WhenTheDoorOpensAndCloses_ThenOnlyTheApplicableOperationIsEnabled()
     {
         // Arrange
         var door = _context.AddDoor(-1, 2);
@@ -122,7 +134,7 @@ public class DoorTests
         var closedState = (open.IsMethodEnabled(), close.IsMethodEnabled());
 
         // Act
-        await door.OpenAsync(CancellationToken.None);
+        door.Open();
 
         // Assert
         Assert.Equal((true, false), closedState);
@@ -181,12 +193,14 @@ public class DoorTests
     }
 
     [Fact]
-    public async Task WhenTheDoorIsNotPartOfAGame_ThenOpeningIsRefused()
+    public void WhenTheDoorIsNotPartOfAGame_ThenClosingIsRefused()
     {
         // Arrange
-        var door = new Door();
+        var door = new Door { IsOpen = true };
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => door.OpenAsync(CancellationToken.None));
+        var exception = Assert.Throws<InvalidOperationException>(door.Close);
+        Assert.Equal("The object is not part of a game.", exception.Message);
+        Assert.True(door.IsOpen);
     }
 }

@@ -102,7 +102,7 @@ public partial class Tree : GameObject, ITitleProvider, IIconProvider
 
     /// <exception cref="InvalidOperationException">The tree is not part of a game.</exception>
     [Operation(Title = "Demolish", Icon = "Delete", Position = 1, Description = "Removes this tree from the game.")]
-    public Task DemolishAsync(CancellationToken cancellationToken) => GetGame().RemoveAsync(this, cancellationToken);
+    public Task DemolishAsync(CancellationToken cancellationToken) => World.RemoveAsync(this, cancellationToken);
 
     private static TreeVariant GetVariant(int variant) => variant is >= 0 and < VariantCount ? Variants[variant] : Variants[0];
 

@@ -29,19 +29,19 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds the object, or moves it to its current footprint and its movement blocking, sound blocking and visibility
+    /// Adds the object, or moves it to its current area and its movement blocking, sound blocking and visibility
     /// state; leaves out an object with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
     /// </summary>
     public void AddOrUpdate(GameObject gameObject)
     {
-        // A loaded configuration skips the range validation, and a huge footprint would fill the chunks.
+        // A loaded configuration skips the range validation, and a huge area would fill the chunks.
         if (!HasValidSize(gameObject))
         {
             Remove(gameObject);
             return;
         }
 
-        var entry = new Entry(gameObject.Footprint, gameObject.IsMovementBlocking, gameObject.IsSoundBlocking, gameObject.IsVisible);
+        var entry = new Entry(gameObject.Area, gameObject.IsMovementBlocking, gameObject.IsSoundBlocking, gameObject.IsVisible);
         if (_entries.TryGetValue(gameObject, out var existing))
         {
             if (existing == entry)
@@ -49,11 +49,11 @@ internal sealed class GameWorldIndex
                 return;
             }
 
-            RemoveFromChunks(gameObject, existing.Footprint);
+            RemoveFromChunks(gameObject, existing.Area);
         }
 
         _entries[gameObject] = entry;
-        AddToChunks(gameObject, entry.Footprint);
+        AddToChunks(gameObject, entry.Area);
         Version++;
     }
 
@@ -61,7 +61,7 @@ internal sealed class GameWorldIndex
     {
         if (_entries.Remove(gameObject, out var existing))
         {
-            RemoveFromChunks(gameObject, existing.Footprint);
+            RemoveFromChunks(gameObject, existing.Area);
             Version++;
         }
     }
@@ -122,7 +122,7 @@ internal sealed class GameWorldIndex
 
         foreach (var gameObject in objects)
         {
-            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Contains(x, y))
+            if (TryGetSoundBlockingArea(gameObject, out var objectArea) && objectArea.Contains(x, y))
             {
                 return true;
             }
@@ -132,7 +132,7 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds the footprint of each object that stops sound by <see cref="IsSoundBlocked"/> and covers a tile of the area
+    /// Adds the area of each object that stops sound by <see cref="IsSoundBlocked"/> and covers a tile of the area
     /// to <paramref name="results"/>, once.
     /// </summary>
     public void QuerySoundBlocking(GameArea area, List<GameArea> results)
@@ -167,7 +167,7 @@ internal sealed class GameWorldIndex
         foreach (var gameObject in objects)
         {
             var entry = _entries[gameObject];
-            if (entry.IsMovementBlocking && !ReferenceEquals(gameObject, ignored) && entry.Footprint.Intersects(area))
+            if (entry.IsMovementBlocking && !ReferenceEquals(gameObject, ignored) && entry.Area.Intersects(area))
             {
                 return true;
             }
@@ -181,7 +181,7 @@ internal sealed class GameWorldIndex
         foreach (var gameObject in objects)
         {
             var entry = _entries[gameObject];
-            if (entry.IsVisible && entry.Footprint.Intersects(area) && _found.Add(gameObject))
+            if (entry.IsVisible && entry.Area.Intersects(area) && _found.Add(gameObject))
             {
                 results.Add(gameObject);
             }
@@ -192,25 +192,25 @@ internal sealed class GameWorldIndex
     {
         foreach (var gameObject in objects)
         {
-            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Intersects(area) && _found.Add(gameObject))
+            if (TryGetSoundBlockingArea(gameObject, out var objectArea) && objectArea.Intersects(area) && _found.Add(gameObject))
             {
-                results.Add(footprint);
+                results.Add(objectArea);
             }
         }
     }
 
-    private bool TryGetSoundBlockingFootprint(GameObject gameObject, out GameArea footprint)
+    private bool TryGetSoundBlockingArea(GameObject gameObject, out GameArea area)
     {
         var entry = _entries[gameObject];
-        footprint = entry.Footprint;
+        area = entry.Area;
         return entry.IsSoundBlocking;
     }
 
-    private void AddToChunks(GameObject gameObject, GameArea footprint)
+    private void AddToChunks(GameObject gameObject, GameArea area)
     {
-        for (var chunkY = (long)footprint.Y >> ChunkShift; chunkY <= footprint.Top >> ChunkShift; chunkY++)
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
-            for (var chunkX = (long)footprint.X >> ChunkShift; chunkX <= footprint.Right >> ChunkShift; chunkX++)
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
                 if (!_chunks.TryGetValue((chunkX, chunkY), out var objects))
                 {
@@ -223,11 +223,11 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private void RemoveFromChunks(GameObject gameObject, GameArea footprint)
+    private void RemoveFromChunks(GameObject gameObject, GameArea area)
     {
-        for (var chunkY = (long)footprint.Y >> ChunkShift; chunkY <= footprint.Top >> ChunkShift; chunkY++)
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
-            for (var chunkX = (long)footprint.X >> ChunkShift; chunkX <= footprint.Right >> ChunkShift; chunkX++)
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
                 if (_chunks.TryGetValue((chunkX, chunkY), out var objects) && objects.Remove(gameObject) && objects.Count == 0)
                 {
@@ -237,5 +237,5 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private readonly record struct Entry(GameArea Footprint, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
+    private readonly record struct Entry(GameArea Area, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
 }

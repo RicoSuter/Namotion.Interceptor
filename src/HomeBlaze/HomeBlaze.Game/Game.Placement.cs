@@ -1,5 +1,4 @@
 using HomeBlaze.Game.Abstractions;
-using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game;
@@ -16,15 +15,8 @@ public partial class Game
     /// </summary>
     internal const string DiagonalMessage = "Face north, east, south or west to place objects.";
 
-    /// <summary>
-    /// Gets where an object <paramref name="across"/> tiles wide across the facing direction and <paramref name="along"/>
-    /// tiles deep along it fits right in front of the caller's player, centered on the player's center across the facing.
-    /// Does not check whether the tiles are free; <see cref="PlaceAsync"/> does.
-    /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">A size is outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
-    /// <exception cref="InvalidOperationException">The caller is not a player of this game, faces diagonally, or the
-    /// footprint would leave the <see cref="int"/> range.</exception>
-    public GameSpot GetPlacementInFront(GameCaller? caller, int across, int along)
+    /// <inheritdoc />
+    public GameSpot GetSpotInFront(GameCaller? caller, int across, int along)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(across, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(across, GameObject.MaximumSize);
@@ -32,45 +24,40 @@ public partial class Game
         ArgumentOutOfRangeException.ThrowIfGreaterThan(along, GameObject.MaximumSize);
         lock (_lock)
         {
-            var actor = ResolveActor(caller) ?? throw new InvalidOperationException(NoActorMessage);
-            if (!FrontPlacement.TryGetFootprint(actor.Footprint, actor.Facing, across, along, out var footprint))
+            var actor = GetActor(caller) ?? throw new InvalidOperationException(NoActorMessage);
+            if (!FrontPlacement.TryGetArea(actor.Area, actor.Facing, across, along, out var area))
             {
                 throw new InvalidOperationException(!Enum.IsDefined(actor.Facing) || actor.Facing.IsDiagonal() ? DiagonalMessage : BlockedMessage);
             }
 
-            return new GameSpot(footprint.X, footprint.Y, footprint.Width, footprint.Depth, actor.Facing);
+            return new GameSpot(area.X, area.Y, area.Width, area.Depth, actor.Facing);
         }
     }
 
-    /// <summary>
-    /// Adds the object to <see cref="Objects"/> under a new name of the prefix, a dash and 8 random hex digits, and saves
-    /// the game.
-    /// Canceling only stops the write; the change stays applied and is saved later.
-    /// </summary>
-    /// <exception cref="ArgumentException">The prefix is empty, the object is already part of this game, or its size is
-    /// outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
-    /// <exception cref="InvalidOperationException">The caller is not a player of this game, or the object blocks movement
-    /// and another movement blocking object covers one of its tiles.</exception>
-    public async Task PlaceAsync(GameCaller? caller, string namePrefix, GameObject gameObject, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public bool IsFree(GameArea area, GameObject? except = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(namePrefix);
+        lock (_lock)
+        {
+            return !GetIndex().IsBlocked(area, except);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task PlaceAsync(GameObject gameObject, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(gameObject);
         lock (_lock)
         {
-            if (ResolveActor(caller) is null)
-            {
-                throw new InvalidOperationException(NoActorMessage);
-            }
-
             var objects = CurrentObjects;
             ValidateNewObject(objects, gameObject, nameof(gameObject));
             var index = GetIndex();
-            if (gameObject.IsMovementBlocking && index.IsBlocked(gameObject.Footprint, ignored: null))
+            if (gameObject.IsMovementBlocking && index.IsBlocked(gameObject.Area, ignored: null))
             {
                 throw new InvalidOperationException(BlockedMessage);
             }
 
-            ReplaceObjects(new Dictionary<string, GameObject>(objects) { [CreateObjectName(objects, namePrefix)] = gameObject });
+            ReplaceObjects(new Dictionary<string, GameObject>(objects) { [CreateObjectName(objects, gameObject)] = gameObject });
             index.AddOrUpdate(gameObject);
         }
 

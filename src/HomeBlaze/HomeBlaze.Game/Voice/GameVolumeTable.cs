@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game.Voice;
@@ -73,7 +74,7 @@ internal sealed class GameVolumeTable
             if (rows.TryGetValue(player.ClientId, out var row))
             {
                 candidates.Clear();
-                index.Query(HearingRange.GetArea(player.Footprint), candidates);
+                index.Query(HearingRange.GetArea(player.Area), candidates);
                 AddAudible(player, row, candidates, rows, index, search);
             }
         }
