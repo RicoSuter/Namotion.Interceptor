@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
 

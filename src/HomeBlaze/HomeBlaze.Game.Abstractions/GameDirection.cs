@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// One of the 8 directions a player faces and steps in; north is +Y and east is +X.
@@ -15,7 +15,7 @@ public enum GameDirection
     NorthWest
 }
 
-internal static class GameDirectionExtensions
+public static class GameDirectionExtensions
 {
     public static int GetOffsetX(this GameDirection direction) => direction switch
     {
@@ -32,16 +32,4 @@ internal static class GameDirectionExtensions
     };
 
     public static bool IsDiagonal(this GameDirection direction) => ((int)direction & 1) == 1;
-
-    public static string GetShortName(this GameDirection direction) => direction switch
-    {
-        GameDirection.North => "N",
-        GameDirection.NorthEast => "NE",
-        GameDirection.East => "E",
-        GameDirection.SouthEast => "SE",
-        GameDirection.South => "S",
-        GameDirection.SouthWest => "SW",
-        GameDirection.West => "W",
-        _ => "NW"
-    };
 }

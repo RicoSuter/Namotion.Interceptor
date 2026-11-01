@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// Keeps the visual of the latest state of an object, so that an unchanged state returns the same instance without

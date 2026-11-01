@@ -22,7 +22,7 @@ public class GamePlacementTests
         var placement = _context.Game.GetPlacementInFront(new GameCaller(player), across: 8, along: 1);
 
         // Assert
-        Assert.Equal(new GamePlacement(x, y, width, depth, facing), placement);
+        Assert.Equal(new GameSpot(x, y, width, depth, facing), placement);
     }
 
     [Fact]

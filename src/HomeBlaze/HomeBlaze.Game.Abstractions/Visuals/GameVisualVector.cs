@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// A point or a size in tiles: X grows to the east, Y upward and Z to the north. As a size, X is the width, Y the height

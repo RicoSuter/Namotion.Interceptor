@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using HomeBlaze.Game.Visuals;
+using HomeBlaze.Game.Abstractions;
 
 namespace HomeBlaze.Game.View;
 

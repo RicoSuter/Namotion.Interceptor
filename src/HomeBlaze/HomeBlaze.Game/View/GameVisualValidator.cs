@@ -1,8 +1,9 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using HomeBlaze.Game.Abstractions;
 using Microsoft.Extensions.Logging;
 
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.View;
 
 /// <summary>
 /// Replaces a visual that the browser must not get by the default box of the object.

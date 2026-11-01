@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 /// <summary>
@@ -67,7 +69,7 @@ internal sealed class GameWorldIndex
     /// <summary>
     /// Whether a blocking object other than <paramref name="ignored"/> covers a tile of the area.
     /// </summary>
-    public bool IsBlocked(Footprint area, GameObject? ignored)
+    public bool IsBlocked(GameArea area, GameObject? ignored)
     {
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
@@ -91,7 +93,7 @@ internal sealed class GameWorldIndex
     /// <summary>
     /// Adds each visible object that covers a tile of the area to <paramref name="results"/>, once.
     /// </summary>
-    public void Query(Footprint area, List<GameObject> results)
+    public void Query(GameArea area, List<GameObject> results)
     {
         _found.Clear();
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
@@ -133,7 +135,7 @@ internal sealed class GameWorldIndex
     /// Adds the footprint of each object that stops sound by <see cref="IsSoundBlocked"/> and covers a tile of the area
     /// to <paramref name="results"/>, once.
     /// </summary>
-    public void QuerySoundBlocking(Footprint area, List<Footprint> results)
+    public void QuerySoundBlocking(GameArea area, List<GameArea> results)
     {
         _found.Clear();
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
@@ -160,7 +162,7 @@ internal sealed class GameWorldIndex
     /// </summary>
     internal static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
 
-    private bool IsBlockedByAny(List<GameObject> objects, Footprint area, GameObject? ignored)
+    private bool IsBlockedByAny(List<GameObject> objects, GameArea area, GameObject? ignored)
     {
         foreach (var gameObject in objects)
         {
@@ -174,7 +176,7 @@ internal sealed class GameWorldIndex
         return false;
     }
 
-    private void AddVisibleIntersecting(List<GameObject> objects, Footprint area, List<GameObject> results)
+    private void AddVisibleIntersecting(List<GameObject> objects, GameArea area, List<GameObject> results)
     {
         foreach (var gameObject in objects)
         {
@@ -186,7 +188,7 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private void AddSoundBlockingIntersecting(List<GameObject> objects, Footprint area, List<Footprint> results)
+    private void AddSoundBlockingIntersecting(List<GameObject> objects, GameArea area, List<GameArea> results)
     {
         foreach (var gameObject in objects)
         {
@@ -197,14 +199,14 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private bool TryGetSoundBlockingFootprint(GameObject gameObject, out Footprint footprint)
+    private bool TryGetSoundBlockingFootprint(GameObject gameObject, out GameArea footprint)
     {
         var entry = _entries[gameObject];
         footprint = entry.Footprint;
         return entry.IsSoundBlocking;
     }
 
-    private void AddToChunks(GameObject gameObject, Footprint footprint)
+    private void AddToChunks(GameObject gameObject, GameArea footprint)
     {
         for (var chunkY = (long)footprint.Y >> ChunkShift; chunkY <= footprint.Top >> ChunkShift; chunkY++)
         {
@@ -221,7 +223,7 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private void RemoveFromChunks(GameObject gameObject, Footprint footprint)
+    private void RemoveFromChunks(GameObject gameObject, GameArea footprint)
     {
         for (var chunkY = (long)footprint.Y >> ChunkShift; chunkY <= footprint.Top >> ChunkShift; chunkY++)
         {
@@ -235,5 +237,5 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private readonly record struct Entry(Footprint Footprint, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
+    private readonly record struct Entry(GameArea Footprint, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
 }

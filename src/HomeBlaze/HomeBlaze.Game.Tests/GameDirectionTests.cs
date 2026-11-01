@@ -1,3 +1,5 @@
+using HomeBlaze.Game.View;
+
 namespace HomeBlaze.Game.Tests;
 
 public class GameDirectionTests

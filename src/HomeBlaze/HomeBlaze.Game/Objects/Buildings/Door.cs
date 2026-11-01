@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Game.Visuals;
+using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 

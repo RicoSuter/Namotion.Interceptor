@@ -71,7 +71,7 @@ public class DemoWorldTests
     public void WhenTheTreesStand_ThenNoneBlocksADoorOrTheSpawnPoint()
     {
         // Arrange
-        var keepClear = _game.Objects.Values.OfType<Door>().Select(GetApproach).Append(new Footprint(-2, -2, 6, 6)).ToArray();
+        var keepClear = _game.Objects.Values.OfType<Door>().Select(GetApproach).Append(new GameArea(-2, -2, 6, 6)).ToArray();
 
         // Act
         var blocking = _game.Objects.Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Footprint))).ToArray();
@@ -81,9 +81,9 @@ public class DemoWorldTests
     }
 
     // The door and 3 tiles on both sides of it, where a player stands to walk through.
-    private static Footprint GetApproach(Door door) => door.Width >= door.Depth
-        ? new Footprint(door.X, door.Y - 3, door.Width, door.Depth + 6)
-        : new Footprint(door.X - 3, door.Y, door.Width + 6, door.Depth);
+    private static GameArea GetApproach(Door door) => door.Width >= door.Depth
+        ? new GameArea(door.X, door.Y - 3, door.Width, door.Depth + 6)
+        : new GameArea(door.X - 3, door.Y, door.Width + 6, door.Depth);
 
     // Every position of a player's footprint that walking reaches from the spawn point at 0, 0 with every door passable.
     private HashSet<(int X, int Y)> FindReachablePositions()
@@ -102,7 +102,7 @@ public class DemoWorldTests
             foreach (var (offsetX, offsetY) in Steps)
             {
                 var next = (X: position.X + offsetX, Y: position.Y + offsetY);
-                if (IsWithinArea(next) && !index.IsBlocked(new Footprint(next.X, next.Y, GamePlayer.Size, GamePlayer.Size), ignored: null) && reachable.Add(next))
+                if (IsWithinArea(next) && !index.IsBlocked(new GameArea(next.X, next.Y, GamePlayer.Size, GamePlayer.Size), ignored: null) && reachable.Add(next))
                 {
                     queue.Enqueue(next);
                 }

@@ -1,6 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Game.Visuals;
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
@@ -78,7 +78,7 @@ public abstract partial class GameObject : IConfigurable
     internal GameVisual DefaultVisual =>
         (_defaultVisual ??= new()).Get((Width, Height, Depth), static size => GameVisual.Box(size.Width, size.Height, size.Depth));
 
-    internal Footprint Footprint => new(X, Y, Width, Depth);
+    internal GameArea Footprint => new(X, Y, Width, Depth);
 
     internal Game? ParentGame => this.TryGetFirstParent<Game>();
 

@@ -2,14 +2,14 @@ using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game.Tests.World;
 
-public class FootprintTests
+public class GameAreaTests
 {
     [Fact]
-    public void WhenFootprintsOverlap_ThenTheyIntersect()
+    public void WhenGameAreasOverlap_ThenTheyIntersect()
     {
         // Arrange
-        var first = new Footprint(0, 0, 2, 2);
-        var second = new Footprint(1, 1, 4, 1);
+        var first = new GameArea(0, 0, 2, 2);
+        var second = new GameArea(1, 1, 4, 1);
 
         // Act
         var intersects = first.Intersects(second);
@@ -19,11 +19,11 @@ public class FootprintTests
     }
 
     [Fact]
-    public void WhenFootprintsOnlyTouch_ThenTheyDoNotIntersect()
+    public void WhenGameAreasOnlyTouch_ThenTheyDoNotIntersect()
     {
         // Arrange
-        var first = new Footprint(0, 0, 2, 2);
-        var second = new Footprint(2, 0, 2, 2);
+        var first = new GameArea(0, 0, 2, 2);
+        var second = new GameArea(2, 0, 2, 2);
 
         // Act
         var intersects = first.Intersects(second);
@@ -36,7 +36,7 @@ public class FootprintTests
     public void WhenTileIsInside_ThenContainsIsTrue()
     {
         // Arrange
-        var footprint = new Footprint(-3, -3, 2, 2);
+        var footprint = new GameArea(-3, -3, 2, 2);
 
         // Act & Assert
         Assert.True(footprint.Contains(-2, -2));
@@ -47,21 +47,21 @@ public class FootprintTests
     public void WhenMoveStaysInRange_ThenItSucceeds()
     {
         // Arrange
-        var footprint = new Footprint(5, 5, 2, 2);
+        var footprint = new GameArea(5, 5, 2, 2);
 
         // Act
         var isMoved = footprint.TryMove(-1, 1, out var moved);
 
         // Assert
         Assert.True(isMoved);
-        Assert.Equal(new Footprint(4, 6, 2, 2), moved);
+        Assert.Equal(new GameArea(4, 6, 2, 2), moved);
     }
 
     [Fact]
     public void WhenMoveLeavesTheIntRangeToTheEast_ThenItFails()
     {
         // Arrange
-        var footprint = new Footprint(int.MaxValue - 1, 0, 2, 2);
+        var footprint = new GameArea(int.MaxValue - 1, 0, 2, 2);
 
         // Act
         var isMoved = footprint.TryMove(1, 0, out _);
@@ -74,7 +74,7 @@ public class FootprintTests
     public void WhenMoveLeavesTheIntRangeToTheSouth_ThenItFails()
     {
         // Arrange
-        var footprint = new Footprint(0, int.MinValue, 2, 2);
+        var footprint = new GameArea(0, int.MinValue, 2, 2);
 
         // Act
         var isMoved = footprint.TryMove(0, -1, out _);
@@ -84,10 +84,10 @@ public class FootprintTests
     }
 
     [Fact]
-    public void WhenFootprintReachesTheEdge_ThenRightIsComputedWithoutOverflow()
+    public void WhenGameAreaReachesTheEdge_ThenRightIsComputedWithoutOverflow()
     {
         // Arrange
-        var footprint = new Footprint(int.MaxValue, 0, 1, 1);
+        var footprint = new GameArea(int.MaxValue, 0, 1, 1);
 
         // Act
         var right = footprint.Right;

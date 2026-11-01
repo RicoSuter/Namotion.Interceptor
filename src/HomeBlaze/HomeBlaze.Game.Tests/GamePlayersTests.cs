@@ -98,7 +98,7 @@ public class GamePlayersTests
 
         // Assert
         var player = _context.Game.Players["tab-1"];
-        Assert.False(player.Footprint.Intersects(new HomeBlaze.Game.World.Footprint(-1, 0, 4, 1)));
+        Assert.False(player.Footprint.Intersects(new GameArea(-1, 0, 4, 1)));
         Assert.True(Math.Abs(player.X) <= 2 && Math.Abs(player.Y) <= 2);
     }
 

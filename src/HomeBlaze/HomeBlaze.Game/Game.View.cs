@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.View;
 using HomeBlaze.Game.World;
 
@@ -21,12 +22,12 @@ public partial class Game
         }
     }
 
-    private static Footprint GetViewArea(int centerX, int centerY)
+    private static GameArea GetViewArea(int centerX, int centerY)
     {
         var minimumX = Math.Max(int.MinValue, (long)centerX - GameViewTracker.ViewRadius);
         var maximumX = Math.Min(int.MaxValue, (long)centerX + GameViewTracker.ViewRadius);
         var minimumY = Math.Max(int.MinValue, (long)centerY - GameViewTracker.ViewRadius);
         var maximumY = Math.Min(int.MaxValue, (long)centerY + GameViewTracker.ViewRadius);
-        return new Footprint((int)minimumX, (int)minimumY, (int)(maximumX - minimumX + 1), (int)(maximumY - minimumY + 1));
+        return new GameArea((int)minimumX, (int)minimumY, (int)(maximumX - minimumX + 1), (int)(maximumY - minimumY + 1));
     }
 }

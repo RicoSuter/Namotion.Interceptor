@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 /// <summary>
@@ -115,13 +117,13 @@ internal static class HearingRange
     /// <remarks>
     /// The footprint must have a width and depth from 1 to <see cref="GameObject.MaximumSize"/>; the index holds no others.
     /// </remarks>
-    public static Footprint GetArea(Footprint footprint)
+    public static GameArea GetArea(GameArea footprint)
     {
         var minimumX = Math.Max(int.MinValue, (long)footprint.X - HearingRadius);
         var maximumX = Math.Min(int.MaxValue, footprint.Right + HearingRadius);
         var minimumY = Math.Max(int.MinValue, (long)footprint.Y - HearingRadius);
         var maximumY = Math.Min(int.MaxValue, footprint.Top + HearingRadius);
-        return new Footprint(
+        return new GameArea(
             (int)minimumX,
             (int)minimumY,
             (int)Math.Min(int.MaxValue, maximumX - minimumX + 1),
@@ -129,13 +131,13 @@ internal static class HearingRange
     }
 
     // In half tiles, so the center of every footprint is a whole number and the walk stays exact.
-    private static (long X, long Y) GetDoubledCenter(Footprint footprint) =>
+    private static (long X, long Y) GetDoubledCenter(GameArea footprint) =>
         (2L * footprint.X + footprint.Width, 2L * footprint.Y + footprint.Depth);
 
     // Walks every tile that the closed segment touches, also only at an edge or a corner, so sound slips neither
     // between two walls that touch at a corner nor along the face of a wall. Called only within the hearing radius,
     // which keeps the products in GetTouchedRows far inside the long range.
-    private static bool IsLineBlocked((long X, long Y) start, (long X, long Y) end, Footprint first, Footprint second, GameWorldIndex index)
+    private static bool IsLineBlocked((long X, long Y) start, (long X, long Y) end, GameArea first, GameArea second, GameWorldIndex index)
     {
         var lastColumn = FloorDivide(Math.Max(start.X, end.X), 2);
         for (var column = CeilingDivide(Math.Min(start.X, end.X), 2) - 1; column <= lastColumn; column++)

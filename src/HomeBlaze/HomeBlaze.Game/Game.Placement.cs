@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.World;
 
@@ -23,7 +24,7 @@ public partial class Game
     /// <exception cref="ArgumentOutOfRangeException">A size is outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
     /// <exception cref="InvalidOperationException">The caller is not a player of this game, faces diagonally, or the
     /// footprint would leave the <see cref="int"/> range.</exception>
-    public GamePlacement GetPlacementInFront(GameCaller? caller, int across, int along)
+    public GameSpot GetPlacementInFront(GameCaller? caller, int across, int along)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(across, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(across, GameObject.MaximumSize);
@@ -37,7 +38,7 @@ public partial class Game
                 throw new InvalidOperationException(!Enum.IsDefined(actor.Facing) || actor.Facing.IsDiagonal() ? DiagonalMessage : BlockedMessage);
             }
 
-            return new GamePlacement(footprint.X, footprint.Y, footprint.Width, footprint.Depth, actor.Facing);
+            return new GameSpot(footprint.X, footprint.Y, footprint.Width, footprint.Depth, actor.Facing);
         }
     }
 

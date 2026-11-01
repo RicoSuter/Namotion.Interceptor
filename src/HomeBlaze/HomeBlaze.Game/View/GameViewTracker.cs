@@ -1,5 +1,5 @@
 using HomeBlaze.Abstractions;
-using HomeBlaze.Game.Visuals;
+using HomeBlaze.Game.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.View;

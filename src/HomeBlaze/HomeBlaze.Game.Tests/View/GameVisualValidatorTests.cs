@@ -1,8 +1,9 @@
+using HomeBlaze.Game.View;
 using HomeBlaze.Game.Tests.Testing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace HomeBlaze.Game.Tests.Visuals;
+namespace HomeBlaze.Game.Tests.View;
 
 public class GameVisualValidatorTests
 {

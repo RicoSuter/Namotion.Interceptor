@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// A point on the ground in tiles: X grows to the east and Z to the north.

@@ -1,0 +1,111 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Game.Abstractions
+{
+    public readonly struct GameArea : System.IEquatable<HomeBlaze.Game.Abstractions.GameArea>
+    {
+        public GameArea(int X, int Y, int Width, int Depth) { }
+        public int Depth { get; init; }
+        public long Right { get; }
+        public long Top { get; }
+        public int Width { get; init; }
+        public int X { get; init; }
+        public int Y { get; init; }
+        public bool Contains(long x, long y) { }
+        public bool Intersects(HomeBlaze.Game.Abstractions.GameArea other) { }
+        public bool TryMove(int offsetX, int offsetY, out HomeBlaze.Game.Abstractions.GameArea moved) { }
+    }
+    public static class GameAssets
+    {
+        public const string ContentPrefix = "_content/";
+        public static string Url(System.Type type, string path) { }
+    }
+    public enum GameDirection
+    {
+        North = 0,
+        NorthEast = 1,
+        East = 2,
+        SouthEast = 3,
+        South = 4,
+        SouthWest = 5,
+        West = 6,
+        NorthWest = 7,
+    }
+    public static class GameDirectionExtensions
+    {
+        public static int GetOffsetX(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+        public static int GetOffsetY(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+        public static bool IsDiagonal(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+    }
+    public readonly struct GameSpot : System.IEquatable<HomeBlaze.Game.Abstractions.GameSpot>
+    {
+        public GameSpot(int X, int Y, int Width, int Depth, HomeBlaze.Game.Abstractions.GameDirection Facing) { }
+        public HomeBlaze.Game.Abstractions.GameArea Area { get; }
+        public int Depth { get; init; }
+        public HomeBlaze.Game.Abstractions.GameDirection Facing { get; init; }
+        public int Width { get; init; }
+        public int X { get; init; }
+        public int Y { get; init; }
+    }
+    public sealed class GameVisual : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisual>
+    {
+        public const string DefaultColor = "#8d8577";
+        public const double MaximumExtent = 1024D;
+        public const int MaximumParts = 16;
+        public GameVisual(System.Collections.Immutable.ImmutableArray<HomeBlaze.Game.Abstractions.GameVisualPart> parts) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Game.Abstractions.GameVisualPart> Parts { get; }
+        public bool Equals(HomeBlaze.Game.Abstractions.GameVisual? other) { }
+        public override int GetHashCode() { }
+        public static HomeBlaze.Game.Abstractions.GameVisual Box(double width, double height, double depth, string color = "#8d8577") { }
+    }
+    public enum GameVisualAnimationMode
+    {
+        Loop = 0,
+        Once = 1,
+    }
+    public sealed class GameVisualCache<TKey>
+        where TKey : System.IEquatable<TKey>
+    {
+        public GameVisualCache() { }
+        public HomeBlaze.Game.Abstractions.GameVisual Get(TKey key, System.Func<TKey, HomeBlaze.Game.Abstractions.GameVisual> create) { }
+    }
+    public enum GameVisualEffect
+    {
+        None = 0,
+        Wind = 1,
+    }
+    public sealed class GameVisualPart : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisualPart>
+    {
+        public GameVisualPart() { }
+        public string? Animation { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualAnimationMode AnimationMode { get; init; }
+        public string? Color { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualEffect Effect { get; init; }
+        public string? Model { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualVector Offset { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualPoint Pivot { get; init; }
+        public double Rotation { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualShape Shape { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualVector Size { get; init; }
+        public string? Texture { get; init; }
+        public double TextureScale { get; init; }
+    }
+    public readonly struct GameVisualPoint : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisualPoint>
+    {
+        public GameVisualPoint(double X, double Z) { }
+        public double X { get; init; }
+        public double Z { get; init; }
+    }
+    public enum GameVisualShape
+    {
+        Box = 0,
+        Model = 1,
+    }
+    public readonly struct GameVisualVector : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisualVector>
+    {
+        public GameVisualVector(double X, double Y, double Z) { }
+        public double X { get; init; }
+        public double Y { get; init; }
+        public double Z { get; init; }
+    }
+}

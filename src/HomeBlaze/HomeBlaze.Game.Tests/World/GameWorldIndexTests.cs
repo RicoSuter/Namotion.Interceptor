@@ -13,7 +13,7 @@ public class GameWorldIndexTests
         index.AddOrUpdate(new Wall { X = 0, Y = 2, Width = 4, Depth = 1 });
 
         // Act
-        var isBlocked = index.IsBlocked(new Footprint(3, 1, 2, 2), ignored: null);
+        var isBlocked = index.IsBlocked(new GameArea(3, 1, 2, 2), ignored: null);
 
         // Assert
         Assert.True(isBlocked);
@@ -28,7 +28,7 @@ public class GameWorldIndexTests
         index.AddOrUpdate(player);
 
         // Act
-        var isBlocked = index.IsBlocked(new Footprint(1, 1, 2, 2), ignored: player);
+        var isBlocked = index.IsBlocked(new GameArea(1, 1, 2, 2), ignored: player);
 
         // Assert
         Assert.False(isBlocked);
@@ -47,8 +47,8 @@ public class GameWorldIndexTests
         index.AddOrUpdate(wall);
 
         // Assert
-        Assert.False(index.IsBlocked(new Footprint(0, 0, 1, 1), ignored: null));
-        Assert.True(index.IsBlocked(new Footprint(103, 0, 1, 1), ignored: null));
+        Assert.False(index.IsBlocked(new GameArea(0, 0, 1, 1), ignored: null));
+        Assert.True(index.IsBlocked(new GameArea(103, 0, 1, 1), ignored: null));
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class GameWorldIndexTests
         var results = new List<GameObject>();
 
         // Act
-        index.Query(new Footprint(-50, -50, 100, 100), results);
+        index.Query(new GameArea(-50, -50, 100, 100), results);
 
         // Assert
         Assert.Same(wall, Assert.Single(results));
@@ -78,7 +78,7 @@ public class GameWorldIndexTests
 
         // Act
         index.Remove(wall);
-        index.Query(new Footprint(-10, -10, 20, 20), results);
+        index.Query(new GameArea(-10, -10, 20, 20), results);
 
         // Assert
         Assert.Empty(results);
@@ -94,8 +94,8 @@ public class GameWorldIndexTests
         var results = new List<GameObject>();
 
         // Act
-        var isBlocked = index.IsBlocked(new Footprint(0, 0, 2, 2), ignored: null);
-        index.Query(new Footprint(0, 0, 2, 2), results);
+        var isBlocked = index.IsBlocked(new GameArea(0, 0, 2, 2), ignored: null);
+        index.Query(new GameArea(0, 0, 2, 2), results);
 
         // Assert
         Assert.False(isBlocked);
@@ -114,7 +114,7 @@ public class GameWorldIndexTests
         var results = new List<GameObject>();
 
         // Act
-        index.Query(new Footprint(-20, -20, 10, 10), results);
+        index.Query(new GameArea(-20, -20, 10, 10), results);
 
         // Assert
         Assert.Same(near, Assert.Single(results));
@@ -134,10 +134,10 @@ public class GameWorldIndexTests
 
         // Act
         index.AddOrUpdate(wall);
-        index.Query(new Footprint(-10, -10, 20, 20), results);
+        index.Query(new GameArea(-10, -10, 20, 20), results);
 
         // Assert
-        Assert.False(index.IsBlocked(new Footprint(0, 0, 1, 1), ignored: null));
+        Assert.False(index.IsBlocked(new GameArea(0, 0, 1, 1), ignored: null));
         Assert.Empty(results);
         Assert.Equal(0, index.Count);
     }
@@ -155,7 +155,7 @@ public class GameWorldIndexTests
         index.AddOrUpdate(wall);
 
         // Assert
-        Assert.False(index.IsBlocked(new Footprint(0, 0, 1, 1), ignored: null));
+        Assert.False(index.IsBlocked(new GameArea(0, 0, 1, 1), ignored: null));
         Assert.Equal(0, index.Count);
     }
 
@@ -203,7 +203,7 @@ public class GameWorldIndexTests
         index.AddOrUpdate(new MovementBlocker { X = 0, Y = 0, Width = 2, Depth = 2 });
 
         // Act
-        var isBlocked = index.IsBlocked(new Footprint(1, 1, 1, 1), ignored: null);
+        var isBlocked = index.IsBlocked(new GameArea(1, 1, 1, 1), ignored: null);
         var isSoundBlocked = index.IsSoundBlocked(1, 1);
 
         // Assert
@@ -250,10 +250,10 @@ public class GameWorldIndexTests
         index.AddOrUpdate(new MovementBlocker { X = 8, Y = 8 });
         index.AddOrUpdate(new GamePlayer { X = 10, Y = 10, IsConnected = true });
         index.AddOrUpdate(new Wall { X = 100, Y = 100 });
-        var results = new List<Footprint>();
+        var results = new List<GameArea>();
 
         // Act
-        index.QuerySoundBlocking(new Footprint(0, 0, 20, 20), results);
+        index.QuerySoundBlocking(new GameArea(0, 0, 20, 20), results);
 
         // Assert
         Assert.Equal(2, results.Count);

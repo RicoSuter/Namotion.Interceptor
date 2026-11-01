@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// Builds the URLs of the static web assets that visuals reference.

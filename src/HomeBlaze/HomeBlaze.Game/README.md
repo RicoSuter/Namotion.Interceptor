@@ -13,19 +13,18 @@ A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every br
 
 The app registers the library with a project reference in `HomeBlaze.csproj` and `.AddAssembly(typeof(HomeBlaze.Game.Game).Assembly)` in `Program.cs`. `Data/Files/Demo/Game.json` of the app holds the demo world, served at `/pages/Demo/Game`: a house of 56 x 40 tiles (14 x 10 m) with six rooms (living room, hall, kitchen, two bedrooms and a bathroom), brick outer walls, concrete inner walls and doors 4 to 6 tiles wide, a wooden shed with a closed door to the west, a forest of 32 trees to the east, 7 more trees around the house, and the tools `wall-tool` and `tree-tool`. New players spawn at 0, 0, just south of the open entrance. A script generated the file once with a fixed random seed; the script is not part of the repository, and the file is edited like any saved world. `DemoWorldTests` checks that it loads, that every room is reachable from the spawn point and that no tree blocks a door.
 
-The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`OperationInvoker`), `HomeBlaze.Services` (`CurrentClientConnection`, the configuration serializer), `HomeBlaze.Installation` (clients), `HomeBlaze.Storage.Abstractions` (`IConfigurationWriter`) and the Namotion.Interceptor generator, tracking and registry libraries. Dependency rule: `HomeBlaze.Game` may reference `HomeBlaze.AI` for agent players; `HomeBlaze.AI` never references or mentions the game.
+The value types of the extension contract (`GameArea`, `GameSpot`, `GameDirection`, `GameVisual` and its parts, `GameAssets`) live in `HomeBlaze.Game.Abstractions`, which this library references. The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`OperationInvoker`), `HomeBlaze.Services` (`CurrentClientConnection`, the configuration serializer), `HomeBlaze.Installation` (clients), `HomeBlaze.Storage.Abstractions` (`IConfigurationWriter`) and the Namotion.Interceptor generator, tracking and registry libraries. Dependency rule: `HomeBlaze.Game` may reference `HomeBlaze.AI` for agent players; `HomeBlaze.AI` never references or mentions the game.
 
 | Folder | Contents |
 |---|---|
 | `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loops, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs` (`ResolveActor`, messages), `Game.Objects.cs` (object API), `Game.Placement.cs` (placement API), `Game.Persistence.cs`, `Game.View.cs`, `Game.Volume.cs` (volume table), `Game.Voice.cs` (toggles, voice loop) |
 | `GameObject.cs`, `GamePlayer.cs`, `GameObjectSnapshot.cs` | The base of every object on the grid, the player, and the snapshot with which `UpdateAsync` undoes a refused change |
-| `Visuals/` | `GameVisual`, `GameVisualPart`, `GameVisualVector`, `GameVisualPoint`, `GameVisualShape`, `GameVisualEffect`, `GameVisualCache`, `GameAssets`, `GameVisualValidator` |
-| `Tools/` | `GameTool`, `GamePlacement` |
+| `Tools/` | `GameTool` |
 | `Objects/Buildings/` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures` |
 | `Objects/Nature/` | `Tree`, `TreeVariant`, `TreeTool` |
 | `Clients/` | `IGameClientDirectory` and its installation implementation |
-| `World/` | Pure grid logic: `Footprint`, `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `FrontPlacement` |
-| `View/` | `GameViewTracker` and what it sends to the browser: `GameViewObject`, `GameViewPart`, `GameViewUpdate`, and `GameColors` for players |
+| `World/` | Pure grid logic: `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `FrontPlacement` |
+| `View/` | `GameViewTracker` and what it sends to the browser: `GameViewObject`, `GameViewPart`, `GameViewUpdate`, `GameVisualValidator`, `GameDirectionNames`, and `GameColors` for players |
 | `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVolumeTable`, `TalkerQueue`, `GameVoiceMixer`, `IGameVoiceSink` |
 | `Components/` | `GamePage.razor`, `GameNameDialog.razor` and `GameCallerServiceProvider` |
 | `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera, frame rate), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (parts, models, wind, glides, fading, players, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/`, `objects/` (assets of the object types) |
@@ -72,7 +71,7 @@ Persistence:
 
 ## Objects and extension points
 
-The core (`Game*.cs`, `GameObject`, `GamePlayer`, `Visuals/`, `Tools/`, `World/`, `View/`, `Voice/`, `Components/`) names no object type. Every object type lives in a folder of `Objects/` with a namespace of its own and uses only public and protected members of the core, so a later split into libraries only moves files and changes the `$type` names in saved worlds. Reviews check this rule; members an object folder declares itself may be internal, such as `WallTextures` or `Tree.Variants`.
+The core (`Game*.cs`, `GameObject`, `GamePlayer`, `Tools/`, `World/`, `View/`, `Voice/`, `Components/`) names no object type. Every object type lives in a folder of `Objects/` with a namespace of its own and uses only public and protected members of the core, so a later split into libraries only moves files and changes the `$type` names in saved worlds. Reviews check this rule; members an object folder declares itself may be internal, such as `WallTextures` or `Tree.Variants`.
 
 | Folder | Namespace | Types |
 |---|---|---|
@@ -93,10 +92,10 @@ Extension points:
 
 Tool and operation parameters with a default are nullable, so an empty dialog field means the default, both in the dialog and over MCP. `[Range]` documents the limits; `MethodParameterDialog` does not enforce it, so the operations check again.
 
-Visuals (`Visuals/`):
+Visuals (`HomeBlaze.Game.Abstractions`):
 
 - `GameVisual` is an immutable record of `GameVisualPart`s that compares by value, parts included. `GameVisual.Box(width, height, depth, color)` creates one box.
-- A part is a `Box` or a `Model` (`GameVisualShape`) with `Offset` and `Size` in tiles (`GameVisualVector`, relative to the south-west corner of the footprint at ground level; as a size, X is the width, Y the height and Z the depth), a `Pivot` (`GameVisualPoint`) and a `Rotation` around it in degrees clockwise seen from above, `Texture`, `TextureScale` (tiles per repeat horizontally and vertically) and `Color` (`#rrggbb`, which tints the texture) for boxes, `Model` for models, `Effect` (`None` or `Wind`) and `Animation` (the name of a model animation that loops). A model is scaled uniformly to the largest size whose bounding box fits in `Size`, with its origin at the horizontal center of the part's box and its lowest point at the box's bottom.
+- A part is a `Box` or a `Model` (`GameVisualShape`) with `Offset` and `Size` in tiles (`GameVisualVector`, relative to the south-west corner of the footprint at ground level; as a size, X is the width, Y the height and Z the depth), a `Pivot` (`GameVisualPoint`) and a `Rotation` around it in degrees clockwise seen from above, `Texture`, `TextureScale` (tiles per repeat horizontally and vertically) and `Color` (`#rrggbb`, which tints the texture) for boxes, `Model` for models, `Effect` (`None` or `Wind`) and `Animation` (the name of a model animation) with `AnimationMode` (`Loop` or `Once`). A model is scaled uniformly to the largest size whose bounding box fits in `Size`, with its origin at the horizontal center of the part's box and its lowest point at the box's bottom.
 - An object computes its visual from configuration or state properties only, because the page observes exactly those, and caches it per state with `GameVisualCache<TKey>`, which returns the same instance for an unchanged key, so the tracker's comparison stops at the reference and allocates nothing.
 - `GameViewTracker` validates a visual when it builds a view object (`GameVisualValidator`). More than 16 parts (`MaximumParts`), offsets, sizes or pivots outside -1024 to 1024 tiles (`MaximumExtent`), negative sizes, a rotation that is not finite, undefined enum values, a texture scale outside 0 (exclusive) to 1024, a color other than `#rrggbb`, an animation name over 64 characters, a model part without a model, and URLs that do not start with `_content/`, are longer than 512 characters or contain `..` or `%` make the object show as its default box. The server logs a warning once per object type and process, remembering the types in a `ConditionalWeakTable` so that an unloaded plugin type is not kept alive. The browser receives the parts with short property names (`GameViewPart`).
 
@@ -104,7 +103,7 @@ Object API on `Game`:
 
 | Member | Behavior |
 |---|---|
-| `GetPlacementInFront(caller, across, along)` | Returns a `GamePlacement(X, Y, Width, Depth, Facing)` for an object `across` tiles wide across the facing direction and `along` tiles deep along it, starting on the tile right in front of the caller's player and centered on the player's center across the facing (an odd remainder goes east or north). Does not check whether the tiles are free. Refuses without a player ("Only a player in the game can place objects."), when facing diagonally ("Face north, east, south or west to place objects.") and beyond the `int` range ("Something is in the way.") |
+| `GetPlacementInFront(caller, across, along)` | Returns a `GameSpot(X, Y, Width, Depth, Facing)` for an object `across` tiles wide across the facing direction and `along` tiles deep along it, starting on the tile right in front of the caller's player and centered on the player's center across the facing (an odd remainder goes east or north). Does not check whether the tiles are free. Refuses without a player ("Only a player in the game can place objects."), when facing diagonally ("Face north, east, south or west to place objects.") and beyond the `int` range ("Something is in the way.") |
 | `PlaceAsync(caller, namePrefix, gameObject, cancellationToken)` | Adds the object under the prefix, a dash and 8 random hex digits. Refuses without a player, and with "Something is in the way." when the object blocks movement and a movement blocking object covers one of its tiles |
 | `RemoveAsync(gameObject, cancellationToken)` | Removes an object of this game |
 | `UpdateAsync(gameObject, change, cancellationToken)` | Runs `change` under `_lock` and updates the index. When the change throws, or the object then blocks movement and overlaps another movement blocking object, `GameObjectSnapshot` writes back the writable configuration and state properties that differ from before through the registry, and the call throws ("Something is in the way." for the overlap). The change may only set properties of the object and must not call into the game |
@@ -156,7 +155,7 @@ Moving is not an operation. The page calls the internal `Game.TryMove(player, di
 - Every accepted attempt sets `Facing`, also when the step is blocked. A save is requested only when the position or facing changed.
 - A step moves the footprint one tile and is refused when any tile it would cover holds another blocking object.
 - A diagonal step is refused when both of its orthogonal steps would be refused, so players cannot squeeze between corner-touching blockers.
-- A step that would leave the `int` range is refused (`Footprint.TryMove` uses `long` arithmetic).
+- A step that would leave the `int` range is refused (`GameArea.TryMove` uses `long` arithmetic).
 
 The target area (`TargetArea`) is the footprint shifted one tile toward the facing, minus the footprint itself: 2 tiles straight ahead, 3 tiles around the corner when facing diagonally. `GetTargetObjects` returns the visible objects there, ordered from south-west to north-east.
 

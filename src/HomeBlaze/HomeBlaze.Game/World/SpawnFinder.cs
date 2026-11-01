@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 internal static class SpawnFinder
@@ -11,7 +13,7 @@ internal static class SpawnFinder
     /// Returns the position nearest to <paramref name="start"/>, ring by ring, at which the footprint is free, or start
     /// when none is free within <paramref name="maximumRadius"/>.
     /// </summary>
-    public static Footprint FindFreePosition(Footprint start, Func<Footprint, bool> isFree, int maximumRadius = MaximumRadius)
+    public static GameArea FindFreePosition(GameArea start, Func<GameArea, bool> isFree, int maximumRadius = MaximumRadius)
     {
         if (isFree(start))
         {
@@ -29,7 +31,7 @@ internal static class SpawnFinder
         return start;
     }
 
-    private static bool TryFindOnRing(Footprint start, int radius, Func<Footprint, bool> isFree, out Footprint found)
+    private static bool TryFindOnRing(GameArea start, int radius, Func<GameArea, bool> isFree, out GameArea found)
     {
         for (var offsetY = -radius; offsetY <= radius; offsetY++)
         {

@@ -636,9 +636,9 @@ public class HearingRangeTests
     public void WhenTheAreaOfAPlayerIsTaken_ThenItReachesTheRadiusBeyondTheFootprint()
     {
         // Arrange
-        var footprint = new Footprint(0, 0, 2, 2);
-        var footprintAtTheLimits = new Footprint(int.MaxValue - 1, int.MinValue, 2, 2);
-        var hugeFootprint = new Footprint(int.MinValue, 0, int.MaxValue, 1);
+        var footprint = new GameArea(0, 0, 2, 2);
+        var footprintAtTheLimits = new GameArea(int.MaxValue - 1, int.MinValue, 2, 2);
+        var hugeFootprint = new GameArea(int.MinValue, 0, int.MaxValue, 1);
 
         // Act
         var area = HearingRange.GetArea(footprint);
@@ -646,8 +646,8 @@ public class HearingRangeTests
         var huge = HearingRange.GetArea(hugeFootprint);
 
         // Assert
-        Assert.Equal(new Footprint(-40, -40, 82, 82), area);
-        Assert.Equal(new Footprint(int.MaxValue - 41, int.MinValue, 42, 42), clamped);
-        Assert.Equal(new Footprint(int.MinValue, -40, int.MaxValue, 81), huge);
+        Assert.Equal(new GameArea(-40, -40, 82, 82), area);
+        Assert.Equal(new GameArea(int.MaxValue - 41, int.MinValue, 42, 42), clamped);
+        Assert.Equal(new GameArea(int.MinValue, -40, int.MaxValue, 81), huge);
     }
 }

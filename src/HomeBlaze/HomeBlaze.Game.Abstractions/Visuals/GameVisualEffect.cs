@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// A motion the browser adds to a <see cref="GameVisualPart"/>.

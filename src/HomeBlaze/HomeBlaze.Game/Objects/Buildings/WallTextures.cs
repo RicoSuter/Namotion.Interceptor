@@ -1,4 +1,4 @@
-using HomeBlaze.Game.Visuals;
+using HomeBlaze.Game.Abstractions;
 
 namespace HomeBlaze.Game.Objects.Buildings;
 

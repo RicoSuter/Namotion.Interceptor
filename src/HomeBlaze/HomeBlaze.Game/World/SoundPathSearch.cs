@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 /// <summary>
@@ -56,7 +58,7 @@ internal sealed class SoundPathSearch
     private readonly int[] _firstPassedOffsets = new int[Steps.Length];
     private readonly int[] _secondPassedOffsets = new int[Steps.Length];
     private readonly PriorityQueue<int, int> _queue = new();
-    private readonly List<Footprint> _blockers = [];
+    private readonly List<GameArea> _blockers = [];
     private bool[] _openTiles = [];
     private int[] _lengths = [];
 
@@ -69,7 +71,7 @@ internal sealed class SoundPathSearch
     // The source and index state of the lengths in _lengths; no lengths for a source of an invalid size.
     private bool _isPrepared;
     private bool _hasLengths;
-    private Footprint _source;
+    private GameArea _source;
     private GameWorldIndex? _index;
     private long _indexVersion;
 
@@ -77,7 +79,7 @@ internal sealed class SoundPathSearch
     /// Computes the lengths from the source footprint, unless they are already computed for this footprint and the
     /// current <see cref="GameWorldIndex.Version"/> of this index.
     /// </summary>
-    public void Prepare(Footprint source, GameWorldIndex index)
+    public void Prepare(GameArea source, GameWorldIndex index)
     {
         if (_isPrepared && _source == source && ReferenceEquals(_index, index) && _indexVersion == index.Version)
         {
@@ -105,7 +107,7 @@ internal sealed class SoundPathSearch
     /// in <see cref="Unit"/>, or <see cref="NoPath"/>, also for a source or target of an invalid size.
     /// </summary>
     /// <exception cref="InvalidOperationException">No source is prepared.</exception>
-    public int GetLength(Footprint target)
+    public int GetLength(GameArea target)
     {
         if (!_isPrepared)
         {
@@ -131,7 +133,7 @@ internal sealed class SoundPathSearch
     /// Gets the length in <see cref="Unit"/> of a path between the centers of two footprints without walls, by the same
     /// rule as <see cref="GetLength"/>, through the tiles nearest to each center.
     /// </summary>
-    public static long GetOpenLength(Footprint first, Footprint second)
+    public static long GetOpenLength(GameArea first, GameArea second)
     {
         var columns = GetCenterTiles(first.X, first.Width);
         var rows = GetCenterTiles(first.Y, first.Depth);
@@ -147,7 +149,7 @@ internal sealed class SoundPathSearch
         return shortest;
     }
 
-    private static long GetOpenLengthTo(long x, long y, Footprint target)
+    private static long GetOpenLengthTo(long x, long y, GameArea target)
     {
         var columns = GetCenterTiles(target.X, target.Width);
         var rows = GetCenterTiles(target.Y, target.Depth);
@@ -169,7 +171,7 @@ internal sealed class SoundPathSearch
         ((long)start + (size - 1) / 2, (long)start + size / 2);
 
     // The length from the center of the footprint to the center of the tile.
-    private static long GetCenterLength(Footprint footprint, long x, long y) =>
+    private static long GetCenterLength(GameArea footprint, long x, long y) =>
         GetOffsetLength(
             2 * x + 1 - (2L * footprint.X + footprint.Width),
             2 * y + 1 - (2L * footprint.Y + footprint.Depth));
@@ -185,10 +187,10 @@ internal sealed class SoundPathSearch
         return doubled / 2;
     }
 
-    private static bool HasValidSize(Footprint footprint) =>
+    private static bool HasValidSize(GameArea footprint) =>
         GameWorldIndex.IsValidSize(footprint.Width) && GameWorldIndex.IsValidSize(footprint.Depth);
 
-    private long GetShortestInRow(Footprint target, long y)
+    private long GetShortestInRow(GameArea target, long y)
     {
         var shortest = (long)NoPath;
         var lastX = Math.Min(target.Right, _originX + _columns - 1 - Padding);
@@ -206,7 +208,7 @@ internal sealed class SoundPathSearch
 
     private int GetTile(long x, long y) => (int)((y - _originY) * _columns + (x - _originX));
 
-    private void SetGrid(Footprint source)
+    private void SetGrid(GameArea source)
     {
         var firstX = Math.Max(int.MinValue, source.X - (long)Margin);
         var lastX = Math.Min(int.MaxValue, source.Right + Margin);
@@ -233,10 +235,10 @@ internal sealed class SoundPathSearch
     }
 
     // Opens the tiles inside the padding, closes those of sound blocking objects and opens the source footprint again.
-    private void MarkOpenTiles(Footprint source, GameWorldIndex index)
+    private void MarkOpenTiles(GameArea source, GameWorldIndex index)
     {
         Array.Clear(_openTiles, 0, _columns * _rows);
-        var area = new Footprint(
+        var area = new GameArea(
             (int)(_originX + Padding), (int)(_originY + Padding), _columns - 2 * Padding, _rows - 2 * Padding);
         MarkTiles(area, area, isOpen: true);
         _blockers.Clear();
@@ -250,7 +252,7 @@ internal sealed class SoundPathSearch
         MarkTiles(source, area, isOpen: true);
     }
 
-    private void MarkTiles(Footprint footprint, Footprint area, bool isOpen)
+    private void MarkTiles(GameArea footprint, GameArea area, bool isOpen)
     {
         var firstX = Math.Max(footprint.X, area.X);
         var lastX = Math.Min(footprint.Right, area.Right);
@@ -262,7 +264,7 @@ internal sealed class SoundPathSearch
     }
 
     // Starts at every tile of the footprint with its length from the center.
-    private void Seed(Footprint source)
+    private void Seed(GameArea source)
     {
         Array.Fill(_lengths, NoPath, 0, _columns * _rows);
         _queue.Clear();

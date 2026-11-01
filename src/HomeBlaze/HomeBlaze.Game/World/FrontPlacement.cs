@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 internal static class FrontPlacement
@@ -8,7 +10,7 @@ internal static class FrontPlacement
     /// actor's center across the facing (an odd remainder goes east or north); returns false for a diagonal facing or a
     /// footprint outside the <see cref="int"/> range.
     /// </summary>
-    public static bool TryGetFootprint(Footprint actor, GameDirection facing, int across, int along, out Footprint footprint)
+    public static bool TryGetFootprint(GameArea actor, GameDirection facing, int across, int along, out GameArea footprint)
     {
         if (!Enum.IsDefined(facing) || facing.IsDiagonal())
         {
@@ -22,21 +24,21 @@ internal static class FrontPlacement
         return TryCreate(GetX(actor, facing, along, sizeX), GetY(actor, facing, along, sizeY), sizeX, sizeY, out footprint);
     }
 
-    private static long GetX(Footprint actor, GameDirection facing, int along, int sizeX) => facing switch
+    private static long GetX(GameArea actor, GameDirection facing, int along, int sizeX) => facing switch
     {
         GameDirection.East => actor.Right + 1,
         GameDirection.West => (long)actor.X - along,
         _ => (long)actor.X + (((long)actor.Width - sizeX + 1) >> 1)
     };
 
-    private static long GetY(Footprint actor, GameDirection facing, int along, int sizeY) => facing switch
+    private static long GetY(GameArea actor, GameDirection facing, int along, int sizeY) => facing switch
     {
         GameDirection.North => actor.Top + 1,
         GameDirection.South => (long)actor.Y - along,
         _ => (long)actor.Y + (((long)actor.Depth - sizeY + 1) >> 1)
     };
 
-    private static bool TryCreate(long x, long y, int sizeX, int sizeY, out Footprint footprint)
+    private static bool TryCreate(long x, long y, int sizeX, int sizeY, out GameArea footprint)
     {
         if (x < int.MinValue || y < int.MinValue || x + sizeX - 1 > int.MaxValue || y + sizeY - 1 > int.MaxValue)
         {
@@ -44,7 +46,7 @@ internal static class FrontPlacement
             return false;
         }
 
-        footprint = new Footprint((int)x, (int)y, sizeX, sizeY);
+        footprint = new GameArea((int)x, (int)y, sizeX, sizeY);
         return true;
     }
 }

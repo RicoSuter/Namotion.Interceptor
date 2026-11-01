@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// How an object looks: parts placed relative to the south-west corner of its footprint at ground level. Compares by

@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Visuals;
+namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// One box or model of a <see cref="GameVisual"/>. Positions are in tiles relative to the south-west corner of the
@@ -52,7 +52,12 @@ public sealed record GameVisualPart
     public GameVisualEffect Effect { get; init; }
 
     /// <summary>
-    /// The name of an animation in the model that plays in a loop, or null.
+    /// The name of an animation in the model, or null; see <see cref="AnimationMode"/>.
     /// </summary>
     public string? Animation { get; init; }
+
+    /// <summary>
+    /// How <see cref="Animation"/> plays; ignored without an animation.
+    /// </summary>
+    public GameVisualAnimationMode AnimationMode { get; init; }
 }

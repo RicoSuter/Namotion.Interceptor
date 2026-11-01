@@ -1,3 +1,5 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 internal static class TargetArea
@@ -6,7 +8,7 @@ internal static class TargetArea
     /// Adds the tiles of the footprint shifted one tile toward <paramref name="facing"/> that the footprint itself does
     /// not cover, row by row from south-west; adds none when the shifted footprint would leave the <see cref="int"/> range.
     /// </summary>
-    public static void GetTiles(Footprint footprint, GameDirection facing, List<Footprint> tiles)
+    public static void GetTiles(GameArea footprint, GameDirection facing, List<GameArea> tiles)
     {
         if (!footprint.TryMove(facing.GetOffsetX(), facing.GetOffsetY(), out var shifted))
         {
@@ -19,7 +21,7 @@ internal static class TargetArea
             {
                 if (!footprint.Contains(x, y))
                 {
-                    tiles.Add(new Footprint((int)x, (int)y, 1, 1));
+                    tiles.Add(new GameArea((int)x, (int)y, 1, 1));
                 }
             }
         }

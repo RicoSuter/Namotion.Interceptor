@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Game.Abstractions\HomeBlaze.Game.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Installation\HomeBlaze.Installation.csproj" />

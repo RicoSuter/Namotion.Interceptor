@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game;
@@ -62,7 +63,7 @@ public partial class Game
     {
         lock (_lock)
         {
-            var tiles = new List<Footprint>(3);
+            var tiles = new List<GameArea>(3);
             TargetArea.GetTiles(player.Footprint, player.Facing, tiles);
             if (tiles.Count == 0 || !player.Footprint.TryMove(player.Facing.GetOffsetX(), player.Facing.GetOffsetY(), out var shifted))
             {
@@ -84,7 +85,7 @@ public partial class Game
         }
     }
 
-    private static bool IntersectsAny(Footprint footprint, List<Footprint> tiles)
+    private static bool IntersectsAny(GameArea footprint, List<GameArea> tiles)
     {
         foreach (var tile in tiles)
         {
@@ -102,7 +103,7 @@ public partial class Game
         Players.TryGetValue(player.ClientId, out var current) && ReferenceEquals(current, player);
 
     // Callers hold _lock.
-    private bool TryGetStep(GamePlayer player, GameDirection direction, out Footprint moved)
+    private bool TryGetStep(GamePlayer player, GameDirection direction, out GameArea moved)
     {
         var index = GetIndex();
         var footprint = player.Footprint;

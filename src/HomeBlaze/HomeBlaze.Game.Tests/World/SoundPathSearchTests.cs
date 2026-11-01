@@ -14,8 +14,8 @@ public class SoundPathSearchTests
         var index = new GameWorldIndex();
 
         // Act
-        search.Prepare(new Footprint(0, 0, width, depth), index);
-        var length = search.GetLength(new Footprint(4, 0, 2, 2));
+        search.Prepare(new GameArea(0, 0, width, depth), index);
+        var length = search.GetLength(new GameArea(4, 0, 2, 2));
 
         // Assert
         Assert.Equal(SoundPathSearch.NoPath, length);
@@ -26,10 +26,10 @@ public class SoundPathSearchTests
     {
         // Arrange
         var search = new SoundPathSearch();
-        search.Prepare(new Footprint(0, 0, 2, 2), new GameWorldIndex());
+        search.Prepare(new GameArea(0, 0, 2, 2), new GameWorldIndex());
 
         // Act
-        var length = search.GetLength(new Footprint(int.MinValue, 0, int.MaxValue, 2));
+        var length = search.GetLength(new GameArea(int.MinValue, 0, int.MaxValue, 2));
 
         // Assert
         Assert.Equal(SoundPathSearch.NoPath, length);
@@ -40,8 +40,8 @@ public class SoundPathSearchTests
     {
         // Arrange
         var search = new SoundPathSearch();
-        var source = new Footprint(0, 0, 2, 2);
-        var target = new Footprint(13, 5, 2, 2);
+        var source = new GameArea(0, 0, 2, 2);
+        var target = new GameArea(13, 5, 2, 2);
         search.Prepare(source, new GameWorldIndex());
 
         // Act
@@ -58,6 +58,6 @@ public class SoundPathSearchTests
         var search = new SoundPathSearch();
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => search.GetLength(new Footprint(0, 0, 2, 2)));
+        Assert.Throws<InvalidOperationException>(() => search.GetLength(new GameArea(0, 0, 2, 2)));
     }
 }
