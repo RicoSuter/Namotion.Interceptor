@@ -2,7 +2,6 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Abstractions;
-using HomeBlaze.Game.World;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -33,8 +32,6 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     /// </summary>
     public const int MaximumMessageLength = 500;
 
-    private const string NoSenderMessage = "Only a player in the game can send messages.";
-
     public override int Width => Size;
 
     public override int Depth => Size;
@@ -45,7 +42,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     public partial GameDirection Facing { get; set; }
 
     /// <summary>
-    /// The id of the client this player belongs to, which is its key in <see cref="Game.Players"/>.
+    /// The id of the client this player belongs to, which is its key in <see cref="Game.Players"/>. Like the other states
+    /// of the player, only the game sets it.
     /// </summary>
     [State(Position = 1)]
     public partial string ClientId { get; internal set; }
@@ -83,18 +81,6 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
 
     public override bool IsVisible => IsConnected;
 
-    // Not intercepted: runtime state of the movement, created by the game under its lock.
-    internal RateLimiter? StepRateLimiter { get; set; }
-
-    internal RateLimiter? TurnRateLimiter { get; set; }
-
-    internal long? LastMessageTimestamp { get; set; }
-
-    // Not intercepted: the page whose microphone counts and the pages with the speaker on, kept by the game under its lock.
-    internal int? MicrophonePageId { get; set; }
-
-    internal HashSet<int>? AudioPageIds { get; set; }
-
     public GamePlayer()
     {
         Facing = GameDirection.North;
@@ -123,12 +109,6 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
         }
 
         var game = this.TryGetFirstParent<Game>() ?? throw new InvalidOperationException("The player is not part of a game.");
-        var sender = game.GetActor(caller);
-        if (caller is not null && sender is null)
-        {
-            throw new InvalidOperationException(NoSenderMessage);
-        }
-
-        return game.SendMessageAsync(this, sender, trimmed, cancellationToken);
+        return game.SendMessageAsync(this, caller, trimmed, cancellationToken);
     }
 }

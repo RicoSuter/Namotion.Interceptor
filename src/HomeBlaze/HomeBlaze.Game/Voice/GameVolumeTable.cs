@@ -1,4 +1,4 @@
-using HomeBlaze.Game.Abstractions;
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game.Voice;
@@ -44,11 +44,11 @@ internal sealed class GameVolumeTable
     }
 
     /// <summary>
-    /// Builds the table for the connected players of a valid size, comparing only players within the hearing radius, which the index
-    /// finds. The index must be up to date; the caller guards it, and also the <paramref name="candidates"/> list and
-    /// the <paramref name="search"/>, which are scratch space.
+    /// Builds the table for the connected players of a valid size, comparing only players within the hearing radius, which
+    /// the index finds. The index must hold the players' current areas; <paramref name="candidates"/> and
+    /// <paramref name="search"/> are scratch space of the caller.
     /// </summary>
-    public static GameVolumeTable Build(Dictionary<string, GamePlayer> players, GameWorldIndex index, List<GameObject> candidates,
+    public static GameVolumeTable Build(Dictionary<string, PlayerEntity> players, GameWorldIndex index, List<GameEntity> candidates,
         SoundPathSearch search)
     {
         var hearingCount = 0;
@@ -79,20 +79,21 @@ internal sealed class GameVolumeTable
             }
         }
 
+        candidates.Clear();
         return Create(rows);
     }
 
     // A player of a size that the index leaves out has no row, so its huge area is never queried.
-    private static bool CanHear(GamePlayer player) => player.IsConnected && GameWorldIndex.HasValidSize(player);
+    private static bool CanHear(PlayerEntity player) => player.IsConnected && GameWorldIndex.HasValidSize(player.Area, player.Height);
 
     // Computes each pair once, from the player with the smaller id, and adds it to both rows. The listener goes first,
     // so the paths of its pairs come from one search.
-    private static void AddAudible(GamePlayer listener, List<GameVolumeEntry> listenerRow, List<GameObject> candidates,
+    private static void AddAudible(PlayerEntity listener, List<GameVolumeEntry> listenerRow, List<GameEntity> candidates,
         Dictionary<string, List<GameVolumeEntry>> rows, GameWorldIndex index, SoundPathSearch search)
     {
         foreach (var candidate in candidates)
         {
-            if (candidate is not GamePlayer talker || string.CompareOrdinal(listener.ClientId, talker.ClientId) >= 0
+            if (candidate is not PlayerEntity talker || string.CompareOrdinal(listener.ClientId, talker.ClientId) >= 0
                 || !rows.TryGetValue(talker.ClientId, out var talkerRow))
             {
                 continue;

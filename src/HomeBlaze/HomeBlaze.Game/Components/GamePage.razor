@@ -1,8 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Page, typeof(Game))]
 @implements ISubjectComponent
 @implements IAsyncDisposable
-@using System.Reactive.Concurrency
-@using System.Reactive.Linq
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Dialogs
@@ -13,7 +11,6 @@
 @using HomeBlaze.Services.Clients
 @using Microsoft.Extensions.Logging
 @using Namotion.Interceptor.Registry
-@using Namotion.Interceptor.Tracking
 @inject IJSRuntime JsRuntime
 @inject CurrentClientConnection CurrentConnection
 @inject IDialogService DialogService
@@ -187,12 +184,17 @@
     private ElementReference _panel;
     private IJSObjectReference? _module;
     private DotNetObjectReference<GamePage>? _reference;
-    private IDisposable? _subscription;
+    private bool _isSubscribed;
+    // The page's client and its player, resolved on every flush; the client id is the player's key in Game.Players.
+    private string? _clientId;
     private GamePlayer? _player;
     private bool _isStarted;
     private bool _isDisposed;
     private string? _error;
     private int _isFlushScheduled;
+    // Flushes run one at a time on the renderer, because the tracker must not be read while the game updates it.
+    private bool _isFlushing;
+    private bool _isFlushRequested;
     private string _positionText = NoPosition;
     private IReadOnlyList<NearbyEntry> _nearby = [];
     // The player and the player ids of the volume table row that _nearby shows.
@@ -260,10 +262,8 @@
             }
 
             _isStarted = true;
-            _subscription = ((IInterceptorSubject)game).Context
-                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-                .Where(change => change.Property.Subject is GameObject || ReferenceEquals(change.Property.Subject, game))
-                .Subscribe(_ => ScheduleFlush());
+            game.WorldChanged += ScheduleFlush;
+            _isSubscribed = true;
             game.VolumeTableChanged += OnVolumeTableChanged;
             await FlushAsync();
             await StartVoiceAsync();
@@ -286,15 +286,24 @@
     /// Moves the player of this page; returns null while the page has none, which the browser treats as an unanswered step.
     /// </summary>
     [JSInvokable]
-    public StepResult? Step(int sequence, int direction, bool turnOnly)
+    public async Task<StepResult?> Step(int sequence, int direction, bool turnOnly)
     {
-        if (Game is not { } game || _player is not { } player)
+        if (Game is not { } game || _player is null || _clientId is not { } clientId)
         {
             return null;
         }
 
-        var result = game.TryMove(player, (GameDirection)direction, turnOnly);
-        return new StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing);
+        try
+        {
+            return await game.StepAsync(clientId, (GameDirection)direction, turnOnly, _lifetime.Token) is { } result
+                ? new StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing)
+                : null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            // The game has stopped or the page went away.
+            return null;
+        }
     }
 
     /// <summary>
@@ -323,9 +332,9 @@
     [JSInvokable]
     public void ReceiveMicrophoneFrame(byte[] frame)
     {
-        if (Game is { } game && _player is { } player)
+        if (Game is { } game && _player is not null && _clientId is { } clientId)
         {
-            game.VoiceMixer.Receive(player.ClientId, _viewId, frame);
+            game.VoiceMixer.Receive(clientId, _viewId, frame);
         }
     }
 
@@ -551,7 +560,7 @@
             return;
         }
 
-        if (game.SetMicrophone(new GameCaller(player.ClientId), _viewId, isOn: true))
+        if (await TrySetVoiceAsync(game.SetMicrophoneAsync(player.ClientId, _viewId, isOn: true, _lifetime.Token)))
         {
             _isMicrophoneOn = true;
             return;
@@ -567,7 +576,7 @@
         _isMicrophoneOn = false;
         if (player is not null)
         {
-            game.SetMicrophone(new GameCaller(player.ClientId), _viewId, isOn: false);
+            await TrySetVoiceAsync(game.SetMicrophoneAsync(player.ClientId, _viewId, isOn: false));
         }
 
         await TryInvokeVoiceAsync(module, "stopCapture", GameVoiceSettings.BrowserCallTimeout);
@@ -589,7 +598,7 @@
         }
 
         var registration = game.VoiceMixer.RegisterSink(player.ClientId, new VoiceSink(this));
-        if (game.SetAudio(new GameCaller(player.ClientId), _viewId, isOn: true))
+        if (await TrySetVoiceAsync(game.SetAudioAsync(player.ClientId, _viewId, isOn: true, _lifetime.Token)))
         {
             _sinkRegistration = registration;
             _isAudioOn = true;
@@ -606,12 +615,25 @@
         _isAudioOn = false;
         if (player is not null)
         {
-            game.SetAudio(new GameCaller(player.ClientId), _viewId, isOn: false);
+            await TrySetVoiceAsync(game.SetAudioAsync(player.ClientId, _viewId, isOn: false));
         }
 
         _sinkRegistration?.Dispose();
         _sinkRegistration = null;
         await TryInvokeVoiceAsync(module, "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
+    }
+
+    // Returns false once the game has stopped or the page went away, as for a refused switch.
+    private static async Task<bool> TrySetVoiceAsync(Task<bool> switching)
+    {
+        try
+        {
+            return await switching;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     // A start without an answer from the browser may still succeed there later, which the stop prevents.
@@ -716,16 +738,16 @@
         }
     }
 
-    // Removes only this page's share of the player's toggles; the other pages of the player keep theirs.
+    // Removes only this page's share of the player's toggles; the other pages of the player keep theirs. Does not wait
+    // for the game, which switches them in its next tick.
     private void StopVoiceInGame()
     {
         _sinkRegistration?.Dispose();
         _sinkRegistration = null;
-        if (Game is { } game && _player is { } player)
+        if (Game is { } game && _player is not null && _clientId is { } clientId)
         {
-            var caller = new GameCaller(player.ClientId);
-            game.SetMicrophone(caller, _viewId, isOn: false);
-            game.SetAudio(caller, _viewId, isOn: false);
+            _ = TrySetVoiceAsync(game.SetMicrophoneAsync(clientId, _viewId, isOn: false));
+            _ = TrySetVoiceAsync(game.SetAudioAsync(clientId, _viewId, isOn: false));
         }
     }
 
@@ -737,7 +759,7 @@
         }
 
         // The target may have moved since the panel rendered.
-        if (owner is GameObject target && !game.GetTargetObjects(player).Contains(target))
+        if (owner is GameObject target && !(await TryGetTargetsAsync(game, player.ClientId)).Contains(target))
         {
             return;
         }
@@ -788,7 +810,7 @@
         }
     }
 
-    // Called inside the writes of the object graph, so it never blocks.
+    // Called on the simulation thread inside a tick, so it never blocks.
     private void ScheduleFlush()
     {
         if (Interlocked.Exchange(ref _isFlushScheduled, 1) == 0)
@@ -811,15 +833,41 @@
         }
     }
 
-    // The panel keeps following the game after the view broke, so that a stale sink does not keep playing.
+    // A flush requested while one runs makes the running one go again instead of overlapping it.
     private async Task FlushAsync()
+    {
+        if (_isFlushing)
+        {
+            _isFlushRequested = true;
+            return;
+        }
+
+        _isFlushing = true;
+        try
+        {
+            do
+            {
+                _isFlushRequested = false;
+                await FlushOnceAsync();
+            }
+            while (_isFlushRequested && !_isDisposed);
+        }
+        finally
+        {
+            _isFlushing = false;
+        }
+    }
+
+    // The panel keeps following the game after the view broke, so that a stale sink does not keep playing.
+    private async Task FlushOnceAsync()
     {
         if (_isDisposed || Game is not { } game || _module is not { } module)
         {
             return;
         }
 
-        _player = CurrentConnection.Connection?.ClientId is { } clientId && game.Players.TryGetValue(clientId, out var player) ? player : null;
+        _clientId = CurrentConnection.Connection?.ClientId;
+        _player = _clientId is { } clientId && game.Players.TryGetValue(clientId, out var player) ? player : null;
         var hasViewChanged = await TryUpdateViewAsync(game, module);
         if (_isDisposed)
         {
@@ -841,8 +889,18 @@
             return false;
         }
 
-        var update = game.UpdateView(_tracker, _player);
-        return !update.IsEmpty && await TryApplyUpdateAsync(module, update);
+        GameViewUpdate update;
+        try
+        {
+            update = await game.UpdateViewAsync(_tracker, _player is null ? null : _clientId, _lifetime.Token);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            // The game has stopped or the page went away.
+            return false;
+        }
+
+        return !_isDisposed && !update.IsEmpty && await TryApplyUpdateAsync(module, update);
     }
 
     // Nearby follows both the view, which carries the toggles, and the volume table.
@@ -859,7 +917,7 @@
             RefreshNearby(game, hasViewChanged);
         }
 
-        RefreshActions(game);
+        await RefreshActionsAsync(game);
         if (isVolumeTableChanged)
         {
             await SynchronizeVoiceAsync(game);
@@ -888,12 +946,25 @@
             return;
         }
 
-        var (isMicrophonePage, isAudioPage) = _player is { } player ? game.GetVoicePages(player, _viewId) : (false, false);
+        var (isMicrophonePage, isAudioPage) = _player is { } player ? await TryGetVoicePagesAsync(game, player.ClientId) : (false, false);
         var isMicrophoneLost = _isMicrophoneOn && !isMicrophonePage;
         var isAudioLost = _isAudioOn && !isAudioPage;
         if (isMicrophoneLost || isAudioLost)
         {
             await RunVoiceToggleAsync(() => StopLostVoiceAsync(module, game, isMicrophoneLost, isAudioLost));
+        }
+    }
+
+    // Reads as no page once the game has stopped, which stops the page's voice.
+    private async Task<(bool IsMicrophonePage, bool IsAudioPage)> TryGetVoicePagesAsync(Game game, string clientId)
+    {
+        try
+        {
+            return await game.GetVoicePagesAsync(clientId, _viewId, _lifetime.Token);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            return (false, false);
         }
     }
 
@@ -927,7 +998,7 @@
         {
             // The module dropped the view or broke, so every later update would fail too.
             _isViewBroken = true;
-            _subscription?.Dispose();
+            Unsubscribe();
             return false;
         }
     }
@@ -1004,9 +1075,9 @@
     }
 
     private NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
-        new(player.Title ?? string.Empty, _tracker.GetPlayerColor(player), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
+        new(player.Title ?? string.Empty, _tracker.GetPlayerColor(player.ClientId), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
 
-    private void RefreshActions(Game game)
+    private async Task RefreshActionsAsync(Game game)
     {
         _actions = GetGameActions(game);
         if (_player is not { } player)
@@ -1017,7 +1088,7 @@
 
         var key = 0;
         var targets = new List<TargetEntry>();
-        foreach (var target in game.GetTargetObjects(player))
+        foreach (var target in await TryGetTargetsAsync(game, player.ClientId))
         {
             var operations = GetOperations(target);
             var actions = new List<ActionEntry>(operations.Count);
@@ -1030,6 +1101,28 @@
         }
 
         _targets = targets;
+    }
+
+    // None once the game has stopped or the page went away.
+    private async Task<IReadOnlyList<GameObject>> TryGetTargetsAsync(Game game, string clientId)
+    {
+        try
+        {
+            return await game.GetTargetsAsync(clientId, _lifetime.Token);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            return [];
+        }
+    }
+
+    private void Unsubscribe()
+    {
+        if (_isSubscribed && Game is { } game)
+        {
+            game.WorldChanged -= ScheduleFlush;
+            _isSubscribed = false;
+        }
     }
 
     // The operations of the game, then those of its tools ordered by name. Runs on every flush, so it sorts only
@@ -1081,7 +1174,7 @@
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        _subscription?.Dispose();
+        Unsubscribe();
         if (Game is { } game)
         {
             game.VolumeTableChanged -= OnVolumeTableChanged;

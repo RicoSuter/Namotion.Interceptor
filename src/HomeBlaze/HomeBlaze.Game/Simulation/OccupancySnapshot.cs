@@ -25,8 +25,8 @@ internal sealed class OccupancySnapshot
     /// </summary>
     public bool IsFree(GameArea area, GameObject? except)
     {
-        var (minimumX, minimumY) = GameEntityIndex.GetChunk(area.X, area.Y);
-        var (maximumX, maximumY) = GameEntityIndex.GetChunk(area.Right, area.Top);
+        var (minimumX, minimumY) = GameWorldIndex.GetChunk(area.X, area.Y);
+        var (maximumX, maximumY) = GameWorldIndex.GetChunk(area.Right, area.Top);
         for (var chunkY = minimumY; chunkY <= maximumY; chunkY++)
         {
             for (var chunkX = minimumX; chunkX <= maximumX; chunkX++)
@@ -45,7 +45,7 @@ internal sealed class OccupancySnapshot
     /// Returns a snapshot with the changed chunks copied from what the index stored; returns this snapshot when no
     /// movement blocking area of a changed chunk differs. This snapshot stays unchanged.
     /// </summary>
-    public OccupancySnapshot With(GameEntityIndex index, ChangedChunks changes)
+    public OccupancySnapshot With(GameWorldIndex index, ChangedChunks changes)
     {
         if (changes.Count == 0)
         {

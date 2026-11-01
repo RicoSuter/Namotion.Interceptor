@@ -6,17 +6,24 @@ public class GamePlacementTests
 {
     private readonly GameTestContext _context = new();
 
+    // Runs the world command and publishes, so the subjects show its result.
+    private async Task RunAsync(Task task)
+    {
+        await _context.RunAsync(task);
+        _context.Publish();
+    }
+
     [Theory]
     [InlineData(GameDirection.North, -3, 2, 8, 1)]
     [InlineData(GameDirection.East, 2, -3, 1, 8)]
     [InlineData(GameDirection.South, -3, -1, 8, 1)]
     [InlineData(GameDirection.West, -1, -3, 1, 8)]
-    public void WhenThePlayerFacesStraight_ThenThePlacementStandsAcrossTheFacingInFront(
+    public async Task WhenThePlayerFacesStraight_ThenThePlacementStandsAcrossTheFacingInFront(
         GameDirection facing, int x, int y, int width, int depth)
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.TryMove(player, facing, turnOnly: true);
+        await _context.StepAsync(player.ClientId, facing, turnOnly: true);
 
         // Act
         var placement = _context.Game.GetSpotInFront(new GameCaller(player.ClientId), across: 8, along: 1);
@@ -26,11 +33,11 @@ public class GamePlacementTests
     }
 
     [Fact]
-    public void WhenThePlayerFacesDiagonally_ThenThePlacementIsRefused()
+    public async Task WhenThePlayerFacesDiagonally_ThenThePlacementIsRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.TryMove(player, GameDirection.NorthEast, turnOnly: true);
+        await _context.StepAsync(player.ClientId, GameDirection.NorthEast, turnOnly: true);
 
         // Act
         var exception = Record.Exception(() => _context.Game.GetSpotInFront(new GameCaller(player.ClientId), across: 4, along: 1));
@@ -55,7 +62,7 @@ public class GamePlacementTests
         // Arrange
         _context.AddConnectedPlayer("tab-1", isNamed: true);
         _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Act
         var exception = Record.Exception(() => _context.Game.GetSpotInFront(new GameCaller("tab-1"), across: 4, along: 1));
@@ -83,17 +90,20 @@ public class GamePlacementTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var wall = new Wall { X = 0, Y = 2, Width = 1, Depth = 4 };
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        await _context.Game.PlaceAsync(wall, CancellationToken.None);
+        await RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
+        await _context.SaveAsync();
 
         // Assert
         var (name, placed) = Assert.Single(_context.Game.Objects);
         Assert.Same(wall, placed);
         Assert.StartsWith("wall-", name);
         Assert.Equal("wall-".Length + 8, name.Length);
-        Assert.Equal(1, _context.Root.WriteCount);
-        Assert.Same(wall, Assert.Single(_context.Game.GetTargetObjects(player)));
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
+        Assert.Same(wall, Assert.Single(await _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId))));
     }
 
     [Fact]
@@ -103,7 +113,7 @@ public class GamePlacementTests
         var tree = new Tree { X = 10, Y = 10 };
 
         // Act
-        await _context.Game.PlaceAsync(tree, CancellationToken.None);
+        await RunAsync(_context.Game.PlaceAsync(tree, CancellationToken.None));
 
         // Assert
         var (name, placed) = Assert.Single(_context.Game.Objects);
@@ -119,12 +129,11 @@ public class GamePlacementTests
 
         // Act
         var exception = await Record.ExceptionAsync(() =>
-            _context.Game.PlaceAsync(new Wall { X = 0, Y = 2, Width = 1, Depth = 4 }, CancellationToken.None));
+            RunAsync(_context.Game.PlaceAsync(new Wall { X = 0, Y = 2, Width = 1, Depth = 4 }, CancellationToken.None)));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.Single(_context.Game.Objects);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -134,7 +143,7 @@ public class GamePlacementTests
         _context.AddConnectedPlayer("tab-1");
 
         // Act
-        await _context.Game.PlaceAsync(new Door { X = 0, Y = 0, IsOpen = true }, CancellationToken.None);
+        await RunAsync(_context.Game.PlaceAsync(new Door { X = 0, Y = 0, IsOpen = true }, CancellationToken.None));
 
         // Assert
         Assert.Single(_context.Game.Objects);
@@ -147,7 +156,7 @@ public class GamePlacementTests
         var wall = new Wall { X = 50, Y = 50 };
 
         // Act
-        await _context.Game.PlaceAsync(wall, CancellationToken.None);
+        await RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
 
         // Assert
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
@@ -172,13 +181,37 @@ public class GamePlacementTests
     }
 
     [Fact]
+    public async Task WhenAnotherThreadAsksWhetherAnAreaIsFree_ThenItGetsTheStateOfTheLastTick()
+    {
+        // Arrange
+        var wall = _context.AddWall(0, 10);
+        var area = new GameArea(20, 20, 4, 1);
+        await RunAsync(_context.Game.PlaceAsync(new Wall { X = 20, Y = 20 }, CancellationToken.None));
+
+        // Act
+        var isWallAreaFree = await Task.Run(() => _context.Game.IsFree(wall.Area));
+        var isPlacedAreaFree = await Task.Run(() => _context.Game.IsFree(area));
+
+        // Assert
+        Assert.False(isWallAreaFree);
+        Assert.False(isPlacedAreaFree);
+    }
+
+    [Fact]
+    public void WhenTheAreaIsLargerThanAnObjectCanBe_ThenIsFreeIsRefused()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => _context.Game.IsFree(new GameArea(0, 0, GameObject.MaximumSize + 1, 1)));
+    }
+
+    [Fact]
     public async Task WhenTheObjectIsAlreadyPartOfTheGame_ThenPlacingIsRefused()
     {
         // Arrange
         var wall = _context.AddWall(50, 50);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => _context.Game.PlaceAsync(wall, CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None)));
 
         // Assert
         Assert.Equal("gameObject", Assert.IsType<ArgumentException>(exception).ParamName);

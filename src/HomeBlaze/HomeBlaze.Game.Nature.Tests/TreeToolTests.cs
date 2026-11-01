@@ -12,14 +12,24 @@ public class TreeToolTests
         _tool = _context.AddTool("tree-tool", new TreeTool(new Random(876)));
     }
 
+    // Runs the operation's world command and publishes, so the subjects show its result.
+    private async Task RunAsync(Task task)
+    {
+        await _context.RunAsync(task);
+        _context.Publish();
+    }
+
     [Fact]
     public async Task WhenAPlayerPlantsATreeWithoutAVariant_ThenARandomTreeStandsInFront()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        await _tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(_tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
+        await _context.SaveAsync();
 
         // Assert
         var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
@@ -27,8 +37,8 @@ public class TreeToolTests
         Assert.InRange(tree.Variant, 0, Tree.VariantCount - 1);
         Assert.InRange(tree.Rotation, 0, 359);
         Assert.InRange(tree.Scale, Tree.MinimumScale, Tree.MaximumScale);
-        Assert.Equal(1, _context.Root.WriteCount);
-        Assert.Same(tree, Assert.Single(_context.Game.GetTargetObjects(player)));
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
+        Assert.Same(tree, Assert.Single(await _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId))));
     }
 
     [Fact]
@@ -38,7 +48,7 @@ public class TreeToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        await _tool.PlantTreeAsync(5, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(_tool.PlantTreeAsync(5, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         Assert.Equal(5, Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value).Variant);
@@ -53,7 +63,7 @@ public class TreeToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        await _tool.PlantTreeAsync(variant, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(_tool.PlantTreeAsync(variant, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
@@ -72,11 +82,11 @@ public class TreeToolTests
         // Act
         for (var index = 0; index < 20; index++)
         {
-            await _tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None);
+            await RunAsync(_tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
             var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
             rotations.Add(tree.Rotation);
             scales.Add(tree.Scale);
-            await tree.DemolishAsync(CancellationToken.None);
+            await RunAsync(tree.DemolishAsync(CancellationToken.None));
         }
 
         // Assert
@@ -95,7 +105,7 @@ public class TreeToolTests
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _tool.PlantTreeAsync(variant, new GameCaller(player.ClientId), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => RunAsync(_tool.PlantTreeAsync(variant, new GameCaller(player.ClientId), CancellationToken.None)));
         Assert.Empty(_context.Game.Objects);
     }
 
@@ -107,7 +117,7 @@ public class TreeToolTests
         _context.AddWall(1, 3, width: 1);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => _tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(_tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None)));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
@@ -118,6 +128,6 @@ public class TreeToolTests
     public async Task WhenThereIsNoActor_ThenPlantingIsRefused()
     {
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _tool.PlantTreeAsync(null, null, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(_tool.PlantTreeAsync(null, null, CancellationToken.None)));
     }
 }

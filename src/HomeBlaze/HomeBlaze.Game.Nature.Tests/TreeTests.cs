@@ -142,18 +142,18 @@ public class TreeTests
     }
 
     [Fact]
-    public void WhenATreeStandsInFront_ThenThePlayerCannotStepIntoIt()
+    public async Task WhenATreeStandsInFront_ThenThePlayerCannotStepIntoIt()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.AddObject("tree", new Tree { X = 0, Y = 2 });
 
         // Act
-        _context.TimeProvider.Advance(Game.StepInterval);
-        var result = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
+        var result = await _context.StepAsync(player.ClientId, GameDirection.North);
+        _context.Publish();
 
         // Assert
-        Assert.False(result.IsAccepted);
+        Assert.False(result!.Value.IsAccepted);
         Assert.Equal((0, 0), (player.X, player.Y));
     }
 
@@ -162,7 +162,7 @@ public class TreeTests
     [InlineData(3, false)]
     [InlineData(-4, true)]
     [InlineData(4, true)]
-    public void WhenAPlayerStepsAlongsideTheTrunk_ThenOnlyAStepIntoItsEdgeIsRefused(int playerX, bool isAccepted)
+    public async Task WhenAPlayerStepsAlongsideTheTrunk_ThenOnlyAStepIntoItsEdgeIsRefused(int playerX, bool isAccepted)
     {
         // Arrange
         // The trunk covers -2 to 3 from west to east.
@@ -170,11 +170,10 @@ public class TreeTests
         _context.AddObject("tree", new Tree { X = -2, Y = 2, Variant = 0 });
 
         // Act
-        _context.TimeProvider.Advance(Game.StepInterval);
-        var result = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
+        var result = await _context.StepAsync(player.ClientId, GameDirection.North);
 
         // Assert
-        Assert.Equal(isAccepted, result.IsAccepted);
+        Assert.Equal(isAccepted, result!.Value.IsAccepted);
     }
 
     [Fact]
@@ -182,12 +181,16 @@ public class TreeTests
     {
         // Arrange
         var tree = _context.AddObject("tree", new Tree { X = 10, Y = 10 });
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        await tree.DemolishAsync(CancellationToken.None);
+        await _context.RunAsync(tree.DemolishAsync(CancellationToken.None));
+        _context.Publish();
 
         // Assert
+        await _context.SaveAsync();
         Assert.Empty(_context.Game.Objects);
-        Assert.Equal(1, _context.Root.WriteCount);
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 }

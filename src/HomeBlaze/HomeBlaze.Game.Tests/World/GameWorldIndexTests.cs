@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.World;
 
@@ -6,11 +7,11 @@ namespace HomeBlaze.Game.Tests.World;
 public class GameWorldIndexTests
 {
     [Fact]
-    public void WhenWallCoversATileOfTheArea_ThenTheAreaIsBlocked()
+    public void WhenABlockingEntityCoversATileOfTheArea_ThenTheAreaIsBlocked()
     {
         // Arrange
         var index = new GameWorldIndex();
-        index.AddOrUpdate(new Wall { X = 0, Y = 2, Width = 4, Depth = 1 });
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 2, 4, 1), isMovementBlocking: true));
 
         // Act
         var isBlocked = index.IsBlocked(new GameArea(3, 1, 2, 2), ignored: null);
@@ -20,11 +21,11 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenOnlyTheIgnoredObjectCoversTheArea_ThenTheAreaIsFree()
+    public void WhenOnlyTheIgnoredEntityCoversTheArea_ThenTheAreaIsFree()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var player = new GamePlayer { IsConnected = true };
+        var player = CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true);
         index.AddOrUpdate(player);
 
         // Act
@@ -35,16 +36,16 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenObjectMoves_ThenItsOldTilesAreFreeAndItsNewTilesBlocked()
+    public void WhenAnEntityMoves_ThenItsOldTilesAreFreeAndItsNewTilesBlocked()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall { X = 0, Y = 0 };
-        index.AddOrUpdate(wall);
+        var entity = CreateEntity(new GameArea(0, 0, 4, 1), isMovementBlocking: true);
+        index.AddOrUpdate(entity);
 
         // Act
-        wall.X = 100;
-        index.AddOrUpdate(wall);
+        entity.Area = new GameArea(100, 0, 4, 1);
+        index.AddOrUpdate(entity);
 
         // Assert
         Assert.False(index.IsBlocked(new GameArea(0, 0, 1, 1), ignored: null));
@@ -52,32 +53,32 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenObjectSpansSeveralChunks_ThenQueryReturnsItOnce()
+    public void WhenAnEntitySpansSeveralChunks_ThenQueryReturnsItOnce()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall { X = -40, Y = -1, Width = 80, Depth = 1 };
-        index.AddOrUpdate(wall);
-        var results = new List<GameObject>();
+        var entity = CreateEntity(new GameArea(-40, -1, 80, 1));
+        index.AddOrUpdate(entity);
+        var results = new List<GameEntity>();
 
         // Act
         index.Query(new GameArea(-50, -50, 100, 100), results);
 
         // Assert
-        Assert.Same(wall, Assert.Single(results));
+        Assert.Same(entity, Assert.Single(results));
     }
 
     [Fact]
-    public void WhenObjectIsRemoved_ThenQueryDoesNotReturnIt()
+    public void WhenAnEntityIsRemoved_ThenQueryDoesNotReturnIt()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall();
-        index.AddOrUpdate(wall);
-        var results = new List<GameObject>();
+        var entity = CreateEntity(new GameArea(0, 0, 1, 1));
+        index.AddOrUpdate(entity);
+        var results = new List<GameEntity>();
 
         // Act
-        index.Remove(wall);
+        index.Remove(entity);
         index.Query(new GameArea(-10, -10, 20, 20), results);
 
         // Assert
@@ -86,12 +87,12 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenPlayerIsDisconnected_ThenItNeitherBlocksNorIsReturned()
+    public void WhenAnEntityIsNeitherBlockingNorVisible_ThenItNeitherBlocksNorIsReturned()
     {
         // Arrange
         var index = new GameWorldIndex();
-        index.AddOrUpdate(new GamePlayer { IsConnected = false });
-        var results = new List<GameObject>();
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 2, 2), isVisible: false));
+        var results = new List<GameEntity>();
 
         // Act
         var isBlocked = index.IsBlocked(new GameArea(0, 0, 2, 2), ignored: null);
@@ -103,15 +104,15 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenObjectsStandAtNegativeCoordinates_ThenQueryFindsOnlyTheIntersectingOnes()
+    public void WhenEntitiesStandAtNegativeCoordinates_ThenQueryFindsOnlyTheIntersectingOnes()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var near = new Wall { X = -17, Y = -17, Width = 1 };
-        var far = new Wall { X = -300, Y = -300 };
+        var near = CreateEntity(new GameArea(-17, -17, 1, 1));
+        var far = CreateEntity(new GameArea(-300, -300, 4, 1));
         index.AddOrUpdate(near);
         index.AddOrUpdate(far);
-        var results = new List<GameObject>();
+        var results = new List<GameEntity>();
 
         // Act
         index.Query(new GameArea(-20, -20, 10, 10), results);
@@ -125,15 +126,15 @@ public class GameWorldIndexTests
     [InlineData(GameObject.MaximumSize + 1, 1, 1)]
     [InlineData(1, -4, 1)]
     [InlineData(1, 1, 0)]
-    public void WhenAnObjectHasASizeOutsideTheRange_ThenItNeitherBlocksNorIsReturned(int width, int depth, int height)
+    public void WhenAnEntityHasASizeOutsideTheRange_ThenItNeitherBlocksNorIsReturned(int width, int depth, int height)
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall { X = 0, Y = 0, Width = width, Depth = depth, Height = height };
-        var results = new List<GameObject>();
+        var entity = CreateEntity(new GameArea(0, 0, width, depth), isMovementBlocking: true, height: height);
+        var results = new List<GameEntity>();
 
         // Act
-        index.AddOrUpdate(wall);
+        index.AddOrUpdate(entity);
         index.Query(new GameArea(-10, -10, 20, 20), results);
 
         // Assert
@@ -143,29 +144,31 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenAnIndexedObjectGetsASizeOutsideTheRange_ThenItIsDropped()
+    public void WhenAnIndexedEntityGetsASizeOutsideTheRange_ThenItIsDroppedAndItsChunksAreChanged()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall { X = 0, Y = 0 };
-        index.AddOrUpdate(wall);
+        var entity = CreateEntity(new GameArea(0, 0, 4, 1), isMovementBlocking: true);
+        index.AddOrUpdate(entity);
+        index.Changes.Clear();
 
         // Act
-        wall.Width = 0;
-        index.AddOrUpdate(wall);
+        entity.Area = entity.Area with { Width = 0 };
+        index.AddOrUpdate(entity);
 
         // Assert
         Assert.False(index.IsBlocked(new GameArea(0, 0, 1, 1), ignored: null));
         Assert.Equal(0, index.Count);
+        Assert.True(index.Changes.Contains((0, 0)));
     }
 
     [Fact]
-    public void WhenAWallOrAClosedDoorCoversATile_ThenTheTileBlocksSound()
+    public void WhenAWallOrAClosedDoorIsReadIntoTheIndex_ThenItsTilesBlockSound()
     {
         // Arrange
         var index = new GameWorldIndex();
-        index.AddOrUpdate(new Wall { X = 0, Y = 0, Width = 4, Depth = 1 });
-        index.AddOrUpdate(new Door { X = 10, Y = 0 });
+        index.AddOrUpdate(ReadEntity(new Wall { X = 0, Y = 0, Width = 4, Depth = 1 }));
+        index.AddOrUpdate(ReadEntity(new Door { X = 10, Y = 0 }));
 
         // Act
         var isWallBlocked = index.IsSoundBlocked(3, 0);
@@ -177,38 +180,22 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenAnOpenDoorAPlayerOrNothingCoversATile_ThenTheTileLetsSoundThrough()
+    public void WhenAnOpenDoorABlockingEntityOrNothingCoversATile_ThenTheTileLetsSoundThrough()
     {
         // Arrange
         var index = new GameWorldIndex();
-        index.AddOrUpdate(new Door { X = 0, Y = 0, IsOpen = true });
-        index.AddOrUpdate(new GamePlayer { X = 10, Y = 0, IsConnected = true });
+        index.AddOrUpdate(ReadEntity(new Door { X = 0, Y = 0, IsOpen = true }));
+        index.AddOrUpdate(CreateEntity(new GameArea(10, 0, 2, 2), isMovementBlocking: true));
 
         // Act
         var isOpenDoorBlocked = index.IsSoundBlocked(1, 0);
-        var isPlayerBlocked = index.IsSoundBlocked(10, 0);
+        var isBlockerBlocked = index.IsSoundBlocked(10, 0);
         var isEmptyBlocked = index.IsSoundBlocked(50, 50);
 
         // Assert
         Assert.False(isOpenDoorBlocked);
-        Assert.False(isPlayerBlocked);
+        Assert.False(isBlockerBlocked);
         Assert.False(isEmptyBlocked);
-    }
-
-    [Fact]
-    public void WhenAnObjectBlocksMovementButNotSound_ThenItsTilesAreBlockedButLetSoundThrough()
-    {
-        // Arrange
-        var index = new GameWorldIndex();
-        index.AddOrUpdate(new MovementBlocker { X = 0, Y = 0, Width = 2, Depth = 2 });
-
-        // Act
-        var isBlocked = index.IsBlocked(new GameArea(1, 1, 1, 1), ignored: null);
-        var isSoundBlocked = index.IsSoundBlocked(1, 1);
-
-        // Assert
-        Assert.True(isBlocked);
-        Assert.False(isSoundBlocked);
     }
 
     [Fact]
@@ -217,17 +204,20 @@ public class GameWorldIndexTests
         // Arrange
         var index = new GameWorldIndex();
         var door = new Door { X = 0, Y = 0 };
-        index.AddOrUpdate(door);
+        var entity = ReadEntity(door);
+        index.AddOrUpdate(entity);
         var closedVersion = index.Version;
         var isClosedBlocked = index.IsSoundBlocked(1, 0);
 
         // Act
         door.IsOpen = true;
-        index.AddOrUpdate(door);
+        entity.ReadFromSubject();
+        index.AddOrUpdate(entity);
         var openVersion = index.Version;
         var isOpenBlocked = index.IsSoundBlocked(1, 0);
         door.IsOpen = false;
-        index.AddOrUpdate(door);
+        entity.ReadFromSubject();
+        index.AddOrUpdate(entity);
 
         // Assert
         Assert.True(isClosedBlocked);
@@ -238,18 +228,17 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenTheSoundBlockingObjectsOfAnAreaAreQueried_ThenOnlyWallsAndClosedDoorsAreFoundOnce()
+    public void WhenTheSoundBlockingEntitiesOfAnAreaAreQueried_ThenOnlySoundBlockingOnesAreFoundOnce()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall { X = 14, Y = 0, Width = 4, Depth = 1 };
-        var closedDoor = new Door { X = 0, Y = 4 };
+        var wall = CreateEntity(new GameArea(14, 0, 4, 1), isMovementBlocking: true, isSoundBlocking: true);
+        var closedDoor = CreateEntity(new GameArea(0, 4, 4, 1), isMovementBlocking: true, isSoundBlocking: true);
         index.AddOrUpdate(wall);
         index.AddOrUpdate(closedDoor);
-        index.AddOrUpdate(new Door { X = 0, Y = 8, IsOpen = true });
-        index.AddOrUpdate(new MovementBlocker { X = 8, Y = 8 });
-        index.AddOrUpdate(new GamePlayer { X = 10, Y = 10, IsConnected = true });
-        index.AddOrUpdate(new Wall { X = 100, Y = 100 });
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 8, 4, 1)));
+        index.AddOrUpdate(CreateEntity(new GameArea(8, 8, 1, 1), isMovementBlocking: true));
+        index.AddOrUpdate(CreateEntity(new GameArea(100, 100, 4, 1), isMovementBlocking: true, isSoundBlocking: true));
         var results = new List<GameArea>();
 
         // Act
@@ -262,20 +251,20 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenObjectsAreAddedMovedRemovedAndCleared_ThenTheVersionIncreasesEachTime()
+    public void WhenEntitiesAreAddedMovedRemovedAndCleared_ThenTheVersionIncreasesEachTime()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall();
+        var entity = CreateEntity(new GameArea(0, 0, 1, 1));
         var versions = new List<long> { index.Version };
 
         // Act
-        index.AddOrUpdate(wall);
+        index.AddOrUpdate(entity);
         versions.Add(index.Version);
-        wall.X = 10;
-        index.AddOrUpdate(wall);
+        entity.Area = new GameArea(10, 0, 1, 1);
+        index.AddOrUpdate(entity);
         versions.Add(index.Version);
-        index.Remove(wall);
+        index.Remove(entity);
         versions.Add(index.Version);
         index.Clear();
         versions.Add(index.Version);
@@ -285,20 +274,22 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenAnUnchangedObjectIsUpdatedOrAnUnknownOneRemoved_ThenTheVersionStays()
+    public void WhenAnUnchangedEntityIsUpdatedOrAnUnknownOneRemoved_ThenNeitherTheVersionNorTheChangesMove()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = new Wall();
-        index.AddOrUpdate(wall);
+        var entity = CreateEntity(new GameArea(0, 0, 1, 1));
+        index.AddOrUpdate(entity);
+        index.Changes.Clear();
         var version = index.Version;
 
         // Act
-        index.AddOrUpdate(wall);
-        index.Remove(new Wall());
+        index.AddOrUpdate(entity);
+        index.Remove(CreateEntity(new GameArea(0, 0, 1, 1)));
 
         // Assert
         Assert.Equal(version, index.Version);
+        Assert.Equal(0, index.Changes.Count);
     }
 
     [Fact]
@@ -307,17 +298,307 @@ public class GameWorldIndexTests
         // Arrange
         var index = new GameWorldIndex();
         var wall = new Wall { X = 0, Y = 0, Height = 4 };
-        index.AddOrUpdate(wall);
+        var entity = ReadEntity(wall);
+        index.AddOrUpdate(entity);
         var isBlockedBefore = index.IsSoundBlocked(0, 0);
         var versionBefore = index.Version;
 
         // Act
         wall.Height = 8;
-        index.AddOrUpdate(wall);
+        entity.ReadFromSubject();
+        index.AddOrUpdate(entity);
 
         // Assert
         Assert.False(isBlockedBefore);
         Assert.True(index.IsSoundBlocked(0, 0));
         Assert.True(index.Version > versionBefore);
+    }
+
+    [Fact]
+    public void WhenAnEntityMovesToAnotherChunk_ThenBothChunksAreChanged()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var entity = CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true);
+        index.AddOrUpdate(entity);
+        index.Changes.Clear();
+
+        // Act
+        entity.Area = new GameArea(16, 0, 2, 2);
+        index.AddOrUpdate(entity);
+
+        // Assert
+        Assert.True(index.Changes.Contains((0, 0)));
+        Assert.True(index.Changes.Contains((1, 0)));
+    }
+
+    [Fact]
+    public void WhenAnEntityIsAddedOrRemoved_ThenOnlyTheChunksOfItsAreaAreChanged()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var entity = CreateEntity(new GameArea(15, -1, 2, 2));
+
+        // Act
+        index.AddOrUpdate(entity);
+        var addedChunks = index.Changes.Chunks.ToHashSet();
+        index.Changes.Clear();
+        index.Remove(entity);
+        var removedChunks = index.Changes.Chunks.ToHashSet();
+
+        // Assert
+        HashSet<(long X, long Y)> expected = [(0, -1), (1, -1), (0, 0), (1, 0)];
+        Assert.Equal(expected, addedChunks);
+        Assert.Equal(expected, removedChunks);
+    }
+
+    [Fact]
+    public void WhenOnlyTheVisualOrTitleChanges_ThenTheChunksAreChangedButTheVersionStays()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var entity = CreateEntity(new GameArea(0, 0, 1, 1), isMovementBlocking: true);
+        index.AddOrUpdate(entity);
+        index.Changes.Clear();
+        var version = index.Version;
+
+        // Act
+        entity.Visual = GameVisual.Box(1, 2, 1);
+        index.AddOrUpdate(entity);
+        var changesAfterVisual = index.Changes.Count;
+        index.Changes.Clear();
+        entity.Title = "Renamed";
+        index.AddOrUpdate(entity);
+
+        // Assert
+        Assert.Equal(1, changesAfterVisual);
+        Assert.True(index.Changes.Contains((0, 0)));
+        Assert.Equal(version, index.Version);
+        Assert.True(index.IsBlocked(new GameArea(0, 0, 1, 1), ignored: null));
+    }
+
+    [Fact]
+    public void WhenAMovementBlockingEntityAlreadyOverlapsThePlayer_ThenItDoesNotBlockTheStepOut()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var door = CreateEntity(new GameArea(0, 0, 4, 1), isMovementBlocking: true);
+        var player = CreateEntity(new GameArea(1, 0, 2, 2), isMovementBlocking: true);
+        index.AddOrUpdate(door);
+        index.AddOrUpdate(player);
+
+        // Act
+        var isBlocked = index.IsBlockedExceptOverlapping(new GameArea(1, 1, 2, 2), player);
+        var isSidewaysBlocked = index.IsBlockedExceptOverlapping(new GameArea(0, 0, 2, 2), player);
+
+        // Assert
+        Assert.False(isBlocked);
+        Assert.False(isSidewaysBlocked);
+        Assert.True(index.IsBlocked(new GameArea(0, 0, 2, 2), ignored: player));
+    }
+
+    [Fact]
+    public void WhenAMovementBlockingEntityDoesNotOverlapThePlayer_ThenItBlocksTheStep()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var door = CreateEntity(new GameArea(0, 0, 4, 1), isMovementBlocking: true);
+        var wall = CreateEntity(new GameArea(0, 3, 4, 1), isMovementBlocking: true);
+        var player = CreateEntity(new GameArea(1, 0, 2, 2), isMovementBlocking: true);
+        index.AddOrUpdate(door);
+        index.AddOrUpdate(wall);
+        index.AddOrUpdate(player);
+
+        // Act
+        var isBlocked = index.IsBlockedExceptOverlapping(new GameArea(1, 2, 2, 2), player);
+
+        // Assert
+        Assert.True(isBlocked);
+    }
+
+    [Fact]
+    public void WhenAChunkIsQueried_ThenEveryEntityCoveringItIsReturnedOnce()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var blocking = CreateEntity(new GameArea(0, 0, 1, 1), isMovementBlocking: true);
+        var hidden = CreateEntity(new GameArea(5, 5, 1, 1), isVisible: false);
+        var spanning = CreateEntity(new GameArea(-20, 2, 40, 1));
+        var elsewhere = CreateEntity(new GameArea(16, 0, 1, 1));
+        index.AddOrUpdate(blocking);
+        index.AddOrUpdate(hidden);
+        index.AddOrUpdate(spanning);
+        index.AddOrUpdate(elsewhere);
+        var results = new List<GameEntity>();
+
+        // Act
+        index.QueryChunk((0, 0), results);
+
+        // Assert
+        Assert.Equal(3, results.Count);
+        Assert.Contains(blocking, results);
+        Assert.Contains(hidden, results);
+        Assert.Contains(spanning, results);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, 0)]
+    [InlineData(15, 16, 0, 1)]
+    [InlineData(-1, -16, -1, -1)]
+    [InlineData(-17, 31, -2, 1)]
+    [InlineData(int.MaxValue, int.MinValue, 134_217_727, -134_217_728)]
+    [InlineData((long)int.MaxValue + 2, 0, 134_217_728, 0)]
+    public void WhenATileIsMappedToItsChunk_ThenChunksAreSixteenTilesWide(long x, long y, long chunkX, long chunkY)
+    {
+        // Act
+        var chunk = GameWorldIndex.GetChunk(x, y);
+
+        // Assert
+        Assert.Equal((chunkX, chunkY), chunk);
+    }
+
+    [Fact]
+    public void WhenTheIndexIsCleared_ThenTheChunksOfAllEntitiesAreChanged()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 1, 1)));
+        index.AddOrUpdate(CreateEntity(new GameArea(40, 40, 1, 1)));
+        index.Changes.Clear();
+
+        // Act
+        index.Clear();
+
+        // Assert
+        Assert.Equal(0, index.Count);
+        Assert.True(index.Changes.Contains((0, 0)));
+        Assert.True(index.Changes.Contains((2, 2)));
+    }
+
+    [Theory]
+    [InlineData(1, 1, 1, true)]
+    [InlineData(GameObject.MaximumSize, GameObject.MaximumSize, GameObject.MaximumSize, true)]
+    [InlineData(0, 1, 1, false)]
+    [InlineData(1, GameObject.MaximumSize + 1, 1, false)]
+    [InlineData(1, 1, -1, false)]
+    public void WhenTheSizeIsChecked_ThenOnlyOneToTheMaximumIsValid(int width, int depth, int height, bool expected)
+    {
+        // Act
+        var isValid = GameWorldIndex.HasValidSize(new GameArea(0, 0, width, depth), height);
+
+        // Assert
+        Assert.Equal(expected, isValid);
+    }
+
+    [Fact]
+    public void WhenTheSameAreaIsQueriedTwiceOrQueriedForSoundAfterwards_ThenEachQueryReturnsTheEntity()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var entity = CreateEntity(new GameArea(-20, 0, 40, 1), isMovementBlocking: true, isSoundBlocking: true);
+        index.AddOrUpdate(entity);
+        var area = new GameArea(-30, -10, 60, 20);
+        var first = new List<GameEntity>();
+        var second = new List<GameEntity>();
+        var soundBlocking = new List<GameArea>();
+
+        // Act
+        index.Query(area, first);
+        index.Query(area, second);
+        index.QuerySoundBlocking(area, soundBlocking);
+
+        // Assert
+        Assert.Same(entity, Assert.Single(first));
+        Assert.Same(entity, Assert.Single(second));
+        Assert.Equal(entity.Area, Assert.Single(soundBlocking));
+    }
+
+    [Fact]
+    public void WhenAChunkEmptiesAndAnotherEntityFillsANewChunk_ThenOnlyTheNewEntityIsReturned()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var removed = CreateEntity(new GameArea(0, 0, 1, 1));
+        var moved = CreateEntity(new GameArea(1, 1, 1, 1));
+        index.AddOrUpdate(removed);
+        index.AddOrUpdate(moved);
+        index.Remove(removed);
+        moved.Area = new GameArea(100, 100, 1, 1);
+        index.AddOrUpdate(moved);
+        var added = CreateEntity(new GameArea(200, 200, 1, 1));
+        var oldChunk = new List<GameEntity>();
+        var movedChunk = new List<GameEntity>();
+        var addedChunk = new List<GameEntity>();
+
+        // Act
+        index.AddOrUpdate(added);
+        index.QueryChunk((0, 0), oldChunk);
+        index.QueryChunk(GameWorldIndex.GetChunk(100, 100), movedChunk);
+        index.QueryChunk(GameWorldIndex.GetChunk(200, 200), addedChunk);
+
+        // Assert
+        Assert.Empty(oldChunk);
+        Assert.Same(moved, Assert.Single(movedChunk));
+        Assert.Same(added, Assert.Single(addedChunk));
+    }
+
+    [Fact]
+    public void WhenTheIndexIsClearedAndFilledAgain_ThenOnlyTheNewEntitiesAreReturned()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 1, 1)));
+        index.AddOrUpdate(CreateEntity(new GameArea(40, 40, 1, 1)));
+        index.Clear();
+        var added = CreateEntity(new GameArea(100, 100, 1, 1));
+        var results = new List<GameEntity>();
+
+        // Act
+        index.AddOrUpdate(added);
+        index.Query(new GameArea(-200, -200, 400, 400), results);
+
+        // Assert
+        Assert.Same(added, Assert.Single(results));
+    }
+
+    [Fact]
+    public void WhenAnAreaEndsBeyondTheIntRange_ThenItIsIndexedFoundAndRemoved()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var entity = CreateEntity(new GameArea(int.MaxValue - 1, 0, 4, 1), isMovementBlocking: true);
+        var results = new List<GameEntity>();
+
+        // Act
+        index.AddOrUpdate(entity);
+        index.Query(new GameArea(int.MaxValue, 0, 1, 1), results);
+        var isBlocked = index.IsBlocked(new GameArea(int.MaxValue, 0, 1, 1), ignored: null);
+        var isChangedBeyond = index.Changes.Contains((134_217_728, 0));
+        index.Remove(entity);
+
+        // Assert
+        Assert.Same(entity, Assert.Single(results));
+        Assert.True(isBlocked);
+        Assert.True(isChangedBeyond);
+        Assert.Equal(0, index.Count);
+        Assert.False(index.IsBlocked(new GameArea(int.MaxValue, 0, 1, 1), ignored: null));
+    }
+
+    private static GameEntity CreateEntity(
+        GameArea area, bool isMovementBlocking = false, bool isSoundBlocking = false, bool isVisible = true, int height = 1) =>
+        new(new MovementBlocker())
+        {
+            Area = area,
+            Height = height,
+            IsMovementBlocking = isMovementBlocking,
+            IsSoundBlocking = isSoundBlocking,
+            IsVisible = isVisible
+        };
+
+    private static GameEntity ReadEntity(GameObject subject)
+    {
+        var entity = new GameEntity(subject);
+        entity.ReadFromSubject();
+        return entity;
     }
 }

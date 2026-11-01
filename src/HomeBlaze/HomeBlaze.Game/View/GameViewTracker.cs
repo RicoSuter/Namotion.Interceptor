@@ -1,13 +1,13 @@
-using HomeBlaze.Abstractions;
 using HomeBlaze.Game.Abstractions;
+using HomeBlaze.Game.Simulation;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.View;
 
 /// <summary>
-/// Remembers what one page knows and turns the objects in view into the changes it lacks. Not thread-safe: the game
-/// calls it under its lock, the page reads <see cref="Known"/> and <see cref="GetPlayerColor"/> on its own render
-/// thread between updates.
+/// Remembers what one page knows and turns the entities in view into the changes it lacks. Not thread-safe: the
+/// simulation calls <see cref="Update"/> on its thread and the page reads <see cref="Known"/> and
+/// <see cref="GetPlayerColor"/> only after the update's task completed, never while one runs.
 /// </summary>
 internal sealed class GameViewTracker
 {
@@ -18,57 +18,57 @@ internal sealed class GameViewTracker
 
     private static readonly GameViewUpdate Empty = new([], []);
 
-    private readonly Dictionary<GameObject, GameViewObject> _known = new(ReferenceEqualityComparer.Instance);
-    private readonly HashSet<GameObject> _seen = new(ReferenceEqualityComparer.Instance);
-    private readonly List<GameObject> _left = [];
+    private readonly Dictionary<GameEntity, GameViewObject> _known = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<GameEntity> _seen = new(ReferenceEqualityComparer.Instance);
+    private readonly List<GameEntity> _left = [];
     private readonly Dictionary<string, string> _playerColors = new();
     private int _nextId;
 
     public IEnumerable<GameViewObject> Known => _known.Values;
 
-    /// <param name="objects">The visible objects in view.</param>
+    /// <param name="entities">The visible entities in view.</param>
     /// <param name="self">The page's own player, or null.</param>
     /// <param name="logger">Warns about object types with an invalid visual.</param>
-    public GameViewUpdate Update(IReadOnlyList<GameObject> objects, GamePlayer? self, ILogger logger)
+    public GameViewUpdate Update(IReadOnlyList<GameEntity> entities, PlayerEntity? self, ILogger logger)
     {
-        var upserted = UpsertChanged(objects, self, logger);
+        var upserted = UpsertChanged(entities, self, logger);
         var removed = RemoveUnseen();
         return upserted is null && removed is null ? Empty : new GameViewUpdate(upserted ?? [], removed ?? []);
     }
 
     // Returns null when nothing changed, so an unchanged view allocates nothing.
-    private List<GameViewObject>? UpsertChanged(IReadOnlyList<GameObject> objects, GamePlayer? self, ILogger logger)
+    private List<GameViewObject>? UpsertChanged(IReadOnlyList<GameEntity> entities, PlayerEntity? self, ILogger logger)
     {
         List<GameViewObject>? upserted = null;
         _seen.Clear();
-        for (var index = 0; index < objects.Count; index++)
+        for (var index = 0; index < entities.Count; index++)
         {
-            var gameObject = objects[index];
-            _seen.Add(gameObject);
-            var isSelf = ReferenceEquals(gameObject, self);
-            var known = _known.GetValueOrDefault(gameObject);
-            if (known is not null && IsUnchanged(known, gameObject, isSelf))
+            var entity = entities[index];
+            _seen.Add(entity);
+            var isSelf = ReferenceEquals(entity, self);
+            var known = _known.GetValueOrDefault(entity);
+            if (known is not null && IsUnchanged(known, entity, isSelf))
             {
                 continue;
             }
 
-            var view = CreateView(gameObject, known?.Id ?? $"o{++_nextId}", isSelf, logger);
-            _known[gameObject] = view;
+            var view = CreateView(entity, known?.Id ?? $"o{++_nextId}", isSelf, logger);
+            _known[entity] = view;
             (upserted ??= []).Add(view);
         }
 
         return upserted;
     }
 
-    // Call after UpsertChanged, which collects the seen objects; returns null when every known object was seen.
+    // Call after UpsertChanged, which collects the seen entities; returns null when every known entity was seen.
     private string[]? RemoveUnseen()
     {
         _left.Clear();
-        foreach (var gameObject in _known.Keys)
+        foreach (var entity in _known.Keys)
         {
-            if (!_seen.Contains(gameObject))
+            if (!_seen.Contains(entity))
             {
-                _left.Add(gameObject);
+                _left.Add(entity);
             }
         }
 
@@ -84,68 +84,64 @@ internal sealed class GameViewTracker
             _known.Remove(_left[index]);
         }
 
+        _left.Clear();
         return removed;
     }
 
-    private bool IsUnchanged(GameViewObject known, GameObject gameObject, bool isSelf) =>
-        HasSameArea(known, gameObject) && HasSameState(known, gameObject, isSelf) && HasSameLook(known, gameObject);
+    private bool IsUnchanged(GameViewObject known, GameEntity entity, bool isSelf) =>
+        HasSameArea(known, entity) && HasSameState(known, entity, isSelf) && HasSameLook(known, entity);
 
     // A cached visual is the same instance, so the reference check spares the value comparison; neither allocates.
-    private bool HasSameLook(GameViewObject known, GameObject gameObject) =>
-        HasSamePassage(known, gameObject) && HasSameLabel(known, gameObject) && Equals(known.Visual, GetVisual(gameObject));
+    private bool HasSameLook(GameViewObject known, GameEntity entity) =>
+        known.IsMovementBlocking == entity.IsMovementBlocking && HasSameLabel(known, entity) && Equals(known.Visual, GetVisual(entity));
 
-    private static bool HasSameArea(GameViewObject known, GameObject gameObject) =>
-        known.X == gameObject.X && known.Y == gameObject.Y && known.Width == gameObject.Width && known.Depth == gameObject.Depth;
+    private static bool HasSameArea(GameViewObject known, GameEntity entity) =>
+        known.X == entity.Area.X && known.Y == entity.Area.Y && known.Width == entity.Area.Width && known.Depth == entity.Area.Depth;
 
-    private static bool HasSameState(GameViewObject known, GameObject gameObject, bool isSelf) =>
-        known.Height == gameObject.Height && known.IsSelf == isSelf && known.Facing == GetFacing(gameObject) && HasSameVoice(known, gameObject);
+    private static bool HasSameState(GameViewObject known, GameEntity entity, bool isSelf) =>
+        known.Height == entity.Height && known.IsSelf == isSelf && known.Facing == GetFacing(entity) && HasSameVoice(known, entity);
 
-    private static bool HasSameVoice(GameViewObject known, GameObject gameObject) =>
-        known.IsMicrophoneOn == IsMicrophoneOn(gameObject) && known.IsAudioOn == IsAudioOn(gameObject);
+    private static bool HasSameVoice(GameViewObject known, GameEntity entity) =>
+        known.IsMicrophoneOn == IsMicrophoneOn(entity) && known.IsAudioOn == IsAudioOn(entity);
 
-    private static bool HasSamePassage(GameViewObject known, GameObject gameObject) =>
-        known.IsMovementBlocking == gameObject.IsMovementBlocking;
+    private bool HasSameLabel(GameViewObject known, GameEntity entity) =>
+        known.Title == entity.Title && known.Color == GetColor(entity);
 
-    private bool HasSameLabel(GameViewObject known, GameObject gameObject) =>
-        known.Title == GetTitle(gameObject) && known.Color == GetColor(gameObject);
-
-    private GameViewObject CreateView(GameObject gameObject, string id, bool isSelf, ILogger logger)
+    private GameViewObject CreateView(GameEntity entity, string id, bool isSelf, ILogger logger)
     {
-        var visual = GetVisual(gameObject);
-        return new(id, GetKind(gameObject), gameObject.X, gameObject.Y, gameObject.Width, gameObject.Depth, gameObject.Height,
-            GetFacing(gameObject), GetTitle(gameObject), GetColor(gameObject), gameObject.IsMovementBlocking, isSelf,
-            IsMicrophoneOn(gameObject), IsAudioOn(gameObject), visual, GetParts(gameObject, visual, logger));
+        var visual = GetVisual(entity);
+        var area = entity.Area;
+        return new(id, GetKind(entity), area.X, area.Y, area.Width, area.Depth, entity.Height, GetFacing(entity), entity.Title,
+            GetColor(entity), entity.IsMovementBlocking, isSelf, IsMicrophoneOn(entity), IsAudioOn(entity), visual,
+            GetParts(entity, visual, logger));
     }
 
-    private static GameVisual? GetVisual(GameObject gameObject) => gameObject is GamePlayer ? null : gameObject.Visual;
+    private static GameVisual? GetVisual(GameEntity entity) => entity is PlayerEntity ? null : entity.Visual;
 
-    private static IReadOnlyList<GameViewPart> GetParts(GameObject gameObject, GameVisual? visual, ILogger logger) =>
-        gameObject is GamePlayer ? [] : GameViewPart.FromVisual(GameVisualValidator.GetValidVisual(gameObject, visual, logger));
+    private static IReadOnlyList<GameViewPart> GetParts(GameEntity entity, GameVisual? visual, ILogger logger) =>
+        entity is PlayerEntity ? [] : GameViewPart.FromVisual(GameVisualValidator.GetValidVisual(entity.Subject, visual, logger));
 
-    private static string GetKind(GameObject gameObject) =>
-        gameObject is GamePlayer ? GameViewObject.PlayerKind : GameViewObject.ObjectKind;
+    private static string GetKind(GameEntity entity) =>
+        entity is PlayerEntity ? GameViewObject.PlayerKind : GameViewObject.ObjectKind;
 
-    private static int GetFacing(GameObject gameObject) => gameObject is GamePlayer player ? (int)player.Facing : 0;
+    private static int GetFacing(GameEntity entity) => entity is PlayerEntity player ? (int)player.Facing : 0;
 
-    private static bool IsMicrophoneOn(GameObject gameObject) => gameObject is GamePlayer { IsMicrophoneOn: true };
+    private static bool IsMicrophoneOn(GameEntity entity) => entity is PlayerEntity { IsMicrophoneOn: true };
 
-    private static bool IsAudioOn(GameObject gameObject) => gameObject is GamePlayer { IsAudioOn: true };
-
-    private static string GetTitle(GameObject gameObject) =>
-        (gameObject as ITitleProvider)?.Title ?? string.Empty;
+    private static bool IsAudioOn(GameEntity entity) => entity is PlayerEntity { IsAudioOn: true };
 
     // Other objects take their colors from their visual.
-    private string GetColor(GameObject gameObject) => gameObject is GamePlayer player ? GetPlayerColor(player) : string.Empty;
+    private string GetColor(GameEntity entity) => entity is PlayerEntity player ? GetPlayerColor(player.ClientId) : string.Empty;
 
     /// <summary>
-    /// Gets the color of the player, the one its view object carries.
+    /// Gets the color of the player of the client, the one its view object carries.
     /// </summary>
-    public string GetPlayerColor(GamePlayer player)
+    public string GetPlayerColor(string clientId)
     {
-        if (!_playerColors.TryGetValue(player.ClientId, out var color))
+        if (!_playerColors.TryGetValue(clientId, out var color))
         {
-            color = GameColors.FromId(player.ClientId);
-            _playerColors[player.ClientId] = color;
+            color = GameColors.FromId(clientId);
+            _playerColors[clientId] = color;
         }
 
         return color;

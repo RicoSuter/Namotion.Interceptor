@@ -1,6 +1,5 @@
 using HomeBlaze.Game.Abstractions;
-using HomeBlaze.Game.Clients;
-using HomeBlaze.Game.World;
+using HomeBlaze.Game.Simulation;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game;
@@ -18,19 +17,28 @@ public partial class Game
     internal const string NoRenameActorMessage = "Only a player in the game can change their name.";
 
     /// <summary>
+    /// How often the game reconciles its players without a signal.
+    /// </summary>
+    internal static readonly TimeSpan HousekeepingInterval = TimeSpan.FromSeconds(5);
+
+    // Never disposed: change observers may still signal a disposed game, and without AvailableWaitHandle the semaphore
+    // holds nothing to release.
+    private readonly SemaphoreSlim _signal = new(0, 1);
+
+    /// <summary>
     /// Gets the name of the client of the caller's player, or null while that client is anonymous or the caller is not a
     /// player of this game.
     /// </summary>
     internal string? GetClientName(GameCaller? caller)
     {
-        if (GetActor(caller) is not { } player || _clients.GetClients() is not { } clients)
+        if (GetActor(caller) is null || _clients.GetClients() is not { } clients)
         {
             return null;
         }
 
         foreach (var client in clients)
         {
-            if (client.Id == player.ClientId)
+            if (client.Id == caller!.ClientId)
             {
                 return client.IsNamed ? client.Title : null;
             }
@@ -41,7 +49,7 @@ public partial class Game
 
     /// <summary>
     /// Names the client of the caller's player, which keeps the player when its browser closes; the player takes the
-    /// name with the next reconcile, which this requests.
+    /// name with the reconcile that this queues.
     /// </summary>
     /// <exception cref="ArgumentException">The name is empty or longer than <see cref="MaximumNameLength"/> after trimming.</exception>
     /// <exception cref="InvalidOperationException">The caller is not a player of this game, or its client is gone.</exception>
@@ -54,126 +62,73 @@ public partial class Game
             throw new ArgumentException($"A name has at most {MaximumNameLength} characters.", nameof(name));
         }
 
-        var player = GetActor(caller) ?? throw new InvalidOperationException(NoRenameActorMessage);
-        await _clients.RenameAsync(player.ClientId, trimmed, cancellationToken);
+        if (GetActor(caller) is null)
+        {
+            throw new InvalidOperationException(NoRenameActorMessage);
+        }
+
+        await _clients.RenameAsync(caller!.ClientId, trimmed, cancellationToken);
 
         // Not every directory reports the rename as a client change.
-        SignalReconcile();
+        PostReconcile();
     }
 
     /// <summary>
-    /// Brings <see cref="Players"/> in line with the clients: a client that is connected or named has a player, which
-    /// joins on a free position; does nothing while there is no installation.
+    /// Makes the housekeeping loop reconcile the players soon; never blocks, so change observers may call it.
     /// </summary>
-    internal void ReconcilePlayers()
+    internal void SignalReconcile()
     {
-        var clients = _clients.GetClients();
-        if (clients is null)
+        try
         {
-            return;
+            _signal.Release();
         }
-
-        lock (_lock)
+        catch (SemaphoreFullException)
         {
-            SynchronizePlayerSet(clients);
-            ReleaseVoiceOfReplacedPlayers();
+            // Already signaled.
+        }
+    }
 
-            var index = GetIndex();
-            foreach (var client in clients)
+    /// <summary>
+    /// Reads the clients now and queues a reconcile of the players with them; does nothing while there is no installation.
+    /// </summary>
+    internal void PostReconcile()
+    {
+        if (_clients.GetClients() is { } clients)
+        {
+            _simulation.Post(() => LogJoined(_world.Reconcile(clients)));
+        }
+    }
+
+    private async Task RunHousekeepingLoopAsync(CancellationToken cancellationToken)
+    {
+        // One wait outlives the passes that a delay ends; a new wait per pass would leave the old one queued to take the next signal.
+        Task? signalTask = null;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
             {
-                if (Players.TryGetValue(client.Id, out var player))
-                {
-                    UpdatePlayer(player, client, index);
-                }
+                PostReconcile();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Updating the players of the game {Game} failed", Title);
+            }
+
+            // WhenAny does not throw; a canceled wait ends the loop through the condition.
+            signalTask ??= _signal.WaitAsync(cancellationToken);
+            var completed = await Task.WhenAny(signalTask, Task.Delay(HousekeepingInterval, _timeProvider, cancellationToken));
+            if (completed == signalTask)
+            {
+                signalTask = null;
             }
         }
     }
 
-    // Callers hold _lock. Replaces Players only when a player is added or removed.
-    private void SynchronizePlayerSet(IReadOnlyList<GameClient> clients)
+    private void LogJoined(List<PlayerEntity>? joined)
     {
-        var current = CurrentPlayers;
-        var next = AddMissingPlayers(clients, RemoveStalePlayers(clients, current));
-        if (!ReferenceEquals(next, current))
+        foreach (var player in joined ?? [])
         {
-            ReplacePlayers(next);
-            RequestIndexRebuild();
-            _isSaveRequested = true;
+            _logger.LogDebug("{Client} joined the game {Game} at {X}, {Y}", player.ClientTitle, Title, player.Area.X, player.Area.Y);
         }
-    }
-
-    // Returns the dictionary itself when nothing changes, so that a copy only exists for a change.
-    private static Dictionary<string, GamePlayer> RemoveStalePlayers(IReadOnlyList<GameClient> clients, Dictionary<string, GamePlayer> players)
-    {
-        var result = players;
-        foreach (var id in players.Keys)
-        {
-            if (!ShouldHavePlayer(clients, id))
-            {
-                if (ReferenceEquals(result, players))
-                {
-                    result = new Dictionary<string, GamePlayer>(players);
-                }
-
-                result.Remove(id);
-            }
-        }
-
-        return result;
-    }
-
-    private static Dictionary<string, GamePlayer> AddMissingPlayers(IReadOnlyList<GameClient> clients, Dictionary<string, GamePlayer> players)
-    {
-        var result = players;
-        foreach (var client in clients)
-        {
-            if ((client.IsNamed || client.IsConnected) && !result.ContainsKey(client.Id))
-            {
-                if (ReferenceEquals(result, players))
-                {
-                    result = new Dictionary<string, GamePlayer>(players);
-                }
-
-                result[client.Id] = new GamePlayer();
-            }
-        }
-
-        return result;
-    }
-
-    // Callers hold _lock.
-    private void UpdatePlayer(GamePlayer player, GameClient client, GameWorldIndex index)
-    {
-        var isJoining = client.IsConnected && !player.IsConnected;
-        player.ClientTitle = client.Title;
-        player.IsConnected = client.IsConnected;
-        if (!client.IsConnected)
-        {
-            ResetVoice(player);
-        }
-
-        if (isJoining)
-        {
-            var position = SpawnFinder.FindFreePosition(player.Area, area => !index.IsBlocked(area, player));
-            player.X = position.X;
-            player.Y = position.Y;
-            _isSaveRequested = true;
-            _logger.LogDebug("{Client} joined the game {Game} at {X}, {Y}", client.Title, Title, position.X, position.Y);
-        }
-
-        index.AddOrUpdate(player);
-    }
-
-    private static bool ShouldHavePlayer(IReadOnlyList<GameClient> clients, string id)
-    {
-        foreach (var client in clients)
-        {
-            if (client.Id == id)
-            {
-                return client.IsNamed || client.IsConnected;
-            }
-        }
-
-        return false;
     }
 }

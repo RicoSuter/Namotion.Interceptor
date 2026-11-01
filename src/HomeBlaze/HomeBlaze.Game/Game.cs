@@ -1,13 +1,17 @@
 using System.ComponentModel;
+using System.Reactive.Concurrency;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Clients;
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Voice;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Game;
 
@@ -26,15 +30,17 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     /// </summary>
     public static readonly TimeSpan StepInterval = TimeSpan.FromMilliseconds(180);
 
-    // Guards Players, Objects, the positions of their objects and the index, so that two players never take one tile.
-    private readonly Lock _lock = new();
     private readonly IGameClientDirectory _clients;
     private readonly ILogger _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly GameSimulation _simulation;
+    private readonly GameWorldState _world;
+    private readonly GamePublisher _publisher;
 
-    // Guarded by _lock: an outside replacement of Players or Objects that a copy-on-write of the game starts from.
-    private Dictionary<string, GamePlayer>? _pendingPlayers;
-    private Dictionary<string, GameObject>? _pendingObjects;
+    private int _isStarted;
+
+    [ThreadStatic]
+    private static bool t_isAssigningClientIds;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -73,11 +79,41 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _timeProvider = timeProvider;
         _logger = logger;
         _voiceMixer = new GameVoiceMixer(timeProvider, logger);
+        _simulation = new GameSimulation(timeProvider, logger);
+        _world = new GameWorldState(timeProvider, _voiceMixer);
+        _publisher = new GamePublisher(this, _world, timeProvider);
+        _lastSaveTimestamp = timeProvider.GetTimestamp();
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
         Objects = new Dictionary<string, GameObject>();
         Tools = new Dictionary<string, GameTool>();
+
+        // Index.Changes is cleared last, after everything that reads it in the tick.
+        _simulation.AddTickHandler(_world.RefreshChangedSubjects);
+        _simulation.AddTickHandler(_world.PublishSnapshot);
+        _simulation.AddTickHandler(RebuildVolumeTableWhenDue);
+        _simulation.AddTickHandler(RaiseWorldChangedWhenChanged);
+        _simulation.AddTickHandler(PublishWhenDue);
+        _simulation.AddTickHandler(StartSaveWhenDue);
+        _simulation.AddTickHandler(_world.Index.Changes.Clear);
     }
+
+    /// <summary>
+    /// Raised on the simulation thread after the world changed in a tick or the subjects were published; handlers must
+    /// not block or throw. The page's trigger to pull its view.
+    /// </summary>
+    internal event Action? WorldChanged;
+
+    /// <summary>
+    /// Whether the calling thread runs this game's simulation.
+    /// </summary>
+    internal bool IsOnSimulationThread => _simulation.IsCurrent;
+
+    /// <summary>
+    /// Whether the calling thread assigns the client ids of players from their keys in <see cref="Players"/>, the one
+    /// write of <see cref="GamePlayer.ClientId"/> that is allowed outside the simulation.
+    /// </summary>
+    internal static bool IsAssigningClientIds => t_isAssigningClientIds;
 
     partial void OnToolsChanging(ref Dictionary<string, GameTool> newValue, ref bool cancel)
     {
@@ -88,61 +124,175 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     partial void OnPlayersChanging(ref Dictionary<string, GamePlayer> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, GamePlayer>();
-        foreach (var (id, player) in newValue)
+        t_isAssigningClientIds = true;
+        try
         {
-            player.ClientId = id;
-        }
-
-        // A reload or the configuration editor assigns outside the lock, so a copy-on-write on another thread may read
-        // Players before this write lands and assign its copy after it; it starts from this dictionary instead.
-        if (!_lock.IsHeldByCurrentThread)
-        {
-            lock (_lock)
+            foreach (var (clientId, player) in newValue)
             {
-                _pendingPlayers = newValue;
+                if (player is not null && player.ClientId != clientId)
+                {
+                    player.ClientId = clientId;
+                }
             }
+        }
+        finally
+        {
+            t_isAssigningClientIds = false;
         }
     }
 
     partial void OnObjectsChanging(ref Dictionary<string, GameObject> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, GameObject>();
-
-        // See OnPlayersChanging.
-        if (!_lock.IsHeldByCurrentThread)
-        {
-            lock (_lock)
-            {
-                _pendingObjects = newValue;
-            }
-        }
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        RequestIndexRebuild();
         SignalReconcile();
         return Task.CompletedTask;
     }
 
-    // Callers hold _lock. The latest assigned players, also when an outside assignment has not landed yet; a pending
-    // value is always the latest, because every write of the game clears it.
-    private Dictionary<string, GamePlayer> CurrentPlayers => _pendingPlayers ?? Players;
+    /// <summary>
+    /// Registers the write interceptor and queues the take-over of the subjects, without starting the loops.
+    /// </summary>
+    internal void StartForTest() => EnsureStarted();
 
-    // Callers hold _lock.
-    private Dictionary<string, GameObject> CurrentObjects => _pendingObjects ?? Objects;
+    /// <summary>
+    /// Runs one tick of the simulation on the calling thread.
+    /// </summary>
+    internal void RunTickForTest() => _simulation.RunTick();
 
-    // Callers hold _lock.
-    private void ReplacePlayers(Dictionary<string, GamePlayer> players)
+    /// <summary>
+    /// Takes in a write that landed on this game or one of its objects; called by <see cref="GameWriteInterceptor"/>
+    /// inside the write, so it never waits for the simulation.
+    /// </summary>
+    internal void OnWritten<TProperty>(IInterceptorSubject subject, string name, TProperty value, bool isOnSimulation)
     {
-        _pendingPlayers = null;
-        Players = players;
+        // The publisher writes only the players and the game's sets; another object written by an observer meanwhile counts.
+        if (isOnSimulation && _publisher.IsPublishing && subject is GamePlayer or Game)
+        {
+            return;
+        }
+
+        switch (subject)
+        {
+            case Game:
+                OnGameWritten(name, value);
+                break;
+            case GamePlayer player:
+                OnPlayerWritten(player, name, value);
+                break;
+            // Read again at the end of the tick, so a schedule or handler writing several properties is read once.
+            case GameObject gameObject when isOnSimulation:
+                _world.ChangedSubjects.Add(gameObject);
+                break;
+
+            // Read again in queue order, so a command queued after the write sees it.
+            case GameObject gameObject:
+                _simulation.Post(() => _world.RefreshSubject(gameObject));
+                break;
+        }
     }
 
-    // Callers hold _lock.
-    private void ReplaceObjects(Dictionary<string, GameObject> objects)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _pendingObjects = null;
-        Objects = objects;
+        EnsureStarted();
+
+        // Runs inside the writes of the whole graph, so it only signals.
+        using var subscription = ((IInterceptorSubject)this).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (_clients.IsClientChange(change))
+                {
+                    SignalReconcile();
+                }
+            });
+
+        // Stopped together with the simulation, also when that one ends on an unexpected exception.
+        using var loopsStopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var voiceLoop = RunVoiceLoopAsync(loopsStopping.Token);
+        var housekeepingLoop = RunHousekeepingLoopAsync(loopsStopping.Token);
+        try
+        {
+            await _simulation.RunAsync(stoppingToken);
+        }
+        finally
+        {
+            await loopsStopping.CancelAsync();
+            await voiceLoop;
+            await housekeepingLoop;
+        }
+    }
+
+    private void EnsureStarted()
+    {
+        if (Interlocked.Exchange(ref _isStarted, 1) == 1)
+        {
+            return;
+        }
+
+        ((IInterceptorSubject)this).Context.TryAddService<IWriteInterceptor>(() => new GameWriteInterceptor(), existing => existing is GameWriteInterceptor);
+
+        // Reads the sets in the tick, after the interceptor is in place: a write that lands before that tick is read here,
+        // one after it queues its own take-over, which runs later.
+        _simulation.Post(() =>
+        {
+            _world.TakeOverPlayers(Players);
+            _world.TakeOverObjects(Objects);
+        });
+    }
+
+    private void OnGameWritten<TProperty>(string name, TProperty value)
+    {
+        if (name == nameof(Players) && value is Dictionary<string, GamePlayer> players)
+        {
+            _simulation.Post(() =>
+            {
+                _world.TakeOverPlayers(players);
+                _world.IsSaveRequested = true;
+            });
+            SignalReconcile();
+        }
+        else if (name == nameof(Objects) && value is Dictionary<string, GameObject> objects)
+        {
+            _simulation.Post(() =>
+            {
+                _world.TakeOverObjects(objects);
+                _world.IsSaveRequested = true;
+            });
+        }
+    }
+
+    private void OnPlayerWritten<TProperty>(GamePlayer player, string name, TProperty value)
+    {
+        switch (name)
+        {
+            case nameof(GamePlayer.X) when value is int x:
+                _simulation.Post(() => _world.Teleport(player, x, null));
+                break;
+            case nameof(GamePlayer.Y) when value is int y:
+                _simulation.Post(() => _world.Teleport(player, null, y));
+                break;
+            case nameof(GamePlayer.Facing) when value is GameDirection facing:
+                _simulation.Post(() => _world.Turn(player, facing));
+                break;
+        }
+    }
+
+    private void RaiseWorldChangedWhenChanged()
+    {
+        if (_world.Index.Changes.Count > 0)
+        {
+            WorldChanged?.Invoke();
+        }
+    }
+
+    private void PublishWhenDue()
+    {
+        if (_publisher.TryPublish())
+        {
+            WorldChanged?.Invoke();
+        }
     }
 }

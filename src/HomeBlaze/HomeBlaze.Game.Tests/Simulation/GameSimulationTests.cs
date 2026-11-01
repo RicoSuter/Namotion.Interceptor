@@ -373,4 +373,48 @@ public class GameSimulationTests
     }
 
     private static void FailingHandler() => throw new InvalidOperationException("broken");
+
+    [Fact]
+    public async Task WhenTheSimulationStops_ThenItRunsTheQueuedWorkOnceAndRefusesLaterWork()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+        var runs = 0;
+        simulation.Post(() => runs++);
+
+        // Act
+        simulation.Stop();
+        simulation.Stop();
+        var later = simulation.InvokeAsync(() => true, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, runs);
+        Assert.Equal("The game has stopped.", (await Assert.ThrowsAsync<InvalidOperationException>(() => later)).Message);
+    }
+
+    [Fact]
+    public void WhenRunningExclusivelyBeforeTheStop_ThenItIsRefused()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => simulation.RunExclusive(() => { }));
+    }
+
+    [Fact]
+    public void WhenRunningExclusivelyAfterTheStop_ThenTheActionRunsAsOnTheSimulationThread()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+        simulation.Stop();
+        var isCurrent = false;
+
+        // Act
+        simulation.RunExclusive(() => isCurrent = simulation.IsCurrent);
+
+        // Assert
+        Assert.True(isCurrent);
+        Assert.False(simulation.IsCurrent);
+    }
 }

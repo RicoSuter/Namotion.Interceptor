@@ -20,7 +20,7 @@ public class OccupancySnapshotTests
     public void WhenAChangedChunkHoldsABlockingEntity_ThenOnlyItsAreaIsOccupiedExceptForItsOwnSubject()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         var entity = CreateEntity(new GameArea(14, 0, 4, 1), isMovementBlocking: true);
         index.AddOrUpdate(entity);
 
@@ -38,7 +38,7 @@ public class OccupancySnapshotTests
     public void WhenAChangedChunkHoldsOnlyNonBlockingEntities_ThenItIsFree()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: false));
 
         // Act
@@ -52,7 +52,7 @@ public class OccupancySnapshotTests
     public void WhenABlockingEntityMovesAway_ThenTheNextSnapshotIsFreeThereAndThePreviousOneStaysOccupied()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         var entity = CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true);
         index.AddOrUpdate(entity);
         var previous = OccupancySnapshot.Empty.With(index, index.Changes);
@@ -74,7 +74,7 @@ public class OccupancySnapshotTests
     public void WhenNothingChanged_ThenTheSameSnapshotIsReturned()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true));
         var snapshot = OccupancySnapshot.Empty.With(index, index.Changes);
         index.Changes.Clear();
@@ -90,7 +90,7 @@ public class OccupancySnapshotTests
     public void WhenAnUnchangedChunkHoldsABlockingEntity_ThenTheNextSnapshotKeepsIt()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true));
         var snapshot = OccupancySnapshot.Empty.With(index, index.Changes);
         index.Changes.Clear();
@@ -108,7 +108,7 @@ public class OccupancySnapshotTests
     public void WhenAnEntityChangedButTheIndexWasNotUpdated_ThenTheSnapshotKeepsTheStoredArea()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         var entity = CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true);
         index.AddOrUpdate(entity);
 
@@ -126,7 +126,7 @@ public class OccupancySnapshotTests
     public void WhenOnlyTheVisualOrANonBlockingEntityChanged_ThenTheSameSnapshotIsReturned()
     {
         // Arrange
-        var index = new GameEntityIndex();
+        var index = new GameWorldIndex();
         var blocking = CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true);
         var walker = CreateEntity(new GameArea(4, 0, 2, 2), isMovementBlocking: false);
         index.AddOrUpdate(blocking);

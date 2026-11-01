@@ -7,7 +7,8 @@ namespace HomeBlaze.Game.Voice;
 
 /// <summary>
 /// Mixes the voices of one game individually for every listener. Its own lock guards the talker queues, microphone
-/// pages and sinks; the game calls it while holding the game's lock, and the mixer never calls into the game.
+/// pages and sinks; the game's simulation sets the microphone pages from its thread, pages pass frames from theirs,
+/// and the mixer never calls into the game.
 /// </summary>
 internal sealed class GameVoiceMixer
 {

@@ -1,23 +1,42 @@
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.View;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HomeBlaze.Game.Tests.View;
 
 public class GameViewTrackerTests
 {
-    private readonly GameTestContext _context = new();
     private readonly GameViewTracker _tracker = new();
+    private readonly List<GameEntity> _inView = [];
+
+    private GameViewUpdate Update(PlayerEntity? self) => _tracker.Update(_inView, self, NullLogger.Instance);
+
+    private PlayerEntity AddPlayer(string clientId, int x = 0, int y = 0)
+    {
+        var player = EntityFactory.Player(clientId, x, y);
+        _inView.Add(player);
+        return player;
+    }
+
+    private GameEntity AddObject(GameObject gameObject)
+    {
+        var entity = EntityFactory.Object(gameObject);
+        _inView.Add(entity);
+        return entity;
+    }
 
     [Fact]
-    public void WhenTheViewIsFirstUpdated_ThenEveryObjectInTheRadiusIsAdded()
+    public async Task WhenTheGameUpdatesTheViewFirst_ThenEveryObjectInTheRadiusIsAdded()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.AddWall(-20, 8, width: 19);
-        _context.AddWall(GameViewTracker.ViewRadius + 50, 0);
+        var context = new GameTestContext();
+        context.AddConnectedPlayer("tab-1");
+        context.AddWall(-20, 8, width: 19);
+        context.AddWall(GameViewTracker.ViewRadius + 50, 0);
 
         // Act
-        var update = _context.Game.UpdateView(_tracker, player);
+        var update = await context.RunAsync(context.Game.UpdateViewAsync(_tracker, "tab-1"));
 
         // Assert
         Assert.Equal(2, update.Upserted.Count);
@@ -35,11 +54,11 @@ public class GameViewTrackerTests
     public void WhenNothingChanged_ThenTheUpdateIsEmpty()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        Update(player);
 
         // Act
-        var update = _context.Game.UpdateView(_tracker, player);
+        var update = Update(player);
 
         // Assert
         Assert.True(update.IsEmpty);
@@ -49,15 +68,15 @@ public class GameViewTrackerTests
     public void WhenNothingChanged_ThenTheUpdateAllocatesNothing()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.AddConnectedPlayer("tab-2", x: 10, y: 0);
-        _context.AddWall(-20, 8);
-        _context.Game.UpdateView(_tracker, player);
-        _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        AddPlayer("tab-2", x: 10);
+        AddObject(new Wall { X = -20, Y = 8 });
+        Update(player);
+        Update(player);
 
         // Act
         var before = GC.GetAllocatedBytesForCurrentThread();
-        var update = _context.Game.UpdateView(_tracker, player);
+        var update = Update(player);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         // Assert
@@ -69,14 +88,13 @@ public class GameViewTrackerTests
     public void WhenAnotherPlayerMoves_ThenOnlyItIsUpserted()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        var other = _context.AddConnectedPlayer("tab-2", x: 10, y: 0);
-        _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 10);
+        Update(player);
 
         // Act
-        _context.TimeProvider.Advance(Game.StepInterval);
-        _context.Game.TryMove(other, GameDirection.East, turnOnly: false);
-        var update = _context.Game.UpdateView(_tracker, player);
+        other.Area = other.Area with { X = 11 };
+        var update = Update(player);
 
         // Assert
         var moved = Assert.Single(update.Upserted);
@@ -85,18 +103,17 @@ public class GameViewTrackerTests
     }
 
     [Fact]
-    public void WhenAPlayerDisconnects_ThenItIsRemovedFromTheView()
+    public void WhenAPlayerLeavesTheView_ThenItIsRemoved()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.AddConnectedPlayer("tab-2", x: 10, y: 0);
-        var first = _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 10);
+        var first = Update(player);
         var otherId = Assert.Single(first.Upserted, view => !view.IsSelf).Id;
 
         // Act
-        _context.Clients.Set("tab-2", isNamed: false, isConnected: false);
-        _context.Game.ReconcilePlayers();
-        var update = _context.Game.UpdateView(_tracker, player);
+        _inView.Remove(other);
+        var update = Update(player);
 
         // Assert
         Assert.Equal(new[] { otherId }, update.Removed);
@@ -107,15 +124,16 @@ public class GameViewTrackerTests
     public void WhenADoorOpens_ThenItIsUpsertedNotBlockingWithItsLeafTurned()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        var door = _context.AddDoor(-1, 2);
-        var first = _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        var door = new Door { X = -1, Y = 2 };
+        var entity = AddObject(door);
+        var first = Update(player);
         var closed = Assert.Single(first.Upserted, view => !view.IsSelf);
 
         // Act
-        door.Open();
-        _context.Game.RequestIndexRebuild();
-        var update = _context.Game.UpdateView(_tracker, player);
+        door.IsOpen = true;
+        entity.ReadFromSubject();
+        var update = Update(player);
 
         // Assert
         Assert.Equal(("Door", true, 0d), (closed.Title, closed.IsMovementBlocking, closed.Parts[1].Rotation));
@@ -127,12 +145,12 @@ public class GameViewTrackerTests
     public void WhenAPlayerTurnsItsMicrophoneOn_ThenItsViewIsUpdated()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        Update(player);
 
         // Act
-        _context.Game.SetMicrophone(new GameCaller(player.ClientId), pageId: 1, isOn: true);
-        var update = _context.Game.UpdateView(_tracker, player);
+        player.IsMicrophoneOn = true;
+        var update = Update(player);
 
         // Assert
         var view = Assert.Single(update.Upserted);
@@ -141,16 +159,33 @@ public class GameViewTrackerTests
     }
 
     [Fact]
+    public void WhenAPlayerTurns_ThenItsViewIsUpdatedWithTheFacing()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        Update(player);
+
+        // Act
+        player.Facing = GameDirection.West;
+        var update = Update(player);
+
+        // Assert
+        Assert.Equal((int)GameDirection.West, Assert.Single(update.Upserted).Facing);
+    }
+
+    [Fact]
     public void WhenAnObjectGetsAnEqualVisual_ThenItIsNotSentAgain()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        var gameObject = _context.AddObject("object", new VisualObject { X = 5, Y = 5, CustomVisual = GameVisual.Box(1, 2, 1) });
-        _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        var gameObject = new VisualObject { X = 5, Y = 5, CustomVisual = GameVisual.Box(1, 2, 1) };
+        var entity = AddObject(gameObject);
+        Update(player);
 
         // Act
         gameObject.CustomVisual = GameVisual.Box(1, 2, 1);
-        var update = _context.Game.UpdateView(_tracker, player);
+        entity.ReadFromSubject();
+        var update = Update(player);
 
         // Assert
         Assert.True(update.IsEmpty);
@@ -160,13 +195,15 @@ public class GameViewTrackerTests
     public void WhenAnObjectGetsAnotherVisual_ThenItIsUpsertedWithTheNewParts()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        var gameObject = _context.AddObject("object", new VisualObject { X = 5, Y = 5 });
-        _context.Game.UpdateView(_tracker, player);
+        var player = AddPlayer("tab-1");
+        var gameObject = new VisualObject { X = 5, Y = 5 };
+        var entity = AddObject(gameObject);
+        Update(player);
 
         // Act
         gameObject.CustomVisual = GameVisual.Box(1, 3, 1, "#112233");
-        var update = _context.Game.UpdateView(_tracker, player);
+        entity.ReadFromSubject();
+        var update = Update(player);
 
         // Assert
         var view = Assert.Single(update.Upserted);
@@ -178,11 +215,11 @@ public class GameViewTrackerTests
     public void WhenAnObjectHasAnInvalidVisual_ThenItIsSentAsTheDefaultBox()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        _context.AddObject("object", new VisualObject { X = 5, Y = 5, CustomVisual = GameVisual.Box(2000, 1, 1) });
+        var player = AddPlayer("tab-1");
+        AddObject(new VisualObject { X = 5, Y = 5, CustomVisual = GameVisual.Box(2000, 1, 1) });
 
         // Act
-        var update = _context.Game.UpdateView(_tracker, player);
+        var update = Update(player);
 
         // Assert
         var view = Assert.Single(update.Upserted, view => !view.IsSelf);
@@ -194,10 +231,10 @@ public class GameViewTrackerTests
     public void WhenAPlayerIsInView_ThenItCarriesNoParts()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
+        var player = AddPlayer("tab-1");
 
         // Act
-        var update = _context.Game.UpdateView(_tracker, player);
+        var update = Update(player);
 
         // Assert
         var self = Assert.Single(update.Upserted);
@@ -209,11 +246,11 @@ public class GameViewTrackerTests
     public void WhenThePlayerColorIsRequested_ThenItIsTheColorOfItsViewObject()
     {
         // Arrange
-        var player = _context.AddConnectedPlayer("tab-1");
-        var view = Assert.Single(_context.Game.UpdateView(_tracker, player).Upserted);
+        var player = AddPlayer("tab-1");
+        var view = Assert.Single(Update(player).Upserted);
 
         // Act
-        var color = _tracker.GetPlayerColor(player);
+        var color = _tracker.GetPlayerColor(player.ClientId);
 
         // Assert
         Assert.Equal(view.Color, color);

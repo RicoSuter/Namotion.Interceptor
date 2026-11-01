@@ -6,20 +6,25 @@ public class GameMovementTests
 {
     private readonly GameTestContext _context = new();
 
-    private MoveResult Step(GamePlayer player, GameDirection direction, bool turnOnly = false)
+    // Steps and publishes, so the subject shows the result.
+    private async Task<MoveResult?> Step(GamePlayer player, GameDirection direction, bool turnOnly = false)
     {
-        _context.TimeProvider.Advance(Game.StepInterval);
-        return _context.Game.TryMove(player, direction, turnOnly);
+        var result = await _context.StepAsync(player.ClientId, direction, turnOnly);
+        _context.Publish();
+        return result;
     }
 
+    private Task<IReadOnlyList<GameObject>> GetTargetsAsync(GamePlayer player) =>
+        _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId));
+
     [Fact]
-    public void WhenThePathIsFree_ThenTheStepMovesOneTileAndTurns()
+    public async Task WhenThePathIsFree_ThenTheStepMovesOneTileAndTurns()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        var result = Step(player, GameDirection.East);
+        var result = await Step(player, GameDirection.East);
 
         // Assert
         Assert.Equal(new MoveResult(true, 1, 0, GameDirection.East), result);
@@ -27,35 +32,35 @@ public class GameMovementTests
     }
 
     [Fact]
-    public void WhenAWallBlocksOneTileOfTheFootprint_ThenTheStepIsRefusedButThePlayerTurns()
+    public async Task WhenAWallBlocksOneTileOfTheFootprint_ThenTheStepIsRefusedButThePlayerTurns()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.AddWall(1, 2, width: 1, depth: 1);
 
         // Act
-        var result = Step(player, GameDirection.North);
+        var result = await Step(player, GameDirection.North);
 
         // Assert
-        Assert.False(result.IsAccepted);
+        Assert.False(result!.Value.IsAccepted);
         Assert.Equal((0, 0, GameDirection.North), (player.X, player.Y, player.Facing));
     }
 
     [Fact]
-    public void WhenTurningOnly_ThenThePositionStays()
+    public async Task WhenTurningOnly_ThenThePositionStays()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        var result = Step(player, GameDirection.West, turnOnly: true);
+        var result = await Step(player, GameDirection.West, turnOnly: true);
 
         // Assert
         Assert.Equal(new MoveResult(true, 0, 0, GameDirection.West), result);
     }
 
     [Fact]
-    public void WhenADiagonalStepSqueezesBetweenCornerBlockers_ThenItIsRefused()
+    public async Task WhenADiagonalStepSqueezesBetweenCornerBlockers_ThenItIsRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -63,36 +68,39 @@ public class GameMovementTests
         _context.AddWall(0, 2, width: 1, depth: 1);
 
         // Act
-        var result = Step(player, GameDirection.NorthEast);
+        var result = await Step(player, GameDirection.NorthEast);
 
         // Assert
-        Assert.False(result.IsAccepted);
+        Assert.False(result!.Value.IsAccepted);
         Assert.Equal((0, 0), (player.X, player.Y));
     }
 
     [Fact]
-    public void WhenADiagonalStepHasOneOrthogonalWayFree_ThenItIsAccepted()
+    public async Task WhenADiagonalStepHasOneOrthogonalWayFree_ThenItIsAccepted()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.AddWall(2, -1, width: 1, depth: 2);
 
         // Act
-        var result = Step(player, GameDirection.NorthEast);
+        var result = await Step(player, GameDirection.NorthEast);
 
         // Assert
-        Assert.True(result.IsAccepted);
+        Assert.True(result!.Value.IsAccepted);
         Assert.Equal((1, 1), (player.X, player.Y));
     }
 
     [Fact]
-    public void WhenFourStepsComeWithinOneInterval_ThenTheFourthIsRefused()
+    public async Task WhenFourStepsComeWithinOneInterval_ThenTheFourthIsRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        var results = Enumerable.Range(0, 4).Select(_ => _context.Game.TryMove(player, GameDirection.East, turnOnly: false).IsAccepted).ToArray();
+        var steps = Enumerable.Range(0, 4).Select(_ => _context.Game.StepAsync(player.ClientId, GameDirection.East, turnOnly: false)).ToArray();
+        _context.Tick();
+        var results = (await Task.WhenAll(steps)).Select(result => result!.Value.IsAccepted).ToArray();
+        _context.Publish();
 
         // Assert
         Assert.Equal(new[] { true, true, true, false }, results);
@@ -100,14 +108,17 @@ public class GameMovementTests
     }
 
     [Fact]
-    public void WhenFourTurnsComeWithinOneInterval_ThenTheFourthIsRefused()
+    public async Task WhenFourTurnsComeWithinOneInterval_ThenTheFourthIsRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var directions = new[] { GameDirection.East, GameDirection.South, GameDirection.West, GameDirection.North };
 
         // Act
-        var results = directions.Select(direction => _context.Game.TryMove(player, direction, turnOnly: true).IsAccepted).ToArray();
+        var turns = directions.Select(direction => _context.Game.StepAsync(player.ClientId, direction, turnOnly: true)).ToArray();
+        _context.Tick();
+        var results = (await Task.WhenAll(turns)).Select(result => result!.Value.IsAccepted).ToArray();
+        _context.Publish();
 
         // Assert
         Assert.Equal(new[] { true, true, true, false }, results);
@@ -120,80 +131,78 @@ public class GameMovementTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.AddWall(0, 2, width: 2, depth: 1);
-        await _context.Game.FlushPendingSaveAsync(CancellationToken.None);
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        var result = Step(player, GameDirection.North);
+        var result = await Step(player, GameDirection.North);
+        await _context.SaveAsync();
 
         // Assert
-        Assert.False(result.IsAccepted);
-        Assert.False(_context.Game.HasPendingSave);
+        Assert.False(result!.Value.IsAccepted);
+        Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
 
     [Fact]
-    public void WhenAStepWouldLeaveTheIntRange_ThenItIsRefused()
+    public async Task WhenAStepWouldLeaveTheIntRange_ThenItIsRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1", x: int.MaxValue - 1);
 
         // Act
-        var result = Step(player, GameDirection.East);
+        var result = await Step(player, GameDirection.East);
 
         // Assert
-        Assert.False(result.IsAccepted);
+        Assert.False(result!.Value.IsAccepted);
         Assert.Equal(int.MaxValue - 1, player.X);
     }
 
     [Fact]
-    public void WhenAnOfflinePlayerStandsInTheWay_ThenTheStepIsAccepted()
+    public async Task WhenAnOfflinePlayerStandsInTheWay_ThenTheStepIsAccepted()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Clients.Set("kitchen", isNamed: true, isConnected: true);
-        _context.Game.ReconcilePlayers();
-        var offline = _context.Game.Players["kitchen"];
-        offline.X = 2;
-        offline.Y = 0;
+        var offline = _context.AddConnectedPlayer("kitchen", x: 2, y: 0, isNamed: true);
         _context.Clients.Set("kitchen", isNamed: true, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
+        Assert.False(offline.IsConnected);
 
         // Act
-        var result = Step(player, GameDirection.East);
+        var result = await Step(player, GameDirection.East);
 
         // Assert
-        Assert.True(result.IsAccepted);
+        Assert.True(result!.Value.IsAccepted);
     }
 
     [Fact]
-    public void WhenThePlayerIsNotPartOfTheGame_ThenTheStepIsRefused()
+    public async Task WhenTheClientHasNoPlayerInTheGame_ThenThereIsNoStep()
     {
         // Arrange
-        var stranger = new GamePlayer { IsConnected = true };
+        _context.AddConnectedPlayer("tab-1");
 
         // Act
-        var result = Step(stranger, GameDirection.East);
+        var result = await _context.StepAsync("tab-2", GameDirection.East);
 
         // Assert
-        Assert.False(result.IsAccepted);
-        Assert.Equal(0, stranger.X);
+        Assert.Null(result);
     }
 
     [Fact]
-    public void WhenAWallStandsInFront_ThenItIsATargetObject()
+    public async Task WhenAWallStandsInFront_ThenItIsATargetObject()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(-1, 2);
 
         // Act
-        var targets = _context.Game.GetTargetObjects(player);
+        var targets = await GetTargetsAsync(player);
 
         // Assert
         Assert.Same(wall, Assert.Single(targets));
     }
 
     [Fact]
-    public void WhenSeveralObjectsStandInFront_ThenTheTargetsAreOrderedFromWestToEast()
+    public async Task WhenSeveralObjectsStandInFront_ThenTheTargetsAreOrderedFromWestToEast()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -202,7 +211,7 @@ public class GameMovementTests
         _context.AddWall(5, 2, width: 1, depth: 1);
 
         // Act
-        var targets = _context.Game.GetTargetObjects(player);
+        var targets = await GetTargetsAsync(player);
 
         // Assert
         Assert.Equal(new GameObject[] { west, east }, targets);

@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.World;
 
@@ -7,14 +8,27 @@ public class HearingRangeTests
 {
     private readonly GameWorldIndex _index = new();
     private readonly SoundPathSearch _search = new();
+    private readonly Dictionary<GameObject, GameEntity> _entities = new(ReferenceEqualityComparer.Instance);
 
-    private static GamePlayer CreatePlayer(string clientId, int x, int y) =>
-        new() { ClientId = clientId, IsConnected = true, X = x, Y = y };
+    private static PlayerEntity CreatePlayer(string clientId, int x, int y) => EntityFactory.Player(clientId, x, y);
 
-    private double GetVolume(GamePlayer first, GamePlayer second) => HearingRange.GetVolume(first, second, _index, _search);
+    private double GetVolume(PlayerEntity first, PlayerEntity second) => HearingRange.GetVolume(first, second, _index, _search);
+
+    // Indexes the object as it is now, as the simulation does after a write.
+    private void Index(GameObject gameObject)
+    {
+        if (!_entities.TryGetValue(gameObject, out var entity))
+        {
+            entity = new GameEntity(gameObject);
+            _entities[gameObject] = entity;
+        }
+
+        entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
+    }
 
     private void AddWall(int x, int y, int width, int depth) =>
-        _index.AddOrUpdate(new Wall { X = x, Y = y, Width = width, Depth = depth });
+        Index(new Wall { X = x, Y = y, Width = width, Depth = depth });
 
     // A room with the inside from -2, 8 to 3, 13 and a door from -1 to 2 in its south wall.
     private Door AddRoomAroundTheOrigin10TilesNorth()
@@ -25,7 +39,7 @@ public class HearingRangeTests
         AddWall(-3, 8, 1, 6);
         AddWall(4, 8, 1, 6);
         var door = new Door { X = -1, Y = 7, Width = 4, Depth = 1 };
-        _index.AddOrUpdate(door);
+        Index(door);
         return door;
     }
 
@@ -136,7 +150,7 @@ public class HearingRangeTests
     {
         // Arrange
         AddWall(10, -5, 1, 4);
-        _index.AddOrUpdate(new Door { X = 10, Y = -1, Width = 1, Depth = 4 });
+        Index(new Door { X = 10, Y = -1, Width = 1, Depth = 4 });
         AddWall(10, 3, 1, 4);
         var first = CreatePlayer("a", 0, 0);
         var second = CreatePlayer("b", 20, 0);
@@ -152,7 +166,7 @@ public class HearingRangeTests
     public void WhenAnOpenDoorStandsBetween_ThenTheVoicePasses()
     {
         // Arrange
-        _index.AddOrUpdate(new Door { X = 10, Y = -1, Width = 1, Depth = 4, IsOpen = true });
+        Index(new Door { X = 10, Y = -1, Width = 1, Depth = 4, IsOpen = true });
         var first = CreatePlayer("a", 0, 0);
         var second = CreatePlayer("b", 20, 0);
 
@@ -167,7 +181,7 @@ public class HearingRangeTests
     public void WhenAnObjectThatBlocksOnlyMovementStandsBetween_ThenTheVoicePasses()
     {
         // Arrange
-        _index.AddOrUpdate(new MovementBlocker { X = 10, Y = -1, Width = 1, Depth = 4 });
+        Index(new MovementBlocker { X = 10, Y = -1, Width = 1, Depth = 4 });
         var first = CreatePlayer("a", 0, 0);
         var second = CreatePlayer("b", 20, 0);
 
@@ -186,7 +200,7 @@ public class HearingRangeTests
         AddWall(-3, -3, 8, 1);
         AddWall(-3, -2, 1, 6);
         AddWall(4, -2, 1, 6);
-        _index.AddOrUpdate(new MovementBlocker { X = -3, Y = 4, Width = 8, Depth = 1 });
+        Index(new MovementBlocker { X = -3, Y = 4, Width = 8, Depth = 1 });
         var inside = CreatePlayer("a", 0, 0);
         var outside = CreatePlayer("b", 0, 10);
 
@@ -233,7 +247,7 @@ public class HearingRangeTests
         // Arrange
         var door = AddRoomAroundTheOrigin10TilesNorth();
         door.IsOpen = true;
-        _index.AddOrUpdate(door);
+        Index(door);
         var inside = CreatePlayer("a", 0, 10);
         var outside = CreatePlayer("b", 8, 0);
 
@@ -299,8 +313,8 @@ public class HearingRangeTests
         var first = CreatePlayer("a", 0, 0);
         var second = CreatePlayer("b", 0, 20);
         var slitIndex = new GameWorldIndex();
-        slitIndex.AddOrUpdate(new Wall { X = -20, Y = 10, Width = 25, Depth = 1 });
-        slitIndex.AddOrUpdate(new Wall { X = 6, Y = 10, Width = 25, Depth = 1 });
+        slitIndex.AddOrUpdate(EntityFactory.Object(new Wall { X = -20, Y = 10, Width = 25, Depth = 1 }));
+        slitIndex.AddOrUpdate(EntityFactory.Object(new Wall { X = 6, Y = 10, Width = 25, Depth = 1 }));
 
         // Act
         var gapVolume = GetVolume(first, second);
@@ -337,14 +351,14 @@ public class HearingRangeTests
         // Arrange
         var door = AddRoomAroundTheOrigin10TilesNorth();
         door.IsOpen = true;
-        _index.AddOrUpdate(door);
+        Index(door);
         var inside = CreatePlayer("a", 0, 10);
         var outside = CreatePlayer("b", 8, 0);
         var openVolume = GetVolume(inside, outside);
 
         // Act
         door.IsOpen = false;
-        _index.AddOrUpdate(door);
+        Index(door);
         var closedVolume = GetVolume(inside, outside);
 
         // Assert

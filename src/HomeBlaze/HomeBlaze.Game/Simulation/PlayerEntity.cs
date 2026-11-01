@@ -20,6 +20,11 @@ internal sealed class PlayerEntity : GameEntity
 
     public string ClientId { get; }
 
+    /// <summary>
+    /// The title of the client, empty when it has none; <see cref="GameEntity.Title"/> falls back to a default then.
+    /// </summary>
+    public string ClientTitle { get; set; } = string.Empty;
+
     public GameDirection Facing { get; set; }
 
     public bool IsConnected { get; set; }

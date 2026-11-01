@@ -8,6 +8,13 @@ public class WallDoorTests
 {
     private readonly GameTestContext _context = new();
 
+    // Runs the operation's world command and publishes, so the subjects show its result.
+    private async Task RunAsync(Task task)
+    {
+        await _context.RunAsync(task);
+        _context.Publish();
+    }
+
     private (Wall Before, Door Door, Wall After) GetPieces()
     {
         var walls = _context.Game.Objects.Values.OfType<Wall>().OrderBy(wall => wall.X).ThenBy(wall => wall.Y).ToArray();
@@ -21,17 +28,20 @@ public class WallDoorTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(-4, 2, width: 16);
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        await wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
+        await _context.SaveAsync();
         var (before, door, after) = GetPieces();
         Assert.Equal((-4, 2, 3, 1), (before.X, before.Y, before.Width, before.Depth));
         Assert.Equal((-1, 2, 4, 1, false), (door.X, door.Y, door.Width, door.Depth, door.IsOpen));
         Assert.Equal((3, 2, 9, 1), (after.X, after.Y, after.Width, after.Depth));
         Assert.Equal(3, _context.Game.Objects.Count);
-        Assert.Equal(1, _context.Root.WriteCount);
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -39,17 +49,20 @@ public class WallDoorTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.TryMove(player, GameDirection.NorthEast, turnOnly: true);
+        await _context.StepAsync(player.ClientId, GameDirection.NorthEast, turnOnly: true);
         var wall = _context.AddWall(-4, 2, width: 16);
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
+            () => RunAsync(wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None)));
 
         // Assert
         Assert.Equal("Face north, east, south or west to place objects.", exception.Message);
         Assert.Same(wall, Assert.Single(_context.Game.Objects.Values));
-        Assert.Equal(0, _context.Root.WriteCount);
+        await _context.SaveAsync();
+        Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -57,11 +70,11 @@ public class WallDoorTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.TryMove(player, GameDirection.East, turnOnly: true);
+        await _context.StepAsync(player.ClientId, GameDirection.East, turnOnly: true);
         var wall = _context.AddWall(2, -4, width: 1, depth: 16);
 
         // Act
-        await wall.AddDoorAsync(6, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(6, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var walls = _context.Game.Objects.Values.OfType<Wall>().OrderBy(piece => piece.Y).ToArray();
@@ -79,7 +92,7 @@ public class WallDoorTests
         var wall = _context.AddWall(0, 2, width: 8);
 
         // Act
-        await wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var (before, door, after) = GetPieces();
@@ -96,7 +109,7 @@ public class WallDoorTests
         var wall = _context.AddWall(0, 2, width: 8);
 
         // Act
-        await wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var (before, door, after) = GetPieces();
@@ -113,7 +126,7 @@ public class WallDoorTests
         var wall = _context.AddWall(-4, 2, width: 16);
 
         // Act
-        await wall.AddDoorAsync(3, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(3, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var (before, door, after) = GetPieces();
@@ -130,7 +143,7 @@ public class WallDoorTests
         var wall = _context.AddWall(-2, 2, width: 6);
 
         // Act
-        await wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var (before, door, after) = GetPieces();
@@ -147,7 +160,7 @@ public class WallDoorTests
 
         // Act
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => wall.AddDoorAsync(4, new GameCaller("tab-1"), CancellationToken.None));
+            () => RunAsync(wall.AddDoorAsync(4, new GameCaller("tab-1"), CancellationToken.None)));
 
         // Assert
         Assert.Equal("Only a player in the game can place objects.", exception.Message);
@@ -159,14 +172,17 @@ public class WallDoorTests
     {
         // Arrange
         var wall = _context.AddWall(int.MaxValue - 3, 20, width: 8);
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        var exception = await Record.ExceptionAsync(() => wall.AddDoorAsync(4, null, CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(wall.AddDoorAsync(4, null, CancellationToken.None)));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal(0, _context.Root.WriteCount);
+        await _context.SaveAsync();
+        Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -179,7 +195,7 @@ public class WallDoorTests
         wall.Height = 12;
 
         // Act
-        await wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
         var (before, door, after) = GetPieces();
@@ -194,7 +210,7 @@ public class WallDoorTests
         var wall = _context.AddWall(0, 20, width: 10);
 
         // Act
-        await wall.AddDoorAsync(4, null, CancellationToken.None);
+        await RunAsync(wall.AddDoorAsync(4, null, CancellationToken.None));
 
         // Assert
         var (before, door, after) = GetPieces();
@@ -207,14 +223,17 @@ public class WallDoorTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(-1, 2, width: 5);
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        var exception = await Record.ExceptionAsync(() => wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(wall.AddDoorAsync(4, new GameCaller(player.ClientId), CancellationToken.None)));
 
         // Assert
         Assert.Equal("This wall is too short for a door of 4 tiles; it fits up to 3.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal(0, _context.Root.WriteCount);
+        await _context.SaveAsync();
+        Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
 
     [Theory]
@@ -226,7 +245,7 @@ public class WallDoorTests
         var wall = _context.AddWall(0, 20, width: 20);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => wall.AddDoorAsync(width, null, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => RunAsync(wall.AddDoorAsync(width, null, CancellationToken.None)));
     }
 
     [Fact]
@@ -236,7 +255,7 @@ public class WallDoorTests
         var wall = _context.AddWall(0, 20, width: 6, depth: 2);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => wall.AddDoorAsync(null, null, CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(wall.AddDoorAsync(null, null, CancellationToken.None)));
 
         // Assert
         Assert.Equal("Only a wall one tile thick can take a door.", Assert.IsType<InvalidOperationException>(exception).Message);
@@ -268,7 +287,7 @@ public class WallDoorTests
         _context.AddWall(11, 2, width: 1);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None)));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);

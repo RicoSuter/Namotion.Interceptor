@@ -25,6 +25,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     private bool _hasTicked;
     private volatile bool _isStopped;
     private int _isDrained;
+    private int _isStopRequested;
 
     // Failure logging: see RunLogged.
     private bool _isFailing;
@@ -182,8 +183,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
-    /// Ticks every <see cref="GameSimulationSettings.TickInterval"/> until canceled, then runs one final tick for the work
-    /// queued meanwhile and refuses all later work.
+    /// Ticks every <see cref="GameSimulationSettings.TickInterval"/> until canceled, then calls <see cref="Stop"/>.
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -205,8 +205,17 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         }
     }
 
-    private void Stop()
+    /// <summary>
+    /// Runs one final tick for the work queued meanwhile and refuses all later work; <see cref="RunAsync"/> calls it when
+    /// it ends. Does nothing after the first call. Call it only while no tick runs on another thread.
+    /// </summary>
+    public void Stop()
     {
+        if (Interlocked.Exchange(ref _isStopRequested, 1) == 1)
+        {
+            return;
+        }
+
         _isStopped = true;
         try
         {
@@ -219,6 +228,30 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
             {
                 item.Work?.Abandon();
             }
+        }
+    }
+
+    /// <summary>
+    /// Runs the action on the calling thread as if on the simulation thread, for the work that follows the stop.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The simulation has not stopped.</exception>
+    public void RunExclusive(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (Volatile.Read(ref _isDrained) == 0)
+        {
+            throw new InvalidOperationException("Run exclusively only after the simulation stopped.");
+        }
+
+        var previous = t_current;
+        t_current = this;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            t_current = previous;
         }
     }
 

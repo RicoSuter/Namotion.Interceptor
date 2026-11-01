@@ -20,11 +20,12 @@ public interface IGameWorld
     /// Whether no movement blocking object other than <paramref name="except"/> overlaps the area. Callable from any
     /// thread; outside the game's own processing it answers from the state of the last tick.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The area is wider or deeper than <see cref="GameObject.MaximumSize"/>.</exception>
     bool IsFree(GameArea area, GameObject? except = null);
 
     /// <summary>
-    /// Adds the object under a name of its type name in lowercase, a dash and 8 random hex digits.
-    /// Canceling only stops the save; the object stays placed.
+    /// Adds the object under a name of its type name in lowercase, a dash and 8 random hex digits. Canceling before the
+    /// game processed the command drops it; after that the object stays placed.
     /// </summary>
     /// <exception cref="ArgumentException">The object is already part of this game, or its size is outside 1 to
     /// <see cref="GameObject.MaximumSize"/>.</exception>
@@ -32,14 +33,14 @@ public interface IGameWorld
     Task PlaceAsync(GameObject gameObject, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Removes the object. Canceling only stops the save; the object stays removed.
+    /// Removes the object. Canceling before the game processed the command drops it; after that the object stays removed.
     /// </summary>
     /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>
     Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Replaces the object by the replacements in one step; no player sees an intermediate state. Canceling only stops
-    /// the save; the replacement stays applied.
+    /// Replaces the object by the replacements in one step; no player sees an intermediate state. Canceling before the
+    /// game processed the command drops it; after that the replacement stays applied.
     /// </summary>
     /// <exception cref="ArgumentException">A replacement is listed twice, already part of this game, or of invalid size.</exception>
     /// <exception cref="InvalidOperationException">The object is not part of this game, or a movement blocking replacement

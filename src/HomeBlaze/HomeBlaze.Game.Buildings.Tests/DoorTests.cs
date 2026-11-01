@@ -8,11 +8,8 @@ public class DoorTests
 {
     private readonly GameTestContext _context = new();
 
-    private MoveResult Step(GamePlayer player, GameDirection direction)
-    {
-        _context.TimeProvider.Advance(Game.StepInterval);
-        return _context.Game.TryMove(player, direction, turnOnly: false);
-    }
+    private async Task<MoveResult> StepAsync(GamePlayer player, GameDirection direction) =>
+        (await _context.StepAsync(player.ClientId, direction)).GetValueOrDefault();
 
     [Fact]
     public void WhenADoorIsCreated_ThenItIsAClosedBlockingWallSegment()
@@ -28,14 +25,15 @@ public class DoorTests
     }
 
     [Fact]
-    public void WhenADoorIsClosed_ThenThePlayerCannotStepIntoIt()
+    public async Task WhenADoorIsClosed_ThenThePlayerCannotStepIntoIt()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.AddDoor(-1, 2);
 
         // Act
-        var result = Step(player, GameDirection.North);
+        var result = await StepAsync(player, GameDirection.North);
+        _context.Publish();
 
         // Assert
         Assert.False(result.IsAccepted);
@@ -43,7 +41,7 @@ public class DoorTests
     }
 
     [Fact]
-    public void WhenADoorIsOpened_ThenItIsOpenAndThePlayerWalksThrough()
+    public async Task WhenADoorIsOpened_ThenItIsOpenAndThePlayerWalksThrough()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -51,9 +49,12 @@ public class DoorTests
 
         // Act
         door.Open();
-        // Stands in for the change observer of the running game, which rebuilds the index after a direct write.
-        _context.Game.RequestIndexRebuild();
-        var results = new[] { Step(player, GameDirection.North), Step(player, GameDirection.North), Step(player, GameDirection.North) };
+        _context.Tick();
+        var results = new[]
+        {
+            await StepAsync(player, GameDirection.North), await StepAsync(player, GameDirection.North), await StepAsync(player, GameDirection.North)
+        };
+        _context.Publish();
 
         // Assert
         Assert.True(door.IsOpen);
@@ -63,7 +64,7 @@ public class DoorTests
     }
 
     [Fact]
-    public void WhenAnOpenDoorIsClosed_ThenItBlocksAgain()
+    public async Task WhenAnOpenDoorIsClosed_ThenItBlocksAgain()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -71,9 +72,8 @@ public class DoorTests
 
         // Act
         door.Close();
-        // Stands in for the change observer of the running game, which rebuilds the index after a direct write.
-        _context.Game.RequestIndexRebuild();
-        var result = Step(player, GameDirection.North);
+        _context.Tick();
+        var result = await StepAsync(player, GameDirection.North);
 
         // Assert
         Assert.False(door.IsOpen);

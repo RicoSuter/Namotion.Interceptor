@@ -38,7 +38,7 @@ public class GameActionsTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1", isNamed: true);
         _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
         Assert.False(player.IsConnected);
 
         // Act
@@ -54,12 +54,17 @@ public class GameActionsTests
         // Arrange
         var wall = _context.AddWall(5, 5);
 
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
+
         // Act
-        await wall.DemolishAsync(CancellationToken.None);
+        await _context.RunAsync(wall.DemolishAsync(CancellationToken.None));
+        _context.Publish();
+        await _context.SaveAsync();
 
         // Assert
         Assert.Empty(_context.Game.Objects);
-        Assert.Equal(1, _context.Root.WriteCount);
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -68,11 +73,11 @@ public class GameActionsTests
         // Arrange
         var sender = _context.AddConnectedPlayer("tab-1");
         _context.Clients.Set("tab-1", isNamed: true, isConnected: true, title: "Kitchen");
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
         var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
 
         // Act
-        await recipient.SendMessageAsync("  Hello  ", new GameCaller(sender.ClientId), CancellationToken.None);
+        await _context.RunAsync(recipient.SendMessageAsync("  Hello  ", new GameCaller(sender.ClientId), CancellationToken.None));
 
         // Assert
         var (clientId, notification) = Assert.Single(_context.Clients.Notifications);
@@ -89,7 +94,7 @@ public class GameActionsTests
 
         // Act
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => recipient.SendMessageAsync("Hello", new GameCaller("tab-2"), CancellationToken.None));
+            () => _context.RunAsync(recipient.SendMessageAsync("Hello", new GameCaller("tab-2"), CancellationToken.None)));
 
         // Assert
         Assert.Equal("Only a player in the game can send messages.", exception.Message);
@@ -103,7 +108,7 @@ public class GameActionsTests
         var recipient = _context.AddConnectedPlayer("tab-1");
 
         // Act
-        await recipient.SendMessageAsync("Hello", null, CancellationToken.None);
+        await _context.RunAsync(recipient.SendMessageAsync("Hello", null, CancellationToken.None));
 
         // Assert
         var (clientId, notification) = Assert.Single(_context.Clients.Notifications);
@@ -120,7 +125,7 @@ public class GameActionsTests
         var message = new string('a', GamePlayer.MaximumMessageLength + 1);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => recipient.SendMessageAsync(message, new GameCaller(sender.ClientId), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => _context.RunAsync(recipient.SendMessageAsync(message, new GameCaller(sender.ClientId), CancellationToken.None)));
         Assert.Empty(_context.Clients.Notifications);
     }
 
@@ -131,12 +136,12 @@ public class GameActionsTests
         var sender = _context.AddConnectedPlayer("tab-1");
         var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
         var caller = new GameCaller(sender.ClientId);
-        await recipient.SendMessageAsync("First", caller, CancellationToken.None);
+        await _context.RunAsync(recipient.SendMessageAsync("First", caller, CancellationToken.None));
 
         // Act
-        var exception = await Record.ExceptionAsync(() => recipient.SendMessageAsync("Second", caller, CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => _context.RunAsync(recipient.SendMessageAsync("Second", caller, CancellationToken.None)));
         _context.TimeProvider.Advance(Game.MessageInterval);
-        await recipient.SendMessageAsync("Third", caller, CancellationToken.None);
+        await _context.RunAsync(recipient.SendMessageAsync("Third", caller, CancellationToken.None));
 
         // Assert
         Assert.IsType<InvalidOperationException>(exception);

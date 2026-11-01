@@ -91,7 +91,7 @@ public class DemoWorldTests
         var index = new GameWorldIndex();
         foreach (var gameObject in _game.Objects.Values.Where(gameObject => gameObject is not Door))
         {
-            index.AddOrUpdate(gameObject);
+            index.AddOrUpdate(EntityFactory.Object(gameObject));
         }
 
         var reachable = new HashSet<(int X, int Y)> { (0, 0) };

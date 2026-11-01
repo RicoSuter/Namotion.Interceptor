@@ -6,18 +6,28 @@ public class GameObjectsTests
 {
     private readonly GameTestContext _context = new();
 
+    // Runs the world command and publishes, so the subjects show its result.
+    private async Task RunAsync(Task task)
+    {
+        await _context.RunAsync(task);
+        _context.Publish();
+    }
+
     [Fact]
     public async Task WhenAnObjectOfTheGameIsRemoved_ThenItIsGoneAndWritten()
     {
         // Arrange
         var wall = _context.AddWall(5, 5);
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        await _context.Game.RemoveAsync(wall, CancellationToken.None);
+        await RunAsync(_context.Game.RemoveAsync(wall, CancellationToken.None));
+        await _context.SaveAsync();
 
         // Assert
         Assert.Empty(_context.Game.Objects);
-        Assert.Equal(1, _context.Root.WriteCount);
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -27,12 +37,11 @@ public class GameObjectsTests
         _context.AddWall(5, 5);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => _context.Game.RemoveAsync(new Wall(), CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(_context.Game.RemoveAsync(new Wall(), CancellationToken.None)));
 
         // Assert
         Assert.Equal("The object is not part of this game.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.Single(_context.Game.Objects);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -43,9 +52,12 @@ public class GameObjectsTests
         var west = new Wall { X = 0, Y = 10, Width = 3 };
         var door = new Door { X = 3, Y = 10, Width = 4 };
         var east = new Wall { X = 7, Y = 10, Width = 3 };
+        await _context.SaveAsync();
+        var writesBefore = _context.Root.WriteCount;
 
         // Act
-        await _context.Game.ReplaceAsync(wall, [west, door, east], CancellationToken.None);
+        await RunAsync(_context.Game.ReplaceAsync(wall, [west, door, east], CancellationToken.None));
+        await _context.SaveAsync();
 
         // Assert
         var objects = _context.Game.Objects;
@@ -53,7 +65,7 @@ public class GameObjectsTests
         Assert.DoesNotContain(wall, objects.Values);
         Assert.Equal(2, objects.Count(pair => pair.Key.StartsWith("wall-", StringComparison.Ordinal)));
         Assert.Same(door, Assert.Single(objects, pair => pair.Key.StartsWith("door-", StringComparison.Ordinal)).Value);
-        Assert.Equal(1, _context.Root.WriteCount);
+        Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -66,13 +78,12 @@ public class GameObjectsTests
 
         // Act
         var exception = await Record.ExceptionAsync(() =>
-            _context.Game.ReplaceAsync(wall, [new Wall { X = 5, Y = 10, Width = 10 }], CancellationToken.None));
+            RunAsync(_context.Game.ReplaceAsync(wall, [new Wall { X = 5, Y = 10, Width = 10 }], CancellationToken.None)));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.Equal(before, _context.Game.Objects);
         Assert.Contains(other, _context.Game.Objects.Values);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -83,13 +94,12 @@ public class GameObjectsTests
         var before = new Dictionary<string, GameObject>(_context.Game.Objects);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => _context.Game.ReplaceAsync(wall,
-            [new Wall { X = 0, Y = 10, Width = 6 }, new Wall { X = 4, Y = 10, Width = 6 }], CancellationToken.None));
+        var exception = await Record.ExceptionAsync(() => RunAsync(_context.Game.ReplaceAsync(wall,
+            [new Wall { X = 0, Y = 10, Width = 6 }, new Wall { X = 4, Y = 10, Width = 6 }], CancellationToken.None)));
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.Equal(before, _context.Game.Objects);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -101,12 +111,11 @@ public class GameObjectsTests
 
         // Act
         var exception = await Record.ExceptionAsync(() =>
-            _context.Game.ReplaceAsync(wall, [door, door], CancellationToken.None));
+            RunAsync(_context.Game.ReplaceAsync(wall, [door, door], CancellationToken.None)));
 
         // Assert
         Assert.IsType<ArgumentException>(exception);
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -117,12 +126,11 @@ public class GameObjectsTests
         var wall = _context.AddWall(-1, 10);
 
         // Act
-        await _context.Game.RemoveAsync(wall, CancellationToken.None);
-        _context.TimeProvider.Advance(Game.StepInterval);
-        var step = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
+        await RunAsync(_context.Game.RemoveAsync(wall, CancellationToken.None));
+        var step = await _context.StepAsync(player.ClientId, GameDirection.North);
 
         // Assert
-        Assert.True(step.IsAccepted);
+        Assert.True(step!.Value.IsAccepted);
     }
 
     [Fact]
@@ -134,17 +142,15 @@ public class GameObjectsTests
         var door = new Door { X = 3, Y = 10, Width = 4, IsOpen = true };
 
         // Act
-        await _context.Game.ReplaceAsync(wall,
+        await RunAsync(_context.Game.ReplaceAsync(wall,
             [new Wall { X = 0, Y = 10, Width = 3 }, door, new Wall { X = 7, Y = 10, Width = 3 }],
-            CancellationToken.None);
-        _context.TimeProvider.Advance(Game.StepInterval);
-        var throughDoor = _context.Game.TryMove(player, GameDirection.North, turnOnly: false);
-        _context.TimeProvider.Advance(Game.StepInterval);
-        var intoWall = _context.Game.TryMove(player, GameDirection.West, turnOnly: false);
+            CancellationToken.None));
+        var throughDoor = await _context.StepAsync(player.ClientId, GameDirection.North);
+        var intoWall = await _context.StepAsync(player.ClientId, GameDirection.West);
 
         // Assert
-        Assert.True(throughDoor.IsAccepted);
-        Assert.False(intoWall.IsAccepted);
+        Assert.True(throughDoor!.Value.IsAccepted);
+        Assert.False(intoWall!.Value.IsAccepted);
     }
 
     [Fact]
@@ -155,12 +161,11 @@ public class GameObjectsTests
 
         // Act
         var exception = await Record.ExceptionAsync(() =>
-            _context.Game.ReplaceAsync(wall, [new Wall { X = 0, Y = 10, Height = GameObject.MaximumSize + 1 }], CancellationToken.None));
+            RunAsync(_context.Game.ReplaceAsync(wall, [new Wall { X = 0, Y = 10, Height = GameObject.MaximumSize + 1 }], CancellationToken.None)));
 
         // Assert
         Assert.Equal("replacements", Assert.IsType<ArgumentException>(exception).ParamName);
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
-        Assert.Equal(0, _context.Root.WriteCount);
     }
 
     [Fact]
@@ -171,7 +176,7 @@ public class GameObjectsTests
 
         // Act
         var exception = await Record.ExceptionAsync(() =>
-            _context.Game.ReplaceAsync(new Wall(), [new Wall { X = 20, Y = 20 }], CancellationToken.None));
+            RunAsync(_context.Game.ReplaceAsync(new Wall(), [new Wall { X = 20, Y = 20 }], CancellationToken.None)));
 
         // Assert
         Assert.Equal("The object is not part of this game.", Assert.IsType<InvalidOperationException>(exception).Message);

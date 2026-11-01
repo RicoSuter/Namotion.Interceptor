@@ -425,11 +425,11 @@ public class GamePageTests
 
         // Act
         // Page ids count up from 1, so no page of the server has this one.
-        Assert.True(world.Game.SetMicrophone(new GameCaller(player.ClientId), pageId: -1, isOn: true));
+        Assert.True(await world.Game.SetMicrophoneAsync(player.ClientId, pageId: -1, isOn: true));
 
         // Assert
         await Expect(microphone).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
-        Assert.True(player.IsMicrophoneOn);
+        await AsyncTestHelpers.WaitUntilAsync(() => player.IsMicrophoneOn, message: "The microphone of the other page is not on");
     }
 
     [Fact]
@@ -442,14 +442,14 @@ public class GamePageTests
         var audio = page.GetByTestId("game-audio");
         await audio.ClickAsync(new() { Timeout = Timeout });
         await Expect(audio).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = Timeout });
-        var pageId = Assert.Single(player.AudioPageIds!);
+        var pageId = Assert.Single(await world.Game.GetAudioPagesForTestAsync(player.ClientId));
 
         // Act
-        Assert.True(world.Game.SetAudio(new GameCaller(player.ClientId), pageId, isOn: false));
+        Assert.True(await world.Game.SetAudioAsync(player.ClientId, pageId, isOn: false));
 
         // Assert
         await Expect(audio).ToHaveAttributeAsync("aria-pressed", "false", new() { Timeout = Timeout });
-        Assert.False(player.IsAudioOn);
+        await AsyncTestHelpers.WaitUntilAsync(() => !player.IsAudioOn, message: "The speaker of the player is still on");
     }
 
     [Fact]

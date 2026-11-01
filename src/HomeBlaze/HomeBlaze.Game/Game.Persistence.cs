@@ -6,45 +6,42 @@ namespace HomeBlaze.Game;
 
 public partial class Game
 {
-    // Guarded by _lock: set by moves, joins and failed writes, cleared by the flush that writes them.
-    private bool _isSaveRequested;
-
-    internal bool HasPendingSave
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _isSaveRequested;
-            }
-        }
-    }
+    // Touched only on the simulation thread, and by StopAsync once the simulation stopped.
+    private long _lastSaveTimestamp;
+    private bool _isSaving;
+    private Task<bool> _saveTask = Task.FromResult(true);
 
     /// <summary>
-    /// Writes the configuration when a move or join happened since the last write; a failed write stays pending, so the
-    /// next flush tries again.
+    /// The running or last save, true when it wrote or nothing can write; read it on the thread that runs the ticks.
     /// </summary>
-    internal async Task FlushPendingSaveAsync(CancellationToken cancellationToken)
-    {
-        lock (_lock)
-        {
-            if (!_isSaveRequested)
-            {
-                return;
-            }
-
-            _isSaveRequested = false;
-        }
-
-        await WriteOrRequestSaveAsync(cancellationToken);
-    }
+    internal Task<bool> SaveTask => _saveTask;
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await base.StopAsync(cancellationToken);
+        if (ExecuteTask is { IsCompleted: false })
+        {
+            _logger.LogWarning("The game {Game} stopped before it was saved and loses its latest changes on restart", Title);
+            return;
+        }
+
+        // A game whose loop never ran stops its simulation here; afterwards this thread is the only one on the state.
+        _simulation.Stop();
         try
         {
-            await FlushPendingSaveAsync(cancellationToken);
+            var isLastSaveWritten = await _saveTask.WaitAsync(cancellationToken);
+            var isSaveRequested = !isLastSaveWritten;
+            _simulation.RunExclusive(() =>
+            {
+                _publisher.Publish();
+                isSaveRequested |= _world.IsSaveRequested;
+                _world.IsSaveRequested = false;
+            });
+
+            if (isSaveRequested && !await WriteConfigurationAsync(cancellationToken))
+            {
+                _logger.LogWarning("The game {Game} stopped before it was saved and loses its latest changes on restart", Title);
+            }
         }
         catch (OperationCanceledException exception)
         {
@@ -52,25 +49,51 @@ public partial class Game
         }
     }
 
-    /// <summary>
-    /// Writes the configuration and requests a save for the next flush when that fails or is canceled.
-    /// </summary>
-    private async Task WriteOrRequestSaveAsync(CancellationToken cancellationToken)
+    // Starts a save at most every SaveInterval when something changed: publishes first, then pauses publishing until the
+    // write finished, so the file holds one consistent publish.
+    private void StartSaveWhenDue()
+    {
+        var now = _timeProvider.GetTimestamp();
+        if (_isSaving || !_world.IsSaveRequested || _timeProvider.GetElapsedTime(_lastSaveTimestamp, now) < GameSimulationSettings.SaveInterval)
+        {
+            return;
+        }
+
+        if (_publisher.Publish())
+        {
+            WorldChanged?.Invoke();
+        }
+
+        _world.IsSaveRequested = false;
+        _isSaving = true;
+        _publisher.IsPaused = true;
+        _lastSaveTimestamp = now;
+        _saveTask = SaveAsync();
+    }
+
+    private async Task<bool> SaveAsync()
     {
         var isWritten = false;
         try
         {
-            isWritten = await WriteConfigurationAsync(cancellationToken);
+            // Off the simulation thread, because the storage serializes the whole game before it awaits anything.
+            isWritten = await Task.Run(() => WriteConfigurationAsync(CancellationToken.None)).ConfigureAwait(false);
+            return isWritten;
         }
         finally
         {
-            if (!isWritten)
-            {
-                lock (_lock)
-                {
-                    _isSaveRequested = true;
-                }
-            }
+            // Dropped once the simulation stopped; StopAsync then reads the result of this task.
+            _simulation.Post(() => CompleteSave(isWritten));
+        }
+    }
+
+    private void CompleteSave(bool isWritten)
+    {
+        _isSaving = false;
+        _publisher.IsPaused = false;
+        if (!isWritten)
+        {
+            _world.IsSaveRequested = true;
         }
     }
 

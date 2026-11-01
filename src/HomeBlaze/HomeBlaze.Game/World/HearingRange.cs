@@ -1,4 +1,5 @@
 using HomeBlaze.Game.Abstractions;
+using HomeBlaze.Game.Simulation;
 
 namespace HomeBlaze.Game.World;
 
@@ -39,7 +40,7 @@ internal static class HearingRange
     /// When the straight line is blocked, <paramref name="search"/> searches from the player with the ordinally smaller
     /// client id, so the pairs of one player computed one after the other reuse its search.
     /// </remarks>
-    public static double GetVolume(GamePlayer first, GamePlayer second, GameWorldIndex index, SoundPathSearch search)
+    public static double GetVolume(PlayerEntity first, PlayerEntity second, GameWorldIndex index, SoundPathSearch search)
     {
         var firstArea = first.Area;
         var secondArea = second.Area;
@@ -97,7 +98,7 @@ internal static class HearingRange
     /// </summary>
     public static double GetOcclusionGain(double detour) => 1 / (1 + detour / HalvingDetour);
 
-    private static bool IsSearchedFrom(GamePlayer first, GamePlayer second)
+    private static bool IsSearchedFrom(PlayerEntity first, PlayerEntity second)
     {
         var order = string.CompareOrdinal(first.ClientId, second.ClientId);
         if (order != 0)

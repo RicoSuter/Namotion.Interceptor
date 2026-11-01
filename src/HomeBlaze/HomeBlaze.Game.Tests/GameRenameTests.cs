@@ -16,7 +16,8 @@ public class GameRenameTests
 
         // Act
         await _context.Game.RenameAsync(caller, "  Kitchen  ", CancellationToken.None);
-        _context.Game.ReconcilePlayers();
+        _context.Tick();
+        _context.Publish();
 
         // Assert
         Assert.Equal(new GameClient("tab-1", "Kitchen", IsNamed: true, IsConnected: true), GetClient("tab-1"));
@@ -102,12 +103,12 @@ public class GameRenameTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.Clients.Set("kitchen", isNamed: true, isConnected: true, title: "Kitchen");
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
         var kitchen = _context.Game.Players["kitchen"];
 
         // Act
         await _context.Game.RenameAsync(new GameCaller(player.ClientId), "Office", CancellationToken.None);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         Assert.Equal(new GameClient("kitchen", "Kitchen", IsNamed: true, IsConnected: true), GetClient("kitchen"));
