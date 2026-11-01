@@ -36,6 +36,7 @@
     <ItemGroup>
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\FakeClientDirectory.cs" Link="Testing\FakeClientDirectory.cs" />
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\GameTestContext.cs" Link="Testing\GameTestContext.cs" />
+        <Compile Include="..\HomeBlaze.Game.Tests\Testing\RecordingViewSink.cs" Link="Testing\RecordingViewSink.cs" />
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\TestRoot.cs" Link="Testing\TestRoot.cs" />
     </ItemGroup>
 

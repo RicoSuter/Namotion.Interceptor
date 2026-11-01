@@ -163,7 +163,6 @@
     private const string ResumeMessage = "Tap the microphone or speaker to resume";
     private const string MicrophoneEndedMessage = "The microphone was disconnected";
     private const string NotConnectedMessage = "Voice is not available while you are not connected";
-    private const string NoPosition = "–";
     private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
 
     // In the order of the pad's 3 by 3 grid; the middle one toggles turning only.
@@ -179,7 +178,6 @@
     // Identifies this page's view in the module, which the pages of a tab share.
     private readonly int _viewId = Interlocked.Increment(ref _lastViewId);
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly GameViewTracker _tracker = new();
     private ElementReference _canvas;
     private ElementReference _pad;
     private ElementReference _panel;
@@ -187,18 +185,23 @@
     private DotNetObjectReference<GamePage>? _reference;
     // The game whose events this page handles, so it unsubscribes from that one also after Subject changed.
     private Game? _subscribedGame;
-    private bool _isWorldSubscribed;
+    private ViewSink? _viewSink;
+    private GameViewSession? _viewSession;
+    // The client the view session follows.
+    private string? _viewClientId;
     // The page's client and its player, resolved on every flush; the client id is the player's key in Game.Players.
     private string? _clientId;
     private GamePlayer? _player;
+    // The panel state of the last update the page took from its view session.
+    private GamePanelState _panelState = GamePanelState.Empty;
     private bool _isStarted;
     private bool _isDisposed;
     private string? _error;
     private int _isFlushScheduled;
-    // Flushes run one at a time on the renderer, because the tracker must not be read while the game updates it.
+    // Flushes run one at a time on the renderer, so at most one update is on its way to the browser.
     private bool _isFlushing;
     private bool _isFlushRequested;
-    private string _positionText = NoPosition;
+    private string _positionText = GamePanelState.NoPosition;
     private IReadOnlyList<NearbyEntry> _nearby = [];
     // The player and the player ids of the volume table row that _nearby shows.
     private GamePlayer? _nearbyPlayer;
@@ -278,15 +281,14 @@
 
             _isStarted = true;
             _subscribedGame = game;
-            game.WorldChanged += ScheduleFlush;
-            _isWorldSubscribed = true;
             game.VolumeTableChanged += OnVolumeTableChanged;
-            await FlushAsync();
+            await OpenViewAsync(game);
             await StartVoiceAsync();
         }
-        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException
+            or GameStoppedException)
         {
-            // The page went away while the game was starting.
+            // The page went away or the game stopped while the game was starting.
         }
         catch (JSException exception)
         {
@@ -408,6 +410,43 @@
         (_, true) => "Turn the speaker off (N)",
         _ => "Turn the speaker on (N)"
     };
+
+    // The session delivers its first update, everything in view, in the tick that opens it.
+    private async Task OpenViewAsync(Game game)
+    {
+        var sink = new ViewSink(this);
+        _viewSink = sink;
+        _viewClientId = CurrentConnection.Connection?.ClientId;
+        var session = await game.Views.OpenAsync(_viewClientId, sink, _lifetime.Token);
+        if (_isDisposed || !ReferenceEquals(_viewSink, sink))
+        {
+            // The page went away or shows another game meanwhile.
+            session.Dispose();
+            return;
+        }
+
+        _viewSession = session;
+    }
+
+    // Called on the simulation thread, so the flush runs on the thread pool: the renderer may run work inline on the
+    // calling thread when it is idle.
+    private void OnViewDelivered() => _ = Task.Run(FlushDeliveredAsync);
+
+    private async Task FlushDeliveredAsync()
+    {
+        try
+        {
+            await InvokeAsync(FlushAsync);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
+        {
+            // The page went away.
+        }
+        catch (Exception exception)
+        {
+            Logger.LogDebug(exception, "Applying a view update failed");
+        }
+    }
 
     // Voice is optional: a browser that cannot load it keeps the game and leaves the buttons disabled.
     private async Task StartVoiceAsync()
@@ -769,13 +808,13 @@
 
     private async Task InvokeActionAsync(IInterceptorSubject owner, MethodMetadata method)
     {
-        if (_isDisposed || _isInvoking || Game is not { } game || _player is not { } player)
+        if (_isDisposed || _isInvoking || _player is not { } player)
         {
             return;
         }
 
         // The target may have moved since the panel rendered.
-        if (owner is GameObject target && !(await TryGetTargetsAsync(game, player.ClientId)).Contains(target))
+        if (owner is GameObject target && !IsTarget(target))
         {
             return;
         }
@@ -874,7 +913,8 @@
         }
     }
 
-    // The panel keeps following the game after the view broke, so that a stale sink does not keep playing.
+    // Takes the update the view session delivered, if any, and refreshes the panel. The panel keeps following the game
+    // after the view broke, so that a stale sink does not keep playing.
     private async Task FlushOnceAsync()
     {
         if (_isDisposed || Game is not { } game || _module is not { } module)
@@ -882,59 +922,66 @@
             return;
         }
 
-        _clientId = CurrentConnection.Connection?.ClientId;
-        _player = _clientId is { } clientId && game.Players.TryGetValue(clientId, out var player) ? player : null;
-        var hasViewChanged = await TryUpdateViewAsync(game, module);
-        if (_isDisposed)
+        var sink = _viewSink;
+        var delivery = sink?.Take();
+        if (delivery is not null)
         {
-            return;
+            try
+            {
+                if (!_isViewBroken && !delivery.Update.IsEmpty)
+                {
+                    await TryApplyUpdateAsync(module, delivery.Update);
+                }
+            }
+            finally
+            {
+                // The session waits for this before it delivers the next update.
+                sink!.Release();
+            }
+
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _panelState = delivery.Panel;
+            _positionText = delivery.Panel.PositionText;
         }
 
-        await RefreshPanelAsync(game, hasViewChanged);
+        ResolvePlayer(game);
+        await RefreshPanelAsync(game, hasDelivery: delivery is not null);
         if (!_isDisposed)
         {
             StateHasChanged();
         }
     }
 
-    // Returns whether the browser received a change of the view.
-    private async Task<bool> TryUpdateViewAsync(Game game, IJSObjectReference module)
+    // The player is the subject of the session's player, once a publish attached it to the game.
+    private void ResolvePlayer(Game game)
     {
-        if (_isViewBroken)
+        _clientId = CurrentConnection.Connection?.ClientId;
+        if (_viewSession is { } session && _clientId != _viewClientId)
         {
-            return false;
+            _viewClientId = _clientId;
+            session.ClientId = _clientId;
         }
 
-        GameViewUpdate update;
-        try
-        {
-            update = await game.UpdateViewAsync(_tracker, _player is null ? null : _clientId, _lifetime.Token);
-        }
-        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
-        {
-            // The game has stopped or the page went away.
-            return false;
-        }
-
-        return !_isDisposed && !update.IsEmpty && await TryApplyUpdateAsync(module, update);
+        _player = _panelState.PlayerClientId is { } clientId && clientId == _clientId && game.Players.TryGetValue(clientId, out var player)
+            ? player
+            : null;
     }
 
-    // Nearby follows both the view, which carries the toggles, and the volume table.
-    private async Task RefreshPanelAsync(Game game, bool hasViewChanged)
+    // Nearby follows the view, which carries the toggles, the publishes, which carry the titles, and the volume table.
+    private async Task RefreshPanelAsync(Game game, bool hasDelivery)
     {
         var isVolumeTableChanged = Interlocked.Exchange(ref _isVolumeTableChanged, 0) == 1;
-        if (hasViewChanged)
-        {
-            RefreshPosition();
-        }
-
         var isPublished = game.PublishVersion != _nearbyPublishVersion;
-        if (hasViewChanged || isVolumeTableChanged || isPublished)
+        if (hasDelivery || isVolumeTableChanged || isPublished)
         {
-            RefreshNearby(game, hasViewChanged || isPublished);
+            RefreshNearby(game, hasDelivery || isPublished);
         }
 
-        await RefreshActionsAsync(game);
+        RefreshActions(game);
         if (isVolumeTableChanged)
         {
             await SynchronizeVoiceAsync(game);
@@ -1015,24 +1062,8 @@
         {
             // The module dropped the view or broke, so every later update would fail too.
             _isViewBroken = true;
-            UnsubscribeWorld();
             return false;
         }
-    }
-
-    private void RefreshPosition()
-    {
-        GameViewObject? self = null;
-        foreach (var view in _tracker.Known)
-        {
-            if (view.IsSelf)
-            {
-                self = view;
-                break;
-            }
-        }
-
-        _positionText = self is null ? NoPosition : $"X {self.X} · Y {self.Y} · facing {((GameDirection)self.Facing).GetShortName()}";
     }
 
     // The own player and the players it hears, by the same rule that mixes the voices. A new table with the same players
@@ -1093,13 +1124,13 @@
         return true;
     }
 
-    private NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
-        new(player.Title ?? string.Empty, _tracker.GetPlayerColor(player.ClientId), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
+    private static NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
+        new(player.Title ?? string.Empty, GameColors.FromId(player.ClientId), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
 
-    private async Task RefreshActionsAsync(Game game)
+    private void RefreshActions(Game game)
     {
         _actions = GetGameActions(game);
-        if (_player is not { } player)
+        if (_player is null)
         {
             _targets = [];
             return;
@@ -1107,7 +1138,7 @@
 
         var key = 0;
         var targets = new List<TargetEntry>();
-        foreach (var target in await TryGetTargetsAsync(game, player.ClientId))
+        foreach (var target in _panelState.Targets)
         {
             var operations = GetOperations(target);
             var actions = new List<ActionEntry>(operations.Count);
@@ -1122,32 +1153,33 @@
         _targets = targets;
     }
 
-    // None once the game has stopped or the page went away.
-    private async Task<IReadOnlyList<GameObject>> TryGetTargetsAsync(Game game, string clientId)
+    private bool IsTarget(GameObject gameObject)
     {
-        try
+        var targets = _panelState.Targets;
+        for (var index = 0; index < targets.Count; index++)
         {
-            return await game.GetTargetsAsync(clientId, _lifetime.Token);
+            if (ReferenceEquals(targets[index], gameObject))
+            {
+                return true;
+            }
         }
-        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
-        {
-            return [];
-        }
+
+        return false;
     }
 
-    private void UnsubscribeWorld()
+    // Also ends the view session in the game, which then delivers nothing more to this page.
+    private void CloseView()
     {
-        if (_isWorldSubscribed && _subscribedGame is { } game)
-        {
-            game.WorldChanged -= ScheduleFlush;
-            _isWorldSubscribed = false;
-        }
+        _viewSink?.Close();
+        _viewSink = null;
+        _viewSession?.Dispose();
+        _viewSession = null;
     }
 
     // Also drops the speaker of this page in the game's mixer, which belongs to that game.
     private void Unsubscribe()
     {
-        UnsubscribeWorld();
+        CloseView();
         if (_subscribedGame is { } game)
         {
             game.VolumeTableChanged -= OnVolumeTableChanged;
@@ -1256,6 +1288,33 @@
     private sealed record VoiceStartResult(bool IsStarted, string? Error);
 
     private sealed record NearbyEntry(string Title, string Color, bool IsSelf, bool IsMicrophoneOn, bool IsAudioOn);
+
+    private sealed record ViewDelivery(GameViewUpdate Update, GamePanelState Panel);
+
+    // The page's side of its view session: busy from a delivery until the flush that applies it released it, so at most
+    // one update is on its way to the browser and the session collects the changes meanwhile.
+    private sealed class ViewSink(GamePage page) : IGameViewSink
+    {
+        private int _isBusy;
+        private int _isClosed;
+        private ViewDelivery? _delivery;
+
+        public bool IsBusy => Volatile.Read(ref _isBusy) == 1 || Volatile.Read(ref _isClosed) == 1;
+
+        // On the simulation thread.
+        public void Deliver(GameViewUpdate update, GamePanelState panel)
+        {
+            Volatile.Write(ref _isBusy, 1);
+            Volatile.Write(ref _delivery, new ViewDelivery(update, panel));
+            page.OnViewDelivered();
+        }
+
+        public ViewDelivery? Take() => Interlocked.Exchange(ref _delivery, null);
+
+        public void Release() => Volatile.Write(ref _isBusy, 0);
+
+        public void Close() => Volatile.Write(ref _isClosed, 1);
+    }
 
     // The page's speaker as the mixer sees it.
     private sealed class VoiceSink(GamePage page) : IGameVoiceSink

@@ -75,11 +75,7 @@ public partial class Game
             return;
         }
 
-        if (_publisher.Publish())
-        {
-            WorldChanged?.Invoke();
-        }
-
+        _publisher.Publish();
         _world.IsSaveRequested = false;
 
         // Before the save serializes the game on another thread, so the hooks' writes do not race it.

@@ -249,8 +249,10 @@ public class GameRuntimeTests
         using var isHeld = new ManualResetEventSlim();
         var isArmed = false;
 
-        // Holds the former run in its final tick, which the queued door write makes raise WorldChanged.
-        _context.Game.WorldChanged += () =>
+        // Holds the former run in its final tick, in which the queued door write makes the view session deliver.
+        var sink = new RecordingViewSink();
+        using var session = await _context.OpenViewAsync("tab-1", sink);
+        sink.Delivered = () =>
         {
             if (isArmed)
             {

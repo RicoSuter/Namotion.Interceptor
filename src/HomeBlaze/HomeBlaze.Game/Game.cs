@@ -39,8 +39,6 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
     private int _isStarted;
 
-    // Touched only on the simulation thread: whether this tick's first handler published the object set.
-    private bool _isObjectSetPublishedInTick;
     private Task _lastRun = Task.CompletedTask;
 
     [ThreadStatic]
@@ -86,30 +84,26 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation = new GameSimulation(timeProvider, logger);
         _world = new GameWorldState(timeProvider, _voiceMixer);
         _publisher = new GamePublisher(this, _world, timeProvider);
+        _viewSessions = CreateViewSessions();
         _lastSaveTimestamp = timeProvider.GetTimestamp();
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
         Objects = new Dictionary<string, GameObject>();
         Tools = new Dictionary<string, GameTool>();
 
-        // Index.Changes is cleared last, after everything that reads it in the tick. The object set is published and the
-        // objects' hooks run first, so what they write is read again in the same tick.
+        // Index.Changes is cleared last, after everything that reads it in the tick; the view sessions come right before,
+        // so they also see what the hooks of a save's publish changed. The object set is published and the objects'
+        // hooks run first, so what they write is read again in the same tick.
         _simulation.AddTickHandler(PublishObjectSetWhenChanged);
         _simulation.AddTickHandler(_world.RefreshChangedSubjects);
         _simulation.AddTickHandler(_world.PublishSnapshot);
         _simulation.AddTickHandler(RebuildVolumeTableWhenDue);
-        _simulation.AddTickHandler(RaiseWorldChangedWhenChanged);
         _simulation.AddTickHandler(PublishWhenDue);
         _simulation.AddTickHandler(StartSaveWhenDue);
         _simulation.AddTickHandler(CompleteWrittenPlacements);
+        _simulation.AddTickHandler(UpdateViewSessions);
         _simulation.AddTickHandler(_world.Index.Changes.Clear);
     }
-
-    /// <summary>
-    /// Raised on the simulation thread after the world changed in a tick or the subjects were published; handlers must
-    /// not block or throw. The page's trigger to pull its view.
-    /// </summary>
-    internal event Action? WorldChanged;
 
     /// <summary>
     /// Increases with every publish that wrote to the subjects; any thread may read it.
@@ -291,6 +285,10 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
             // The stop dropped the schedules, so every object of a restarted game sets them up again.
             OnObjectsTakenOver(isRestarting ? GetObjectSubjects() : added, removed);
+            if (isRestarting)
+            {
+                _viewSessions.RequestFullRefresh();
+            }
         });
     }
 
@@ -332,29 +330,16 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
     }
 
-    private void RaiseWorldChangedWhenChanged()
-    {
-        if (_world.Index.Changes.Count > 0)
-        {
-            WorldChanged?.Invoke();
-        }
-    }
-
     // Placed objects are attached in the tick that adds them, so their World resolves once the command completes.
     private void PublishObjectSetWhenChanged()
     {
-        _isObjectSetPublishedInTick = _publisher.TryPublishObjectSet();
+        _publisher.TryPublishObjectSet();
         RunAddedToWorldOfPublishedObjects();
     }
 
     private void PublishWhenDue()
     {
         ResumePublishingWhenSaveIsOverdue();
-        var isObjectSetPublished = _isObjectSetPublishedInTick;
-        _isObjectSetPublishedInTick = false;
-        if (_publisher.TryPublish() || isObjectSetPublished)
-        {
-            WorldChanged?.Invoke();
-        }
+        _publisher.TryPublish();
     }
 }

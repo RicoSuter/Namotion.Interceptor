@@ -15,7 +15,7 @@ public class GameMovementTests
     }
 
     private Task<IReadOnlyList<GameObject>> GetTargetsAsync(GamePlayer player) =>
-        _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId));
+        _context.GetTargetsAsync(player.ClientId);
 
     [Fact]
     public async Task WhenThePathIsFree_ThenTheStepMovesOneTileAndTurns()

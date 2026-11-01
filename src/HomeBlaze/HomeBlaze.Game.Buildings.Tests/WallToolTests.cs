@@ -35,7 +35,7 @@ public class WallToolTests
         var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
         Assert.Equal((-1, 2, 4, 1, 10, WallMaterial.Bricks), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Height, wall.Material));
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
-        Assert.Same(wall, Assert.Single(await _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId))));
+        Assert.Same(wall, Assert.Single(await _context.GetTargetsAsync(player.ClientId)));
     }
 
     [Theory]

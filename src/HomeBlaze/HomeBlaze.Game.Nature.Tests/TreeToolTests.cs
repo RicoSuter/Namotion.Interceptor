@@ -38,7 +38,7 @@ public class TreeToolTests
         Assert.InRange(tree.Rotation, 0, 359);
         Assert.InRange(tree.Scale, Tree.MinimumScale, Tree.MaximumScale);
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
-        Assert.Same(tree, Assert.Single(await _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId))));
+        Assert.Same(tree, Assert.Single(await _context.GetTargetsAsync(player.ClientId)));
     }
 
     [Fact]

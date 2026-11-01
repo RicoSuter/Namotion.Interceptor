@@ -103,7 +103,7 @@ public class GamePlacementTests
         Assert.StartsWith("wall-", name);
         Assert.Equal("wall-".Length + 8, name.Length);
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
-        Assert.Same(wall, Assert.Single(await _context.RunAsync(_context.Game.GetTargetsAsync(player.ClientId))));
+        Assert.Same(wall, Assert.Single(await _context.GetTargetsAsync(player.ClientId)));
     }
 
     [Fact]

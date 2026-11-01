@@ -1,6 +1,7 @@
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.View;
+using HomeBlaze.Game.World;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HomeBlaze.Game.Tests.View;
@@ -8,35 +9,44 @@ namespace HomeBlaze.Game.Tests.View;
 public class GameViewTrackerTests
 {
     private readonly GameViewTracker _tracker = new();
-    private readonly List<GameEntity> _inView = [];
+    private readonly GameWorldIndex _index = new();
 
-    private GameViewUpdate Update(PlayerEntity? self) => _tracker.Update(_inView, self, NullLogger.Instance);
+    // Takes the chunks the index changed since the last update, as the view session does.
+    private GameViewUpdate Update(PlayerEntity? self, int centerX = 0, int centerY = 0)
+    {
+        var update = _tracker.UpdateChunks(_index, _index.Changes, GameViewWindow.Around(centerX, centerY), self, isFullRefresh: false,
+            NullLogger.Instance);
+        _index.Changes.Clear();
+        return update;
+    }
 
     private PlayerEntity AddPlayer(string clientId, int x = 0, int y = 0)
     {
         var player = EntityFactory.Player(clientId, x, y);
-        _inView.Add(player);
+        _index.AddOrUpdate(player);
         return player;
     }
 
     private GameEntity AddObject(GameObject gameObject)
     {
         var entity = EntityFactory.Object(gameObject);
-        _inView.Add(entity);
+        _index.AddOrUpdate(entity);
         return entity;
     }
 
     [Fact]
-    public async Task WhenTheGameUpdatesTheViewFirst_ThenEveryObjectInTheRadiusIsAdded()
+    public void WhenTheFirstUpdateRuns_ThenEveryVisibleEntityInTheWindowIsAdded()
     {
         // Arrange
-        var context = new GameTestContext();
-        context.AddConnectedPlayer("tab-1");
-        context.AddWall(-20, 8, width: 19);
-        context.AddWall(GameViewTracker.ViewRadius + 50, 0);
+        var player = AddPlayer("tab-1");
+        AddObject(new Wall { X = -20, Y = 8, Width = 19 });
+        AddObject(new Wall { X = GameViewTracker.ViewRadius + 50, Y = 0 });
+        var hidden = AddPlayer("tab-2", x: 10);
+        hidden.SetConnected(false);
+        _index.AddOrUpdate(hidden);
 
         // Act
-        var update = await context.RunAsync(context.Game.UpdateViewAsync(_tracker, "tab-1"));
+        var update = Update(player);
 
         // Assert
         Assert.Equal(2, update.Upserted.Count);
@@ -51,24 +61,113 @@ public class GameViewTrackerTests
     }
 
     [Fact]
-    public async Task WhenAPlayerDisconnects_ThenTheGameReportsItRemovedFromTheView()
+    public void WhenAPlayerDisconnects_ThenItIsRemoved()
     {
         // Arrange
-        var context = new GameTestContext();
-        context.AddConnectedPlayer("tab-1");
-        context.AddConnectedPlayer("tab-2", x: 10);
-        var first = await context.RunAsync(context.Game.UpdateViewAsync(_tracker, "tab-1"));
-        var otherId = Assert.Single(first.Upserted, view => !view.IsSelf).Id;
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 10);
+        var otherId = Assert.Single(Update(player).Upserted, view => !view.IsSelf).Id;
 
         // Act
-        context.Clients.Set("tab-2", isNamed: false, isConnected: false);
-        context.Reconcile();
-        var update = await context.RunAsync(context.Game.UpdateViewAsync(_tracker, "tab-1"));
+        other.SetConnected(false);
+        _index.AddOrUpdate(other);
+        var update = Update(player);
 
         // Assert
         Assert.Equal(new[] { otherId }, update.Removed);
         Assert.Empty(update.Upserted);
-        Assert.Single(_tracker.Known);
+        Assert.Equal(1, _tracker.Count);
+    }
+
+    [Fact]
+    public void WhenAnEntityMovesBetweenChunksOfTheWindow_ThenItIsUpsertedAndKept()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 15);
+        var otherId = Assert.Single(Update(player).Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        other.Area = other.Area with { X = 17 };
+        _index.AddOrUpdate(other);
+        var update = Update(player);
+
+        // Assert
+        var moved = Assert.Single(update.Upserted);
+        Assert.Equal((otherId, 17), (moved.Id, moved.X));
+        Assert.Empty(update.Removed);
+        Assert.Equal(2, _tracker.Count);
+    }
+
+    [Fact]
+    public void WhenAnEntityMovesOutOfTheWindow_ThenItIsRemoved()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 10);
+        var otherId = Assert.Single(Update(player).Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        other.Area = other.Area with { X = 1000 };
+        _index.AddOrUpdate(other);
+        var update = Update(player);
+
+        // Assert
+        Assert.Equal(new[] { otherId }, update.Removed);
+        Assert.Empty(update.Upserted);
+    }
+
+    [Fact]
+    public void WhenTheWindowJumps_ThenTheEntitiesLeftBehindAreRemovedAndTheOnesAtTheTargetAdded()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        AddObject(new Wall { X = -20, Y = 8 });
+        AddObject(new Wall { X = 5000, Y = 0 });
+        var nearId = Assert.Single(Update(player).Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        player.Area = player.Area with { X = 5000, Y = 5 };
+        _index.AddOrUpdate(player);
+        var update = Update(player, 5000, 5);
+
+        // Assert
+        Assert.Equal(new[] { nearId }, update.Removed);
+        Assert.Equal(2, update.Upserted.Count);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 5000 });
+        Assert.Contains(update.Upserted, view => view is { IsSelf: false, X: 5000, Y: 0 });
+        Assert.Equal(2, _tracker.Count);
+    }
+
+    [Fact]
+    public void WhenAWallSpansSeveralChunks_ThenItIsUpsertedOnceAndRemovedOnlyWhenItLeavesTheLastOne()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var wall = new Wall { X = -20, Y = 8, Width = 40 };
+        var entity = AddObject(wall);
+        var first = Update(player);
+
+        // Act
+        wall.Material = WallMaterial.Wood;
+        entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
+        var changed = Update(player);
+        wall.Width = 10;
+        entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
+        var shrunk = Update(player);
+        _index.Remove(entity);
+        var removed = Update(player);
+
+        // Assert
+        Assert.Single(first.Upserted, view => !view.IsSelf);
+        Assert.Single(changed.Upserted);
+        Assert.Empty(changed.Removed);
+        Assert.Equal(10, Assert.Single(shrunk.Upserted).Width);
+        Assert.Empty(shrunk.Removed);
+        Assert.Single(removed.Removed);
+        Assert.Equal(1, _tracker.Count);
     }
 
     [Fact]
@@ -115,6 +214,7 @@ public class GameViewTrackerTests
 
         // Act
         other.Area = other.Area with { X = 11 };
+        _index.AddOrUpdate(other);
         var update = Update(player);
 
         // Assert
@@ -133,12 +233,12 @@ public class GameViewTrackerTests
         var otherId = Assert.Single(first.Upserted, view => !view.IsSelf).Id;
 
         // Act
-        _inView.Remove(other);
+        _index.Remove(other);
         var update = Update(player);
 
         // Assert
         Assert.Equal(new[] { otherId }, update.Removed);
-        Assert.Single(_tracker.Known);
+        Assert.Equal(1, _tracker.Count);
     }
 
     [Fact]
@@ -154,6 +254,7 @@ public class GameViewTrackerTests
         // Act
         door.IsOpen = true;
         entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
         var update = Update(player);
 
         // Assert
@@ -171,6 +272,7 @@ public class GameViewTrackerTests
 
         // Act
         player.IsMicrophoneOn = true;
+        _index.MarkChanged(player);
         var update = Update(player);
 
         // Assert
@@ -188,6 +290,7 @@ public class GameViewTrackerTests
 
         // Act
         player.Facing = GameDirection.West;
+        _index.MarkChanged(player);
         var update = Update(player);
 
         // Assert
@@ -206,6 +309,7 @@ public class GameViewTrackerTests
         // Act
         gameObject.CustomVisual = GameVisual.Box(1, 2, 1);
         entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
         var update = Update(player);
 
         // Assert
@@ -224,6 +328,7 @@ public class GameViewTrackerTests
         // Act
         gameObject.CustomVisual = GameVisual.Box(1, 3, 1, "#112233");
         entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
         var update = Update(player);
 
         // Assert
@@ -264,17 +369,15 @@ public class GameViewTrackerTests
     }
 
     [Fact]
-    public void WhenThePlayerColorIsRequested_ThenItIsTheColorOfItsViewObject()
+    public void WhenAPlayerIsInView_ThenItCarriesTheColorOfItsClient()
     {
         // Arrange
         var player = AddPlayer("tab-1");
-        var view = Assert.Single(Update(player).Upserted);
 
         // Act
-        var color = _tracker.GetPlayerColor(player.ClientId);
+        var view = Assert.Single(Update(player).Upserted);
 
         // Assert
-        Assert.Equal(view.Color, color);
-        Assert.Equal(GameColors.FromId("tab-1"), color);
+        Assert.Equal(GameColors.FromId("tab-1"), view.Color);
     }
 }

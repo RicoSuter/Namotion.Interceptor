@@ -39,10 +39,15 @@ public partial class Game
     /// </summary>
     internal const string NoSenderMessage = "Only a player in the game can send messages.";
 
-    // Touched only on the simulation thread: scratch space of the view and target queries, and of the objects whose
-    // OnAddedToWorld runs.
-    private readonly List<GameEntity> _queryResults = [];
+    // Touched only on the simulation thread: the objects whose OnAddedToWorld runs.
     private readonly List<GameObject> _addedObjects = [];
+
+    private readonly GameViewSessions _viewSessions;
+
+    /// <summary>
+    /// The view sessions of the pages.
+    /// </summary>
+    internal GameViewSessions Views => _viewSessions;
 
     // Touched only on the simulation thread: the places and replaces of other threads, which wait for a write of the set.
     private readonly GameSetWaiters _placementsAwaitingWrite = new();
@@ -261,44 +266,10 @@ public partial class Game
             ? _world.TryMove(player, direction, turnOnly)
             : (MoveResult?)null, cancellationToken);
 
-    /// <summary>
-    /// Gets the visible objects other than the client's player in the tiles in front of it, from south-west to north-east.
-    /// </summary>
-    internal Task<IReadOnlyList<GameObject>> GetTargetsAsync(string clientId, CancellationToken cancellationToken = default) =>
-        _simulation.InvokeAsync<IReadOnlyList<GameObject>>(() =>
-        {
-            if (!_world.Players.TryGetValue(clientId, out var player))
-            {
-                return [];
-            }
+    private GameViewSessions CreateViewSessions() => new(_simulation, _world, _logger);
 
-            _queryResults.Clear();
-            _world.GetTargets(player, _queryResults);
-            var targets = new GameObject[_queryResults.Count];
-            for (var i = 0; i < targets.Length; i++)
-            {
-                targets[i] = _queryResults[i].Subject;
-            }
-
-            _queryResults.Clear();
-            return targets;
-        }, cancellationToken);
-
-    /// <summary>
-    /// Brings the tracker in line with the visible entities within <see cref="GameViewTracker.ViewRadius"/> of the
-    /// client's player, or of the origin while it has none, and returns what changed. The caller must not touch the
-    /// tracker until the task completed.
-    /// </summary>
-    internal Task<GameViewUpdate> UpdateViewAsync(GameViewTracker tracker, string? clientId, CancellationToken cancellationToken = default) =>
-        _simulation.InvokeAsync(() =>
-        {
-            var self = clientId is not null && _world.Players.TryGetValue(clientId, out var player) ? player : null;
-            _queryResults.Clear();
-            _world.Index.Query(GetViewArea(self?.Area.X ?? 0, self?.Area.Y ?? 0), _queryResults);
-            var update = tracker.Update(_queryResults, self, _logger);
-            _queryResults.Clear();
-            return update;
-        }, cancellationToken);
+    // Runs after everything that changes the index in the tick, so the sessions see all of this tick's changes.
+    private void UpdateViewSessions() => _viewSessions.Update(_publisher.Version);
 
     /// <exception cref="InvalidOperationException">The sender is not a connected player of this game or sent a message
     /// less than <see cref="MessageInterval"/> ago.</exception>
@@ -390,14 +361,5 @@ public partial class Game
             Volatile.Write(ref _action, null);
             Volatile.Read(ref _registration)?.Dispose();
         }
-    }
-
-    private static GameArea GetViewArea(int centerX, int centerY)
-    {
-        var minimumX = Math.Max(int.MinValue, (long)centerX - GameViewTracker.ViewRadius);
-        var maximumX = Math.Min(int.MaxValue, (long)centerX + GameViewTracker.ViewRadius);
-        var minimumY = Math.Max(int.MinValue, (long)centerY - GameViewTracker.ViewRadius);
-        var maximumY = Math.Min(int.MaxValue, (long)centerY + GameViewTracker.ViewRadius);
-        return new GameArea((int)minimumX, (int)minimumY, (int)(maximumX - minimumX + 1), (int)(maximumY - minimumY + 1));
     }
 }

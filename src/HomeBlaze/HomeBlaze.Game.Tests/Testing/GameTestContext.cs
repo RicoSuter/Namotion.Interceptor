@@ -1,4 +1,6 @@
 using HomeBlaze.Game.Buildings;
+using HomeBlaze.Game.Simulation;
+using HomeBlaze.Game.View;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -161,6 +163,22 @@ internal sealed class GameTestContext
         player.Y = y;
         Tick();
         return player;
+    }
+
+    /// <summary>
+    /// Opens a view session for the client and runs the tick that delivers its first update.
+    /// </summary>
+    public Task<GameViewSession> OpenViewAsync(string? clientId, IGameViewSink sink) =>
+        RunAsync(Game.Views.OpenAsync(clientId, sink));
+
+    /// <summary>
+    /// Gets the targets of the client's player as the panel of a new view session shows them.
+    /// </summary>
+    public async Task<IReadOnlyList<GameObject>> GetTargetsAsync(string clientId)
+    {
+        var sink = new RecordingViewSink();
+        using var session = await OpenViewAsync(clientId, sink);
+        return sink.Panel.Targets;
     }
 
     public Wall AddWall(int x, int y, int width = Wall.DefaultLength, int depth = 1) =>
