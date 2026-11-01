@@ -1,10 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <ItemGroup>
-        <InternalsVisibleTo Include="HomeBlaze.Game.Buildings.Tests" />
-    </ItemGroup>
-
-    <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Game.Abstractions\HomeBlaze.Game.Abstractions.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

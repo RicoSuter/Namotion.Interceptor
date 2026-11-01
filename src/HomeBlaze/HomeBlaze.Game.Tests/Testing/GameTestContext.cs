@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Buildings;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

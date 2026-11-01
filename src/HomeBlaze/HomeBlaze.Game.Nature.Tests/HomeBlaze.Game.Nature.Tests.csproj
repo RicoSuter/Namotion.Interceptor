@@ -23,7 +23,6 @@
     <ItemGroup>
         <Using Include="Xunit" />
         <Using Include="HomeBlaze.Game.Abstractions" />
-        <Using Include="HomeBlaze.Game.Buildings" />
         <Using Include="HomeBlaze.Game.Nature" />
     </ItemGroup>
 
@@ -32,7 +31,6 @@
         <ProjectReference Include="..\HomeBlaze.Game.Buildings\HomeBlaze.Game.Buildings.csproj" />
         <ProjectReference Include="..\HomeBlaze.Game.Nature\HomeBlaze.Game.Nature.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-        <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
 
     <!-- The shared helpers of the game tests; GameTestContext needs HomeBlaze.Game.Buildings for AddWall and AddDoor. -->

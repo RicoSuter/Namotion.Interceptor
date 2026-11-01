@@ -9,7 +9,13 @@ A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every br
 | Project | Contents |
 |---|---|
 | `HomeBlaze.Game` (Razor SDK) | Subjects, the page component, the JS modules and the vendored assets under `wwwroot/` |
-| `HomeBlaze.Game.Tests` | Unit tests and E2E tests |
+| `HomeBlaze.Game.Tests` | Unit tests of the core, the demo world tests and the E2E tests |
+| `HomeBlaze.Game.Abstractions` | The extension contract that object libraries build on |
+| `HomeBlaze.Game.Abstractions.Tests` | The public API snapshot of the abstractions |
+| `HomeBlaze.Game.Buildings` (Razor SDK) | Walls, doors, the wall tool and the wall textures under `wwwroot/textures/` |
+| `HomeBlaze.Game.Buildings.Tests` | Unit tests of walls, doors and the wall tool, run against a real game |
+| `HomeBlaze.Game.Nature` (Razor SDK) | Trees, the tree tool and the tree models under `wwwroot/models/` |
+| `HomeBlaze.Game.Nature.Tests` | Unit tests of trees and the tree tool, run against a real game |
 
 The app registers the library and the object libraries `HomeBlaze.Game.Buildings` and `HomeBlaze.Game.Nature` with project references in `HomeBlaze.csproj` and one `.AddAssembly(...)` each in `Program.cs`. `Data/Files/Demo/Game.json` of the app holds the demo world, served at `/pages/Demo/Game`: a house of 56 x 40 tiles (14 x 10 m) with six rooms (living room, hall, kitchen, two bedrooms and a bathroom), brick outer walls, concrete inner walls and doors 4 to 6 tiles wide, a wooden shed with a closed door to the west, a forest of 32 trees to the east, 7 more trees around the house, and the tools `wall-tool` and `tree-tool`. New players spawn at 0, 0, just south of the open entrance. A script generated the file once with a fixed random seed; the script is not part of the repository, and the file is edited like any saved world. `DemoWorldTests` checks that it loads, that every room is reachable from the spawn point and that no tree blocks a door.
 
@@ -75,7 +81,15 @@ The core (`Game*.cs`, `GamePlayer`, `World/`, `View/`, `Voice/`, `Components/`) 
 | `HomeBlaze.Game.Buildings` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures`; walls and doors share a library because "Add door" creates doors |
 | `HomeBlaze.Game.Nature` | `Tree`, `TreeVariant`, `TreeTool` |
 
-Moving the object types into these libraries removed the `Objects.` segment from their `$type` names, which are now `HomeBlaze.Game.Buildings.Wall`, `HomeBlaze.Game.Nature.Tree` and so on; walls and doors saved before an earlier move are named `HomeBlaze.Game.Wall` and `HomeBlaze.Game.Door`. The loader has no rename mapping, so a world saved before needs those names replaced in its file.
+Moving the object types into these libraries changed their `$type` names. The loader has no rename mapping, so a world saved before needs these names replaced in its file:
+
+| Old `$type` | New `$type` |
+|---|---|
+| `HomeBlaze.Game.Wall`, `HomeBlaze.Game.Objects.Buildings.Wall` | `HomeBlaze.Game.Buildings.Wall` |
+| `HomeBlaze.Game.Door`, `HomeBlaze.Game.Objects.Buildings.Door` | `HomeBlaze.Game.Buildings.Door` |
+| `HomeBlaze.Game.Objects.Buildings.WallTool` | `HomeBlaze.Game.Buildings.WallTool` |
+| `HomeBlaze.Game.Objects.Nature.Tree` | `HomeBlaze.Game.Nature.Tree` |
+| `HomeBlaze.Game.Objects.Nature.TreeTool` | `HomeBlaze.Game.Nature.TreeTool` |
 
 Extension points:
 
@@ -355,15 +369,15 @@ Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** wi
 
 ## Assets and licenses
 
-Everything is vendored under the `wwwroot/` of the library that uses it, served by `MapStaticAssets` (compressed and fingerprinted at build time) at `_content/<assembly name>/`. Each folder has a `LICENSE.md` with source and terms, which lists every file of the folder. The assets of an object type live in its object library under `objects/<folder>/`, which `GameAssets.Url` turns into `_content/HomeBlaze.Game.Nature/objects/nature/models/...`, for example.
+Everything is vendored under the `wwwroot/` of the library that uses it, served by `MapStaticAssets` (compressed and fingerprinted at build time) at `_content/<assembly name>/`. Each folder has a `LICENSE.md` with source and terms, which lists every file of the folder. The assets of an object type live in the `wwwroot/` of its object library, which `GameAssets.Url` turns into `_content/HomeBlaze.Game.Nature/models/...`, for example.
 
 | Folder | Asset | License |
 |---|---|---|
 | `HomeBlaze.Game`: `lib/babylonjs/` | Babylon.js 9.31.0 core and glTF loader (UMD builds) | Apache 2.0 |
 | `HomeBlaze.Game`: `models/` | `Casual_2.glb` from the Ultimate Modular Men pack by Quaternius, only `Idle_Neutral` and `Walk` kept | CC0 |
 | `HomeBlaze.Game`: `textures/` | ambientCG Grass004 (`grass.jpg`), re-encoded | CC0 |
-| `HomeBlaze.Game.Buildings`: `objects/buildings/textures/` | ambientCG Bricks097 (`bricks.jpg`, stacked to a square), Concrete046 (`concrete.jpg`) and Planks021 (`wood.jpg`), re-encoded to 512 x 512 | CC0 |
-| `HomeBlaze.Game.Nature`: `objects/nature/models/` | Seven trees of the low poly nature pack by flo-bit, unchanged GLB files from a pinned commit | CC0 |
+| `HomeBlaze.Game.Buildings`: `textures/` | ambientCG Bricks097 (`bricks.jpg`, stacked to a square), Concrete046 (`concrete.jpg`) and Planks021 (`wood.jpg`), re-encoded to 512 x 512 | CC0 |
+| `HomeBlaze.Game.Nature`: `models/` | Seven trees of the low poly nature pack by flo-bit, unchanged GLB files from a pinned commit | CC0 |
 
 To swap the character, replace the GLB and its license, then update `game-entities.js`: the file name in `LoadAssetContainerAsync`, `IDLE_ANIMATION`, `WALKING_ANIMATION`, `SHIRT_MATERIAL` (the material tinted with the player color) and `WALKING_SPEED_RATIO` so the feet keep pace with one tile per step. The model is scaled from its bounding box to the player's `Height` and must face north (+z) after the loader's handedness conversion.
 

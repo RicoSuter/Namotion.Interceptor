@@ -7,9 +7,9 @@ namespace HomeBlaze.Game.Buildings;
 /// </summary>
 internal static class WallTextures
 {
-    private static readonly string BricksUrl = GameAssets.Url(typeof(WallTextures), "objects/buildings/textures/bricks.jpg");
-    private static readonly string ConcreteUrl = GameAssets.Url(typeof(WallTextures), "objects/buildings/textures/concrete.jpg");
-    private static readonly string WoodUrl = GameAssets.Url(typeof(WallTextures), "objects/buildings/textures/wood.jpg");
+    private static readonly string BricksUrl = GameAssets.Url(typeof(WallTextures), "textures/bricks.jpg");
+    private static readonly string ConcreteUrl = GameAssets.Url(typeof(WallTextures), "textures/concrete.jpg");
+    private static readonly string WoodUrl = GameAssets.Url(typeof(WallTextures), "textures/wood.jpg");
 
     public static GameVisualPart CreateBox(WallMaterial material, GameVisualVector offset, GameVisualVector size) => new()
     {

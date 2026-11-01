@@ -3,7 +3,7 @@ using HomeBlaze.Game.Abstractions;
 namespace HomeBlaze.Game.Nature;
 
 /// <summary>
-/// A tree model under <c>wwwroot/objects/nature/models/</c> and its sizes in tiles at a scale of 100 percent.
+/// A tree model under <c>wwwroot/models/</c> and its sizes in tiles at a scale of 100 percent.
 /// </summary>
 /// <param name="File">The file name of the model.</param>
 /// <param name="Height">The height in tiles it is shown at, at a scale of 100 percent.</param>
@@ -11,5 +11,5 @@ namespace HomeBlaze.Game.Nature;
 /// <param name="CrownSize">The diameter of the circle around the trunk that holds the whole crown.</param>
 internal sealed record TreeVariant(string File, int Height, int TrunkSize, int CrownSize)
 {
-    public string Url { get; } = GameAssets.Url(typeof(TreeVariant), $"objects/nature/models/{File}");
+    public string Url { get; } = GameAssets.Url(typeof(TreeVariant), $"models/{File}");
 }

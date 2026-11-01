@@ -30,7 +30,6 @@
         <ProjectReference Include="..\HomeBlaze.Game\HomeBlaze.Game.csproj" />
         <ProjectReference Include="..\HomeBlaze.Game.Buildings\HomeBlaze.Game.Buildings.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-        <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
 
     <!-- The shared helpers of the game tests; GameTestContext needs HomeBlaze.Game.Buildings for AddWall and AddDoor. -->
