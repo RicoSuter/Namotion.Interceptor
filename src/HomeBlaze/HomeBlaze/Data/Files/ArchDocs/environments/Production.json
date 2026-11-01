@@ -1,0 +1,12 @@
+{
+  "$type": "Namotion.ArchDocs.Environment",
+  "name": "Production",
+  "deploymentUnitSources": [
+    {
+      "path": "/ArchDocs/deployment-units/Orders"
+    },
+    {
+      "path": "/ArchDocs/deployment-units/Payments"
+    }
+  ]
+}

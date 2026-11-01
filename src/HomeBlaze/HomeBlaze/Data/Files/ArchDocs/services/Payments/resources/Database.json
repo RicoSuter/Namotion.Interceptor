@@ -1,0 +1,6 @@
+{
+  "$type": "Namotion.ArchDocs.Resource",
+  "name": "Payments database",
+  "kind": "Database",
+  "technology": "PostgreSQL"
+}
