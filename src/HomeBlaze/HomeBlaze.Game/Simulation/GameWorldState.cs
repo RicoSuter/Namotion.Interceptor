@@ -18,7 +18,10 @@ internal sealed class GameWorldState
     /// </summary>
     public const string DefaultPlayerTitle = "Player";
 
-    private const string NotPartOfGameMessage = "The object is not part of this game.";
+    /// <summary>
+    /// The message with which an object of another game is refused.
+    /// </summary>
+    public const string NotPartOfGameMessage = "The object is not part of this game.";
 
     private readonly TimeProvider _timeProvider;
     private readonly GameVoiceMixer _voiceMixer;
@@ -28,6 +31,10 @@ internal sealed class GameWorldState
 
     // Objects added since the last publish of the object set; writes to them go unseen until the set attaches them.
     private readonly List<GameObject> _unpublishedObjects = [];
+
+    // Objects placed or added by a replacement that the last publish of the object set attached, whose OnAddedToWorld
+    // is due.
+    private readonly List<GameObject> _publishedNewObjects = [];
 
     // Swapped in whole by the simulation thread and read by any thread; a published instance never changes.
     private volatile OccupancySnapshot _snapshot = OccupancySnapshot.Empty;
@@ -97,6 +104,13 @@ internal sealed class GameWorldState
     public OccupancySnapshot Snapshot => _snapshot;
 
     /// <summary>
+    /// The objects of the world placed or added by a replacement that a publish of the object set attached since the
+    /// game last cleared this list, in the order added. Removing an object takes it out; a take-over clears the list and
+    /// reports the objects it keeps as added instead.
+    /// </summary>
+    public List<GameObject> PublishedNewObjects => _publishedNewObjects;
+
+    /// <summary>
     /// The players by client id as of the last <see cref="PublishSnapshot"/>; any thread may read it.
     /// </summary>
     public ImmutableDictionary<string, PlayerPosition> PlayerPositions => _playerPositions;
@@ -127,6 +141,7 @@ internal sealed class GameWorldState
         foreach (var subject in _unpublishedObjects)
         {
             ChangedSubjects.Add(subject);
+            _publishedNewObjects.Add(subject);
         }
 
         _unpublishedObjects.Clear();
@@ -149,11 +164,17 @@ internal sealed class GameWorldState
     /// Takes over the objects as they are, without overlap checks: keeps the entities of subjects that stay, reads every
     /// subject again and indexes it. A subject listed under several names is taken once.
     /// </summary>
-    /// <returns>The subjects that entered and those that left the world.</returns>
+    /// <returns>The subjects that entered the world, including kept ones placed or added by a replacement whose
+    /// <see cref="PublishedNewObjects"/> entry is still due, and those that left it.</returns>
     public (List<GameObject> Added, List<GameObject> Removed) TakeOverObjects(Dictionary<string, GameObject> objects)
     {
         var added = new List<GameObject>();
         var removed = new List<GameObject>();
+
+        // The taken-over subjects come from a set written to the game, which attached them, so none waits for a publish.
+        var pendingObjects = GetPendingNewObjects();
+        _unpublishedObjects.Clear();
+        _publishedNewObjects.Clear();
         var next = new Dictionary<string, GameEntity>(objects.Count);
         var names = new Dictionary<GameObject, string>(objects.Count, ReferenceEqualityComparer.Instance);
         foreach (var (name, subject) in objects)
@@ -167,6 +188,10 @@ internal sealed class GameWorldState
             if (!NamesBySubject.ContainsKey(subject) || !EntitiesBySubject.TryGetValue(subject, out var entity))
             {
                 entity = new GameEntity(subject);
+                added.Add(subject);
+            }
+            else if (pendingObjects?.Contains(subject) == true)
+            {
                 added.Add(subject);
             }
 
@@ -740,6 +765,18 @@ internal sealed class GameWorldState
         return entity;
     }
 
+    private HashSet<GameObject>? GetPendingNewObjects()
+    {
+        if (_unpublishedObjects.Count == 0 && _publishedNewObjects.Count == 0)
+        {
+            return null;
+        }
+
+        var pendingObjects = new HashSet<GameObject>(_unpublishedObjects, ReferenceEqualityComparer.Instance);
+        pendingObjects.UnionWith(_publishedNewObjects);
+        return pendingObjects;
+    }
+
     private void AddObject(GameEntity entity)
     {
         _unpublishedObjects.Add(entity.Subject);
@@ -752,6 +789,9 @@ internal sealed class GameWorldState
 
     private void RemoveObject(GameObject gameObject)
     {
+        // Both usually empty: the game empties them with the next publish and the tick after it.
+        _unpublishedObjects.Remove(gameObject);
+        _publishedNewObjects.Remove(gameObject);
         NamesBySubject.Remove(gameObject, out var name);
         EntitiesBySubject.Remove(gameObject, out var entity);
         Objects.Remove(name!);

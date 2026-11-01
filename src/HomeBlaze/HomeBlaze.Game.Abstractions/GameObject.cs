@@ -10,7 +10,7 @@ namespace HomeBlaze.Game.Abstractions;
 /// X + <see cref="Width"/> - 1 and from <see cref="Y"/> to Y + <see cref="Depth"/> - 1.
 /// </summary>
 [InterceptorSubject]
-public abstract partial class GameObject : IConfigurable
+public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
 {
     // Created on first use, because most object types override Visual.
     private GameVisualCache<(int Width, int Height, int Depth)>? _defaultVisual;
@@ -95,4 +95,15 @@ public abstract partial class GameObject : IConfigurable
     }
 
     public virtual Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    void IGameObjectLifecycle.OnAddedToWorld() => OnAddedToWorld();
+
+    /// <summary>
+    /// Called on the game's own thread when the object enters the world: when the game starts or loads, and when the
+    /// object is placed or added by a replacement, then once the game published it, so that <see cref="World"/> resolves.
+    /// The place to set up schedules.
+    /// </summary>
+    protected virtual void OnAddedToWorld()
+    {
+    }
 }

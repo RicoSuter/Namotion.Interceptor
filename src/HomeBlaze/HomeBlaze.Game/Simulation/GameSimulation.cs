@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.Simulation;
@@ -25,7 +26,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     private int _isDrained;
     private int _isStopRequested;
 
-    // Failure logging: see RunLogged.
+    // Failure logging: see OnFailed.
     private bool _isFailing;
     private bool _hasFailedInTick;
     private long _lastWarningTimestamp;
@@ -204,8 +205,9 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
-    /// Runs one final tick for the work queued meanwhile and refuses all later work; <see cref="RunAsync"/> calls it when
-    /// it ends. Does nothing after the first call. Call it only while no tick runs on another thread.
+    /// Runs one final tick for the work queued meanwhile, drops the schedules and refuses all later work;
+    /// <see cref="RunAsync"/> calls it when it ends. Does nothing after the first call. Call it only while no tick runs
+    /// on another thread.
     /// </summary>
     public void Stop()
     {
@@ -221,6 +223,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         }
         finally
         {
+            _schedules.Clear();
             Interlocked.Exchange(ref _isDrained, 1);
             while (_queue.TryDequeue(out var item))
             {
@@ -230,8 +233,8 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
-    /// Accepts work again after a stop, for a game that starts again; the tick handlers stay. Call it only while no
-    /// tick runs.
+    /// Accepts work again after a stop, for a game that starts again; the tick handlers stay, and schedules made since
+    /// the stop are dropped. Call it only while no tick runs.
     /// </summary>
     /// <exception cref="InvalidOperationException">The simulation has not stopped.</exception>
     public void Restart()
@@ -240,6 +243,9 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         {
             throw new InvalidOperationException("Restart only after the simulation stopped.");
         }
+
+        // A schedule made by RunExclusive work would otherwise come due in the first tick, before the start sets it up again.
+        _schedules.Clear();
 
         // Drained first, so work queued once the stop flag clears is not abandoned.
         Volatile.Write(ref _isDrained, 0);
@@ -276,6 +282,22 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         }
     }
 
+    /// <summary>
+    /// Runs the action with the state on the calling thread and logs it, throttled like a failing scheduled action,
+    /// when it throws.
+    /// </summary>
+    public void RunLogged<TState>(Action<TState> action, TState state)
+    {
+        try
+        {
+            action(state);
+        }
+        catch (Exception exception)
+        {
+            OnFailed(exception, action.Method, state);
+        }
+    }
+
     private static Task<T> InvokeInline<T>(Func<T> function, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested)
@@ -293,9 +315,6 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         }
     }
 
-    // A streak of ticks with failures warns once, then stays at debug level so a broken object type does not flood the
-    // log at the tick rate. It warns again after a minute, with the count it suppressed, so a second broken object type
-    // is not hidden for good. A tick without failure ends the streak, whatever else ran in it.
     private void RunLogged(Action action)
     {
         try
@@ -304,31 +323,41 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         }
         catch (Exception exception)
         {
-            _hasFailedInTick = true;
-            var now = timeProvider.GetTimestamp();
-            if (!_isFailing || timeProvider.GetElapsedTime(_lastWarningTimestamp, now) >= RepeatedWarningInterval)
-            {
-                logger.LogWarning(
-                    exception, "An action of the game simulation failed: {Action} ({SuppressedCount} similar failures suppressed since the last warning)",
-                    Describe(action), _suppressedCount);
-                _lastWarningTimestamp = now;
-                _suppressedCount = 0;
-            }
-            else
-            {
-                if (logger.IsEnabled(LogLevel.Debug))
-                {
-                    logger.LogDebug(exception, "An action of the game simulation failed: {Action}", Describe(action));
-                }
-
-                _suppressedCount++;
-            }
-
-            _isFailing = true;
+            OnFailed(exception, action.Method, null);
         }
     }
 
-    private static string Describe(Action action) => $"{action.Method.DeclaringType?.FullName}.{action.Method.Name}";
+    // A streak of ticks with failures warns once, then stays at debug level so a broken object type does not flood the
+    // log at the tick rate. It warns again after a minute, with the count it suppressed, so a second broken object type
+    // is not hidden for good. A tick without failure ends the streak, whatever else ran in it.
+    private void OnFailed(Exception exception, MethodInfo method, object? state)
+    {
+        _hasFailedInTick = true;
+        var now = timeProvider.GetTimestamp();
+        if (!_isFailing || timeProvider.GetElapsedTime(_lastWarningTimestamp, now) >= RepeatedWarningInterval)
+        {
+            logger.LogWarning(
+                exception, "An action of the game simulation failed: {Action} ({SuppressedCount} similar failures suppressed since the last warning)",
+                Describe(method, state), _suppressedCount);
+            _lastWarningTimestamp = now;
+            _suppressedCount = 0;
+        }
+        else
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "An action of the game simulation failed: {Action}", Describe(method, state));
+            }
+
+            _suppressedCount++;
+        }
+
+        _isFailing = true;
+    }
+
+    private static string Describe(MethodInfo method, object? state) => state is null
+        ? $"{method.DeclaringType?.FullName}.{method.Name}"
+        : $"{method.DeclaringType?.FullName}.{method.Name} of {state.GetType().FullName}";
 
     private void EnsureCurrent()
     {

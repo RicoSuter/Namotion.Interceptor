@@ -46,4 +46,14 @@ public interface IGameWorld
     /// <exception cref="InvalidOperationException">The object is not part of this game, or a movement blocking replacement
     /// overlaps a movement blocking object other than the replaced one or another replacement; nothing changes then.</exception>
     Task ReplaceAsync(GameObject gameObject, IReadOnlyList<GameObject> replacements, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs the action on the game's own thread at the first tick at or after the delay, at the earliest in the next
+    /// tick. Called on the game's own thread, the delay counts from the current tick; called from another thread, from
+    /// the next tick. Disposing the result, from any thread, cancels it, and removing the object cancels all its
+    /// schedules. Schedules are not saved; set them up again in <see cref="GameObject.OnAddedToWorld"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The delay is negative.</exception>
+    /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>
+    IDisposable Schedule(GameObject gameObject, TimeSpan delay, Action action);
 }

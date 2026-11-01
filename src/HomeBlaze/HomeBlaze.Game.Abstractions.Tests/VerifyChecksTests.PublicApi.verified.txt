@@ -47,7 +47,7 @@ namespace HomeBlaze.Game.Abstractions
         public const string Blocked = "Something is in the way.";
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public abstract class GameObject : HomeBlaze.Abstractions.IConfigurable, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public abstract class GameObject : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Game.Abstractions.IGameObjectLifecycle, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public const int MaximumSize = 1024;
         protected GameObject() { }
@@ -72,6 +72,7 @@ namespace HomeBlaze.Game.Abstractions
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected virtual void OnAddedToWorld() { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
@@ -161,6 +162,10 @@ namespace HomeBlaze.Game.Abstractions
         public double Y { get; init; }
         public double Z { get; init; }
     }
+    public interface IGameObjectLifecycle
+    {
+        void OnAddedToWorld();
+    }
     public interface IGameWorld
     {
         HomeBlaze.Game.Abstractions.GameSpot GetSpotInFront(HomeBlaze.Game.Abstractions.GameCaller? caller, int across, int along);
@@ -168,5 +173,6 @@ namespace HomeBlaze.Game.Abstractions
         System.Threading.Tasks.Task PlaceAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.Task RemoveAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.Task ReplaceAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Collections.Generic.IReadOnlyList<HomeBlaze.Game.Abstractions.GameObject> replacements, System.Threading.CancellationToken cancellationToken);
+        System.IDisposable Schedule(HomeBlaze.Game.Abstractions.GameObject gameObject, System.TimeSpan delay, System.Action action);
     }
 }

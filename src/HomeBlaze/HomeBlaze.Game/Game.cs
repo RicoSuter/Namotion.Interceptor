@@ -89,7 +89,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         Objects = new Dictionary<string, GameObject>();
         Tools = new Dictionary<string, GameTool>();
 
-        // Index.Changes is cleared last, after everything that reads it in the tick.
+        // Index.Changes is cleared last, after everything that reads it in the tick. The objects' hooks run first, so
+        // what they write is read again in the same tick.
+        _simulation.AddTickHandler(RunAddedToWorldOfPublishedObjects);
         _simulation.AddTickHandler(_world.RefreshChangedSubjects);
         _simulation.AddTickHandler(_world.PublishSnapshot);
         _simulation.AddTickHandler(RebuildVolumeTableWhenDue);
@@ -278,7 +280,10 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation.Post(() =>
         {
             _world.TakeOverPlayers(Players, isRestart: isRestarting);
-            _world.TakeOverObjects(Objects);
+            var (added, removed) = _world.TakeOverObjects(Objects);
+
+            // The stop dropped the schedules, so every object of a restarted game sets them up again.
+            OnObjectsTakenOver(isRestarting ? GetObjectSubjects() : added, removed);
         });
     }
 
@@ -297,8 +302,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         {
             _simulation.Post(() =>
             {
-                _world.TakeOverObjects(objects);
+                var (added, removed) = _world.TakeOverObjects(objects);
                 _world.IsSaveRequested = true;
+                OnObjectsTakenOver(added, removed);
             });
         }
     }

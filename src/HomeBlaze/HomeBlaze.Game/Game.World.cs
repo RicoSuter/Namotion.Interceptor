@@ -3,6 +3,7 @@ using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.View;
 using HomeBlaze.Game.World;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Game;
 
@@ -38,8 +39,10 @@ public partial class Game
     /// </summary>
     internal const string NoSenderMessage = "Only a player in the game can send messages.";
 
-    // Touched only on the simulation thread: scratch space of the view and target queries.
+    // Touched only on the simulation thread: scratch space of the view and target queries, and of the objects whose
+    // OnAddedToWorld runs.
     private readonly List<GameEntity> _queryResults = [];
+    private readonly List<GameObject> _addedObjects = [];
 
     /// <inheritdoc />
     public GameSpot GetSpotInFront(GameCaller? caller, int across, int along)
@@ -96,6 +99,7 @@ public partial class Game
         return _simulation.InvokeAsync(() =>
         {
             _world.Remove(gameObject);
+            _simulation.CancelSchedules(gameObject);
             return true;
         }, cancellationToken);
     }
@@ -111,9 +115,100 @@ public partial class Game
         return _simulation.InvokeAsync(() =>
         {
             _world.Replace(gameObject, copy);
+            _simulation.CancelSchedules(gameObject);
             return true;
         }, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public IDisposable Schedule(GameObject gameObject, TimeSpan delay, Action action)
+    {
+        ArgumentNullException.ThrowIfNull(gameObject);
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
+        if (_simulation.IsCurrent)
+        {
+            if (!_world.NamesBySubject.ContainsKey(gameObject))
+            {
+                throw new InvalidOperationException(GameWorldState.NotPartOfGameMessage);
+            }
+
+            return _simulation.Schedule(gameObject, delay, action);
+        }
+
+        // Outside the simulation only the facade answers: an object of the world that the game has not published yet
+        // is refused here.
+        if (gameObject is GamePlayer || !ReferenceEquals(gameObject.TryGetFirstParent<Game>(), this))
+        {
+            throw new InvalidOperationException(GameWorldState.NotPartOfGameMessage);
+        }
+
+        var schedule = new PendingSchedule(gameObject, delay, action);
+        _simulation.Post(() => schedule.Register(this));
+        return schedule;
+    }
+
+    /// <summary>
+    /// Cancels the schedules of the objects that left the world and runs <see cref="IGameObjectLifecycle.OnAddedToWorld"/>
+    /// of the ones that entered it; call on the simulation thread.
+    /// </summary>
+    private void OnObjectsTakenOver(List<GameObject> added, List<GameObject> removed)
+    {
+        foreach (var subject in removed)
+        {
+            _simulation.CancelSchedules(subject);
+        }
+
+        foreach (var subject in added)
+        {
+            RunAddedToWorld(subject);
+        }
+    }
+
+    private List<GameObject> GetObjectSubjects()
+    {
+        var subjects = new List<GameObject>(_world.Objects.Count);
+        foreach (var entity in _world.Objects.Values)
+        {
+            subjects.Add(entity.Subject);
+        }
+
+        return subjects;
+    }
+
+    // Swapped out first, because a hook may remove an object, which takes it out of the world's list.
+    private void RunAddedToWorldOfPublishedObjects()
+    {
+        if (_world.PublishedNewObjects.Count == 0)
+        {
+            return;
+        }
+
+        _addedObjects.AddRange(_world.PublishedNewObjects);
+        _world.PublishedNewObjects.Clear();
+        try
+        {
+            foreach (var subject in _addedObjects)
+            {
+                RunAddedToWorld(subject);
+            }
+        }
+        finally
+        {
+            _addedObjects.Clear();
+        }
+    }
+
+    // An earlier hook of the same batch may have removed the object.
+    private void RunAddedToWorld(GameObject subject)
+    {
+        if (_world.NamesBySubject.ContainsKey(subject))
+        {
+            _simulation.RunLogged(CallOnAddedToWorld, subject);
+        }
+    }
+
+    private static void CallOnAddedToWorld(GameObject subject) => ((IGameObjectLifecycle)subject).OnAddedToWorld();
 
     /// <summary>
     /// Gets the connected player of this game the caller acts as, or null when it acts as none, for example from the
@@ -231,6 +326,43 @@ public partial class Game
 
         (area, facing) = (default, default);
         return false;
+    }
+
+    /// <summary>
+    /// A schedule made outside the simulation thread, which the simulation registers in its next tick; disposing it
+    /// cancels it whether it is registered yet or not.
+    /// </summary>
+    private sealed class PendingSchedule(GameObject gameObject, TimeSpan delay, Action action) : IDisposable
+    {
+        private Action? _action = action;
+        private IDisposable? _registration;
+        private int _isDisposed;
+
+        // On the simulation thread. An object removed meanwhile had its schedules canceled, so this one is dropped too.
+        public void Register(Game game)
+        {
+            var scheduledAction = Volatile.Read(ref _action);
+            if (scheduledAction is null || !game._world.NamesBySubject.ContainsKey(gameObject))
+            {
+                return;
+            }
+
+            var registration = game._simulation.Schedule(gameObject, delay, scheduledAction);
+
+            // Full fences on both sides: either Dispose sees the registration or this sees the disposal.
+            Interlocked.Exchange(ref _registration, registration);
+            if (Volatile.Read(ref _isDisposed) == 1)
+            {
+                registration.Dispose();
+            }
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _isDisposed, 1);
+            Volatile.Write(ref _action, null);
+            Volatile.Read(ref _registration)?.Dispose();
+        }
     }
 
     private static GameArea GetViewArea(int centerX, int centerY)

@@ -29,6 +29,26 @@ public class GameSchedulesTests
     }
 
     [Fact]
+    public void WhenTheSimulationRestartsAfterAStop_ThenTheSchedulesOfTheFormerRunNeverRun()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+        var hasRun = false;
+        simulation.Post(() => simulation.Schedule(this, TimeSpan.FromSeconds(1), () => hasRun = true));
+        simulation.RunTick();
+        simulation.Stop();
+        simulation.RunExclusive(() => simulation.Schedule(this, TimeSpan.FromSeconds(1), () => hasRun = true));
+
+        // Act
+        simulation.Restart();
+        _timeProvider.Advance(TimeSpan.FromSeconds(1));
+        simulation.RunTick();
+
+        // Assert
+        Assert.False(hasRun);
+    }
+
+    [Fact]
     public void WhenTheDelayHasNotPassed_ThenTheActionWaits()
     {
         // Arrange

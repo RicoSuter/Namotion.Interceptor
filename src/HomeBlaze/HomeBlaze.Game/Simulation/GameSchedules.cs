@@ -61,6 +61,23 @@ internal sealed class GameSchedules
     }
 
     /// <summary>
+    /// Cancels every pending action.
+    /// </summary>
+    public void Clear()
+    {
+        foreach (var entries in _byOwner.Values)
+        {
+            foreach (var entry in entries)
+            {
+                entry.Dispose();
+            }
+        }
+
+        _byOwner.Clear();
+        _queue.Clear();
+    }
+
+    /// <summary>
     /// Takes the next action added before the current tick and due at or before the timestamp, oldest due time first and
     /// in the order added for equal ones; canceled entries are skipped.
     /// </summary>
