@@ -205,4 +205,143 @@ public class DoorTests
         Assert.Equal("The object is not part of a game.", exception.Message);
         Assert.True(door.IsOpen);
     }
+
+    [Fact]
+    public void WhenADoorWithAutoCloseIsOpened_ThenItClosesAfterTheDelay()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 10);
+        door.AutoCloseDelay = TimeSpan.FromSeconds(5);
+        _context.Tick();
+
+        // Act
+        door.Open();
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        _context.Tick();
+
+        // Assert
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenSomethingStandsInTheDoorwayAtTheDelay_ThenTheDoorTriesAgainAfterTheDelay()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 4);
+        door.AutoCloseDelay = TimeSpan.FromSeconds(5);
+        _context.Tick();
+        door.Open();
+        var player = _context.AddConnectedPlayer("tab-1", x: 1, y: 3);
+
+        // Act
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        _context.Tick();
+        var isOpenWhileOccupied = door.IsOpen;
+        player.X = 20;
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        _context.Tick();
+
+        // Assert
+        Assert.True(isOpenWhileOccupied);
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenAnOpenDoorWithAutoCloseIsLoaded_ThenItClosesAfterTheDelay()
+    {
+        // Arrange
+        var door = new Door { X = 0, Y = 10, IsOpen = true, AutoCloseDelay = TimeSpan.FromSeconds(5) };
+
+        // Act
+        _context.AddObject("door-loaded", door);
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        _context.Tick();
+
+        // Assert
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenAutoCloseIsZero_ThenTheDoorStaysOpen()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 10);
+        _context.Tick();
+
+        // Act
+        door.Open();
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        _context.Tick();
+
+        // Assert
+        Assert.True(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenAutoCloseIsNegative_ThenItBecomesZero()
+    {
+        // Arrange
+        var door = new Door();
+
+        // Act
+        door.AutoCloseDelay = TimeSpan.FromSeconds(-3);
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, door.AutoCloseDelay);
+    }
+
+    [Fact]
+    public void WhenAnAutoClosingDoorIsClosedAndReopened_ThenTheFirstOpeningDoesNotCloseItEarly()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 10);
+        door.AutoCloseDelay = TimeSpan.FromSeconds(10);
+        _context.Tick();
+        door.Open();
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        _context.Tick();
+        door.Close();
+        _context.Tick();
+
+        // Act
+        door.Open();
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        _context.Tick();
+        var isOpenBeforeTheSecondDelay = door.IsOpen;
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(4));
+        _context.Tick();
+
+        // Assert
+        Assert.True(isOpenBeforeTheSecondDelay);
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenAnAutoClosingDoorIsClosedByHand_ThenThePendingCloseDoesNotCloseALaterOpening()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 10);
+        door.AutoCloseDelay = TimeSpan.FromSeconds(5);
+        _context.Tick();
+        door.Open();
+        _context.Tick();
+        door.Close();
+        _context.Tick();
+        door.AutoCloseDelay = TimeSpan.Zero;
+        _context.Tick();
+
+        // Act
+        door.Open();
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        _context.Tick();
+
+        // Assert
+        Assert.True(door.IsOpen);
+    }
 }

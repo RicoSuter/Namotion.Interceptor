@@ -23,6 +23,9 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     private const string LeafColor = "#8b5a2b";
     private const double OpenRotation = -90;
 
+    // Disposed before a new schedule is made, so one opening has at most one pending close.
+    private IDisposable? _pendingClose;
+
     private readonly GameVisualCache<(int Width, int Depth, int Height, bool IsOpen, WallMaterial Material)> _visual = new();
 
     /// <summary>
@@ -71,6 +74,12 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     [Configuration]
     public partial WallMaterial Material { get; set; }
 
+    /// <summary>
+    /// The time after which an opened door closes itself; zero keeps it open. Negative values become zero.
+    /// </summary>
+    [Configuration]
+    public partial TimeSpan AutoCloseDelay { get; set; }
+
     public string? Title => "Door";
 
     public string? IconName => "DoorFront";
@@ -97,6 +106,23 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         Height = DefaultHeight;
         IsOpen = false;
         Material = WallMaterial.Bricks;
+        AutoCloseDelay = TimeSpan.Zero;
+    }
+
+    partial void OnAutoCloseDelayChanging(ref TimeSpan newValue, ref bool cancel)
+    {
+        if (newValue < TimeSpan.Zero)
+        {
+            newValue = TimeSpan.Zero;
+        }
+    }
+
+    protected override void OnAddedToWorld()
+    {
+        if (IsOpen)
+        {
+            ScheduleAutoClose();
+        }
     }
 
     /// <exception cref="InvalidOperationException">The door is already open.</exception>
@@ -109,6 +135,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         }
 
         IsOpen = true;
+        ScheduleAutoClose();
     }
 
     /// <exception cref="InvalidOperationException">The door is already closed, something stands in it, or it is not part of a game.</exception>
@@ -125,7 +152,37 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
             throw new InvalidOperationException(GameMessages.Blocked);
         }
 
+        Interlocked.Exchange(ref _pendingClose, null)?.Dispose();
         IsOpen = false;
+    }
+
+    private void ScheduleAutoClose()
+    {
+        if (AutoCloseDelay <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var schedule = World.Schedule(this, AutoCloseDelay, CloseOrTryAgain);
+        Interlocked.Exchange(ref _pendingClose, schedule)?.Dispose();
+    }
+
+    // Runs on the game's thread; a doorway that is still occupied is tried again after another delay.
+    private void CloseOrTryAgain()
+    {
+        if (!IsOpen)
+        {
+            return;
+        }
+
+        if (World.IsFree(Area, this))
+        {
+            IsOpen = false;
+        }
+        else
+        {
+            ScheduleAutoClose();
+        }
     }
 
     private static GameVisual CreateVisual(int width, int depth, int height, bool isOpen, WallMaterial material)
