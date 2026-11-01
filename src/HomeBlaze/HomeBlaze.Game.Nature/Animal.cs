@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -9,9 +8,10 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace HomeBlaze.Game.Nature;
 
 /// <summary>
-/// An animal that wanders around: every 2 to 6 seconds it steps one tile in a random direction when nothing blocks it,
-/// and turns toward it. It eats when fed and does not step meanwhile. Its body covers a square of tiles that blocks
-/// movement; its head and tail reach beyond it.
+/// An animal that wanders around its home in walking bouts: after a pause of 3 to 8 seconds it walks 4 to 12 tiles in a
+/// row in a direction close to its facing, one tile every 250 ms, until a step is blocked or would leave the
+/// <see cref="WanderRadius"/>. It turns by at most 90 degrees at once. It eats when fed and does not walk meanwhile. Its
+/// body covers a square of tiles that blocks movement; its head and tail reach beyond it.
 /// </summary>
 [Category("Game")]
 [Description("An animal that wanders around and eats when fed")]
@@ -21,19 +21,21 @@ namespace HomeBlaze.Game.Nature;
 public partial class Animal : GameObject, ITitleProvider, IIconProvider
 {
     private const int DirectionCount = 8;
-    private const int DegreesPerDirection = 360 / DirectionCount;
 
-    private static readonly ImmutableArray<AnimalModel> Models =
-    [
-        new("deer.glb", 6, 6, TimeSpan.FromSeconds(6.5)),
-        new("stag.glb", 7, 8, TimeSpan.FromSeconds(12.5))
-    ];
+    // The turns a bout tries, in steps of 45 degrees and multiplied by a random side, after the one it chose: straight,
+    // then the smallest turns first. Turning around is left out; a boxed-in animal turns by 90 degrees instead.
+    private static readonly int[] FallbackTurns = [0, 1, -1, 2, -2, 3, -3];
+
+    private static readonly AnimalModel DeerModel = new("deer.glb", 6, 6, TimeSpan.FromSeconds(6.5));
+    private static readonly AnimalModel StagModel = new("stag.glb", 7, 8, TimeSpan.FromSeconds(12.5));
 
     private readonly Random _random;
-    private readonly GameVisualCache<(AnimalVariant Variant, GameDirection Facing, bool IsEating)> _visual = new();
+    private readonly GameVisualCache<(AnimalVariant Variant, GameDirection Facing, bool IsEating, bool IsWalking)> _visual = new();
 
-    // Only the game's thread replaces it, in OnAddedToWorld and in the step it schedules.
+    // Only the game's thread touches these, in OnAddedToWorld and in the actions they schedule: the pending pause or step,
+    // and the steps left in the current bout.
     private IDisposable? _pendingStep;
+    private int _remainingSteps;
 
     // The latest end of eating; replacing or clearing it disposes the previous one, so at most one is live.
     private IDisposable? _pendingEatEnd;
@@ -44,14 +46,34 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
     public const int Size = 4;
 
     /// <summary>
-    /// The shortest time between two steps.
+    /// The default <see cref="WanderRadius"/> in tiles, 6 m.
     /// </summary>
-    public static readonly TimeSpan MinimumStepDelay = TimeSpan.FromSeconds(2);
+    public const int DefaultWanderRadius = 24;
 
     /// <summary>
-    /// The longest time between two steps.
+    /// The fewest tiles a bout walks unless a step is blocked.
     /// </summary>
-    public static readonly TimeSpan MaximumStepDelay = TimeSpan.FromSeconds(6);
+    public const int MinimumBoutSteps = 4;
+
+    /// <summary>
+    /// The most tiles a bout walks.
+    /// </summary>
+    public const int MaximumBoutSteps = 12;
+
+    /// <summary>
+    /// The shortest pause before a bout.
+    /// </summary>
+    public static readonly TimeSpan MinimumPause = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The longest pause before a bout.
+    /// </summary>
+    public static readonly TimeSpan MaximumPause = TimeSpan.FromSeconds(8);
+
+    /// <summary>
+    /// The time per tile while walking, about 1 m/s.
+    /// </summary>
+    public static readonly TimeSpan StepInterval = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
     /// The model; an undefined value, possible in a loaded file, shows a deer.
@@ -60,7 +82,27 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
     public partial AnimalVariant Variant { get; set; }
 
     /// <summary>
-    /// The direction of the last step, which the model faces.
+    /// The position the animal wanders around, the south-west corner of its footprint there; set to where it stands when
+    /// it enters the world without one.
+    /// </summary>
+    [Configuration]
+    public partial int? HomeX { get; set; }
+
+    /// <summary>
+    /// See <see cref="HomeX"/>.
+    /// </summary>
+    [Configuration]
+    public partial int? HomeY { get; set; }
+
+    /// <summary>
+    /// How far in tiles the animal wanders from its home; zero or less lets it wander anywhere. A step that would leave the
+    /// radius counts as blocked unless it comes closer to home, so an animal outside the radius walks back.
+    /// </summary>
+    [Configuration]
+    public partial int WanderRadius { get; set; }
+
+    /// <summary>
+    /// The direction the animal faces and walks in.
     /// </summary>
     [State]
     public partial GameDirection Facing { get; set; }
@@ -70,6 +112,12 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
     /// </summary>
     [State]
     public partial bool IsEating { get; set; }
+
+    /// <summary>
+    /// Whether the animal is in a walking bout, which loops its walk animation unless it eats.
+    /// </summary>
+    [State]
+    public partial bool IsWalking { get; set; }
 
     public override int Width => Size;
 
@@ -85,8 +133,8 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
 
     public string? IconName => "Pets";
 
-    public override GameVisual Visual => _visual.Get((Variant, Facing, IsEating),
-        static state => CreateVisual(state.Variant, state.Facing, state.IsEating));
+    public override GameVisual Visual => _visual.Get((Variant, Facing, IsEating, IsWalking),
+        static state => CreateVisual(state.Variant, state.Facing, state.IsEating, state.IsWalking));
 
     [Derived]
     [PropertyAttribute("Feed", KnownAttributes.IsEnabled)]
@@ -97,35 +145,54 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
     {
     }
 
-    /// <param name="random">Chooses the step delays and directions; tests pass a predictable one.</param>
+    /// <param name="random">Chooses the pauses, turns and bout lengths; tests pass a predictable one.</param>
     internal Animal(Random random)
     {
         _random = random;
         Variant = AnimalVariant.Deer;
+        HomeX = null;
+        HomeY = null;
+        WanderRadius = DefaultWanderRadius;
         Facing = GameDirection.North;
         IsEating = false;
+        IsWalking = false;
     }
 
     partial void OnIsEatingChanged(bool newValue)
     {
-        if (!newValue)
+        if (newValue)
         {
-            Interlocked.Exchange(ref _pendingEatEnd, null)?.Dispose();
+            if (TryGetWorld(out var world))
+            {
+                ScheduleEatEnd(world);
+            }
+
+            return;
         }
-        else if (TryGetWorld(out var world))
+
+        // The handle is read before IsEating: feeding on another thread after this write stores a new handle, and only the
+        // handle of this end may be cleared, never the new one.
+        var pending = Volatile.Read(ref _pendingEatEnd);
+        if (!IsEating && pending is not null && Interlocked.CompareExchange(ref _pendingEatEnd, null, pending) == pending)
         {
-            ScheduleEatEnd(world);
+            pending.Dispose();
         }
     }
 
     protected override void OnAddedToWorld()
     {
-        if (IsEating)
+        var world = World;
+        if (HomeX is null || HomeY is null)
         {
-            ScheduleEatEnd(World);
+            (HomeX, HomeY) = (X, Y);
         }
 
-        ScheduleNextStep(World);
+        if (IsEating)
+        {
+            ScheduleEatEnd(world);
+        }
+
+        EndBout(world);
     }
 
     /// <exception cref="InvalidOperationException">The animal is already eating.</exception>
@@ -142,42 +209,133 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
 
     internal static TimeSpan GetEatDuration(AnimalVariant variant) => GetModel(variant).EatDuration;
 
-    private static AnimalModel GetModel(AnimalVariant variant) => variant == AnimalVariant.Stag ? Models[1] : Models[0];
+    /// <summary>
+    /// Maps a roll of 0 to 99 to the turn of a new bout in steps of 45 degrees, clockwise positive: straight half of the
+    /// time, 45 degrees to either side 36 percent and 90 degrees 14 percent of the time.
+    /// </summary>
+    internal static int GetTurn(int roll) => roll switch
+    {
+        < 50 => 0,
+        < 68 => 1,
+        < 86 => -1,
+        < 93 => 2,
+        _ => -2
+    };
+
+    private static AnimalModel GetModel(AnimalVariant variant) => variant switch
+    {
+        AnimalVariant.Stag => StagModel,
+        _ => DeerModel
+    };
+
+    private static GameDirection Turn(GameDirection direction, int turn) =>
+        (GameDirection)(((((int)direction + turn) % DirectionCount) + DirectionCount) % DirectionCount);
 
     private void ScheduleEatEnd(IGameWorld world)
     {
-        var schedule = world.Schedule(this, GetModel(Variant).EatDuration, () => IsEating = false);
+        var schedule = world.Schedule(this, GetModel(Variant).EatDuration, EndEating);
         Interlocked.Exchange(ref _pendingEatEnd, schedule)?.Dispose();
     }
 
-    private void ScheduleNextStep(IGameWorld world)
+    // Runs on the game's thread; the animal pauses after eating before it walks again.
+    private void EndEating()
     {
-        var delay = TimeSpan.FromMilliseconds(_random.Next((int)MinimumStepDelay.TotalMilliseconds, (int)MaximumStepDelay.TotalMilliseconds + 1));
-        _pendingStep?.Dispose();
-        _pendingStep = world.Schedule(this, delay, Step);
+        IsEating = false;
+        EndBout(World);
     }
 
-    // Runs on the game's thread; a blocked step is skipped and tried again with the next one.
+    private void Schedule(IGameWorld world, TimeSpan delay, Action action)
+    {
+        _pendingStep?.Dispose();
+        _pendingStep = world.Schedule(this, delay, action);
+    }
+
+    private void EndBout(IGameWorld world)
+    {
+        _remainingSteps = 0;
+        IsWalking = false;
+        var pause = _random.Next((int)MinimumPause.TotalMilliseconds, (int)MaximumPause.TotalMilliseconds + 1);
+        Schedule(world, TimeSpan.FromMilliseconds(pause), StartBout);
+    }
+
+    // Runs on the game's thread: takes the first step of a bout in the chosen direction, or in the one with the smallest
+    // turn whose step is free.
+    private void StartBout()
+    {
+        var world = World;
+        var facing = Turn(Facing, 0);
+        var chosenTurn = GetTurn(_random.Next(100));
+        var side = _random.Next(2) == 0 ? 1 : -1;
+        if (!IsEating)
+        {
+            for (var index = -1; index < FallbackTurns.Length; index++)
+            {
+                var turn = index < 0 ? chosenTurn : FallbackTurns[index] * side;
+                if ((index < 0 || turn != chosenTurn) && TryStep(world, Turn(facing, turn)))
+                {
+                    _remainingSteps = _random.Next(MinimumBoutSteps, MaximumBoutSteps + 1) - 1;
+                    IsWalking = true;
+                    Schedule(world, StepInterval, Step);
+                    return;
+                }
+            }
+
+            // Only the way back may be free: turns halfway now, so that the next bout can walk back with another 90 degrees.
+            Facing = Turn(facing, 2 * side);
+        }
+
+        EndBout(world);
+    }
+
+    // Runs on the game's thread; the bout ends one interval after its last step, so the walk animation lasts through it.
     private void Step()
     {
         var world = World;
-        if (!IsEating)
+        if (IsEating || _remainingSteps <= 0 || !TryStep(world, Turn(Facing, 0)))
         {
-            var direction = (GameDirection)_random.Next(DirectionCount);
-            if (Area.TryMove(direction.GetOffsetX(), direction.GetOffsetY(), out var next) && world.IsFree(next, this))
-            {
-                X = next.X;
-                Y = next.Y;
-                Facing = direction;
-            }
+            EndBout(world);
+            return;
         }
 
-        ScheduleNextStep(world);
+        _remainingSteps--;
+        Schedule(world, StepInterval, Step);
+    }
+
+    private bool TryStep(IGameWorld world, GameDirection direction)
+    {
+        if (!Area.TryMove(direction.GetOffsetX(), direction.GetOffsetY(), out var next) || !IsNearHome(next) || !world.IsFree(next, this))
+        {
+            return false;
+        }
+
+        X = next.X;
+        Y = next.Y;
+        Facing = direction;
+        return true;
+    }
+
+    private bool IsNearHome(GameArea next)
+    {
+        if (WanderRadius <= 0 || HomeX is not { } homeX || HomeY is not { } homeY)
+        {
+            return true;
+        }
+
+        var distance = GetSquaredDistance(next.X, next.Y, homeX, homeY);
+        return distance <= (double)WanderRadius * WanderRadius || distance < GetSquaredDistance(X, Y, homeX, homeY);
+    }
+
+    // A double, because the square of an offset across the whole int range overflows a long.
+    private static double GetSquaredDistance(int x, int y, int homeX, int homeY)
+    {
+        var offsetX = (double)x - homeX;
+        var offsetY = (double)y - homeY;
+        return (offsetX * offsetX) + (offsetY * offsetY);
     }
 
     // The box is as wide and deep as the model is long and centered on the body, so the model fits it lengthwise for
     // every facing; the box's height is at least the model's, so its length sets the scale.
-    private static GameVisual CreateVisual(AnimalVariant variant, GameDirection facing, bool isEating)
+    private static GameVisual CreateVisual(AnimalVariant variant, GameDirection facing, bool isEating, bool isWalking)
     {
         var model = GetModel(variant);
         var offset = (Size - model.Length) / 2.0;
@@ -188,9 +346,19 @@ public partial class Animal : GameObject, ITitleProvider, IIconProvider
             Offset = new GameVisualVector(offset, 0, offset),
             Size = new GameVisualVector(model.Length, model.Height, model.Length),
             Pivot = new GameVisualPoint(Size / 2.0, Size / 2.0),
-            Rotation = (((int)facing % DirectionCount) + DirectionCount) % DirectionCount * DegreesPerDirection,
-            Animation = isEating ? AnimalModel.EatAnimation : AnimalModel.IdleAnimation,
+            Rotation = facing.GetRotation(),
+            Animation = GetAnimation(isEating, isWalking),
             AnimationMode = isEating ? GameVisualAnimationMode.Once : GameVisualAnimationMode.Loop
         }]);
+    }
+
+    private static string GetAnimation(bool isEating, bool isWalking)
+    {
+        if (isEating)
+        {
+            return AnimalModel.EatAnimation;
+        }
+
+        return isWalking ? AnimalModel.WalkAnimation : AnimalModel.IdleAnimation;
     }
 }

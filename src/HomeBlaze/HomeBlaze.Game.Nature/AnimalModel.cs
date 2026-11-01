@@ -12,9 +12,14 @@ namespace HomeBlaze.Game.Nature;
 internal sealed record AnimalModel(string File, int Length, int Height, TimeSpan EatDuration)
 {
     /// <summary>
-    /// The looping animation while the animal stands or steps.
+    /// The looping animation while the animal stands.
     /// </summary>
     public const string IdleAnimation = "Idle";
+
+    /// <summary>
+    /// The looping animation while it walks.
+    /// </summary>
+    public const string WalkAnimation = "Walk";
 
     /// <summary>
     /// The animation played once while it eats.

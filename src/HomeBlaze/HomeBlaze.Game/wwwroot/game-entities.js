@@ -376,8 +376,10 @@ export async function createEntities(scene, options) {
     }
 
     // Plays the part's animation from the start: looping, or once, after which it holds its last frame, because a group that
-    // does not loop leaves its targets at the end.
+    // does not loop leaves its targets at the end. The previous group is reset before it stops, because stopping leaves
+    // its targets where they are, and a bone the next group does not animate, such as a leg of a walk, would stay frozen.
     function playAnimation(node) {
+        node.animationGroup?.reset();
         node.animationGroup?.stop();
         const animation = node.part.a;
         const name = `${node.name}-${animation}`;
@@ -585,7 +587,10 @@ export async function createEntities(scene, options) {
             return;
         }
 
-        entity.tween = { from: entity.root.position.clone(), to: target, start: performance.now(), duration: options.stepIntervalMs };
+        // An object glides like a part, a little longer than the interval it is published at, so that a walking animal
+        // moves on without stopping between its steps.
+        const duration = entity.view.kind === 'player' ? options.stepIntervalMs : GLIDE_MS;
+        entity.tween = { from: entity.root.position.clone(), to: target, start: performance.now(), duration };
         setWalking(entity, true);
     }
 

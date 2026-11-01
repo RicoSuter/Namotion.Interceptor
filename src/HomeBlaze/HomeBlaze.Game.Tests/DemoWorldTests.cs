@@ -81,7 +81,7 @@ public class DemoWorldTests
     }
 
     [Fact]
-    public void WhenTheDemoWorldLoads_ThenADeerAndAStagStandOnFreeTiles()
+    public void WhenTheDemoWorldLoads_ThenTheAnimalsStandOnFreeTiles()
     {
         // Arrange
         var animals = _game.Objects.Values.OfType<Animal>().ToArray();
@@ -96,6 +96,7 @@ public class DemoWorldTests
         Assert.Equal(4, animals.Length);
         Assert.Equal([AnimalVariant.Deer, AnimalVariant.Stag], animals.Select(animal => animal.Variant).Distinct().Order());
         Assert.Empty(overlapping);
+        Assert.All(animals, animal => Assert.True(animal.HomeX is not null && animal.HomeY is not null && animal.WanderRadius > 0));
     }
 
     // The door and 3 tiles on both sides of it, where a player stands to walk through.
