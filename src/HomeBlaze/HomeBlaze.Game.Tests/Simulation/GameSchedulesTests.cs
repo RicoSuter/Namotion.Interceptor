@@ -140,4 +140,122 @@ public class GameSchedulesTests
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => simulation.Schedule(this, TimeSpan.Zero, () => { }));
     }
+
+    [Fact]
+    public void WhenScheduledOffTheSimulationThread_ThenCancelingThrows()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => simulation.CancelSchedules(this));
+    }
+
+    [Fact]
+    public void WhenTheOwnersSchedulesWereCanceled_ThenANewScheduleOfTheOwnerRuns()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+        var count = 0;
+        simulation.Post(() => simulation.Schedule(this, TimeSpan.FromSeconds(1), () => count += 1));
+        simulation.RunTick();
+        simulation.Post(() =>
+        {
+            simulation.CancelSchedules(this);
+            simulation.Schedule(this, TimeSpan.FromSeconds(1), () => count += 10);
+        });
+        simulation.RunTick();
+
+        // Act
+        _timeProvider.Advance(TimeSpan.FromSeconds(1));
+        simulation.RunTick();
+
+        // Assert
+        Assert.Equal(10, count);
+    }
+
+    [Fact]
+    public void WhenAScheduledActionSchedulesWithZeroDelay_ThenItRunsInTheNextTick()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+        var order = new List<string>();
+        simulation.Post(() => simulation.Schedule(this, TimeSpan.Zero, () =>
+        {
+            order.Add("outer");
+            simulation.Schedule(this, TimeSpan.Zero, () => order.Add("inner"));
+        }));
+        simulation.RunTick();
+
+        // Act
+        simulation.RunTick();
+        var afterSecondTick = order.ToArray();
+        simulation.RunTick();
+
+        // Assert
+        Assert.Equal(["outer"], afterSecondTick);
+        Assert.Equal(["outer", "inner"], order);
+    }
+
+    [Fact]
+    public void WhenAnActionSchedulesWithZeroDelay_ThenItRunsInTheNextTick()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+        var hasRun = false;
+        simulation.Post(() => simulation.Schedule(this, TimeSpan.Zero, () => hasRun = true));
+
+        // Act
+        simulation.RunTick();
+        var afterFirstTick = hasRun;
+        simulation.RunTick();
+
+        // Assert
+        Assert.False(afterFirstTick);
+        Assert.True(hasRun);
+    }
+
+    [Fact]
+    public void WhenTheDelayIsNegative_ThenItThrows()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+        Exception? exception = null;
+        simulation.Post(() => exception = Record.Exception(() => simulation.Schedule(this, TimeSpan.FromSeconds(-1), () => { })));
+
+        // Act
+        simulation.RunTick();
+
+        // Assert
+        Assert.IsType<ArgumentOutOfRangeException>(exception);
+    }
+
+    [Fact]
+    public void WhenTheDelayIsTheMaximum_ThenTheActionNeverRunsAndNothingOverflows()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+        var hasRun = false;
+        simulation.Post(() => simulation.Schedule(this, TimeSpan.MaxValue, () => hasRun = true));
+        simulation.RunTick();
+
+        // Act
+        _timeProvider.Advance(TimeSpan.FromDays(365));
+        simulation.RunTick();
+
+        // Assert
+        Assert.False(hasRun);
+        Assert.Empty(_logger.Entries);
+    }
+
+    [Fact]
+    public void WhenArgumentsAreNull_ThenScheduleRejectsThem()
+    {
+        // Arrange
+        var simulation = new GameSimulation(_timeProvider, _logger);
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => simulation.Schedule(null!, TimeSpan.Zero, () => { }));
+        Assert.Throws<ArgumentNullException>(() => simulation.Schedule(this, TimeSpan.Zero, null!));
+    }
 }
