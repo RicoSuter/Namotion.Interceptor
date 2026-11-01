@@ -24,10 +24,12 @@ public interface IGameWorld
     bool IsFree(GameArea area, GameObject? except = null);
 
     /// <summary>
-    /// Adds the object under a name of its type name in lowercase, a dash and 8 random hex digits. Once the task
-    /// completed, the object is one of the game's objects and its <see cref="GameObject.World"/> resolves, except while
-    /// the game saves, which delays that by a moment. Canceling before the game processed the command drops it; after
-    /// that the object stays placed.
+    /// Adds the object under a name of its type name in lowercase, a dash and 8 random hex digits. Called from another
+    /// thread, the task completes once the object is one of the game's objects, so its <see cref="GameObject.World"/>
+    /// resolves and, unless the game stopped meanwhile, its <see cref="GameObject.OnAddedToWorld"/> ran. Called on the game's own thread, as from a scheduled
+    /// action or <see cref="GameObject.OnAddedToWorld"/>, the command runs at once and the task completes with it; the
+    /// object joins the game's objects later in that tick or in the next, and its <see cref="GameObject.OnAddedToWorld"/>
+    /// follows. Canceling before the game processed the command drops it; after that the object stays placed.
     /// </summary>
     /// <exception cref="ArgumentException">The object is already part of this game, or its size is outside 1 to
     /// <see cref="GameObject.MaximumSize"/>.</exception>
@@ -41,8 +43,8 @@ public interface IGameWorld
     Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Replaces the object by the replacements in one step; no player sees an intermediate state. The replacements are
-    /// then part of the game's objects as placed objects are after <see cref="PlaceAsync"/>. Canceling before the game
+    /// Replaces the object by the replacements in one step; no player sees an intermediate state. The task completes
+    /// and the replacements join the game's objects as with <see cref="PlaceAsync"/>. Canceling before the game
     /// processed the command drops it; after that the replacement stays applied.
     /// </summary>
     /// <exception cref="ArgumentException">A replacement is listed twice, already part of this game, or of invalid size.</exception>
@@ -51,10 +53,12 @@ public interface IGameWorld
     Task ReplaceAsync(GameObject gameObject, IReadOnlyList<GameObject> replacements, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Runs the action on the game's own thread at the first tick at or after the delay, at the earliest in the next
-    /// tick. Called on the game's own thread, the delay counts from the current tick; called from another thread, from
-    /// the next tick. Disposing the result, from any thread, cancels it, and removing the object cancels all its
-    /// schedules. Schedules are not saved; set them up again in <see cref="GameObject.OnAddedToWorld"/>.
+    /// Runs the action synchronously on the game's own thread at the first tick at or after the delay, never in the tick
+    /// the delay counts from. Called on the game's own thread, the delay counts from the current tick; called from another
+    /// thread, from the tick that registers the schedule, the next one. Pass a synchronous action, not an async lambda,
+    /// whose continuations would leave the game's thread; an exception it throws is logged and the game goes on.
+    /// Disposing the result, from any thread, cancels it, and removing the object cancels all its schedules. Schedules
+    /// are not saved; set them up again in <see cref="GameObject.OnAddedToWorld"/>.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The delay is negative.</exception>
     /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>

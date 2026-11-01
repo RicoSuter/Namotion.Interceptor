@@ -101,6 +101,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation.AddTickHandler(RaiseWorldChangedWhenChanged);
         _simulation.AddTickHandler(PublishWhenDue);
         _simulation.AddTickHandler(StartSaveWhenDue);
+        _simulation.AddTickHandler(CompleteWrittenPlacements);
         _simulation.AddTickHandler(_world.Index.Changes.Clear);
     }
 
@@ -267,6 +268,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         var isRestarting = _simulation.HasStopped;
         if (isRestarting)
         {
+            // Left over when a stop timed out while a save paused publishing; the restart's take-over drops their objects.
+            _simulation.RunExclusive(AbandonPlacements);
+
             // The stop dropped the completion of a save that ran then; StopAsync awaited it.
             _simulation.Restart();
             _isSaving = false;

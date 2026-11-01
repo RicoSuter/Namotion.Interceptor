@@ -2,8 +2,8 @@ namespace HomeBlaze.Game.Simulation;
 
 /// <summary>
 /// Writes the simulation's state to the facade subjects: the changed players' values and the player set of the game at
-/// most every <see cref="GameSimulationSettings.PublishInterval"/>, and the object set of the game whenever it changed.
-/// Used only on the simulation thread.
+/// most every <see cref="GameSimulationSettings.PublishInterval"/>, and the object set of the game in the tick it
+/// changed. Used only on the simulation thread.
 /// </summary>
 internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvider timeProvider)
 {
@@ -35,8 +35,13 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         ReferenceEquals(subject, _writingSubject) && property == _writingProperty && ReferenceEquals(set, _writingSet);
 
     /// <summary>
-    /// Publishes everything when <see cref="GameSimulationSettings.PublishInterval"/> passed since the last publish, and
-    /// otherwise a changed object set only, unless paused.
+    /// Counts the writes of the object set; touched only on the simulation thread.
+    /// </summary>
+    public long ObjectSetVersion { get; private set; }
+
+    /// <summary>
+    /// Publishes the players' values and the player set when <see cref="GameSimulationSettings.PublishInterval"/> passed
+    /// since the last publish, unless paused; the object set is left to <see cref="TryPublishObjectSet"/>.
     /// </summary>
     /// <returns>Whether anything was written.</returns>
     public bool TryPublish()
@@ -49,10 +54,10 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         var now = timeProvider.GetTimestamp();
         if (_hasPublished && timeProvider.GetElapsedTime(_lastPublishTimestamp, now) < GameSimulationSettings.PublishInterval)
         {
-            return TryPublishObjectSet();
+            return false;
         }
 
-        return Publish();
+        return Publish(includesObjectSet: false);
     }
 
     /// <summary>
@@ -84,9 +89,12 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
     /// Writes everything pending now, also while paused.
     /// </summary>
     /// <returns>Whether anything was written.</returns>
-    public bool Publish()
+    public bool Publish() => Publish(includesObjectSet: true);
+
+    private bool Publish(bool includesObjectSet)
     {
-        if (world.PendingPublishes.Count == 0 && !world.IsPlayerSetChanged && !world.IsObjectSetChanged)
+        var isObjectSetDue = includesObjectSet && world.IsObjectSetChanged;
+        if (world.PendingPublishes.Count == 0 && !world.IsPlayerSetChanged && !isObjectSetDue)
         {
             return false;
         }
@@ -128,7 +136,7 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
                 game.Players = players;
             }
 
-            if (world.IsObjectSetChanged)
+            if (isObjectSetDue)
             {
                 WriteObjectSet();
             }
@@ -142,9 +150,9 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         return true;
     }
 
+    // The flag is cleared only once the write went through, so a write that an observer fails is retried next tick.
     private void WriteObjectSet()
     {
-        world.IsObjectSetChanged = false;
         var objects = new Dictionary<string, Abstractions.GameObject>(world.Objects.Count);
         foreach (var (name, entity) in world.Objects)
         {
@@ -153,6 +161,8 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
 
         SetWriting(game, nameof(Game.Objects), objects);
         game.Objects = objects;
+        world.IsObjectSetChanged = false;
+        ObjectSetVersion++;
         world.OnObjectSetPublished();
     }
 

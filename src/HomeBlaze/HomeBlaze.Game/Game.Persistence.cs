@@ -33,7 +33,16 @@ public partial class Game
             var isSaveRequested = !isLastSaveWritten;
             _simulation.RunExclusive(() =>
             {
-                _publisher.Publish();
+                try
+                {
+                    _publisher.Publish();
+                }
+                finally
+                {
+                    CompleteWrittenPlacements();
+                    AbandonPlacements();
+                }
+
                 isSaveRequested |= _world.IsSaveRequested;
                 _world.IsSaveRequested = false;
             });
@@ -46,6 +55,12 @@ public partial class Game
         catch (OperationCanceledException exception)
         {
             _logger.LogWarning(exception, "The game {Game} stopped before it was saved and loses its latest changes on restart", Title);
+
+            // Unless the game started again meanwhile, whose start fails them instead.
+            if (_simulation.HasStopped)
+            {
+                _simulation.RunExclusive(AbandonPlacements);
+            }
         }
     }
 
@@ -65,6 +80,9 @@ public partial class Game
         }
 
         _world.IsSaveRequested = false;
+
+        // Before the save serializes the game on another thread, so the hooks' writes do not race it.
+        RunAddedToWorldOfPublishedObjects();
         _isSaving = true;
         _publisher.IsPaused = true;
         _lastSaveTimestamp = now;

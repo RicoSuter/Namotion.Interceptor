@@ -94,7 +94,7 @@ public class GameScheduleTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void WhenScheduledFromAPageThreadAndDisposedBeforeTheTick_ThenTheActionNeverRuns(bool isRegistered)
+    public void WhenScheduledFromAPageThreadAndDisposedBeforeItIsDue_ThenTheActionNeverRuns(bool isRegistered)
     {
         // Arrange
         var scheduled = _context.AddObject("scheduled", new ScheduledObject { X = 0, Y = 0 });
@@ -217,6 +217,103 @@ public class GameScheduleTests
     }
 
     [Fact]
+    public async Task WhenPublishingIsPaused_ThenThePlaceCompletesOnlyOnceTheObjectCanUseTheWorld()
+    {
+        // Arrange
+        _context.AddObject("saved", new ScheduledObject { X = 10, Y = 0 });
+        var blocker = _context.HoldSave();
+        var placed = new ScheduledObject { X = 0, Y = 0 };
+
+        // Act
+        var operation = PlaceAndScheduleAsync(placed);
+        _context.Game.RunTickForTest();
+        _context.Game.RunTickForTest();
+        var isCompletedDuringSave = operation.IsCompleted;
+        await _context.ReleaseSaveAsync(blocker);
+        await _context.RunAsync(operation);
+        _context.Tick(3);
+
+        // Assert
+        Assert.False(isCompletedDuringSave);
+        Assert.Equal(1, placed.AddedCount);
+        Assert.Equal(1, placed.RunCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheOwnerLeavesBeforeAPageThreadScheduleIsRegistered_ThenTheActionNeverRuns(bool isReplaced)
+    {
+        // Arrange
+        var scheduled = _context.AddObject("scheduled", new ScheduledObject { X = 0, Y = 0 });
+        var command = isReplaced
+            ? _context.Game.ReplaceAsync(scheduled, [new ScheduledObject { X = 0, Y = 0 }], CancellationToken.None)
+            : _context.Game.RemoveAsync(scheduled, CancellationToken.None);
+
+        // Act
+        // Still attached until the queued command ran, so the schedule is accepted and queued behind it.
+        scheduled.ScheduleIncrement(TimeSpan.Zero);
+        await _context.RunAsync(command);
+        _context.Tick(3);
+
+        // Assert
+        Assert.Equal(0, scheduled.RunCount);
+    }
+
+    [Fact]
+    public void WhenAHookRemovesALaterObjectOfTheSameBatch_ThenThatObjectsHookNeverRuns()
+    {
+        // Arrange
+        var second = new ScheduledObject { X = 10, Y = 0 };
+        var first = new ScheduledObject { X = 0, Y = 0, OnAdded = first => first.RemoveFromWorld(second) };
+
+        // Act
+        _context.Game.Objects = new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second };
+        _context.Tick();
+
+        // Assert
+        Assert.Equal(1, first.AddedCount);
+        Assert.Equal(0, second.AddedCount);
+        Assert.True(_context.Game.IsFree(second.Area));
+    }
+
+    [Fact]
+    public void WhenAHookOfATakenOverObjectPlacesAnother_ThenThePlaceCompletesAtOnceAndTheOtherHookRunsInTheSameTick()
+    {
+        // Arrange
+        var child = new ScheduledObject { X = 20, Y = 0 };
+        Task? place = null;
+        var parent = new ScheduledObject { X = 0, Y = 0, OnAdded = parent => place = parent.PlaceInWorld(child) };
+
+        // Act
+        _context.AddObject("parent", parent);
+
+        // Assert
+        Assert.True(place!.IsCompletedSuccessfully);
+        Assert.Equal(1, child.AddedCount);
+        Assert.Contains(child, _context.Game.Objects.Values);
+    }
+
+    [Fact]
+    public async Task WhenAHookOfAPlacedObjectPlacesAnother_ThenTheOtherHookRunsInTheNextTick()
+    {
+        // Arrange
+        var child = new ScheduledObject { X = 20, Y = 0 };
+        var parent = new ScheduledObject { X = 0, Y = 0, OnAdded = parent => parent.PlaceInWorld(child) };
+
+        // Act
+        await _context.RunAsync(_context.Game.PlaceAsync(parent, CancellationToken.None));
+        var childAddedCountInTheParentsTick = child.AddedCount;
+        _context.Tick();
+
+        // Assert
+        Assert.Equal(1, parent.AddedCount);
+        Assert.Equal(0, childAddedCountInTheParentsTick);
+        Assert.Equal(1, child.AddedCount);
+        Assert.Contains(child, _context.Game.Objects.Values);
+    }
+
+    [Fact]
     public async Task WhenAnObjectIsRemovedWhilePublishingIsPaused_ThenOnAddedToWorldNeverRuns()
     {
         // Arrange
@@ -225,13 +322,13 @@ public class GameScheduleTests
         var placed = new ScheduledObject { X = 0, Y = 0 };
         var place = _context.Game.PlaceAsync(placed, CancellationToken.None);
         _context.Game.RunTickForTest();
-        await place;
 
         // Act
         var remove = _context.Game.RemoveAsync(placed, CancellationToken.None);
         _context.Game.RunTickForTest();
         await remove;
         await _context.ReleaseSaveAsync(blocker);
+        await place;
         _context.Tick();
 
         // Assert
@@ -247,12 +344,12 @@ public class GameScheduleTests
         var placed = new ScheduledObject { X = 0, Y = 0 };
         var place = _context.Game.PlaceAsync(placed, CancellationToken.None);
         _context.Game.RunTickForTest();
-        await place;
 
         // Act
         _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["placed"] = placed };
         _context.Game.RunTickForTest();
         await _context.ReleaseSaveAsync(blocker);
+        await place;
         _context.Tick();
 
         // Assert

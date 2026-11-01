@@ -44,6 +44,9 @@ public partial class Game
     private readonly List<GameEntity> _queryResults = [];
     private readonly List<GameObject> _addedObjects = [];
 
+    // Touched only on the simulation thread: the places and replaces of other threads, which wait for a write of the set.
+    private readonly GameSetWaiters _placementsAwaitingWrite = new();
+
     /// <inheritdoc />
     public GameSpot GetSpotInFront(GameCaller? caller, int across, int along)
     {
@@ -85,11 +88,7 @@ public partial class Game
     public Task PlaceAsync(GameObject gameObject, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(gameObject);
-        return _simulation.InvokeAsync(() =>
-        {
-            _world.Place(gameObject);
-            return true;
-        }, cancellationToken);
+        return RunPlacementAsync(() => _world.Place(gameObject), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -112,11 +111,10 @@ public partial class Game
 
         // A copy, so a caller that changes its list afterwards does not change the queued command.
         GameObject[] copy = [.. replacements];
-        return _simulation.InvokeAsync(() =>
+        return RunPlacementAsync(() =>
         {
             _world.Replace(gameObject, copy);
             _simulation.CancelSchedules(gameObject);
-            return true;
         }, cancellationToken);
     }
 
@@ -136,8 +134,7 @@ public partial class Game
             return _simulation.Schedule(gameObject, delay, action);
         }
 
-        // Outside the simulation only the facade answers: an object of the world that the game has not published yet
-        // is refused here.
+        // Outside the simulation only the facade answers, which holds every object whose place or replace completed.
         if (gameObject is GamePlayer || !ReferenceEquals(gameObject.TryGetFirstParent<Game>(), this))
         {
             throw new InvalidOperationException(GameWorldState.NotPartOfGameMessage);
@@ -147,6 +144,32 @@ public partial class Game
         _simulation.Post(() => schedule.Register(this));
         return schedule;
     }
+
+    // Called from another thread, the task waits until the object set with the new objects is written, so their World
+    // resolves when it completes; on the simulation thread it completes at once.
+    private Task RunPlacementAsync(Action placement, CancellationToken cancellationToken)
+    {
+        if (_simulation.IsCurrent)
+        {
+            return _simulation.InvokeAsync(() =>
+            {
+                placement();
+                return true;
+            }, cancellationToken);
+        }
+
+        return _placementsAwaitingWrite.InvokeAsync(_simulation, _publisher, placement, cancellationToken);
+    }
+
+    /// <summary>
+    /// Completes the places and replaces whose objects a write of the object set published; call on the simulation thread.
+    /// </summary>
+    private void CompleteWrittenPlacements() => _placementsAwaitingWrite.Complete(_publisher.ObjectSetVersion);
+
+    /// <summary>
+    /// Fails the places and replaces still waiting for a write of the object set; call once the simulation stopped.
+    /// </summary>
+    private void AbandonPlacements() => _placementsAwaitingWrite.Abandon();
 
     /// <summary>
     /// Cancels the schedules of the objects that left the world and runs <see cref="IGameObjectLifecycle.OnAddedToWorld"/>
@@ -176,16 +199,15 @@ public partial class Game
         return subjects;
     }
 
-    // Swapped out first, because a hook may remove an object, which takes it out of the world's list.
+    // Moved out first, because a hook may remove an object, which takes it out of the world's list.
     private void RunAddedToWorldOfPublishedObjects()
     {
-        if (_world.PublishedNewObjects.Count == 0)
+        _world.MovePublishedNewObjectsTo(_addedObjects);
+        if (_addedObjects.Count == 0)
         {
             return;
         }
 
-        _addedObjects.AddRange(_world.PublishedNewObjects);
-        _world.PublishedNewObjects.Clear();
         try
         {
             foreach (var subject in _addedObjects)
@@ -334,20 +356,25 @@ public partial class Game
     /// </summary>
     private sealed class PendingSchedule(GameObject gameObject, TimeSpan delay, Action action) : IDisposable
     {
+        private GameObject? _gameObject = gameObject;
         private Action? _action = action;
         private IDisposable? _registration;
         private int _isDisposed;
 
         // On the simulation thread. An object removed meanwhile had its schedules canceled, so this one is dropped too.
+        // The references go either way, so a held handle does not keep the object or the action alive.
         public void Register(Game game)
         {
+            var owner = _gameObject;
             var scheduledAction = Volatile.Read(ref _action);
-            if (scheduledAction is null || !game._world.NamesBySubject.ContainsKey(gameObject))
+            _gameObject = null;
+            Volatile.Write(ref _action, null);
+            if (owner is null || scheduledAction is null || !game._world.NamesBySubject.ContainsKey(owner))
             {
                 return;
             }
 
-            var registration = game._simulation.Schedule(gameObject, delay, scheduledAction);
+            var registration = game._simulation.Schedule(owner, delay, scheduledAction);
 
             // Full fences on both sides: either Dispose sees the registration or this sees the disposal.
             Interlocked.Exchange(ref _registration, registration);

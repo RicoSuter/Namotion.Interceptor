@@ -31,6 +31,16 @@ public partial class ScheduledObject : GameObject
     /// </summary>
     public IDisposable ScheduleFor(GameObject gameObject, TimeSpan delay, Action action) => World.Schedule(gameObject, delay, action);
 
+    /// <summary>
+    /// Places the object through this object's game.
+    /// </summary>
+    public Task PlaceInWorld(GameObject gameObject) => World.PlaceAsync(gameObject, CancellationToken.None);
+
+    /// <summary>
+    /// Removes the object through this object's game.
+    /// </summary>
+    public Task RemoveFromWorld(GameObject gameObject) => World.RemoveAsync(gameObject, CancellationToken.None);
+
     protected override void OnAddedToWorld()
     {
         Interlocked.Increment(ref _addedCount);

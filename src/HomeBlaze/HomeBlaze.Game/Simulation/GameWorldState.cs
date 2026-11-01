@@ -104,11 +104,15 @@ internal sealed class GameWorldState
     public OccupancySnapshot Snapshot => _snapshot;
 
     /// <summary>
-    /// The objects of the world placed or added by a replacement that a publish of the object set attached since the
-    /// game last cleared this list, in the order added. Removing an object takes it out; a take-over clears the list and
+    /// Moves the objects of the world placed or added by a replacement that a write of the object set attached since the
+    /// last call to the target, in the order added. Removing an object takes it out before; a take-over drops them and
     /// reports the objects it keeps as added instead.
     /// </summary>
-    public List<GameObject> PublishedNewObjects => _publishedNewObjects;
+    public void MovePublishedNewObjectsTo(List<GameObject> target)
+    {
+        target.AddRange(_publishedNewObjects);
+        _publishedNewObjects.Clear();
+    }
 
     /// <summary>
     /// The players by client id as of the last <see cref="PublishSnapshot"/>; any thread may read it.
@@ -164,8 +168,8 @@ internal sealed class GameWorldState
     /// Takes over the objects as they are, without overlap checks: keeps the entities of subjects that stay, reads every
     /// subject again and indexes it. A subject listed under several names is taken once.
     /// </summary>
-    /// <returns>The subjects that entered the world, including kept ones placed or added by a replacement whose
-    /// <see cref="PublishedNewObjects"/> entry is still due, and those that left it.</returns>
+    /// <returns>The subjects that entered the world, including kept ones placed or added by a replacement that
+    /// <see cref="MovePublishedNewObjectsTo"/> has not reported yet, and those that left it.</returns>
     public (List<GameObject> Added, List<GameObject> Removed) TakeOverObjects(Dictionary<string, GameObject> objects)
     {
         var added = new List<GameObject>();

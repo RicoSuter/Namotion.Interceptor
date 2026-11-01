@@ -63,7 +63,7 @@ A player inside a movement blocking object, for example a door closed by an auto
 ## Simulation (`HomeBlaze.Game/Simulation/`)
 
 - `GameSimulation` is the only writer of the world state. It runs on a fixed tick, by default 50 ms, driven by the game's `TimeProvider`. A tick runs synchronously without awaiting; the thread running a tick is the simulation thread for that tick (a thread-static marker), so tests run ticks on the test thread through a test host with `AdvanceTicks(n)`.
-- Everything else reaches it through a lock-free command queue (`Channel`). Commands that answer carry a `TaskCompletionSource` (`RunContinuationsAsynchronously`) completed at the end of their tick, after the tick handlers, so a caller sees what the tick published. A command that throws fails only its own task; a throwing scheduled action or `OnAddedToWorld` is logged, throttled, and the tick goes on.
+- Everything else reaches it through a lock-free command queue (`Channel`). Commands that answer carry a `TaskCompletionSource` (`RunContinuationsAsynchronously`) completed at the end of their tick, after the tick handlers, so a caller sees what the tick published; a place or replace from another thread completes only once the object set with its objects is written, which a save in progress delays. A command that throws fails only its own task; a throwing scheduled action or `OnAddedToWorld` is logged, throttled, and the tick goes on.
 - State, touched only on the simulation thread:
   - players by client id: area, facing, connected, title, rate limiters, last message time, voice pages;
   - objects by name: the subject and its generic entry (area, movement blocking, sound blocking, visible, visual), read from the subject when a command changed it;

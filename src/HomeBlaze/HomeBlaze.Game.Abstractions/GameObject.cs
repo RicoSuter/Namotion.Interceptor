@@ -99,10 +99,15 @@ public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
     void IGameObjectLifecycle.OnAddedToWorld() => OnAddedToWorld();
 
     /// <summary>
-    /// Called on the game's own thread when the object enters the world: when the game starts or loads, and when the
-    /// object is placed or added by a replacement, right after the game added it to its objects. <see cref="World"/>
-    /// resolves here, which makes it the place to set up schedules.
+    /// Called on the game's own thread when the object enters the world: when the game starts, restarts or loads, and
+    /// when the object is placed or added by a replacement, right after the game added it to its objects.
+    /// <see cref="World"/> resolves here, which makes it the place to set up schedules.
     /// </summary>
+    /// <remarks>
+    /// It can run again for the same instance, after a restart, an outside replacement of the objects, or when the object
+    /// is removed and placed again, and nothing is called on removal. Set up only schedules here, which removal and a
+    /// stop cancel, or keep it idempotent.
+    /// </remarks>
     protected virtual void OnAddedToWorld()
     {
     }

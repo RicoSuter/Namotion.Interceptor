@@ -246,8 +246,8 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
-    /// Accepts work again after a stop, for a game that starts again; the tick handlers stay, and schedules made since
-    /// the stop are dropped. Call it only while no tick runs.
+    /// Accepts work again after a stop, for a game that starts again; the tick handlers stay, and schedules made and work
+    /// queued since the stop are dropped. Call it only while no tick runs.
     /// </summary>
     /// <exception cref="InvalidOperationException">The simulation has not stopped.</exception>
     public void Restart()
@@ -259,6 +259,12 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
 
         // A schedule made by RunExclusive work would otherwise come due in the first tick, before the start sets it up again.
         _schedules.Clear();
+
+        // Work that passed the stop check of Post or InvokeAsync just before the stop and was queued after its sweep.
+        while (_queue.TryDequeue(out var item))
+        {
+            item.Work?.Abandon();
+        }
 
         // Drained first, so work queued once the stop flag clears is not abandoned.
         Volatile.Write(ref _isDrained, 0);

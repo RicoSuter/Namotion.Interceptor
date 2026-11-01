@@ -2,6 +2,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using HomeBlaze.Game.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Game.Tests;
@@ -75,7 +76,7 @@ public class GamePublishTests
     }
 
     [Fact]
-    public async Task WhenAnObjectIsPlacedWhilePublishingIsPaused_ThenItIsInTheObjectsOnceTheSaveCompleted()
+    public async Task WhenAnObjectIsPlacedWhilePublishingIsPaused_ThenThePlaceCompletesOnceTheSaveCompletedAndTheObjectIsPublished()
     {
         // Arrange
         _context.AddWall(0, 0);
@@ -85,13 +86,36 @@ public class GamePublishTests
         // Act
         var place = _context.Game.PlaceAsync(wall, CancellationToken.None);
         _context.Game.RunTickForTest();
+        _context.Game.RunTickForTest();
+        var isCompletedDuringSave = place.IsCompleted;
         var objectCountDuringSave = _context.Game.Objects.Count;
         await _context.ReleaseSaveAsync(blocker);
 
         // Assert
         await place;
+        Assert.False(isCompletedDuringSave);
         Assert.Equal(1, objectCountDuringSave);
         Assert.Same(wall, _context.Game.Objects.Values.Last());
+    }
+
+    [Fact]
+    public async Task WhenTheWriteOfTheObjectsFails_ThenTheNextTickWritesThemAgain()
+    {
+        // Arrange
+        var failingInterceptor = new FailingWriteInterceptor(nameof(Game.Objects));
+        var context = new GameTestContext(subjectContext: InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithService<IWriteInterceptor>(() => failingInterceptor, existing => ReferenceEquals(existing, failingInterceptor)));
+        var wall = new Wall { X = 10, Y = 10 };
+        failingInterceptor.IsArmed = true;
+
+        // Act
+        await context.RunAsync(context.Game.PlaceAsync(wall, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(1, failingInterceptor.FailureCount);
+        Assert.Same(wall, Assert.Single(context.Game.Objects).Value);
     }
 
     [Fact]
@@ -130,13 +154,13 @@ public class GamePublishTests
         // The held save pauses publishing, so the placed wall is not published at once.
         var place = context.Game.PlaceAsync(wall, CancellationToken.None);
         context.Game.RunTickForTest();
-        await place;
         var isPublishedAtOnce = context.Game.Objects.ContainsValue(wall);
 
         // Act
         // Unseen by the write interceptor, because the wall is not attached to the game yet.
         wall.X = 30;
         await context.ReleaseSaveAsync(blocker);
+        await place;
 
         // Assert
         Assert.False(isPublishedAtOnce);
