@@ -223,4 +223,44 @@ public class GameWorldStateTests
         var position = _world.PlayerPositions["tab-1"];
         Assert.Equal((player.Subject, new GameArea(5, 6, 2, 2), true), (position.Subject, position.Area, position.IsConnected));
     }
+
+    [Fact]
+    public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersTakeTheirSubjectsPositionWithTheirVoiceOff()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.MicrophonePageId = 1;
+        player.IsMicrophoneOn = true;
+        player.AudioPageIds = [1, 2];
+        player.IsAudioOn = true;
+        player.Subject.X = 30;
+        var players = new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject };
+
+        // Act
+        _world.TakeOverPlayers(players, isRestart: true);
+
+        // Assert
+        Assert.Same(player, _world.Players["tab-1"]);
+        Assert.Equal(30, player.Area.X);
+        Assert.Null(player.MicrophonePageId);
+        Assert.Empty(player.AudioPageIds);
+        Assert.False(player.IsMicrophoneOn || player.IsAudioOn);
+        Assert.True(_world.IsVoiceChanged);
+    }
+
+    [Fact]
+    public void WhenPlayersAreTakenOverWithoutARestart_ThenKeptPlayersKeepTheirVoice()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.MicrophonePageId = 1;
+        player.IsMicrophoneOn = true;
+
+        // Act
+        _world.TakeOverPlayers(new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject });
+
+        // Assert
+        Assert.Equal(1, player.MicrophonePageId);
+        Assert.True(player.IsMicrophoneOn);
+    }
 }

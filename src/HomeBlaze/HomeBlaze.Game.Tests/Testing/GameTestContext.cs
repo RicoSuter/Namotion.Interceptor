@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Game.Tests.Testing;
 
@@ -21,9 +22,11 @@ internal sealed class GameTestContext
 
     public Game Game { get; }
 
-    public GameTestContext(ILogger? logger = null)
+    /// <param name="logger">The game's logger, none by default.</param>
+    /// <param name="subjectContext">The context of the root, the app's context by default.</param>
+    public GameTestContext(ILogger? logger = null, IInterceptorSubjectContext? subjectContext = null)
     {
-        Root = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
+        Root = new TestRoot(subjectContext ?? SubjectContextFactory.Create(new ServiceCollection()));
         Game = new Game(Clients, TimeProvider, logger ?? NullLogger.Instance);
         Root.Game = Game;
         Game.StartForTest();

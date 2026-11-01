@@ -104,21 +104,24 @@ public class GamePublishTests
     public async Task WhenAPlacedObjectIsWrittenBeforeItIsPublished_ThenTheGameReadsTheWriteAfterThePublish()
     {
         // Arrange
-        // The construction's tick published, so the placed wall is not published at once.
+        // Without the app's registry, which writes properties of an object when the publish attaches it.
+        var context = new GameTestContext(subjectContext: InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents());
         var wall = new Wall { X = 10, Y = 10 };
-        await _context.RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
-        var isPublishedAtOnce = _context.Game.Objects.Count > 0;
+
+        // The construction's tick published, so the placed wall is not published at once.
+        await context.RunAsync(context.Game.PlaceAsync(wall, CancellationToken.None));
+        var isPublishedAtOnce = context.Game.Objects.Count > 0;
 
         // Act
         // Unseen by the write interceptor, because the wall is not attached to the game yet.
         wall.X = 30;
-        _context.Publish();
-        _context.Tick();
+        context.Publish();
+        context.Tick();
 
         // Assert
         Assert.False(isPublishedAtOnce);
-        Assert.True(_context.Game.IsFree(new GameArea(10, 10, 4, 1)));
-        Assert.False(_context.Game.IsFree(wall.Area));
+        Assert.True(context.Game.IsFree(new GameArea(10, 10, 4, 1)));
+        Assert.False(context.Game.IsFree(wall.Area));
     }
 
     [Fact]

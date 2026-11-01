@@ -205,9 +205,10 @@ internal sealed class GameWorldState
     /// voice of every entity that leaves. The players connect with the next <see cref="Reconcile"/>.
     /// </summary>
     /// <param name="players">The players by client id.</param>
-    /// <param name="isReadingPositions">Whether a kept entity takes the subject's position and facing too, as after a
-    /// restart, when the subjects hold what the last publish wrote plus the writes made while the game was stopped.</param>
-    public void TakeOverPlayers(Dictionary<string, GamePlayer> players, bool isReadingPositions = false)
+    /// <param name="isRestart">Whether the game starts again after a stop: a kept entity then takes the subject's
+    /// position and facing, which hold what the last publish wrote plus the writes made while the game was stopped, and
+    /// turns its voice off, because the pages that switched it may have closed meanwhile.</param>
+    public void TakeOverPlayers(Dictionary<string, GamePlayer> players, bool isRestart = false)
     {
         var keptEntities = GetKeptPlayers(players);
 
@@ -235,7 +236,7 @@ internal sealed class GameWorldState
         Players.Clear();
         foreach (var entity in entities)
         {
-            AddTakenPlayer(entity, isReadingPositions && keptEntities.Contains(entity));
+            AddTakenPlayer(entity, isRestart && keptEntities.Contains(entity));
         }
 
         IsPlayerSetChanged = true;
@@ -611,11 +612,12 @@ internal sealed class GameWorldState
         return kept;
     }
 
-    private void AddTakenPlayer(PlayerEntity player, bool isReadingPosition)
+    private void AddTakenPlayer(PlayerEntity player, bool isKeptOverRestart)
     {
-        if (isReadingPosition)
+        if (isKeptOverRestart)
         {
             ReadPosition(player);
+            ResetVoice(player);
         }
 
         Players[player.ClientId] = player;

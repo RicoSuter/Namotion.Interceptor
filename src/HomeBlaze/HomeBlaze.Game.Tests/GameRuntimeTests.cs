@@ -238,4 +238,57 @@ public class GameRuntimeTests
             await _context.Game.StopAsync(CancellationToken.None);
         }
     }
+
+    [Fact]
+    public async Task WhenTheGameStartsAgainBeforeATimedOutStopFinished_ThenTheNewRunWaitsForTheFormerOne()
+    {
+        // Arrange
+        var door = _context.AddDoor(-1, 2);
+        _context.AddConnectedPlayer("tab-1");
+        using var finalTickGate = new ManualResetEventSlim();
+        using var isHeld = new ManualResetEventSlim();
+        var isArmed = false;
+
+        // Holds the former run in its final tick, which the queued door write makes raise WorldChanged.
+        _context.Game.WorldChanged += () =>
+        {
+            if (isArmed)
+            {
+                isArmed = false;
+                isHeld.Set();
+                finalTickGate.Wait();
+            }
+        };
+        await _context.Game.StartAsync(CancellationToken.None);
+        isArmed = true;
+        door.IsOpen = true;
+        // On another thread, because the cancellation may run the final tick inline, which the gate then holds.
+        var stop = Task.Run(() => _context.Game.StopAsync(new CancellationToken(canceled: true)));
+        await AsyncTestHelpers.WaitUntilAsync(() => isHeld.IsSet, message: "The former run did not reach its final tick");
+
+        // Act
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            finalTickGate.Set();
+            await stop;
+            Task<MoveResult?>? step = null;
+            await WaitUntilAsync(() =>
+            {
+                if (step is null || step.IsFaulted)
+                {
+                    step = _context.Game.StepAsync("tab-1", GameDirection.North, turnOnly: false);
+                }
+
+                return step.IsCompletedSuccessfully;
+            }, "The game did not run again after the former run finished");
+
+            // Assert
+            Assert.True((await step!)!.Value.IsAccepted);
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
 }

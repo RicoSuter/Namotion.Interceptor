@@ -38,6 +38,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     private readonly GamePublisher _publisher;
 
     private int _isStarted;
+    private Task _lastRun = Task.CompletedTask;
 
     [ThreadStatic]
     private static bool t_isAssigningClientIds;
@@ -209,6 +210,22 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // A stop that timed out leaves the former run finishing; this run waits for it, so two loops never tick at once.
+        var run = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var previousRun = Interlocked.Exchange(ref _lastRun, run.Task);
+        try
+        {
+            await previousRun.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await RunAsync(stoppingToken);
+        }
+        finally
+        {
+            run.SetResult();
+        }
+    }
+
+    private async Task RunAsync(CancellationToken stoppingToken)
+    {
         Start();
 
         // Runs inside the writes of the whole graph, so it only signals.
@@ -260,7 +277,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         // one after it queues its own take-over, which runs later.
         _simulation.Post(() =>
         {
-            _world.TakeOverPlayers(Players, isReadingPositions: isRestarting);
+            _world.TakeOverPlayers(Players, isRestart: isRestarting);
             _world.TakeOverObjects(Objects);
         });
     }
