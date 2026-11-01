@@ -23,6 +23,7 @@ public class GameVisualValidatorTests
         "color" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), Color = "red" },
         "texture-scale" => new GameVisualPart { Size = new GameVisualVector(1, 1, 1), TextureScale = 0 },
         "shape" => new GameVisualPart { Shape = (GameVisualShape)7, Size = new GameVisualVector(1, 1, 1) },
+        "animation-mode" => new GameVisualPart { AnimationMode = (GameVisualAnimationMode)7, Size = new GameVisualVector(1, 1, 1) },
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
@@ -61,6 +62,7 @@ public class GameVisualValidatorTests
     [InlineData("color")]
     [InlineData("texture-scale")]
     [InlineData("shape")]
+    [InlineData("animation-mode")]
     public void WhenAPartIsInvalid_ThenTheObjectShowsAsTheDefaultBox(string kind)
     {
         // Arrange

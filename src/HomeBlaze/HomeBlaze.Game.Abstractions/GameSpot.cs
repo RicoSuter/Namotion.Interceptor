@@ -6,5 +6,8 @@ namespace HomeBlaze.Game.Abstractions;
 /// </summary>
 public readonly record struct GameSpot(int X, int Y, int Width, int Depth, GameDirection Facing)
 {
+    /// <summary>
+    /// The tiles the object covers at this spot.
+    /// </summary>
     public GameArea Area => new(X, Y, Width, Depth);
 }

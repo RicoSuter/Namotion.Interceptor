@@ -5,6 +5,9 @@ namespace HomeBlaze.Game.Abstractions;
 /// </summary>
 public enum GameVisualEffect
 {
+    /// <summary>
+    /// No motion.
+    /// </summary>
     None,
 
     /// <summary>

@@ -60,8 +60,10 @@ internal static class GameVisualValidator
     private static bool IsValidTurn(GameVisualPart part) =>
         IsInRange(part.Pivot.X) && IsInRange(part.Pivot.Z) && double.IsFinite(part.Rotation);
 
-    private static bool IsValidLook(GameVisualPart part) =>
-        Enum.IsDefined(part.Shape) && Enum.IsDefined(part.Effect) && IsValidSurface(part) && IsValidSource(part);
+    private static bool IsValidLook(GameVisualPart part) => HasDefinedEnums(part) && IsValidSurface(part) && IsValidSource(part);
+
+    private static bool HasDefinedEnums(GameVisualPart part) =>
+        Enum.IsDefined(part.Shape) && Enum.IsDefined(part.Effect) && Enum.IsDefined(part.AnimationMode);
 
     private static bool IsValidSurface(GameVisualPart part) =>
         IsValidTextureScale(part.TextureScale) && IsValidColor(part.Color) && IsValidAnimation(part.Animation);

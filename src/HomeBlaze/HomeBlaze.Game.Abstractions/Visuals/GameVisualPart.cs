@@ -2,10 +2,13 @@ namespace HomeBlaze.Game.Abstractions;
 
 /// <summary>
 /// One box or model of a <see cref="GameVisual"/>. Positions are in tiles relative to the south-west corner of the
-/// object's footprint at ground level.
+/// object's area at ground level.
 /// </summary>
 public sealed record GameVisualPart
 {
+    /// <summary>
+    /// Whether the part is a box or a model.
+    /// </summary>
     public GameVisualShape Shape { get; init; }
 
     /// <summary>
@@ -49,6 +52,9 @@ public sealed record GameVisualPart
     /// </summary>
     public string? Model { get; init; }
 
+    /// <summary>
+    /// The motion the browser adds to the part.
+    /// </summary>
     public GameVisualEffect Effect { get; init; }
 
     /// <summary>

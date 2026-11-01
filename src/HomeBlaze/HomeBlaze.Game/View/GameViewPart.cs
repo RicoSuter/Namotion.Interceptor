@@ -63,6 +63,7 @@ internal sealed class GameViewPart
     public string? Animation { get; init; }
 
     [JsonPropertyName("am")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public int AnimationMode { get; init; }
 
     public static GameViewPart[] FromVisual(GameVisual visual)

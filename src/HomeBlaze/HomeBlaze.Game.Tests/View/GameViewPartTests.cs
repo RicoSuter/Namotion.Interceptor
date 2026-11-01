@@ -29,4 +29,17 @@ public class GameViewPartTests
         // Assert
         Assert.Equal(0, Assert.Single(parts).AnimationMode);
     }
+
+    [Fact]
+    public void WhenAnimationModeIsTheDefault_ThenItIsNotSerialized()
+    {
+        // Arrange
+        var part = Assert.Single(GameViewPart.FromVisual(GameVisual.Box(1, 1, 1)));
+
+        // Act
+        var json = System.Text.Json.JsonSerializer.Serialize(part);
+
+        // Assert
+        Assert.DoesNotContain("\"am\"", json);
+    }
 }
