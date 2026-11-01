@@ -20,3 +20,14 @@ graph TD
     click A "http://mermaid-exfiltration.test/clicked" "Tooltip"
     click B call alert()
 ```
+
+```mermaid
+stateDiagram-v2
+    Space --> Comment
+    Comment --> Set
+    Set --> Joined
+    style Joined mask-image:url(//mermaid-control.test/joined)
+    style Space mask-image:url (//mermaid-exfiltration.test/space)
+    style Comment mask-image:url/**/(//mermaid-exfiltration.test/comment)
+    style Set mask-image:image-set ("//mermaid-exfiltration.test/set" 1x)
+```
