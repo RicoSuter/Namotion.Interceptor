@@ -380,4 +380,47 @@ public class GameViewTrackerTests
         // Assert
         Assert.Equal(GameColors.FromId("tab-1"), view.Color);
     }
+
+    [Fact]
+    public void WhenOnlyTheHeightOfAnObjectChanges_ThenItIsUpserted()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var entity = AddObject(new VisualObject { X = 5, Y = 5 });
+        Update(player);
+
+        // Act
+        entity.Height = 4;
+        _index.AddOrUpdate(entity);
+        var update = Update(player);
+
+        // Assert
+        Assert.Equal(4, Assert.Single(update.Upserted).Height);
+    }
+
+    [Fact]
+    public void WhenAFullRefreshFindsNewEntities_ThenTheFormerOnesAreRemovedAndTheNewOnesAdded()
+    {
+        // Arrange
+        var wall = new Wall { X = -20, Y = 8 };
+        var player = AddPlayer("tab-1");
+        AddObject(wall);
+        var first = Update(player);
+        var formerIds = first.Upserted.Select(view => view.Id).ToHashSet();
+
+        // Act: the index holds new entities of the same subjects without having reported a change.
+        _index.Clear();
+        var newPlayer = AddPlayer("tab-1");
+        AddObject(wall);
+        _index.Changes.Clear();
+        var update = _tracker.UpdateChunks(_index, _index.Changes, GameViewWindow.Around(0, 0), newPlayer, isFullRefresh: true,
+            NullLogger.Instance);
+
+        // Assert
+        Assert.Equal(formerIds, update.Removed.ToHashSet());
+        Assert.Equal(2, update.Upserted.Count);
+        Assert.DoesNotContain(update.Upserted, view => formerIds.Contains(view.Id));
+        Assert.Equal(2, _tracker.Count);
+    }
 }
+

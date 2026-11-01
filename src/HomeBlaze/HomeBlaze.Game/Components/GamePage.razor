@@ -282,13 +282,12 @@
             _isStarted = true;
             _subscribedGame = game;
             game.VolumeTableChanged += OnVolumeTableChanged;
-            await OpenViewAsync(game);
+            OpenView(game);
             await StartVoiceAsync();
         }
-        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException
-            or GameStoppedException)
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException)
         {
-            // The page went away or the game stopped while the game was starting.
+            // The page went away while the game was starting.
         }
         catch (JSException exception)
         {
@@ -411,21 +410,12 @@
         _ => "Turn the speaker on (N)"
     };
 
-    // The session delivers its first update, everything in view, in the tick that opens it.
-    private async Task OpenViewAsync(Game game)
+    // The session delivers its first update, everything in view, in the next tick of the game, also one after a restart.
+    private void OpenView(Game game)
     {
-        var sink = new ViewSink(this);
-        _viewSink = sink;
+        _viewSink = new ViewSink(this);
         _viewClientId = CurrentConnection.Connection?.ClientId;
-        var session = await game.Views.OpenAsync(_viewClientId, sink, _lifetime.Token);
-        if (_isDisposed || !ReferenceEquals(_viewSink, sink))
-        {
-            // The page went away or shows another game meanwhile.
-            session.Dispose();
-            return;
-        }
-
-        _viewSession = session;
+        _viewSession = game.Views.Open(_viewClientId, _viewSink);
     }
 
     // Called on the simulation thread, so the flush runs on the thread pool: the renderer may run work inline on the
@@ -813,7 +803,7 @@
             return;
         }
 
-        // The target may have moved since the panel rendered.
+        // The latest panel may no longer show the target that was rendered.
         if (owner is GameObject target && !IsTarget(target))
         {
             return;
@@ -836,6 +826,11 @@
         }
 
         await FlushAsync();
+        if (!_isDisposed)
+        {
+            // A flush renders only what changed, and the actions are enabled again.
+            StateHasChanged();
+        }
     }
 
     private async Task RenameAsync()
@@ -924,8 +919,13 @@
 
         var sink = _viewSink;
         var delivery = sink?.Take();
+        var isChanged = false;
         if (delivery is not null)
         {
+            // Taken first, so an update the browser refused does not drop the panel.
+            _panelState = delivery.Panel;
+            isChanged = _positionText != delivery.Panel.PositionText;
+            _positionText = delivery.Panel.PositionText;
             try
             {
                 if (!_isViewBroken && !delivery.Update.IsEmpty)
@@ -943,21 +943,21 @@
             {
                 return;
             }
-
-            _panelState = delivery.Panel;
-            _positionText = delivery.Panel.PositionText;
         }
 
-        ResolvePlayer(game);
-        await RefreshPanelAsync(game, hasDelivery: delivery is not null);
-        if (!_isDisposed)
+        isChanged |= ResolvePlayer(game);
+        isChanged |= await RefreshPanelAsync(game, hasDelivery: delivery is not null);
+
+        // Most deliveries change only the canvas, which the browser draws, so the panel renders only when it changed.
+        if (isChanged && !_isDisposed)
         {
             StateHasChanged();
         }
     }
 
-    // The player is the subject of the session's player, once a publish attached it to the game.
-    private void ResolvePlayer(Game game)
+    // The player is the subject of the session's player, once a publish attached it to the game. Returns whether it
+    // changed.
+    private bool ResolvePlayer(Game game)
     {
         _clientId = CurrentConnection.Connection?.ClientId;
         if (_viewSession is { } session && _clientId != _viewClientId)
@@ -966,26 +966,27 @@
             session.ClientId = _clientId;
         }
 
+        var former = _player;
         _player = _panelState.PlayerClientId is { } clientId && clientId == _clientId && game.Players.TryGetValue(clientId, out var player)
             ? player
             : null;
+        return !ReferenceEquals(former, _player);
     }
 
     // Nearby follows the view, which carries the toggles, the publishes, which carry the titles, and the volume table.
-    private async Task RefreshPanelAsync(Game game, bool hasDelivery)
+    // Returns whether Nearby or the actions changed.
+    private async Task<bool> RefreshPanelAsync(Game game, bool hasDelivery)
     {
         var isVolumeTableChanged = Interlocked.Exchange(ref _isVolumeTableChanged, 0) == 1;
         var isPublished = game.PublishVersion != _nearbyPublishVersion;
-        if (hasDelivery || isVolumeTableChanged || isPublished)
-        {
-            RefreshNearby(game, hasDelivery || isPublished);
-        }
-
-        RefreshActions(game);
+        var isChanged = (hasDelivery || isVolumeTableChanged || isPublished) && RefreshNearby(game, hasDelivery || isPublished);
+        isChanged |= RefreshActions(game);
         if (isVolumeTableChanged)
         {
             await SynchronizeVoiceAsync(game);
         }
+
+        return isChanged;
     }
 
     // Raised on the simulation thread inside a tick, so it only schedules a flush.
@@ -1045,44 +1046,41 @@
         }
     }
 
-    // Returns false when the page went away or the view cannot take updates anymore.
-    private async Task<bool> TryApplyUpdateAsync(IJSObjectReference module, GameViewUpdate update)
+    private async Task TryApplyUpdateAsync(IJSObjectReference module, GameViewUpdate update)
     {
         try
         {
             await module.InvokeVoidAsync("applyUpdate", _lifetime.Token, _viewId, update);
-            return !_isDisposed;
         }
         catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException)
         {
             // The page went away.
-            return false;
         }
         catch (JSException)
         {
             // The module dropped the view or broke, so every later update would fail too.
             _isViewBroken = true;
-            return false;
         }
     }
 
     // The own player and the players it hears, by the same rule that mixes the voices. A new table with the same players
-    // keeps the list, unless the view or a publish changed their toggles or titles.
-    private void RefreshNearby(Game game, bool isChanged)
+    // keeps the list, unless the view or a publish changed their toggles or titles. Returns whether the entries changed.
+    private bool RefreshNearby(Game game, bool isChanged)
     {
         var publishVersion = game.PublishVersion;
         if (_player is not { } player)
         {
+            var wasEmpty = _nearby.Count == 0;
             _nearby = [];
             _nearbyPlayer = null;
             _nearbyPlayerIds = [];
-            return;
+            return !wasEmpty;
         }
 
         var row = game.VolumeTable.GetRow(player.ClientId);
         if (!isChanged && HasSameNearbyPlayers(player, row))
         {
-            return;
+            return false;
         }
 
         var players = game.Players;
@@ -1100,10 +1098,16 @@
         nearby.Sort(static (first, second) => first.IsSelf != second.IsSelf
             ? second.IsSelf.CompareTo(first.IsSelf)
             : StringComparer.CurrentCulture.Compare(first.Title, second.Title));
-        _nearby = nearby;
+        var isEntriesChanged = !nearby.SequenceEqual(_nearby);
+        if (isEntriesChanged)
+        {
+            _nearby = nearby;
+        }
+
         _nearbyPlayer = player;
         _nearbyPlayerIds = playerIds;
         _nearbyPublishVersion = publishVersion;
+        return isEntriesChanged;
     }
 
     private bool HasSameNearbyPlayers(GamePlayer player, ReadOnlySpan<GameVolumeEntry> row)
@@ -1127,13 +1131,21 @@
     private static NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
         new(player.Title ?? string.Empty, GameColors.FromId(player.ClientId), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
 
-    private void RefreshActions(Game game)
+    // Keeps the former lists while they hold the same entries; returns whether they changed.
+    private bool RefreshActions(Game game)
     {
-        _actions = GetGameActions(game);
+        var gameActions = GetGameActions(game);
+        var isChanged = !gameActions.SequenceEqual(_actions);
+        if (isChanged)
+        {
+            _actions = gameActions;
+        }
+
         if (_player is null)
         {
+            isChanged |= _targets.Count > 0;
             _targets = [];
-            return;
+            return isChanged;
         }
 
         var key = 0;
@@ -1150,7 +1162,13 @@
             targets.Add(new TargetEntry(target, (target as ITitleProvider)?.Title ?? target.GetType().Name, actions));
         }
 
+        if (targets.SequenceEqual(_targets, TargetEntryComparer.Instance))
+        {
+            return isChanged;
+        }
+
         _targets = targets;
+        return true;
     }
 
     private bool IsTarget(GameObject gameObject)
@@ -1323,6 +1341,18 @@
     }
 
     private sealed record TargetEntry(IInterceptorSubject Subject, string Title, IReadOnlyList<ActionEntry> Actions);
+
+    // Compares the actions by their entries, which the record compares by reference.
+    private sealed class TargetEntryComparer : IEqualityComparer<TargetEntry>
+    {
+        public static TargetEntryComparer Instance { get; } = new();
+
+        public bool Equals(TargetEntry? first, TargetEntry? second) =>
+            ReferenceEquals(first, second) || (first is not null && second is not null && ReferenceEquals(first.Subject, second.Subject) &&
+                first.Title == second.Title && first.Actions.SequenceEqual(second.Actions));
+
+        public int GetHashCode(TargetEntry entry) => entry.Subject.GetHashCode();
+    }
 
     private sealed record ActionEntry(int Key, MethodMetadata Method);
 

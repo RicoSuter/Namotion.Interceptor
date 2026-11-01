@@ -14,8 +14,8 @@ public class GameMovementTests
         return result;
     }
 
-    private Task<IReadOnlyList<GameObject>> GetTargetsAsync(GamePlayer player) =>
-        _context.GetTargetsAsync(player.ClientId);
+    private IReadOnlyList<GameObject> GetTargets(GamePlayer player) =>
+        _context.GetTargets(player.ClientId);
 
     [Fact]
     public async Task WhenThePathIsFree_ThenTheStepMovesOneTileAndTurns()
@@ -188,21 +188,21 @@ public class GameMovementTests
     }
 
     [Fact]
-    public async Task WhenAWallStandsInFront_ThenItIsATargetObject()
+    public void WhenAWallStandsInFront_ThenItIsATargetObject()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(-1, 2);
 
         // Act
-        var targets = await GetTargetsAsync(player);
+        var targets = GetTargets(player);
 
         // Assert
         Assert.Same(wall, Assert.Single(targets));
     }
 
     [Fact]
-    public async Task WhenSeveralObjectsStandInFront_ThenTheTargetsAreOrderedFromWestToEast()
+    public void WhenSeveralObjectsStandInFront_ThenTheTargetsAreOrderedFromWestToEast()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
@@ -211,7 +211,7 @@ public class GameMovementTests
         _context.AddWall(5, 2, width: 1, depth: 1);
 
         // Act
-        var targets = await GetTargetsAsync(player);
+        var targets = GetTargets(player);
 
         // Assert
         Assert.Equal(new GameObject[] { west, east }, targets);

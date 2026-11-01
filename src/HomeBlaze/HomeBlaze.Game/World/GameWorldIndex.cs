@@ -26,12 +26,13 @@ internal sealed class GameWorldIndex
     /// <summary>
     /// Increases with every change of the indexed entities' areas, movement blocking, sound blocking or visibility, and
     /// when one is added or removed, so a reader can tell whether anything relevant to movement or sound changed since
-    /// it last looked. A change of only the visual or title leaves it unchanged.
+    /// it last looked. A change of only the visual, title or height leaves it unchanged.
     /// </summary>
     public long Version { get; private set; }
 
     /// <summary>
-    /// The chunks whose entities were added, moved, removed or changed, including a change of only the visual or title.
+    /// The chunks whose entities were added, moved, removed or changed, including a change of only the visual, title or
+    /// height.
     /// The index only adds to it; its reader clears it.
     /// </summary>
     public ChangedChunks Changes { get; } = new();
@@ -71,7 +72,7 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds the entity, or takes over its current area, movement blocking, sound blocking, visibility, visual and title;
+    /// Adds the entity, or takes over its current area, movement blocking, sound blocking, visibility, visual, title and height;
     /// removes an entity whose size is not valid by <see cref="HasValidSize"/>.
     /// </summary>
     public void AddOrUpdate(GameEntity entity)
@@ -86,7 +87,7 @@ internal sealed class GameWorldIndex
         var entry = new Entry(entity.Area, entity.IsMovementBlocking, entity.IsSoundBlocking, entity.IsVisible);
         if (!_slots.TryGetValue(entity, out var slot))
         {
-            slot = new Slot(entity) { Entry = entry, Visual = entity.Visual, Title = entity.Title };
+            slot = new Slot(entity) { Entry = entry, Visual = entity.Visual, Title = entity.Title, Height = entity.Height };
             _slots.Add(entity, slot);
             AddToChunks(slot, entry.Area);
             AddChangedChunks(entry.Area);
@@ -95,7 +96,8 @@ internal sealed class GameWorldIndex
         }
 
         var existing = slot.Entry;
-        var isViewChanged = (!ReferenceEquals(slot.Visual, entity.Visual) && slot.Visual != entity.Visual) || slot.Title != entity.Title;
+        var isViewChanged = (!ReferenceEquals(slot.Visual, entity.Visual) && slot.Visual != entity.Visual) || slot.Title != entity.Title
+            || slot.Height != entity.Height;
         if (existing == entry && !isViewChanged)
         {
             return;
@@ -103,6 +105,7 @@ internal sealed class GameWorldIndex
 
         slot.Visual = entity.Visual;
         slot.Title = entity.Title;
+        slot.Height = entity.Height;
         if (existing.Area != entry.Area)
         {
             RemoveFromChunks(slot, existing.Area);
@@ -395,6 +398,8 @@ internal sealed class GameWorldIndex
         public GameVisual? Visual { get; set; }
 
         public string Title { get; set; } = string.Empty;
+
+        public int Height { get; set; }
 
         public long QueryStamp { get; set; }
     }

@@ -251,7 +251,7 @@ public class GameRuntimeTests
 
         // Holds the former run in its final tick, in which the queued door write makes the view session deliver.
         var sink = new RecordingViewSink();
-        using var session = await _context.OpenViewAsync("tab-1", sink);
+        using var session = _context.OpenView("tab-1", sink);
         sink.Delivered = () =>
         {
             if (isArmed)
@@ -293,4 +293,59 @@ public class GameRuntimeTests
             await _context.Game.StopAsync(CancellationToken.None);
         }
     }
+
+    [Fact]
+    public async Task WhenAViewOpensWhileTheGameIsStopped_ThenItsFirstUpdateArrivesAfterTheRestart()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddWall(-20, 8);
+        await _context.Game.StartAsync(CancellationToken.None);
+        await _context.Game.StopAsync(CancellationToken.None);
+        var sink = new RecordingViewSink();
+
+        // Act
+        using var session = _context.Game.Views.Open("tab-1", sink);
+        var deliveredWhileStopped = sink.Deliveries.Count;
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await WaitUntilAsync(() => sink.Deliveries.Count > 0, "The view got no update after the restart");
+            Assert.Equal(0, deliveredWhileStopped);
+            var update = sink.Deliveries[0].Update;
+            Assert.Contains(update.Upserted, view => view.IsSelf);
+            Assert.Contains(update.Upserted, view => view is { IsSelf: false, X: -20, Y: 8 });
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheGameStartsAgainWithAnObjectAddedWhileStopped_ThenTheOpenViewShowsIt()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var sink = new RecordingViewSink();
+        using var session = _context.OpenView("tab-1", sink);
+        await _context.Game.StartAsync(CancellationToken.None);
+        await _context.Game.StopAsync(CancellationToken.None);
+        _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["wall-new"] = new Wall { X = -20, Y = 8 } };
+
+        // Act
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await WaitUntilAsync(() => sink.Updates.Any(update => update.Upserted.Any(view => view is { IsSelf: false, X: -20, Y: 8 })),
+                "The view did not show the object added while the game was stopped");
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
 }
+

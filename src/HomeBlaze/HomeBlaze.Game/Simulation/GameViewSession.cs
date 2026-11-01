@@ -65,29 +65,51 @@ internal sealed class GameViewSession : IDisposable
     public void RequestFullRefresh() => _isFullRefreshRequested = true;
 
     /// <summary>
-    /// Delivers what changed in the window since the last delivery, with the panel state, unless the sink is busy or
-    /// nothing changed; call once per tick, after the world changes of the tick were applied and before
-    /// <see cref="GameWorldIndex.Changes"/> is cleared.
+    /// Delivers what changed in the window since the last delivery, with the panel state, unless the sink is busy, a full
+    /// refresh is due but not allowed, or nothing changed; call once per tick, after the world changes of the tick were
+    /// applied and before <see cref="GameWorldIndex.Changes"/> is cleared.
     /// </summary>
     /// <param name="world">The world state.</param>
     /// <param name="publishVersion">The version of the last publish; a new one is delivered so the page reads the subjects again.</param>
+    /// <param name="canFullRefresh">Whether this tick still allows a refresh of every chunk of the window; without it a
+    /// session that needs one waits like one whose sink is busy.</param>
     /// <param name="logger">Warns about object types with an invalid visual.</param>
-    public void Update(GameWorldState world, long publishVersion, ILogger logger)
+    /// <returns>Whether the session refreshed every chunk of its window.</returns>
+    public bool Update(GameWorldState world, long publishVersion, bool canFullRefresh, ILogger logger)
     {
         var changes = world.Index.Changes;
         if (_sink.IsBusy)
         {
             CollectPending(changes);
-            return;
+            return false;
         }
 
         var self = FindSelf(world);
+        var window = self is null ? GameViewWindow.Around(0, 0) : GameViewWindow.Around(self.Area.X, self.Area.Y);
+        var isFullRefresh = IsFullRefreshDue(window);
+        if (isFullRefresh && !canFullRefresh)
+        {
+            // The full refresh reads every chunk of the window, so the changes meanwhile need not be collected.
+            return false;
+        }
+
         var chunks = GetChangedChunks(changes);
-        var isFullRefresh = _isFullRefreshRequested;
-        var update = UpdateTracker(world, self, chunks, isFullRefresh, logger);
+        var update = chunks.Count > 0 || isFullRefresh || _tracker.Window != window
+            ? _tracker.UpdateChunks(world.Index, chunks, window, self, isFullRefresh, logger)
+            : GameViewTracker.Empty;
         var panel = GetPanel(world, self, chunks, isFullRefresh);
         _isFullRefreshRequested = false;
         _pendingChunks.Clear();
+        DeliverWhenChanged(update, panel, publishVersion);
+        return isFullRefresh;
+    }
+
+    // The first update, a different own player and a window that jumped refresh every chunk.
+    private bool IsFullRefreshDue(GameViewWindow window) =>
+        _isFullRefreshRequested || !_tracker.HasWindow || window.IsFarFrom(_tracker.Window);
+
+    private void DeliverWhenChanged(GameViewUpdate update, GamePanelState panel, long publishVersion)
+    {
         if (update.IsEmpty && ReferenceEquals(panel, _panel) && publishVersion == _publishVersion)
         {
             return;
@@ -110,15 +132,7 @@ internal sealed class GameViewSession : IDisposable
         return _pendingChunks;
     }
 
-    private GameViewUpdate UpdateTracker(GameWorldState world, PlayerEntity? self, ChangedChunks chunks, bool isFullRefresh, ILogger logger)
-    {
-        var window = self is null ? GameViewWindow.Around(0, 0) : GameViewWindow.Around(self.Area.X, self.Area.Y);
-        return chunks.Count > 0 || isFullRefresh || _tracker.Window != window
-            ? _tracker.UpdateChunks(world.Index, chunks, window, self, isFullRefresh, logger)
-            : GameViewTracker.Empty;
-    }
-
-    // Another player, or none, changes what is the page's own player, so every chunk is refreshed.
+    // A different own player, or none, changes IsSelf, so every chunk is refreshed.
     private PlayerEntity? FindSelf(GameWorldState world)
     {
         var self = ClientId is { } clientId && world.Players.TryGetValue(clientId, out var player) ? player : null;

@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.View;
 
@@ -12,7 +13,7 @@ public class GameViewSessionTests
         Assert.Single(update.Upserted, view => view.X == x && view.Y == y).Id;
 
     [Fact]
-    public async Task WhenASessionJoins_ThenItsFirstUpdateHoldsEverythingInView()
+    public void WhenASessionJoins_ThenItsFirstUpdateHoldsEverythingInView()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
@@ -20,7 +21,7 @@ public class GameViewSessionTests
         _context.AddWall(300, 0);
 
         // Act
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
 
         // Assert
         var (update, panel) = Assert.Single(_sink.Deliveries);
@@ -34,13 +35,13 @@ public class GameViewSessionTests
     }
 
     [Fact]
-    public async Task WhenAnObjectInViewChanges_ThenOnlyItIsUpserted()
+    public void WhenAnObjectInViewChanges_ThenOnlyItIsUpserted()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         _context.AddWall(-20, 8);
         var door = _context.AddDoor(10, 10);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var doorId = GetId(_sink.Updates[0], 10, 10);
         _sink.Clear();
 
@@ -56,12 +57,12 @@ public class GameViewSessionTests
     }
 
     [Fact]
-    public async Task WhenAnObjectOutsideTheViewChanges_ThenNothingIsDelivered()
+    public void WhenAnObjectOutsideTheViewChanges_ThenNothingIsDelivered()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         var door = _context.AddDoor(300, 0);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         _sink.Clear();
 
         // Act
@@ -80,7 +81,7 @@ public class GameViewSessionTests
         var leaving = _context.AddWall(-205, 0, width: 1);
         var staying = _context.AddWall(-20, 8);
         var entering = _context.AddWall(210, 0, width: 1);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var first = _sink.Updates[0];
         var leavingId = GetId(first, leaving.X, leaving.Y);
         Assert.Contains(first.Upserted, view => view.X == staying.X);
@@ -105,7 +106,7 @@ public class GameViewSessionTests
         _context.AddConnectedPlayer("tab-1");
         var first = _context.AddDoor(10, 10);
         var second = _context.AddDoor(-10, 20);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var firstId = GetId(_sink.Updates[0], 10, 10);
         var secondId = GetId(_sink.Updates[0], -10, 20);
         _sink.Clear();
@@ -138,7 +139,7 @@ public class GameViewSessionTests
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(-20, 8);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var wallId = GetId(_sink.Updates[0], -20, 8);
         _sink.Clear();
 
@@ -158,7 +159,7 @@ public class GameViewSessionTests
         _context.AddConnectedPlayer("tab-1");
         var wall = _context.AddWall(180, 8, width: 40);
         var door = _context.AddDoor(176, 0, width: 2);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var wallId = Assert.Single(_sink.Updates[0].Upserted, view => view.X == 180).Id;
         _sink.Clear();
 
@@ -185,7 +186,7 @@ public class GameViewSessionTests
         _context.AddConnectedPlayer("tab-1");
         var north = _context.AddWall(-1, 2);
         var east = _context.AddWall(2, 0, width: 1, depth: 2);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var before = _sink.Panel.Targets;
 
         // Act
@@ -198,11 +199,11 @@ public class GameViewSessionTests
     }
 
     [Fact]
-    public async Task WhenAnObjectIsPlacedInFront_ThenTheTargetsInThePanelFollow()
+    public void WhenAnObjectIsPlacedInFront_ThenTheTargetsInThePanelFollow()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
 
         // Act
         var wall = _context.AddWall(-1, 2);
@@ -212,11 +213,11 @@ public class GameViewSessionTests
     }
 
     [Fact]
-    public async Task WhenThePlayerOfTheSessionAppears_ThenTheSessionFollowsIt()
+    public void WhenThePlayerOfTheSessionAppears_ThenTheSessionFollowsIt()
     {
         // Arrange
         _context.AddWall(-20, 8);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var (first, firstPanel) = Assert.Single(_sink.Deliveries);
         _sink.Clear();
 
@@ -233,12 +234,12 @@ public class GameViewSessionTests
     }
 
     [Fact]
-    public async Task WhenAPlayerInViewDisconnects_ThenItIsRemoved()
+    public void WhenAPlayerInViewDisconnects_ThenItIsRemoved()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         _context.AddConnectedPlayer("tab-2", x: 10);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         var otherId = Assert.Single(_sink.Updates[0].Upserted, view => !view.IsSelf).Id;
         _sink.Clear();
 
@@ -253,12 +254,12 @@ public class GameViewSessionTests
     }
 
     [Fact]
-    public async Task WhenTheSessionIsDisposed_ThenNothingMoreIsDelivered()
+    public void WhenTheSessionIsDisposed_ThenNothingMoreIsDelivered()
     {
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         var door = _context.AddDoor(10, 10);
-        var session = await _context.OpenViewAsync("tab-1", _sink);
+        var session = _context.OpenView("tab-1", _sink);
         _sink.Clear();
 
         // Act
@@ -276,7 +277,7 @@ public class GameViewSessionTests
         // Arrange
         _context.AddConnectedPlayer("tab-1");
         _context.AddConnectedPlayer("tab-2", x: 300);
-        await _context.OpenViewAsync("tab-1", _sink);
+        _context.OpenView("tab-1", _sink);
         _sink.Clear();
 
         // Act
@@ -286,5 +287,119 @@ public class GameViewSessionTests
         // Assert
         var (update, _) = Assert.Single(_sink.Deliveries);
         Assert.True(update.IsEmpty);
+    }
+
+    [Fact]
+    public async Task WhenTheSinkIsBusyWhileThePlayerCrossesAChunkBoundary_ThenTheStripsArriveInOneUpdate()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1", x: 7);
+        var leaving = _context.AddWall(-205, 0, width: 1);
+        var entering = _context.AddWall(210, 0, width: 1);
+        _context.OpenView("tab-1", _sink);
+        var leavingId = GetId(_sink.Updates[0], leaving.X, leaving.Y);
+        _sink.Clear();
+
+        // Act
+        _sink.IsBusy = true;
+        await _context.StepAsync("tab-1", GameDirection.East);
+        _context.Tick();
+        _sink.IsBusy = false;
+        _context.Tick();
+
+        // Assert
+        var update = Assert.Single(_sink.Updates);
+        Assert.Equal(new[] { leavingId }, update.Removed);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 8 });
+        Assert.Contains(update.Upserted, view => view.X == entering.X);
+    }
+
+    [Fact]
+    public async Task WhenAnEntityMovesFromTheLeavingStripIntoTheEnteringStrip_ThenItIsUpsertedAndNotRemoved()
+    {
+        // Arrange: at x 7 the window spans the tiles from -208 to 207, at x 8 those from -192 to 223.
+        _context.AddConnectedPlayer("tab-1", x: 7);
+        var other = _context.AddConnectedPlayer("tab-2", x: -205);
+        _context.OpenView("tab-1", _sink);
+        var otherId = GetId(_sink.Updates[0], -205, 0);
+        _sink.Clear();
+
+        // Act: the teleport and the step run in the same tick.
+        other.X = 210;
+        await _context.StepAsync("tab-1", GameDirection.East);
+
+        // Assert
+        var update = Assert.Single(_sink.Updates);
+        Assert.Empty(update.Removed);
+        Assert.Contains(update.Upserted, view => view.Id == otherId && view.X == 210);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 8 });
+    }
+
+    [Fact]
+    public void WhenTheSessionSwitchesToAnotherPlayer_ThenItFollowsThatPlayer()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 1000);
+        var session = _context.OpenView("tab-1", _sink);
+        var formerId = Assert.Single(_sink.Updates[0].Upserted, view => view.IsSelf).Id;
+        _sink.Clear();
+
+        // Act
+        session.ClientId = "tab-2";
+        _context.Tick();
+
+        // Assert
+        var (update, panel) = Assert.Single(_sink.Deliveries);
+        Assert.Equal(new[] { formerId }, update.Removed);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 1000 });
+        Assert.Equal(("tab-2", "X 1000 · Y 0 · facing N"), (panel.PlayerClientId, panel.PositionText));
+    }
+
+    [Fact]
+    public void WhenManySessionsNeedAFullRefresh_ThenTheyAreServedOverSeveralTicks()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var sinks = new RecordingViewSink[GameViewSessions.MaximumFullRefreshesPerTick + 2];
+        for (var i = 0; i < sinks.Length; i++)
+        {
+            sinks[i] = new RecordingViewSink();
+            _context.Game.Views.Open("tab-1", sinks[i]);
+        }
+
+        // Act
+        _context.Tick();
+        var servedInFirstTick = sinks.Count(sink => sink.Deliveries.Count > 0);
+        _context.Tick();
+        var servedInSecondTick = sinks.Count(sink => sink.Deliveries.Count > 0);
+
+        // Assert
+        Assert.Equal(GameViewSessions.MaximumFullRefreshesPerTick, servedInFirstTick);
+        Assert.Equal(sinks.Length, servedInSecondTick);
+        Assert.All(sinks, sink => Assert.Contains(Assert.Single(sink.Deliveries).Update.Upserted, view => view.IsSelf));
+    }
+
+    [Fact]
+    public void WhenNothingChanges_ThenATickWithOpenSessionsAllocatesNothing()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        _context.AddWall(-20, 8);
+        _context.OpenView("tab-1", _sink);
+        _context.OpenView("tab-2", new RecordingViewSink());
+        _context.Publish();
+        _context.Tick(5);
+        _sink.Clear();
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        _context.Tick();
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Empty(_sink.Deliveries);
+        Assert.Equal(0, allocated);
     }
 }
