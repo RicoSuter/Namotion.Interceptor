@@ -33,6 +33,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     /// </summary>
     public const int MaximumMessageLength = 500;
 
+    private const string NoSenderMessage = "Only a player in the game can send messages.";
+
     public override int Width => Size;
 
     public override int Depth => Size;
@@ -108,7 +110,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     /// between two messages.
     /// </summary>
     /// <exception cref="ArgumentException">The message is empty or longer than <see cref="MaximumMessageLength"/>.</exception>
-    /// <exception cref="InvalidOperationException">The sender sent a message too recently, or the player cannot get it.</exception>
+    /// <exception cref="InvalidOperationException">The caller is not a connected player of the game, the sender sent a message
+    /// too recently, or the player cannot get it.</exception>
     [Operation(Title = "Send message", Icon = "Chat", Position = 1, Description = "Shows a message in the browser of this player.")]
     public Task SendMessageAsync(string message, [FromServices] GameCaller? caller, CancellationToken cancellationToken)
     {
@@ -120,6 +123,12 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
         }
 
         var game = this.TryGetFirstParent<Game>() ?? throw new InvalidOperationException("The player is not part of a game.");
-        return game.SendMessageAsync(this, game.GetActor(caller), trimmed, cancellationToken);
+        var sender = game.GetActor(caller);
+        if (caller is not null && sender is null)
+        {
+            throw new InvalidOperationException(NoSenderMessage);
+        }
+
+        return game.SendMessageAsync(this, sender, trimmed, cancellationToken);
     }
 }

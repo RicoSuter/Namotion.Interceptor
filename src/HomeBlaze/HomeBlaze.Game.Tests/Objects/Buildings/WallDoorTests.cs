@@ -35,6 +35,24 @@ public class WallDoorTests
     }
 
     [Fact]
+    public async Task WhenTheCallerFacesDiagonally_ThenAddingADoorIsRefused()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.Game.TryMove(player, GameDirection.NorthEast, turnOnly: true);
+        var wall = _context.AddWall(-4, 2, width: 16);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => wall.AddDoorAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Face north, east, south or west to place objects.", exception.Message);
+        Assert.Same(wall, Assert.Single(_context.Game.Objects.Values));
+        Assert.Equal(0, _context.Root.WriteCount);
+    }
+
+    [Fact]
     public async Task WhenADoorIsAddedToANorthSouthWall_ThenTheWallIsSplitAroundThePlayer()
     {
         // Arrange

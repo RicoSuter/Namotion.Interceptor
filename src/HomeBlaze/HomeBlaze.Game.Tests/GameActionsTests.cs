@@ -39,12 +39,12 @@ public class GameActionsTests
         var player = _context.AddConnectedPlayer("tab-1", isNamed: true);
         _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
         _context.Game.ReconcilePlayers();
+        Assert.False(player.IsConnected);
 
         // Act
         var actor = _context.Game.GetActor(new GameCaller("tab-1"));
 
         // Assert
-        Assert.False(player.IsConnected);
         Assert.Null(actor);
     }
 
@@ -79,6 +79,36 @@ public class GameActionsTests
         Assert.Equal("tab-2", clientId);
         Assert.Equal("Message from Kitchen", notification.Title);
         Assert.Equal("Hello", notification.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerIsNotAPlayerOfTheGame_ThenSendingIsRefused()
+    {
+        // Arrange
+        var recipient = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => recipient.SendMessageAsync("Hello", new GameCaller("tab-2"), CancellationToken.None));
+
+        // Assert
+        Assert.Equal("Only a player in the game can send messages.", exception.Message);
+        Assert.Empty(_context.Clients.Notifications);
+    }
+
+    [Fact]
+    public async Task WhenThereIsNoCaller_ThenTheMessageIsSentWithoutASender()
+    {
+        // Arrange
+        var recipient = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        await recipient.SendMessageAsync("Hello", null, CancellationToken.None);
+
+        // Assert
+        var (clientId, notification) = Assert.Single(_context.Clients.Notifications);
+        Assert.Equal("tab-1", clientId);
+        Assert.Equal("Message", notification.Title);
     }
 
     [Fact]

@@ -5,11 +5,6 @@ namespace HomeBlaze.Game;
 
 public partial class Game
 {
-    /// <summary>
-    /// The message with which a change is refused because a movement blocking object stands in the way.
-    /// </summary>
-    internal const string BlockedMessage = GameMessages.Blocked;
-
     private const string NotPartOfGameMessage = "The object is not part of this game.";
 
     /// <inheritdoc />
@@ -71,7 +66,7 @@ public partial class Game
             ValidateNewObject(objects, replacement, nameof(replacements));
             if (replacement.IsMovementBlocking && index.IsBlocked(replacement.Area, replaced))
             {
-                throw new InvalidOperationException(BlockedMessage);
+                throw new InvalidOperationException(GameMessages.Blocked);
             }
 
             ValidateAgainstEarlierReplacements(replacements, i);
@@ -91,7 +86,7 @@ public partial class Game
 
             if (AreBothMovementBlocking(earlier, replacement) && earlier.Area.Intersects(replacement.Area))
             {
-                throw new InvalidOperationException(BlockedMessage);
+                throw new InvalidOperationException(GameMessages.Blocked);
             }
         }
     }

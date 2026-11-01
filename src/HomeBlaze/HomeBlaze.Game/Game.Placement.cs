@@ -27,7 +27,7 @@ public partial class Game
             var actor = GetActor(caller) ?? throw new InvalidOperationException(NoActorMessage);
             if (!FrontPlacement.TryGetArea(actor.Area, actor.Facing, across, along, out var area))
             {
-                throw new InvalidOperationException(!Enum.IsDefined(actor.Facing) || actor.Facing.IsDiagonal() ? DiagonalMessage : BlockedMessage);
+                throw new InvalidOperationException(!Enum.IsDefined(actor.Facing) || actor.Facing.IsDiagonal() ? DiagonalMessage : GameMessages.Blocked);
             }
 
             return new GameSpot(area.X, area.Y, area.Width, area.Depth, actor.Facing);
@@ -54,7 +54,7 @@ public partial class Game
             var index = GetIndex();
             if (gameObject.IsMovementBlocking && index.IsBlocked(gameObject.Area, ignored: null))
             {
-                throw new InvalidOperationException(BlockedMessage);
+                throw new InvalidOperationException(GameMessages.Blocked);
             }
 
             ReplaceObjects(new Dictionary<string, GameObject>(objects) { [CreateObjectName(objects, gameObject)] = gameObject });

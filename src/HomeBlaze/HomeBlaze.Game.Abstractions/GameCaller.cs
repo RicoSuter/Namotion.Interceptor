@@ -6,8 +6,10 @@ namespace HomeBlaze.Game.Abstractions;
 /// </summary>
 public sealed class GameCaller
 {
+    /// <exception cref="ArgumentException">The client id is null or empty.</exception>
     public GameCaller(string clientId)
     {
+        ArgumentException.ThrowIfNullOrEmpty(clientId);
         ClientId = clientId;
     }
 

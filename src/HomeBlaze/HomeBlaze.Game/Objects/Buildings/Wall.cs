@@ -99,7 +99,7 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
     /// <param name="cancellationToken">Cancels saving.</param>
     /// <exception cref="ArgumentOutOfRangeException">The width is out of range.</exception>
     /// <exception cref="InvalidOperationException">The wall is thicker than one tile, too short for the door, reaches past
-    /// the <see cref="int"/> range, is not part of a game, the caller is not a player of the game or faces diagonally, or a
+    /// the <see cref="int"/> range, is not part of a game, the caller is not a connected player of this game or faces diagonally, or a
     /// piece would overlap another movement blocking object.</exception>
     [Operation(Title = "Add door", Icon = "DoorFront", Position = 2,
         Description = "Replaces the part of this wall in front of you by a door, keeping a wall tile on each side. An empty width makes a door of 1 m.")]
@@ -131,21 +131,26 @@ public partial class Wall : GameObject, ITitleProvider, IIconProvider
         return World.ReplaceAsync(this, CreateDoorPieces(doorWidth, spot), cancellationToken);
     }
 
-    // Works in doubled coordinates, where the center of a spot of an odd width, on the line between two tiles, is a whole
-    // number. Adding 1 before the flooring shift rounds half a tile up, so the extra tile of an odd door goes east or
-    // north, as for placing in front of a player.
     private List<GameObject> CreateDoorPieces(int doorWidth, GameSpot? spot)
     {
         var isAlongX = IsAlongX;
         long start = isAlongX ? X : Y;
         var length = Length;
-        var doubledCenter = 2 * start + length;
+
+        long doorStart;
         if (spot is { } front)
         {
-            doubledCenter = 2L * (isAlongX ? front.X : front.Y) + doorWidth;
+            doorStart = isAlongX ? front.X : front.Y;
+        }
+        else
+        {
+            // The middle of the wall works in doubled coordinates, where the center between two tiles is a whole number.
+            // Adding 1 before the flooring shift rounds half a tile up, so the extra tile of an odd door goes east or
+            // north, as for placing in front of a player.
+            doorStart = (2 * start + length - doorWidth + 1) >> 1;
         }
 
-        var doorStart = Math.Clamp((doubledCenter - doorWidth + 1) >> 1, start + DoorMargin, start + length - DoorMargin - doorWidth);
+        doorStart = Math.Clamp(doorStart, start + DoorMargin, start + length - DoorMargin - doorWidth);
         return
         [
             CreatePiece(isAlongX, start, (int)(doorStart - start)),

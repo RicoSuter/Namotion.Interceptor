@@ -12,7 +12,7 @@ public interface IGameWorld
     /// or north). Does not check whether the area is free.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">A size is outside 1 to <see cref="GameObject.MaximumSize"/>.</exception>
-    /// <exception cref="InvalidOperationException">The caller is not a player of this game, faces diagonally, or the area
+    /// <exception cref="InvalidOperationException">The caller is not a connected player of this game, faces diagonally, or the area
     /// would leave the <see cref="int"/> range.</exception>
     GameSpot GetSpotInFront(GameCaller? caller, int across, int along);
 

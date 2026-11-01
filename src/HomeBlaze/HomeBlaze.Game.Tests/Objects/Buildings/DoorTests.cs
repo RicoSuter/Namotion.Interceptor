@@ -51,6 +51,7 @@ public class DoorTests
 
         // Act
         door.Open();
+        // Stands in for the change observer of the running game, which rebuilds the index after a direct write.
         _context.Game.RequestIndexRebuild();
         var results = new[] { Step(player, GameDirection.North), Step(player, GameDirection.North), Step(player, GameDirection.North) };
 
@@ -70,6 +71,7 @@ public class DoorTests
 
         // Act
         door.Close();
+        // Stands in for the change observer of the running game, which rebuilds the index after a direct write.
         _context.Game.RequestIndexRebuild();
         var result = Step(player, GameDirection.North);
 
