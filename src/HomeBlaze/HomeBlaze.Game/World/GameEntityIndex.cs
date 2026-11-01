@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Simulation;
 
@@ -17,6 +18,7 @@ internal sealed class GameEntityIndex
     private readonly Stack<List<Slot>> _pooledLists = new();
 
     // Marks the slots a query already returned, so an entity spanning several chunks is returned once without a set.
+    // Queries write these stamps, so no two queries may run at the same time, not even two read-only ones.
     private long _queryStamp;
 
     public int Count => _slots.Count;
@@ -53,9 +55,14 @@ internal sealed class GameEntityIndex
 
     public void Clear()
     {
-        foreach (var chunk in _chunks.Keys)
+        foreach (var (chunk, slots) in _chunks)
         {
             Changes.Add(chunk);
+            if (_pooledLists.Count < MaximumPooledLists)
+            {
+                slots.Clear();
+                _pooledLists.Push(slots);
+            }
         }
 
         _chunks.Clear();
@@ -88,7 +95,7 @@ internal sealed class GameEntityIndex
         }
 
         var existing = slot.Entry;
-        var isViewChanged = slot.Visual != entity.Visual || slot.Title != entity.Title;
+        var isViewChanged = (!ReferenceEquals(slot.Visual, entity.Visual) && slot.Visual != entity.Visual) || slot.Title != entity.Title;
         if (existing == entry && !isViewChanged)
         {
             return;
@@ -193,6 +200,27 @@ internal sealed class GameEntityIndex
         foreach (var slot in slots)
         {
             results.Add(slot.Entity);
+        }
+    }
+
+    /// <summary>
+    /// Adds the area and subject each movement blocking entity of the chunk had at its last <see cref="AddOrUpdate"/> to
+    /// <paramref name="results"/>.
+    /// </summary>
+    public void QueryChunkMovementBlocking((long X, long Y) chunk, ImmutableArray<(GameArea Area, GameObject Subject)>.Builder results)
+    {
+        if (!_chunks.TryGetValue(chunk, out var slots))
+        {
+            return;
+        }
+
+        foreach (var slot in slots)
+        {
+            var entry = slot.Entry;
+            if (entry.IsMovementBlocking)
+            {
+                results.Add((entry.Area, slot.Entity.Subject));
+            }
         }
     }
 

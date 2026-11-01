@@ -446,6 +446,8 @@ public class GameEntityIndexTests
     [InlineData(15, 16, 0, 1)]
     [InlineData(-1, -16, -1, -1)]
     [InlineData(-17, 31, -2, 1)]
+    [InlineData(int.MaxValue, int.MinValue, 134_217_727, -134_217_728)]
+    [InlineData((long)int.MaxValue + 2, 0, 134_217_728, 0)]
     public void WhenATileIsMappedToItsChunk_ThenChunksAreSixteenTilesWide(long x, long y, long chunkX, long chunkY)
     {
         // Act
@@ -486,6 +488,100 @@ public class GameEntityIndexTests
 
         // Assert
         Assert.Equal(expected, isValid);
+    }
+
+    [Fact]
+    public void WhenTheSameAreaIsQueriedTwiceOrQueriedForSoundAfterwards_ThenEachQueryReturnsTheEntity()
+    {
+        // Arrange
+        var index = new GameEntityIndex();
+        var entity = CreateEntity(new GameArea(-20, 0, 40, 1), isMovementBlocking: true, isSoundBlocking: true);
+        index.AddOrUpdate(entity);
+        var area = new GameArea(-30, -10, 60, 20);
+        var first = new List<GameEntity>();
+        var second = new List<GameEntity>();
+        var soundBlocking = new List<GameArea>();
+
+        // Act
+        index.Query(area, first);
+        index.Query(area, second);
+        index.QuerySoundBlocking(area, soundBlocking);
+
+        // Assert
+        Assert.Same(entity, Assert.Single(first));
+        Assert.Same(entity, Assert.Single(second));
+        Assert.Equal(entity.Area, Assert.Single(soundBlocking));
+    }
+
+    [Fact]
+    public void WhenAChunkEmptiesAndAnotherEntityFillsANewChunk_ThenOnlyTheNewEntityIsReturned()
+    {
+        // Arrange
+        var index = new GameEntityIndex();
+        var removed = CreateEntity(new GameArea(0, 0, 1, 1));
+        var moved = CreateEntity(new GameArea(1, 1, 1, 1));
+        index.AddOrUpdate(removed);
+        index.AddOrUpdate(moved);
+        index.Remove(removed);
+        moved.Area = new GameArea(100, 100, 1, 1);
+        index.AddOrUpdate(moved);
+        var added = CreateEntity(new GameArea(200, 200, 1, 1));
+        var oldChunk = new List<GameEntity>();
+        var movedChunk = new List<GameEntity>();
+        var addedChunk = new List<GameEntity>();
+
+        // Act
+        index.AddOrUpdate(added);
+        index.QueryChunk((0, 0), oldChunk);
+        index.QueryChunk(GameEntityIndex.GetChunk(100, 100), movedChunk);
+        index.QueryChunk(GameEntityIndex.GetChunk(200, 200), addedChunk);
+
+        // Assert
+        Assert.Empty(oldChunk);
+        Assert.Same(moved, Assert.Single(movedChunk));
+        Assert.Same(added, Assert.Single(addedChunk));
+    }
+
+    [Fact]
+    public void WhenTheIndexIsClearedAndFilledAgain_ThenOnlyTheNewEntitiesAreReturned()
+    {
+        // Arrange
+        var index = new GameEntityIndex();
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 0, 1, 1)));
+        index.AddOrUpdate(CreateEntity(new GameArea(40, 40, 1, 1)));
+        index.Clear();
+        var added = CreateEntity(new GameArea(100, 100, 1, 1));
+        var results = new List<GameEntity>();
+
+        // Act
+        index.AddOrUpdate(added);
+        index.Query(new GameArea(-200, -200, 400, 400), results);
+
+        // Assert
+        Assert.Same(added, Assert.Single(results));
+    }
+
+    [Fact]
+    public void WhenAnAreaEndsBeyondTheIntRange_ThenItIsIndexedFoundAndRemoved()
+    {
+        // Arrange
+        var index = new GameEntityIndex();
+        var entity = CreateEntity(new GameArea(int.MaxValue - 1, 0, 4, 1), isMovementBlocking: true);
+        var results = new List<GameEntity>();
+
+        // Act
+        index.AddOrUpdate(entity);
+        index.Query(new GameArea(int.MaxValue, 0, 1, 1), results);
+        var isBlocked = index.IsBlocked(new GameArea(int.MaxValue, 0, 1, 1), ignored: null);
+        var isChangedBeyond = index.Changes.Contains((134_217_728, 0));
+        index.Remove(entity);
+
+        // Assert
+        Assert.Same(entity, Assert.Single(results));
+        Assert.True(isBlocked);
+        Assert.True(isChangedBeyond);
+        Assert.Equal(0, index.Count);
+        Assert.False(index.IsBlocked(new GameArea(int.MaxValue, 0, 1, 1), ignored: null));
     }
 
     private static GameEntity CreateEntity(

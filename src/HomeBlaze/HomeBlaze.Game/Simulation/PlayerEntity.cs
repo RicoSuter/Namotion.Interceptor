@@ -14,7 +14,6 @@ internal sealed class PlayerEntity : GameEntity
         ClientId = clientId;
         Area = new GameArea(0, 0, GamePlayer.Size, GamePlayer.Size);
         Height = GamePlayer.BodyHeight;
-        Visual = null;
     }
 
     public new GamePlayer Subject => (GamePlayer)base.Subject;

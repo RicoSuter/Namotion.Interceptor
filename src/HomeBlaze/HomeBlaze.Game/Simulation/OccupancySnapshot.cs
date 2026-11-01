@@ -27,9 +27,9 @@ internal sealed class OccupancySnapshot
     {
         var (minimumX, minimumY) = GameEntityIndex.GetChunk(area.X, area.Y);
         var (maximumX, maximumY) = GameEntityIndex.GetChunk(area.Right, area.Top);
-        for (var chunkX = minimumX; chunkX <= maximumX; chunkX++)
+        for (var chunkY = minimumY; chunkY <= maximumY; chunkY++)
         {
-            for (var chunkY = minimumY; chunkY <= maximumY; chunkY++)
+            for (var chunkX = minimumX; chunkX <= maximumX; chunkX++)
             {
                 if (_chunks.TryGetValue((chunkX, chunkY), out var entries) && IsOverlappedByAny(entries, area, except))
                 {
@@ -42,32 +42,29 @@ internal sealed class OccupancySnapshot
     }
 
     /// <summary>
-    /// Returns a snapshot with the changed chunks copied from the index, from the current area and movement blocking of
-    /// their entities, which therefore must match what the index last took over; this one stays unchanged.
-    /// <paramref name="scratch"/> is cleared and reused.
+    /// Returns a snapshot with the changed chunks copied from what the index stored; returns this snapshot when no
+    /// movement blocking area of a changed chunk differs. This snapshot stays unchanged.
     /// </summary>
-    public OccupancySnapshot With(GameEntityIndex index, ChangedChunks changes, List<GameEntity> scratch)
+    public OccupancySnapshot With(GameEntityIndex index, ChangedChunks changes)
     {
         if (changes.Count == 0)
         {
             return this;
         }
 
-        var builder = _chunks.ToBuilder();
+        ImmutableDictionary<(long X, long Y), ImmutableArray<(GameArea Area, GameObject Subject)>>.Builder? builder = null;
         var entries = ImmutableArray.CreateBuilder<(GameArea Area, GameObject Subject)>();
         foreach (var chunk in changes.Chunks)
         {
-            scratch.Clear();
-            index.QueryChunk(chunk, scratch);
             entries.Clear();
-            foreach (var entity in scratch)
+            index.QueryChunkMovementBlocking(chunk, entries);
+            var hasExisting = _chunks.TryGetValue(chunk, out var existing);
+            if (hasExisting ? AreEqual(existing, entries) : entries.Count == 0)
             {
-                if (entity.IsMovementBlocking)
-                {
-                    entries.Add((entity.Area, entity.Subject));
-                }
+                continue;
             }
 
+            builder ??= _chunks.ToBuilder();
             if (entries.Count == 0)
             {
                 builder.Remove(chunk);
@@ -78,8 +75,26 @@ internal sealed class OccupancySnapshot
             }
         }
 
-        scratch.Clear();
-        return new OccupancySnapshot(builder.ToImmutable());
+        return builder is null ? this : new OccupancySnapshot(builder.ToImmutable());
+    }
+
+    private static bool AreEqual(
+        ImmutableArray<(GameArea Area, GameObject Subject)> existing, ImmutableArray<(GameArea Area, GameObject Subject)>.Builder entries)
+    {
+        if (existing.Length != entries.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < existing.Length; i++)
+        {
+            if (existing[i].Area != entries[i].Area || !ReferenceEquals(existing[i].Subject, entries[i].Subject))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsOverlappedByAny(ImmutableArray<(GameArea Area, GameObject Subject)> entries, GameArea area, GameObject? except)
