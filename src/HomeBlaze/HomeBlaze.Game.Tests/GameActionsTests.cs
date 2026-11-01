@@ -136,12 +136,18 @@ public class GameActionsTests
         var sender = _context.AddConnectedPlayer("tab-1");
         var recipient = _context.AddConnectedPlayer("tab-2", x: 0, y: 2);
         var caller = new GameCaller(sender.ClientId);
-        await _context.RunAsync(recipient.SendMessageAsync("First", caller, CancellationToken.None));
+        var first = recipient.SendMessageAsync("First", caller, CancellationToken.None);
+        _context.Tick();
+        await first;
 
         // Act
-        var exception = await Record.ExceptionAsync(() => _context.RunAsync(recipient.SendMessageAsync("Second", caller, CancellationToken.None)));
+        var second = recipient.SendMessageAsync("Second", caller, CancellationToken.None);
+        _context.Tick();
+        var exception = await Record.ExceptionAsync(() => second);
         _context.TimeProvider.Advance(Game.MessageInterval);
-        await _context.RunAsync(recipient.SendMessageAsync("Third", caller, CancellationToken.None));
+        var third = recipient.SendMessageAsync("Third", caller, CancellationToken.None);
+        _context.Tick();
+        await third;
 
         // Assert
         Assert.IsType<InvalidOperationException>(exception);

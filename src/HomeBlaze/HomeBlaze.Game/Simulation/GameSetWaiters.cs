@@ -17,7 +17,7 @@ internal sealed class GameSetWaiters
     public Task InvokeAsync(GameSimulation simulation, GamePublisher publisher, Action command, CancellationToken cancellationToken)
     {
         // Completed directly rather than through Unwrap, whose proxy completes only once a continuation ran.
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new CommandCompletion(cancellationToken);
         simulation.InvokeAsync(() =>
         {
             try
@@ -33,7 +33,7 @@ internal sealed class GameSetWaiters
             _waiters.Add((publisher.ObjectSetVersion, completion));
             return true;
         }, cancellationToken).ContinueWith(
-            static (invoke, state) => ForwardUnfinished(invoke, (TaskCompletionSource)state!),
+            static (invoke, state) => ForwardUnfinished(invoke, (CommandCompletion)state!),
             completion, CancellationToken.None, TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
         return completion.Task;
@@ -55,11 +55,11 @@ internal sealed class GameSetWaiters
     }
 
     // A command canceled before it ran, or refused because the game stopped.
-    private static void ForwardUnfinished(Task invoke, TaskCompletionSource completion)
+    private static void ForwardUnfinished(Task invoke, CommandCompletion completion)
     {
         if (invoke.IsCanceled)
         {
-            completion.TrySetCanceled();
+            completion.TrySetCanceled(completion.CancellationToken);
         }
         else
         {
@@ -78,5 +78,12 @@ internal sealed class GameSetWaiters
         }
 
         _waiters.Clear();
+    }
+
+    // Carries the caller's token, so a command canceled before it ran fails with an exception that names it.
+    private sealed class CommandCompletion(CancellationToken cancellationToken)
+        : TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+    {
+        public CancellationToken CancellationToken { get; } = cancellationToken;
     }
 }

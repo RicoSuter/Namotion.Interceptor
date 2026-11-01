@@ -21,6 +21,7 @@ public partial class Game
         await base.StopAsync(cancellationToken);
         if (ExecuteTask is { IsCompleted: false })
         {
+            // Known limitation: place and replace tasks waiting for a write held by a save stay pending until a restart.
             _logger.LogWarning("The game {Game} stopped before it was saved and loses its latest changes on restart", Title);
             return;
         }

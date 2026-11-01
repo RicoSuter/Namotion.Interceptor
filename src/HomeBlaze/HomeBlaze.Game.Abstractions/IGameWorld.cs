@@ -26,10 +26,12 @@ public interface IGameWorld
     /// <summary>
     /// Adds the object under a name of its type name in lowercase, a dash and 8 random hex digits. Called from another
     /// thread, the task completes once the object is one of the game's objects, so its <see cref="GameObject.World"/>
-    /// resolves and, unless the game stopped meanwhile, its <see cref="GameObject.OnAddedToWorld"/> ran. Called on the game's own thread, as from a scheduled
-    /// action or <see cref="GameObject.OnAddedToWorld"/>, the command runs at once and the task completes with it; the
-    /// object joins the game's objects later in that tick or in the next, and its <see cref="GameObject.OnAddedToWorld"/>
-    /// follows. Canceling before the game processed the command drops it; after that the object stays placed.
+    /// resolves and, unless the game stopped meanwhile, its <see cref="GameObject.OnAddedToWorld"/> ran. Called on the
+    /// game's own thread, as from a scheduled action or <see cref="GameObject.OnAddedToWorld"/>, the command runs at
+    /// once and the task completes with it; the object joins the game's objects later in that tick or in the next, and
+    /// its <see cref="GameObject.OnAddedToWorld"/> follows. Canceling before the game processed the command drops it;
+    /// after that the object stays placed, and canceling no longer ends the wait, which ends once the game wrote its
+    /// objects, at the latest when a save in progress completed.
     /// </summary>
     /// <exception cref="ArgumentException">The object is already part of this game, or its size is outside 1 to
     /// <see cref="GameObject.MaximumSize"/>.</exception>
@@ -45,7 +47,7 @@ public interface IGameWorld
     /// <summary>
     /// Replaces the object by the replacements in one step; no player sees an intermediate state. The task completes
     /// and the replacements join the game's objects as with <see cref="PlaceAsync"/>. Canceling before the game
-    /// processed the command drops it; after that the replacement stays applied.
+    /// processed the command drops it; after that the replacement stays applied, and canceling no longer ends the wait.
     /// </summary>
     /// <exception cref="ArgumentException">A replacement is listed twice, already part of this game, or of invalid size.</exception>
     /// <exception cref="InvalidOperationException">The object is not part of this game, or a movement blocking replacement

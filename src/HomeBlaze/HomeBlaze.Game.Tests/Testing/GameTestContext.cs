@@ -14,6 +14,8 @@ namespace HomeBlaze.Game.Tests.Testing;
 /// </summary>
 internal sealed class GameTestContext
 {
+    private static readonly TimeSpan ContinuationWait = TimeSpan.FromMilliseconds(20);
+
     public FakeTimeProvider TimeProvider { get; } = new();
 
     public FakeClientDirectory Clients { get; } = new();
@@ -48,29 +50,39 @@ internal sealed class GameTestContext
     }
 
     /// <summary>
-    /// Runs ticks until the task completes, at most 100.
+    /// Runs ticks until the task completes, at most 100; only the first advances the clock.
     /// </summary>
     public async Task<T> RunAsync<T>(Task<T> task)
     {
-        for (var i = 0; i < 100 && !task.IsCompleted; i++)
-        {
-            Tick();
-        }
-
+        RunTicksUntilCompleted(task);
         return await task;
     }
 
     /// <summary>
-    /// Runs ticks until the task completes, at most 100.
+    /// Runs ticks until the task completes, at most 100; only the first advances the clock.
     /// </summary>
     public async Task RunAsync(Task task)
     {
-        for (var i = 0; i < 100 && !task.IsCompleted; i++)
-        {
-            Tick();
-        }
+        RunTicksUntilCompleted(task);
 
         await task;
+    }
+
+    // A task that ends in a continuation completes a moment after its tick, so the later ticks wait for it briefly and
+    // leave the clock alone: waiting must not move game time.
+    private void RunTicksUntilCompleted(Task task)
+    {
+        if (task.IsCompleted)
+        {
+            return;
+        }
+
+        Tick();
+        for (var i = 1; i < 100 && !((IAsyncResult)task).AsyncWaitHandle.WaitOne(ContinuationWait); i++)
+        {
+            Game.RunTickForTest();
+            Game.SaveTask.GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>
