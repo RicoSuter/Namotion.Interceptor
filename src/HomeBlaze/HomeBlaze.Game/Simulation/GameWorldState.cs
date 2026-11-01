@@ -26,6 +26,9 @@ internal sealed class GameWorldState
     private readonly HashSet<string> _changedPositions = [];
     private readonly List<GameArea> _targetTiles = new(3);
 
+    // Objects added since the last publish of the object set; writes to them go unseen until the set attaches them.
+    private readonly List<GameObject> _unpublishedObjects = [];
+
     // Swapped in whole by the simulation thread and read by any thread; a published instance never changes.
     private volatile OccupancySnapshot _snapshot = OccupancySnapshot.Empty;
     private volatile ImmutableDictionary<string, PlayerPosition> _playerPositions = ImmutableDictionary<string, PlayerPosition>.Empty;
@@ -116,6 +119,20 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
+    /// Reads the objects added since the last publish of the object set again in the next tick, because a write to them
+    /// before the publish attached them to the game did not reach the write interceptor.
+    /// </summary>
+    public void OnObjectSetPublished()
+    {
+        foreach (var subject in _unpublishedObjects)
+        {
+            ChangedSubjects.Add(subject);
+        }
+
+        _unpublishedObjects.Clear();
+    }
+
+    /// <summary>
     /// Clears the pending publishes after the publisher wrote them.
     /// </summary>
     public void ClearPendingPublishes()
@@ -187,17 +204,12 @@ internal sealed class GameWorldState
     /// one at the subject's position and facing, disconnected and with voice off, for every other subject. Releases the
     /// voice of every entity that leaves. The players connect with the next <see cref="Reconcile"/>.
     /// </summary>
-    public void TakeOverPlayers(Dictionary<string, GamePlayer> players)
+    /// <param name="players">The players by client id.</param>
+    /// <param name="isReadingPositions">Whether a kept entity takes the subject's position and facing too, as after a
+    /// restart, when the subjects hold what the last publish wrote plus the writes made while the game was stopped.</param>
+    public void TakeOverPlayers(Dictionary<string, GamePlayer> players, bool isReadingPositions = false)
     {
-        var subjects = new HashSet<GamePlayer>(ReferenceEqualityComparer.Instance);
-        var keptEntities = new HashSet<PlayerEntity>(ReferenceEqualityComparer.Instance);
-        foreach (var (clientId, subject) in players)
-        {
-            if (IsTakeable(clientId, subject, subjects) && Players.TryGetValue(clientId, out var existing) && ReferenceEquals(existing.Subject, subject))
-            {
-                keptEntities.Add(existing);
-            }
-        }
+        var keptEntities = GetKeptPlayers(players);
 
         // Leaving entities go first, so a subject that moved to another client id is published with its new entity last.
         foreach (var entity in Players.Values)
@@ -209,7 +221,7 @@ internal sealed class GameWorldState
         }
 
         var entities = new List<PlayerEntity>(players.Count);
-        subjects.Clear();
+        var subjects = new HashSet<GamePlayer>(ReferenceEqualityComparer.Instance);
         foreach (var (clientId, subject) in players)
         {
             if (IsTakeable(clientId, subject, subjects))
@@ -223,10 +235,7 @@ internal sealed class GameWorldState
         Players.Clear();
         foreach (var entity in entities)
         {
-            Players[entity.ClientId] = entity;
-            EntitiesBySubject[entity.Subject] = entity;
-            Index.AddOrUpdate(entity);
-            _changedPositions.Add(entity.ClientId);
+            AddTakenPlayer(entity, isReadingPositions && keptEntities.Contains(entity));
         }
 
         IsPlayerSetChanged = true;
@@ -586,6 +595,48 @@ internal sealed class GameWorldState
         return entity;
     }
 
+    // The entities whose subject stays under the same client id.
+    private HashSet<PlayerEntity> GetKeptPlayers(Dictionary<string, GamePlayer> players)
+    {
+        var subjects = new HashSet<GamePlayer>(ReferenceEqualityComparer.Instance);
+        var kept = new HashSet<PlayerEntity>(ReferenceEqualityComparer.Instance);
+        foreach (var (clientId, subject) in players)
+        {
+            if (IsTakeable(clientId, subject, subjects) && Players.TryGetValue(clientId, out var existing) && ReferenceEquals(existing.Subject, subject))
+            {
+                kept.Add(existing);
+            }
+        }
+
+        return kept;
+    }
+
+    private void AddTakenPlayer(PlayerEntity player, bool isReadingPosition)
+    {
+        if (isReadingPosition)
+        {
+            ReadPosition(player);
+        }
+
+        Players[player.ClientId] = player;
+        EntitiesBySubject[player.Subject] = player;
+        Index.AddOrUpdate(player);
+        _changedPositions.Add(player.ClientId);
+    }
+
+    private void ReadPosition(PlayerEntity player)
+    {
+        var subject = player.Subject;
+        var area = player.Area with { X = subject.X, Y = subject.Y };
+        if (area != player.Area || subject.Facing != player.Facing)
+        {
+            player.Area = area;
+            player.Facing = subject.Facing;
+            Index.MarkChanged(player);
+            OnPositionChanged(player);
+        }
+    }
+
     // Returns whether the player joined.
     private bool UpdatePlayer(PlayerEntity player, GameClient client)
     {
@@ -689,6 +740,7 @@ internal sealed class GameWorldState
 
     private void AddObject(GameEntity entity)
     {
+        _unpublishedObjects.Add(entity.Subject);
         var name = CreateObjectName(entity.Subject);
         Objects[name] = entity;
         NamesBySubject[entity.Subject] = name;

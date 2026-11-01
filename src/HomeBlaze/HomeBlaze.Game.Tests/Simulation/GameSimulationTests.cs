@@ -205,7 +205,7 @@ public class GameSimulationTests
         // Assert
         Assert.Equal(42, await invoked);
         Assert.Equal(["posted", "handler", "handler"], order);
-        Assert.Equal("The game has stopped.", (await Assert.ThrowsAsync<InvalidOperationException>(() => late)).Message);
+        Assert.Equal("The game has stopped.", (await Assert.ThrowsAsync<GameStoppedException>(() => late)).Message);
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class GameSimulationTests
         var task = simulation.InvokeAsync(() => 1, CancellationToken.None);
 
         // Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => task);
+        await Assert.ThrowsAsync<GameStoppedException>(() => task);
     }
 
     [Fact]
@@ -389,7 +389,7 @@ public class GameSimulationTests
 
         // Assert
         Assert.Equal(1, runs);
-        Assert.Equal("The game has stopped.", (await Assert.ThrowsAsync<InvalidOperationException>(() => later)).Message);
+        Assert.Equal("The game has stopped.", (await Assert.ThrowsAsync<GameStoppedException>(() => later)).Message);
     }
 
     [Fact]
@@ -416,5 +416,37 @@ public class GameSimulationTests
         // Assert
         Assert.True(isCurrent);
         Assert.False(simulation.IsCurrent);
+    }
+
+    [Fact]
+    public void WhenRestartingBeforeTheStop_ThenItIsRefused()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(simulation.Restart);
+    }
+
+    [Fact]
+    public async Task WhenTheSimulationRestartsAfterAStop_ThenItTakesWorkAndTicksItsHandlersAgain()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+        var handled = 0;
+        simulation.AddTickHandler(() => handled++);
+        simulation.Stop();
+        var handledBeforeRestart = handled;
+
+        // Act
+        simulation.Restart();
+        var task = simulation.InvokeAsync(() => 1, CancellationToken.None);
+        simulation.RunTick();
+        simulation.Stop();
+
+        // Assert
+        Assert.Equal(1, await task);
+        Assert.Equal(handledBeforeRestart + 2, handled);
+        Assert.True(simulation.HasStopped);
     }
 }

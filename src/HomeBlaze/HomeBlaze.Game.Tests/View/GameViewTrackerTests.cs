@@ -51,6 +51,27 @@ public class GameViewTrackerTests
     }
 
     [Fact]
+    public async Task WhenAPlayerDisconnects_ThenTheGameReportsItRemovedFromTheView()
+    {
+        // Arrange
+        var context = new GameTestContext();
+        context.AddConnectedPlayer("tab-1");
+        context.AddConnectedPlayer("tab-2", x: 10);
+        var first = await context.RunAsync(context.Game.UpdateViewAsync(_tracker, "tab-1"));
+        var otherId = Assert.Single(first.Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        context.Clients.Set("tab-2", isNamed: false, isConnected: false);
+        context.Reconcile();
+        var update = await context.RunAsync(context.Game.UpdateViewAsync(_tracker, "tab-1"));
+
+        // Assert
+        Assert.Equal(new[] { otherId }, update.Removed);
+        Assert.Empty(update.Upserted);
+        Assert.Single(_tracker.Known);
+    }
+
+    [Fact]
     public void WhenNothingChanged_ThenTheUpdateIsEmpty()
     {
         // Arrange

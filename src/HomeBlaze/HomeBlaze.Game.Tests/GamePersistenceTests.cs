@@ -160,4 +160,43 @@ public class GamePersistenceTests
         Assert.Null(exception);
         Assert.Equal(1, player.X);
     }
+
+    [Fact]
+    public async Task WhenASaveHangsLongerThanTheSaveInterval_ThenPublishingGoesOnAndTheSaveStillCompletes()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = new GameTestContext(logger);
+        var player = context.AddConnectedPlayer("tab-1");
+        await context.SaveAsync();
+        await context.StepAsync("tab-1", GameDirection.East);
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.Root.WriteBlocker = blocker.Task;
+
+        // Ticks without GameTestContext.Tick, which would wait for the held save.
+        context.TimeProvider.Advance(GameSimulationSettings.SaveInterval);
+        context.Game.RunTickForTest();
+        context.TimeProvider.Advance(Game.StepInterval);
+        var step = context.Game.StepAsync("tab-1", GameDirection.East, turnOnly: false);
+        context.Game.RunTickForTest();
+        var xWhilePaused = player.X;
+
+        // Act
+        context.TimeProvider.Advance(GameSimulationSettings.SaveInterval);
+        context.Game.RunTickForTest();
+        context.Game.RunTickForTest();
+        var xAfterInterval = player.X;
+        blocker.SetResult();
+        await context.Game.SaveTask;
+        var writesAfterHungSave = context.Root.WriteCount;
+        await context.StepAsync("tab-1", GameDirection.East);
+        await context.SaveAsync();
+
+        // Assert
+        Assert.Equal(2, (await step)!.Value.X);
+        Assert.Equal(1, xWhilePaused);
+        Assert.Equal(2, xAfterInterval);
+        Assert.Single(logger.Entries, entry => entry.Message.Contains("takes longer than", StringComparison.Ordinal));
+        Assert.Equal(writesAfterHungSave + 1, context.Root.WriteCount);
+    }
 }

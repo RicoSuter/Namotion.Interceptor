@@ -9,15 +9,29 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
     private long _lastPublishTimestamp;
     private bool _hasPublished;
 
-    /// <summary>
-    /// Whether a publish writes right now, so the write interceptor ignores these writes.
-    /// </summary>
-    public bool IsPublishing { get; private set; }
+    // The write the publisher makes right now, which the write interceptor ignores; a write that an observer makes
+    // meanwhile has another subject, property or set and counts.
+    private object? _writingSubject;
+    private string? _writingProperty;
+    private object? _writingSet;
+
+    private long _version;
 
     /// <summary>
     /// Whether publishing waits, as it does while a save writes the subjects.
     /// </summary>
     public bool IsPaused { get; set; }
+
+    /// <summary>
+    /// Increases with every publish that wrote something; any thread may read it.
+    /// </summary>
+    public long Version => Volatile.Read(ref _version);
+
+    /// <summary>
+    /// Whether the write is the one the publisher makes right now, of a player's value or of a set of the game.
+    /// </summary>
+    public bool IsOwnWrite(object subject, string property, object? set) =>
+        ReferenceEquals(subject, _writingSubject) && property == _writingProperty && ReferenceEquals(set, _writingSet);
 
     /// <summary>
     /// Publishes when <see cref="GameSimulationSettings.PublishInterval"/> passed since the last publish, unless paused.
@@ -52,18 +66,24 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
 
         _lastPublishTimestamp = timeProvider.GetTimestamp();
         _hasPublished = true;
-        IsPublishing = true;
         try
         {
             foreach (var player in world.PendingPublishes)
             {
                 var subject = player.Subject;
+                SetWriting(subject, nameof(GamePlayer.X));
                 subject.X = player.Area.X;
+                SetWriting(subject, nameof(GamePlayer.Y));
                 subject.Y = player.Area.Y;
+                SetWriting(subject, nameof(GamePlayer.Facing));
                 subject.Facing = player.Facing;
+                SetWriting(subject, nameof(GamePlayer.IsConnected));
                 subject.IsConnected = player.IsConnected;
+                SetWriting(subject, nameof(GamePlayer.ClientTitle));
                 subject.ClientTitle = player.ClientTitle;
+                SetWriting(subject, nameof(GamePlayer.IsMicrophoneOn));
                 subject.IsMicrophoneOn = player.IsMicrophoneOn;
+                SetWriting(subject, nameof(GamePlayer.IsAudioOn));
                 subject.IsAudioOn = player.IsAudioOn;
             }
 
@@ -77,6 +97,7 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
                     players[clientId] = player.Subject;
                 }
 
+                SetWriting(game, nameof(Game.Players), players);
                 game.Players = players;
             }
 
@@ -89,14 +110,24 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
                     objects[name] = entity.Subject;
                 }
 
+                SetWriting(game, nameof(Game.Objects), objects);
                 game.Objects = objects;
+                world.OnObjectSetPublished();
             }
         }
         finally
         {
-            IsPublishing = false;
+            SetWriting(null, null);
+            Interlocked.Increment(ref _version);
         }
 
         return true;
+    }
+
+    private void SetWriting(object? subject, string? property, object? set = null)
+    {
+        _writingSubject = subject;
+        _writingProperty = property;
+        _writingSet = set;
     }
 }

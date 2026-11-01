@@ -11,8 +11,6 @@ namespace HomeBlaze.Game.Simulation;
 /// </summary>
 internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
 {
-    private const string StoppedMessage = "The game has stopped.";
-
     private static readonly TimeSpan RepeatedWarningInterval = TimeSpan.FromMinutes(1);
 
     [ThreadStatic]
@@ -59,7 +57,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     /// Queues the function for the next tick and completes with its result or exception. Canceling the token completes
     /// the task as canceled at once and drops the function. On the simulation thread the function runs inline instead.
     /// </summary>
-    /// <returns>A faulted task with an <see cref="InvalidOperationException"/> once the simulation has stopped.</returns>
+    /// <returns>A faulted task with a <see cref="GameStoppedException"/> once the simulation has stopped.</returns>
     public Task<T> InvokeAsync<T>(Func<T> function, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(function);
@@ -70,7 +68,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
 
         if (_isStopped)
         {
-            return Task.FromException<T>(new InvalidOperationException(StoppedMessage));
+            return Task.FromException<T>(new GameStoppedException());
         }
 
         var work = new InvokeWork<T>(function, cancellationToken);
@@ -232,6 +230,29 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
+    /// Accepts work again after a stop, for a game that starts again; the tick handlers stay. Call it only while no
+    /// tick runs.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The simulation has not stopped.</exception>
+    public void Restart()
+    {
+        if (Volatile.Read(ref _isDrained) == 0)
+        {
+            throw new InvalidOperationException("Restart only after the simulation stopped.");
+        }
+
+        // Drained first, so work queued once the stop flag clears is not abandoned.
+        Volatile.Write(ref _isDrained, 0);
+        _isStopped = false;
+        Volatile.Write(ref _isStopRequested, 0);
+    }
+
+    /// <summary>
+    /// Whether the simulation has stopped, refused the work left over, and not restarted since.
+    /// </summary>
+    public bool HasStopped => Volatile.Read(ref _isDrained) == 1;
+
+    /// <summary>
     /// Runs the action on the calling thread as if on the simulation thread, for the work that follows the stop.
     /// </summary>
     /// <exception cref="InvalidOperationException">The simulation has not stopped.</exception>
@@ -362,7 +383,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         public void Abandon()
         {
             _registration.Dispose();
-            TrySetException(new InvalidOperationException(StoppedMessage));
+            TrySetException(new GameStoppedException());
         }
     }
 }

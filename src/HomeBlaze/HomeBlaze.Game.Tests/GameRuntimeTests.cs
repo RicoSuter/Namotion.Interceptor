@@ -205,4 +205,37 @@ public class GameRuntimeTests
 
         return null;
     }
+
+    [Fact]
+    public async Task WhenTheGameStartsAgainAfterAStop_ThenOutsideWritesAndStepsWork()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var door = _context.AddDoor(-1, 2);
+        var wall = _context.AddWall(20, 0);
+        await _context.Game.StartAsync(CancellationToken.None);
+        await _context.Game.StopAsync(CancellationToken.None);
+
+        // A stopped game drops the write, so the next start takes the objects over again.
+        door.IsOpen = true;
+
+        // Act
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAsync(() => _context.Game.IsFree(door.Area), "The door opened while stopped is still closed");
+            wall.X = 30;
+            await WaitUntilAsync(() => _context.Game.IsFree(new GameArea(20, 0, 4, 1)), "The wall moved after the restart is still there");
+            _context.TimeProvider.Advance(Game.StepInterval);
+            var step = _context.Game.StepAsync("tab-1", GameDirection.North, turnOnly: false);
+            await WaitUntilAsync(() => step.IsCompleted, "The step after the restart did not run");
+
+            // Assert
+            Assert.True((await step)!.Value.IsAccepted);
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
 }

@@ -71,6 +71,21 @@ public partial class Game
         _saveTask = SaveAsync();
     }
 
+    // A write that hangs must not freeze the subjects: publishing goes on after one save interval, at the price of a
+    // file that may mix two publishes. The save still runs and completes as usual.
+    private void ResumePublishingWhenSaveIsOverdue()
+    {
+        if (!_isSaving || !_publisher.IsPaused
+            || _timeProvider.GetElapsedTime(_lastSaveTimestamp, _timeProvider.GetTimestamp()) < GameSimulationSettings.SaveInterval)
+        {
+            return;
+        }
+
+        _publisher.IsPaused = false;
+        _logger.LogWarning("Saving the game {Game} takes longer than {Interval}, so publishing goes on before it completed",
+            Title, GameSimulationSettings.SaveInterval);
+    }
+
     private async Task<bool> SaveAsync()
     {
         var isWritten = false;

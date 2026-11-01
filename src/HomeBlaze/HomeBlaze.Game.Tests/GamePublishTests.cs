@@ -99,4 +99,82 @@ public class GamePublishTests
         // Assert
         Assert.Equal(new[] { ("tab-1", "tab-1") }, clientIds);
     }
+
+    [Fact]
+    public async Task WhenAPlacedObjectIsWrittenBeforeItIsPublished_ThenTheGameReadsTheWriteAfterThePublish()
+    {
+        // Arrange
+        // The construction's tick published, so the placed wall is not published at once.
+        var wall = new Wall { X = 10, Y = 10 };
+        await _context.RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
+        var isPublishedAtOnce = _context.Game.Objects.Count > 0;
+
+        // Act
+        // Unseen by the write interceptor, because the wall is not attached to the game yet.
+        wall.X = 30;
+        _context.Publish();
+        _context.Tick();
+
+        // Assert
+        Assert.False(isPublishedAtOnce);
+        Assert.True(_context.Game.IsFree(new GameArea(10, 10, 4, 1)));
+        Assert.False(_context.Game.IsFree(wall.Area));
+    }
+
+    [Fact]
+    public async Task WhenAnObserverWritesTheObjectsDuringAPublish_ThenTheWriteIsTakenOver()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var extra = new Wall { X = 30, Y = 30 };
+        var isWritten = false;
+        using var subscription = Changes
+            .Where(change => ReferenceEquals(change.Property.Subject, player) && change.Property.Name == nameof(GamePlayer.X))
+            .Subscribe(_ =>
+            {
+                if (!isWritten)
+                {
+                    isWritten = true;
+                    _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["extra"] = extra };
+                }
+            });
+
+        // Act
+        await _context.StepAsync("tab-1", GameDirection.East);
+        _context.Publish();
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Same(extra, _context.Game.Objects["extra"]);
+        Assert.False(_context.Game.IsFree(extra.Area));
+    }
+
+    [Fact]
+    public async Task WhenAnObserverWritesThePositionOfAPlayerDuringAPublish_ThenThePlayerIsMovedThere()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var isWritten = false;
+        using var subscription = Changes
+            .Where(change => ReferenceEquals(change.Property.Subject, player) && change.Property.Name == nameof(GamePlayer.Facing))
+            .Subscribe(_ =>
+            {
+                if (!isWritten)
+                {
+                    isWritten = true;
+                    player.X = 50;
+                }
+            });
+
+        // Act
+        await _context.StepAsync("tab-1", GameDirection.West, turnOnly: true);
+        _context.Publish();
+        var result = await _context.StepAsync("tab-1", GameDirection.East);
+        _context.Publish();
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Equal(51, result!.Value.X);
+        Assert.Equal(51, player.X);
+    }
 }

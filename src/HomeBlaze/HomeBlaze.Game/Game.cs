@@ -105,6 +105,11 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     internal event Action? WorldChanged;
 
     /// <summary>
+    /// Increases with every publish that wrote to the subjects; any thread may read it.
+    /// </summary>
+    internal long PublishVersion => _publisher.Version;
+
+    /// <summary>
     /// Whether the calling thread runs this game's simulation.
     /// </summary>
     internal bool IsOnSimulationThread => _simulation.IsCurrent;
@@ -124,6 +129,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     partial void OnPlayersChanging(ref Dictionary<string, GamePlayer> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, GamePlayer>();
+        var wasAssigningClientIds = t_isAssigningClientIds;
         t_isAssigningClientIds = true;
         try
         {
@@ -137,7 +143,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
         finally
         {
-            t_isAssigningClientIds = false;
+            t_isAssigningClientIds = wasAssigningClientIds;
         }
     }
 
@@ -155,7 +161,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     /// <summary>
     /// Registers the write interceptor and queues the take-over of the subjects, without starting the loops.
     /// </summary>
-    internal void StartForTest() => EnsureStarted();
+    internal void StartForTest() => Start();
 
     /// <summary>
     /// Runs one tick of the simulation on the calling thread.
@@ -168,8 +174,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     /// </summary>
     internal void OnWritten<TProperty>(IInterceptorSubject subject, string name, TProperty value, bool isOnSimulation)
     {
-        // The publisher writes only the players and the game's sets; another object written by an observer meanwhile counts.
-        if (isOnSimulation && _publisher.IsPublishing && subject is GamePlayer or Game)
+        if (isOnSimulation && IsPublishersOwnWrite(subject, name, value))
         {
             return;
         }
@@ -194,9 +199,17 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
     }
 
+    // A set is compared by reference, so an observer that writes another set of the game during a publish is not ignored.
+    private bool IsPublishersOwnWrite<TProperty>(IInterceptorSubject subject, string name, TProperty value) => subject switch
+    {
+        Game => _publisher.IsOwnWrite(subject, name, value),
+        GamePlayer => _publisher.IsOwnWrite(subject, name, null),
+        _ => false
+    };
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        EnsureStarted();
+        Start();
 
         // Runs inside the writes of the whole graph, so it only signals.
         using var subscription = ((IInterceptorSubject)this).Context
@@ -225,20 +238,29 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
     }
 
-    private void EnsureStarted()
+    // Called for every start, also after a stop: work given to a stopped game was dropped, so the game takes over its
+    // subjects again.
+    private void Start()
     {
-        if (Interlocked.Exchange(ref _isStarted, 1) == 1)
+        var isRestarting = _simulation.HasStopped;
+        if (isRestarting)
         {
-            return;
+            // The stop dropped the completion of a save that ran then; StopAsync awaited it.
+            _simulation.Restart();
+            _isSaving = false;
+            _publisher.IsPaused = false;
         }
 
-        ((IInterceptorSubject)this).Context.TryAddService<IWriteInterceptor>(() => new GameWriteInterceptor(), existing => existing is GameWriteInterceptor);
+        if (Interlocked.Exchange(ref _isStarted, 1) == 0)
+        {
+            ((IInterceptorSubject)this).Context.TryAddService<IWriteInterceptor>(() => new GameWriteInterceptor(), existing => existing is GameWriteInterceptor);
+        }
 
         // Reads the sets in the tick, after the interceptor is in place: a write that lands before that tick is read here,
         // one after it queues its own take-over, which runs later.
         _simulation.Post(() =>
         {
-            _world.TakeOverPlayers(Players);
+            _world.TakeOverPlayers(Players, isReadingPositions: isRestarting);
             _world.TakeOverObjects(Objects);
         });
     }
@@ -290,6 +312,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
     private void PublishWhenDue()
     {
+        ResumePublishingWhenSaveIsOverdue();
         if (_publisher.TryPublish())
         {
             WorldChanged?.Invoke();

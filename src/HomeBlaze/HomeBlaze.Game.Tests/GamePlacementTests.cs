@@ -216,4 +216,37 @@ public class GamePlacementTests
         // Assert
         Assert.Equal("gameObject", Assert.IsType<ArgumentException>(exception).ParamName);
     }
+
+    [Fact]
+    public async Task WhenAnotherThreadAsksDuringATick_ThenItGetsTheLastTicksSnapshotWhileTheTickSeesTheLiveIndex()
+    {
+        // Arrange
+        var area = new GameArea(20, 20, 4, 1);
+        bool? isFreeOnSimulation = null;
+        bool? isFreeElsewhere = null;
+        var probe = new ProbeObject
+        {
+            X = 40,
+            Y = 40,
+            OnFirstRead = () =>
+            {
+                isFreeOnSimulation = _context.Game.IsFree(area);
+                isFreeElsewhere = AskFromAnotherThread(area);
+            }
+        };
+
+        // Act
+        // Both run in the same tick: the wall enters the live index first, the snapshot only at the end of the tick.
+        var placeWall = _context.Game.PlaceAsync(new Wall { X = 20, Y = 20 }, CancellationToken.None);
+        var placeProbe = _context.Game.PlaceAsync(probe, CancellationToken.None);
+        _context.Tick();
+        await Task.WhenAll(placeWall, placeProbe);
+
+        // Assert
+        Assert.False(isFreeOnSimulation);
+        Assert.True(isFreeElsewhere);
+        Assert.False(_context.Game.IsFree(area));
+    }
+
+    private bool AskFromAnotherThread(GameArea area) => Task.Run(() => _context.Game.IsFree(area)).GetAwaiter().GetResult();
 }

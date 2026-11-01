@@ -5,6 +5,7 @@
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Components.Operations
+@using HomeBlaze.Game.Simulation
 @using HomeBlaze.Game.View
 @using HomeBlaze.Game.Voice
 @using HomeBlaze.Services
@@ -184,7 +185,9 @@
     private ElementReference _panel;
     private IJSObjectReference? _module;
     private DotNetObjectReference<GamePage>? _reference;
-    private bool _isSubscribed;
+    // The game whose events this page handles, so it unsubscribes from that one also after Subject changed.
+    private Game? _subscribedGame;
+    private bool _isWorldSubscribed;
     // The page's client and its player, resolved on every flush; the client id is the player's key in Game.Players.
     private string? _clientId;
     private GamePlayer? _player;
@@ -200,6 +203,8 @@
     // The player and the player ids of the volume table row that _nearby shows.
     private GamePlayer? _nearbyPlayer;
     private string[] _nearbyPlayerIds = [];
+    // The publish of the subjects that _nearby shows, whose titles and toggles it reads.
+    private long _nearbyPublishVersion = -1;
     private int _isVolumeTableChanged;
     private IReadOnlyList<TargetEntry> _targets = [];
     private IReadOnlyList<GameAction> _actions = [];
@@ -226,6 +231,16 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private Game? Game => Subject as Game;
+
+    protected override void OnParametersSet()
+    {
+        // A page shown for another game keeps no handler or speaker in the former one.
+        if (_subscribedGame is not null && !ReferenceEquals(_subscribedGame, Subject))
+        {
+            StopVoiceInGame();
+            Unsubscribe();
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -262,8 +277,9 @@
             }
 
             _isStarted = true;
+            _subscribedGame = game;
             game.WorldChanged += ScheduleFlush;
-            _isSubscribed = true;
+            _isWorldSubscribed = true;
             game.VolumeTableChanged += OnVolumeTableChanged;
             await FlushAsync();
             await StartVoiceAsync();
@@ -299,7 +315,7 @@
                 ? new StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing)
                 : null;
         }
-        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
         {
             // The game has stopped or the page went away.
             return null;
@@ -630,7 +646,7 @@
         {
             return await switching;
         }
-        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
         {
             return false;
         }
@@ -744,7 +760,7 @@
     {
         _sinkRegistration?.Dispose();
         _sinkRegistration = null;
-        if (Game is { } game && _player is not null && _clientId is { } clientId)
+        if (_subscribedGame is { } game && _player is not null && _clientId is { } clientId)
         {
             _ = TrySetVoiceAsync(game.SetMicrophoneAsync(clientId, _viewId, isOn: false));
             _ = TrySetVoiceAsync(game.SetAudioAsync(clientId, _viewId, isOn: false));
@@ -894,7 +910,7 @@
         {
             update = await game.UpdateViewAsync(_tracker, _player is null ? null : _clientId, _lifetime.Token);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
         {
             // The game has stopped or the page went away.
             return false;
@@ -912,9 +928,10 @@
             RefreshPosition();
         }
 
-        if (hasViewChanged || isVolumeTableChanged)
+        var isPublished = game.PublishVersion != _nearbyPublishVersion;
+        if (hasViewChanged || isVolumeTableChanged || isPublished)
         {
-            RefreshNearby(game, hasViewChanged);
+            RefreshNearby(game, hasViewChanged || isPublished);
         }
 
         await RefreshActionsAsync(game);
@@ -924,7 +941,7 @@
         }
     }
 
-    // Raised on the voice loop, so it only schedules a flush.
+    // Raised on the simulation thread inside a tick, so it only schedules a flush.
     private void OnVolumeTableChanged()
     {
         Volatile.Write(ref _isVolumeTableChanged, 1);
@@ -962,7 +979,7 @@
         {
             return await game.GetVoicePagesAsync(clientId, _viewId, _lifetime.Token);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
         {
             return (false, false);
         }
@@ -998,7 +1015,7 @@
         {
             // The module dropped the view or broke, so every later update would fail too.
             _isViewBroken = true;
-            Unsubscribe();
+            UnsubscribeWorld();
             return false;
         }
     }
@@ -1019,9 +1036,10 @@
     }
 
     // The own player and the players it hears, by the same rule that mixes the voices. A new table with the same players
-    // keeps the list, because their toggles and titles reach it through the view.
-    private void RefreshNearby(Game game, bool hasViewChanged)
+    // keeps the list, unless the view or a publish changed their toggles or titles.
+    private void RefreshNearby(Game game, bool isChanged)
     {
+        var publishVersion = game.PublishVersion;
         if (_player is not { } player)
         {
             _nearby = [];
@@ -1031,7 +1049,7 @@
         }
 
         var row = game.VolumeTable.GetRow(player.ClientId);
-        if (!hasViewChanged && HasSameNearbyPlayers(player, row))
+        if (!isChanged && HasSameNearbyPlayers(player, row))
         {
             return;
         }
@@ -1054,6 +1072,7 @@
         _nearby = nearby;
         _nearbyPlayer = player;
         _nearbyPlayerIds = playerIds;
+        _nearbyPublishVersion = publishVersion;
     }
 
     private bool HasSameNearbyPlayers(GamePlayer player, ReadOnlySpan<GameVolumeEntry> row)
@@ -1110,19 +1129,33 @@
         {
             return await game.GetTargetsAsync(clientId, _lifetime.Token);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
         {
             return [];
         }
     }
 
-    private void Unsubscribe()
+    private void UnsubscribeWorld()
     {
-        if (_isSubscribed && Game is { } game)
+        if (_isWorldSubscribed && _subscribedGame is { } game)
         {
             game.WorldChanged -= ScheduleFlush;
-            _isSubscribed = false;
+            _isWorldSubscribed = false;
         }
+    }
+
+    // Also drops the speaker of this page in the game's mixer, which belongs to that game.
+    private void Unsubscribe()
+    {
+        UnsubscribeWorld();
+        if (_subscribedGame is { } game)
+        {
+            game.VolumeTableChanged -= OnVolumeTableChanged;
+            _subscribedGame = null;
+        }
+
+        _sinkRegistration?.Dispose();
+        _sinkRegistration = null;
     }
 
     // The operations of the game, then those of its tools ordered by name. Runs on every flush, so it sorts only
@@ -1174,13 +1207,8 @@
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
-        Unsubscribe();
-        if (Game is { } game)
-        {
-            game.VolumeTableChanged -= OnVolumeTableChanged;
-        }
-
         StopVoiceInGame();
+        Unsubscribe();
         try
         {
             await _lifetime.CancelAsync();
