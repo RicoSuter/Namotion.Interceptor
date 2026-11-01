@@ -108,6 +108,8 @@ export async function createEntities(scene, options) {
     const models = new Map();
     const windMaterials = new Map();
     const fadeMaterials = new Map();
+    // The model URL and animation name of each missing animation that was logged, so it is logged once.
+    const missingAnimations = new Set();
     // Written to the canvas for tests and diagnosis.
     const stats = { parts: 0, models: 0, failures: 0, faded: 0, animationsOnce: 0 };
     // Reused by every frame, so the render loop does not allocate.
@@ -382,13 +384,29 @@ export async function createEntities(scene, options) {
         const group = animation ? node.instance.animationGroups.find(candidate => candidate.name === name) ?? null : null;
         node.animationGroup = group;
         if (!group) {
+            if (animation) {
+                warnMissingAnimation(node.part.m, animation);
+            }
+
             return;
         }
 
-        const isOnce = node.part.am === ONCE_ANIMATION_MODE;
+        const isOnce = isOnceAnimation(node.part);
         group.start(!isOnce);
         if (isOnce) {
             stats.animationsOnce++;
+        }
+    }
+
+    function isOnceAnimation(part) {
+        return part.am === ONCE_ANIMATION_MODE;
+    }
+
+    function warnMissingAnimation(url, animation) {
+        const key = `${url}|${animation}`;
+        if (!missingAnimations.has(key)) {
+            missingAnimations.add(key);
+            console.warn(`The model ${url} has no animation ${animation}.`);
         }
     }
 
@@ -666,7 +684,7 @@ export async function createEntities(scene, options) {
             node.part = part;
             // A model still loading plays the latest animation once it is shown.
             if (node.state === 'model'
-                && (part.a !== previous.a || (part.am === ONCE_ANIMATION_MODE) !== (previous.am === ONCE_ANIMATION_MODE))) {
+                && (part.a !== previous.a || isOnceAnimation(part) !== isOnceAnimation(previous))) {
                 playAnimation(node);
                 updateStats();
             }
