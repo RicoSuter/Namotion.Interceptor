@@ -36,7 +36,7 @@ Namespace `HomeBlaze.Game.Abstractions`.
   - virtual `Width`, `Depth`, `Height` (1, not intercepted; types with a configurable size override them with `[Configuration]` as Wall and Door do today), `IsMovementBlocking` (true), `IsSoundBlocking` (false), `IsVisible` (true), `Visual` (gray box of the size);
   - `GameArea Area => new(X, Y, Width, Depth)`;
   - `protected IGameWorld World`, which throws `InvalidOperationException` while the object is not part of a game;
-  - `protected virtual void OnAddedToWorld()`, empty by default.
+  - `protected virtual void OnAddedToWorld()`, empty by default, which the game reaches through the explicitly implemented `IGameObjectLifecycle`.
 - `GameTool`, abstract `[InterceptorSubject]` class implementing `IConfigurable`, with `protected IGameWorld World`.
 - `IGameWorld`:
   - `GameSpot GetSpotInFront(GameCaller? caller, int across, int along)`: the area right in front of the caller's player, centered across its facing direction (odd remainder east or north), with the facing; throws `InvalidOperationException` with "Only a player in the game can place objects." or "Face north, east, south or west to place objects.". It does not check whether the area is free.
@@ -45,7 +45,7 @@ Namespace `HomeBlaze.Game.Abstractions`.
   - `Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken)`.
   - `Task ReplaceAsync(GameObject gameObject, IReadOnlyList<GameObject> replacements, CancellationToken cancellationToken)`: atomic; refused when a movement blocking replacement overlaps a movement blocking object other than the replaced one or another replacement, or a replacement is listed twice.
   - `IDisposable Schedule(GameObject gameObject, TimeSpan delay, Action action)`: runs the action on the simulation thread at the first tick at or after the delay; disposing cancels it; removing the object cancels all its schedules; not saved.
-- Values: `GameCaller`, `GameArea` (X, Y, Width, Depth, `Intersects`), `GameSpot` (X, Y, Width, Depth, Facing, `Area`), `GameDirection` with its offset helpers, `GameVisual`, `GameVisualPart`, `GameVisualShape`, `GameVisualEffect`, `GameVisualAnimationMode` (`Loop`, `Once`), `GameVisualVector`, `GameVisualPoint`, `GameVisualCache<TKey>`, `GameAssets.Url(Type, string)`.
+- Values: `GameCaller` (the client id of the page that invokes an operation), `GameMessages` (the shared refusal texts, such as `Blocked`), `GameArea` (X, Y, Width, Depth, `Intersects`), `GameSpot` (X, Y, Width, Depth, Facing, `Area`), `GameDirection` with its offset helpers, `GameVisual`, `GameVisualPart`, `GameVisualShape`, `GameVisualEffect`, `GameVisualAnimationMode` (`Loop`, `Once`), `GameVisualVector`, `GameVisualPoint`, `GameVisualCache<TKey>`, `GameAssets.Url(Type, string)`.
 - `GameVisualPart.AnimationMode`: `Loop` (default) plays `Animation` in a loop; `Once` plays it once whenever the part's `Animation` changes and holds the last frame.
 - The object API methods throw `InvalidOperationException("The object is not part of this game.")` for objects of another game, and `ArgumentException` for invalid sizes (1 to `GameObject.MaximumSize`) or objects already in the game, as today. Canceling a world command before its tick drops it; after that the change stays applied.
 
@@ -121,7 +121,7 @@ A player inside a movement blocking object, for example a door closed by an auto
 
 ## Page tidying
 
-- `GamePage.razor` splits into the page (layout and panel), `GameViewSession` (simulation session and update queue) and `GameVoiceSession` (the voice wiring).
+- `GamePage.razor` splits into the page (markup and a code-behind for layout and panel), `GameViewConnection` (the page's side of its view session and the update queue) and `GameVoiceConnection` (the voice wiring); `GameViewSession` is the simulation's side.
 - Folders by responsibility: `Simulation/`, `View/`, `Voice/`, `World/`, `Components/`.
 
 ## Removed
