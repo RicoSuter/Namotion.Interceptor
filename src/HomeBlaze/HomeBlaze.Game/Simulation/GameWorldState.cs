@@ -69,7 +69,9 @@ internal sealed class GameWorldState
     public GameWorldIndex Index { get; } = new();
 
     /// <summary>
-    /// The subjects written since the last <see cref="RefreshChangedSubjects"/>, whose entities are read again.
+    /// The subjects written on the simulation thread since the last <see cref="RefreshChangedSubjects"/>, whose entities
+    /// are read again at the end of the tick, and before a step, place, replace or game-thread free check, so these never
+    /// decide on positions that earlier work of the tick already changed.
     /// </summary>
     public HashSet<GameObject> ChangedSubjects { get; } = new(ReferenceEqualityComparer.Instance);
 
@@ -306,6 +308,7 @@ internal sealed class GameWorldState
     /// </summary>
     public MoveResult TryMove(PlayerEntity player, GameDirection direction, bool turnOnly)
     {
+        RefreshChangedSubjects();
         if (!Enum.IsDefined(direction))
         {
             return CreateMoveResult(player, false);
@@ -381,6 +384,7 @@ internal sealed class GameWorldState
     /// <exception cref="InvalidOperationException">The object blocks movement and a movement blocking entity covers its area.</exception>
     public void Place(GameObject gameObject)
     {
+        RefreshChangedSubjects();
         var entity = CreateObjectEntity(gameObject, nameof(gameObject));
         if (entity.IsMovementBlocking && Index.IsBlocked(entity.Area, ignored: null))
         {
@@ -413,6 +417,7 @@ internal sealed class GameWorldState
     /// overlaps a movement blocking entity other than the replaced one or another replacement.</exception>
     public void Replace(GameObject gameObject, IReadOnlyList<GameObject> replacements)
     {
+        RefreshChangedSubjects();
         if (!NamesBySubject.ContainsKey(gameObject))
         {
             throw new InvalidOperationException(NotPartOfGameMessage);

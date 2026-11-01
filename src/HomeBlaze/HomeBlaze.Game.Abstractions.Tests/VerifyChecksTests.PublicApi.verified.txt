@@ -40,6 +40,7 @@ namespace HomeBlaze.Game.Abstractions
     {
         public static int GetOffsetX(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
         public static int GetOffsetY(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+        public static int GetRotation(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
         public static bool IsDiagonal(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
     }
     public static class GameMessages

@@ -18,7 +18,8 @@ public interface IGameWorld
 
     /// <summary>
     /// Whether no movement blocking object other than <paramref name="except"/> overlaps the area. Callable from any
-    /// thread; outside the game's own processing it answers from the state of the last tick.
+    /// thread; on the game's own thread it includes what objects wrote earlier in the tick, elsewhere it answers from the
+    /// state of the last tick.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The area is wider or deeper than <see cref="GameObject.MaximumSize"/>.</exception>
     bool IsFree(GameArea area, GameObject? except = null);

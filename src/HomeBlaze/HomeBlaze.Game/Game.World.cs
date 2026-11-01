@@ -85,6 +85,8 @@ public partial class Game
             return _world.Snapshot.IsFree(area, except);
         }
 
+        // Indexes what earlier schedules of this tick wrote, so two objects stepping in one tick cannot both take a tile.
+        _world.RefreshChangedSubjects();
         var ignored = except is null ? null : _world.FindEntity(except);
         return !_world.Index.IsBlocked(area, ignored);
     }

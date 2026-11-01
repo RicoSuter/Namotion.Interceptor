@@ -43,6 +43,40 @@ public class GameScheduleTests
     }
 
     [Fact]
+    public void WhenAScheduleMovesAnObject_ThenAFreeCheckOfALaterScheduleInTheSameTickSeesIt()
+    {
+        // Arrange
+        var mover = _context.AddObject("mover", new ScheduledObject { X = 20, Y = 20 });
+        bool? isFreeAfterTheMove = null;
+        mover.ScheduleFor(mover, TimeSpan.Zero, () => mover.X = 5);
+        mover.ScheduleFor(mover, TimeSpan.Zero, () => isFreeAfterTheMove = _context.Game.IsFree(new GameArea(5, 20, 1, 1)));
+
+        // Act
+        _context.Tick(2);
+
+        // Assert
+        Assert.False(isFreeAfterTheMove);
+    }
+
+    [Fact]
+    public async Task WhenAScheduleMovesAnObjectInFrontOfAPlayer_ThenItsStepInTheSameTickIsRefused()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var mover = _context.AddObject("mover", new ScheduledObject { X = 20, Y = 20 });
+        mover.ScheduleFor(mover, TimeSpan.Zero, () => (mover.X, mover.Y) = (0, 2));
+        _context.Tick();
+
+        // Act
+        var result = await _context.StepAsync(player.ClientId, GameDirection.North);
+
+        // Assert
+        Assert.Equal((0, 2), (mover.X, mover.Y));
+        Assert.False(result!.Value.IsAccepted);
+        Assert.Equal((0, 0), (player.X, player.Y));
+    }
+
+    [Fact]
     public async Task WhenTheObjectIsRemoved_ThenItsSchedulesAreCanceled()
     {
         // Arrange

@@ -121,13 +121,22 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
 
     partial void OnIsOpenChanged(bool newValue)
     {
-        if (!newValue)
+        if (newValue)
         {
-            Interlocked.Exchange(ref _pendingClose, null)?.Dispose();
+            if (TryGetWorld(out var world))
+            {
+                ScheduleAutoClose(world);
+            }
+
+            return;
         }
-        else if (TryGetWorld(out var world))
+
+        // The handle is read before IsOpen: an opening on another thread after this close stores a new handle, and only
+        // the handle of this close may be cleared, never the new one.
+        var pending = Volatile.Read(ref _pendingClose);
+        if (!IsOpen && pending is not null && Interlocked.CompareExchange(ref _pendingClose, null, pending) == pending)
         {
-            ScheduleAutoClose(world);
+            pending.Dispose();
         }
     }
 

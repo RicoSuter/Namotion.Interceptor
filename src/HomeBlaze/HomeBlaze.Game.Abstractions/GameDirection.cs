@@ -41,6 +41,12 @@ public static class GameDirectionExtensions
     };
 
     /// <summary>
+    /// The turn from north in degrees clockwise seen from above, 0 to 315 in steps of 45, as
+    /// <see cref="GameVisualPart.Rotation"/> takes it; an undefined value turns by its value modulo 8.
+    /// </summary>
+    public static int GetRotation(this GameDirection direction) => ((((int)direction % 8) + 8) % 8) * 45;
+
+    /// <summary>
     /// Whether the direction is north-east, south-east, south-west or north-west.
     /// </summary>
     public static bool IsDiagonal(this GameDirection direction) => ((int)direction & 1) == 1;
