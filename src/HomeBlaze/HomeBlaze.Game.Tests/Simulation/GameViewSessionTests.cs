@@ -402,4 +402,35 @@ public class GameViewSessionTests
         Assert.Empty(_sink.Deliveries);
         Assert.Equal(0, allocated);
     }
+
+    [Fact]
+    public void WhenADeferredFullRefreshLosesItsReason_ThenTheChangesOfTheDeferredTickStillArrive()
+    {
+        // Arrange: the sessions opened later, which follow a player that stays, take the full refreshes of the tick
+        // before the first session's turn.
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 20);
+        // A chunk apart from the player's, so the jump back does not refresh it.
+        var door = _context.AddDoor(100, 100);
+        _context.OpenView("tab-1", _sink);
+        var doorId = GetId(_sink.Updates[0], 100, 100);
+        _sink.Clear();
+        for (var i = 0; i < GameViewSessions.MaximumFullRefreshesPerTick; i++)
+        {
+            _context.Game.Views.Open("tab-2", new RecordingViewSink());
+        }
+
+        // Act
+        player.X = 5000;
+        door.IsOpen = true;
+        _context.Tick();
+        var deliveredInDeferredTick = _sink.Deliveries.Count;
+        player.X = 0;
+        _context.Tick();
+
+        // Assert
+        Assert.Equal(0, deliveredInDeferredTick);
+        Assert.Contains(_sink.Updates, update => update.Upserted.Any(view => view.Id == doorId && !view.IsMovementBlocking));
+    }
 }
+

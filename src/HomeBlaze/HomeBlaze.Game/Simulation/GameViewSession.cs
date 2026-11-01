@@ -89,7 +89,9 @@ internal sealed class GameViewSession : IDisposable
         var isFullRefresh = IsFullRefreshDue(window);
         if (isFullRefresh && !canFullRefresh)
         {
-            // The full refresh reads every chunk of the window, so the changes meanwhile need not be collected.
+            // The full refresh reads every chunk of the window, so the changes meanwhile need not be collected. It stays
+            // due also when its reason goes away, as for a player that jumps away and back before it ran.
+            _isFullRefreshRequested = true;
             return false;
         }
 
