@@ -38,6 +38,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     private readonly GamePublisher _publisher;
 
     private int _isStarted;
+
+    // Touched only on the simulation thread: whether this tick's first handler published the object set.
+    private bool _isObjectSetPublishedInTick;
     private Task _lastRun = Task.CompletedTask;
 
     [ThreadStatic]
@@ -89,9 +92,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         Objects = new Dictionary<string, GameObject>();
         Tools = new Dictionary<string, GameTool>();
 
-        // Index.Changes is cleared last, after everything that reads it in the tick. The objects' hooks run first, so
-        // what they write is read again in the same tick.
-        _simulation.AddTickHandler(RunAddedToWorldOfPublishedObjects);
+        // Index.Changes is cleared last, after everything that reads it in the tick. The object set is published and the
+        // objects' hooks run first, so what they write is read again in the same tick.
+        _simulation.AddTickHandler(PublishObjectSetWhenChanged);
         _simulation.AddTickHandler(_world.RefreshChangedSubjects);
         _simulation.AddTickHandler(_world.PublishSnapshot);
         _simulation.AddTickHandler(RebuildVolumeTableWhenDue);
@@ -333,10 +336,19 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
     }
 
+    // Placed objects are attached in the tick that adds them, so their World resolves once the command completes.
+    private void PublishObjectSetWhenChanged()
+    {
+        _isObjectSetPublishedInTick = _publisher.TryPublishObjectSet();
+        RunAddedToWorldOfPublishedObjects();
+    }
+
     private void PublishWhenDue()
     {
         ResumePublishingWhenSaveIsOverdue();
-        if (_publisher.TryPublish())
+        var isObjectSetPublished = _isObjectSetPublishedInTick;
+        _isObjectSetPublishedInTick = false;
+        if (_publisher.TryPublish() || isObjectSetPublished)
         {
             WorldChanged?.Invoke();
         }

@@ -98,6 +98,37 @@ internal sealed class GameTestContext
     }
 
     /// <summary>
+    /// Starts a requested save that writes only once the returned source completes, which pauses publishing meanwhile.
+    /// Tick with <see cref="Game.RunTickForTest"/> until <see cref="ReleaseSaveAsync"/>, because <see cref="Tick"/> waits
+    /// for the save.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No save was requested.</exception>
+    public TaskCompletionSource HoldSave()
+    {
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Root.WriteBlocker = blocker.Task;
+        TimeProvider.Advance(GameSimulationSettings.SaveInterval);
+        Game.RunTickForTest();
+        if (Game.SaveTask.IsCompleted)
+        {
+            throw new InvalidOperationException("No save was requested.");
+        }
+
+        return blocker;
+    }
+
+    /// <summary>
+    /// Lets the save held by <see cref="HoldSave"/> write and runs the tick that takes in its result and resumes publishing.
+    /// </summary>
+    public async Task ReleaseSaveAsync(TaskCompletionSource blocker)
+    {
+        Root.WriteBlocker = null;
+        blocker.SetResult();
+        await Game.SaveTask;
+        Tick();
+    }
+
+    /// <summary>
     /// Moves the player of the client one step after the step interval passed, so the rate limit never refuses it.
     /// </summary>
     public Task<MoveResult?> StepAsync(string clientId, GameDirection direction, bool turnOnly = false)

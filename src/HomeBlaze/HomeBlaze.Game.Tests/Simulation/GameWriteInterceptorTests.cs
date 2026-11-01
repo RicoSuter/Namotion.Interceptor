@@ -75,18 +75,14 @@ public class GameWriteInterceptorTests
     public async Task WhenObjectsAreReplacedWhileATickPublishesAnOlderSet_ThenTheReplacementWins()
     {
         // Arrange
-        var placed = new Wall { X = 20, Y = 20 };
         var replacement = new Wall { X = 30, Y = 30 };
-        var isReplaced = false;
 
-        // Lands after the place and before the publish of the same tick, which writes the set without it.
-        _context.Game.WorldChanged += () =>
+        // Lands while the place reads the object, before the publish of the same tick, which writes the set without it.
+        var placed = new ProbeObject
         {
-            if (!isReplaced)
-            {
-                isReplaced = true;
-                _context.Game.Objects = new Dictionary<string, GameObject> { ["replacement"] = replacement };
-            }
+            X = 20,
+            Y = 20,
+            OnFirstRead = () => _context.Game.Objects = new Dictionary<string, GameObject> { ["replacement"] = replacement }
         };
         _context.Publish();
 

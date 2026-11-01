@@ -100,8 +100,8 @@ public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
 
     /// <summary>
     /// Called on the game's own thread when the object enters the world: when the game starts or loads, and when the
-    /// object is placed or added by a replacement, then once the game published it, so that <see cref="World"/> resolves.
-    /// The place to set up schedules.
+    /// object is placed or added by a replacement, right after the game added it to its objects. <see cref="World"/>
+    /// resolves here, which makes it the place to set up schedules.
     /// </summary>
     protected virtual void OnAddedToWorld()
     {

@@ -20,6 +20,9 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     private readonly ConcurrentQueue<Item> _queue = new();
     private readonly GameSchedules _schedules = new();
     private readonly List<Action> _tickHandlers = [];
+
+    // The invoked work that ran in the current tick, completed once the tick handlers ran.
+    private readonly List<IGameWork> _ranWork = [];
     private long _tickTimestamp;
     private bool _hasTicked;
     private volatile bool _isStopped;
@@ -55,8 +58,10 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
-    /// Queues the function for the next tick and completes with its result or exception. Canceling the token completes
-    /// the task as canceled at once and drops the function. On the simulation thread the function runs inline instead.
+    /// Queues the function for the next tick and completes with its result or exception at the end of that tick, after
+    /// the tick handlers, so the caller sees what they published. Canceling the token before the tick ran the function
+    /// completes the task as canceled at once and drops the function. On the simulation thread the function runs inline
+    /// instead and the task completes at once.
     /// </summary>
     /// <returns>A faulted task with a <see cref="GameStoppedException"/> once the simulation has stopped.</returns>
     public Task<T> InvokeAsync<T>(Func<T> function, CancellationToken cancellationToken)
@@ -140,7 +145,8 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     }
 
     /// <summary>
-    /// Runs one tick on the calling thread: the due schedules, the actions queued before the tick, then the tick handlers.
+    /// Runs one tick on the calling thread: the due schedules, the actions queued before the tick, then the tick handlers;
+    /// completes the tasks of the invoked work last.
     /// </summary>
     public void RunTick()
     {
@@ -162,6 +168,7 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
                 if (item.Work is { } work)
                 {
                     work.Run();
+                    _ranWork.Add(work);
                 }
                 else
                 {
@@ -176,6 +183,12 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         }
         finally
         {
+            foreach (var work in _ranWork)
+            {
+                work.Complete();
+            }
+
+            _ranWork.Clear();
             _isFailing = _hasFailedInTick;
             t_current = previous;
         }
@@ -371,6 +384,8 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
     {
         void Run();
 
+        void Complete();
+
         void Abandon();
     }
 
@@ -380,6 +395,9 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
         : TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously), IGameWork
     {
         private CancellationTokenRegistration _registration;
+        private bool _hasRun;
+        private T? _result;
+        private Exception? _exception;
 
         public void RegisterCancellation()
         {
@@ -399,13 +417,26 @@ internal sealed class GameSimulation(TimeProvider timeProvider, ILogger logger)
                 return;
             }
 
+            _hasRun = true;
             try
             {
-                TrySetResult(function());
+                _result = function();
             }
             catch (Exception exception)
             {
-                TrySetException(exception);
+                _exception = exception;
+            }
+        }
+
+        public void Complete()
+        {
+            if (_exception is not null)
+            {
+                TrySetException(_exception);
+            }
+            else if (_hasRun)
+            {
+                TrySetResult(_result!);
             }
         }
 

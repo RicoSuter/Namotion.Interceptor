@@ -187,29 +187,51 @@ public class GameScheduleTests
 
         // Act
         await _context.RunAsync(_context.Game.PlaceAsync(placed, CancellationToken.None));
-        _context.Publish();
-        _context.Tick(2);
+        var placedAddedCount = placed.AddedCount;
+        _context.Tick();
         await _context.RunAsync(_context.Game.ReplaceAsync(placed, [replacement], CancellationToken.None));
-        _context.Publish();
-        _context.Tick(2);
+        var replacementAddedCount = replacement.AddedCount;
+        _context.Tick();
 
-        // Assert: the hooks could schedule, so the object was part of the game when they ran.
-        Assert.Equal(1, placed.AddedCount);
+        // Assert: the hooks ran before the commands completed and could schedule, so the objects were part of the game.
+        Assert.Equal(1, placedAddedCount);
         Assert.Equal(1, placed.RunCount);
-        Assert.Equal(1, replacement.AddedCount);
+        Assert.Equal(1, replacementAddedCount);
         Assert.Equal(1, replacement.RunCount);
     }
 
     [Fact]
-    public async Task WhenAnObjectIsRemovedBeforeItWasPublished_ThenOnAddedToWorldNeverRuns()
+    public async Task WhenAPlaceCompletes_ThenAnOperationOfThePlacedObjectCanUseTheWorld()
     {
         // Arrange
         var placed = new ScheduledObject { X = 0, Y = 0 };
-        await _context.RunAsync(_context.Game.PlaceAsync(placed, CancellationToken.None));
 
         // Act
-        await _context.RunAsync(_context.Game.RemoveAsync(placed, CancellationToken.None));
-        _context.Publish();
+        var operation = PlaceAndScheduleAsync(placed);
+        var schedule = await _context.RunAsync(operation);
+        _context.Tick(3);
+
+        // Assert
+        Assert.NotNull(schedule);
+        Assert.Equal(1, placed.RunCount);
+    }
+
+    [Fact]
+    public async Task WhenAnObjectIsRemovedWhilePublishingIsPaused_ThenOnAddedToWorldNeverRuns()
+    {
+        // Arrange
+        _context.AddObject("saved", new ScheduledObject { X = 10, Y = 0 });
+        var blocker = _context.HoldSave();
+        var placed = new ScheduledObject { X = 0, Y = 0 };
+        var place = _context.Game.PlaceAsync(placed, CancellationToken.None);
+        _context.Game.RunTickForTest();
+        await place;
+
+        // Act
+        var remove = _context.Game.RemoveAsync(placed, CancellationToken.None);
+        _context.Game.RunTickForTest();
+        await remove;
+        await _context.ReleaseSaveAsync(blocker);
         _context.Tick();
 
         // Assert
@@ -220,14 +242,17 @@ public class GameScheduleTests
     public async Task WhenAPlacedObjectIsTakenOverBeforeItWasPublished_ThenOnAddedToWorldRunsOnce()
     {
         // Arrange
+        _context.AddObject("saved", new ScheduledObject { X = 10, Y = 0 });
+        var blocker = _context.HoldSave();
         var placed = new ScheduledObject { X = 0, Y = 0 };
-        _context.Publish();
-        await _context.RunAsync(_context.Game.PlaceAsync(placed, CancellationToken.None));
+        var place = _context.Game.PlaceAsync(placed, CancellationToken.None);
+        _context.Game.RunTickForTest();
+        await place;
 
         // Act
         _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["placed"] = placed };
-        _context.Tick();
-        _context.Publish();
+        _context.Game.RunTickForTest();
+        await _context.ReleaseSaveAsync(blocker);
         _context.Tick();
 
         // Assert
@@ -303,6 +328,13 @@ public class GameScheduleTests
         {
             await _context.Game.StopAsync(CancellationToken.None);
         }
+    }
+
+    // Continues off the test thread, as an operation on a page does after it awaited the place.
+    private async Task<IDisposable> PlaceAndScheduleAsync(ScheduledObject placed)
+    {
+        await _context.Game.PlaceAsync(placed, CancellationToken.None).ConfigureAwait(false);
+        return placed.ScheduleIncrement(TickInterval);
     }
 
     private static ScheduledObject CreateIncrementingObject(int x, TimeSpan delay) => new()

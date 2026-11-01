@@ -11,7 +11,8 @@ internal static class GameSimulationSettings
     public static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// The shortest time between two publishes of the simulation's state to the subjects.
+    /// The shortest time between two publishes of the players' state to the subjects; a changed object set is published
+    /// in the tick that changed it.
     /// </summary>
     public static readonly TimeSpan PublishInterval = TimeSpan.FromMilliseconds(250);
 

@@ -61,20 +61,37 @@ public class GamePublishTests
     }
 
     [Fact]
-    public async Task WhenAnObjectIsPlaced_ThenItAppearsInTheObjectsAfterThePublish()
+    public async Task WhenAnObjectIsPlaced_ThenItIsInTheObjectsOnceThePlaceCompletes()
     {
         // Arrange
-        // The construction's tick published the empty sets.
+        // The construction's tick published the empty sets, so the publish interval has not passed yet.
         var wall = new Wall { X = 10, Y = 10 };
 
         // Act
         await _context.RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
-        var isPublishedAtOnce = _context.Game.Objects.Count > 0;
-        _context.Publish();
 
         // Assert
-        Assert.False(isPublishedAtOnce);
         Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+    }
+
+    [Fact]
+    public async Task WhenAnObjectIsPlacedWhilePublishingIsPaused_ThenItIsInTheObjectsOnceTheSaveCompleted()
+    {
+        // Arrange
+        _context.AddWall(0, 0);
+        var blocker = _context.HoldSave();
+        var wall = new Wall { X = 10, Y = 10 };
+
+        // Act
+        var place = _context.Game.PlaceAsync(wall, CancellationToken.None);
+        _context.Game.RunTickForTest();
+        var objectCountDuringSave = _context.Game.Objects.Count;
+        await _context.ReleaseSaveAsync(blocker);
+
+        // Assert
+        await place;
+        Assert.Equal(1, objectCountDuringSave);
+        Assert.Same(wall, _context.Game.Objects.Values.Last());
     }
 
     [Fact]
@@ -106,17 +123,20 @@ public class GamePublishTests
         // Arrange
         // Without the app's registry, which writes properties of an object when the publish attaches it.
         var context = new GameTestContext(subjectContext: InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents());
+        context.AddWall(0, 0);
+        var blocker = context.HoldSave();
         var wall = new Wall { X = 10, Y = 10 };
 
-        // The construction's tick published, so the placed wall is not published at once.
-        await context.RunAsync(context.Game.PlaceAsync(wall, CancellationToken.None));
-        var isPublishedAtOnce = context.Game.Objects.Count > 0;
+        // The held save pauses publishing, so the placed wall is not published at once.
+        var place = context.Game.PlaceAsync(wall, CancellationToken.None);
+        context.Game.RunTickForTest();
+        await place;
+        var isPublishedAtOnce = context.Game.Objects.ContainsValue(wall);
 
         // Act
         // Unseen by the write interceptor, because the wall is not attached to the game yet.
         wall.X = 30;
-        context.Publish();
-        context.Tick();
+        await context.ReleaseSaveAsync(blocker);
 
         // Assert
         Assert.False(isPublishedAtOnce);

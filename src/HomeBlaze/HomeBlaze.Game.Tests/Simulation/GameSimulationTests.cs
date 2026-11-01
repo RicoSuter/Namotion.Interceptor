@@ -33,6 +33,42 @@ public class GameSimulationTests
     }
 
     [Fact]
+    public async Task WhenAnInvokedFunctionRan_ThenItsTaskCompletesOnlyAfterTheTickHandlers()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+        Task<int>? task = null;
+        bool? isCompletedInHandler = null;
+        simulation.AddTickHandler(() => isCompletedInHandler = task?.IsCompleted);
+        task = simulation.InvokeAsync(() => 42, CancellationToken.None);
+
+        // Act
+        simulation.RunTick();
+
+        // Assert
+        Assert.False(isCompletedInHandler);
+        Assert.Equal(42, await task);
+    }
+
+    [Fact]
+    public async Task WhenAnInvokedFunctionThrows_ThenItsTaskFaultsAfterTheTickHandlers()
+    {
+        // Arrange
+        var simulation = CreateSimulation();
+        Task<int>? task = null;
+        bool? isCompletedInHandler = null;
+        simulation.AddTickHandler(() => isCompletedInHandler = task?.IsCompleted);
+        task = simulation.InvokeAsync<int>(() => throw new InvalidOperationException("Refused."), CancellationToken.None);
+
+        // Act
+        simulation.RunTick();
+
+        // Assert
+        Assert.False(isCompletedInHandler);
+        Assert.Equal("Refused.", (await Assert.ThrowsAsync<InvalidOperationException>(() => task)).Message);
+    }
+
+    [Fact]
     public void WhenActionsArePosted_ThenTheyRunInOrder()
     {
         // Arrange

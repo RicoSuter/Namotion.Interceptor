@@ -63,18 +63,18 @@ A player inside a movement blocking object, for example a door closed by an auto
 ## Simulation (`HomeBlaze.Game/Simulation/`)
 
 - `GameSimulation` is the only writer of the world state. It runs on a fixed tick, by default 50 ms, driven by the game's `TimeProvider`. A tick runs synchronously without awaiting; the thread running a tick is the simulation thread for that tick (a thread-static marker), so tests run ticks on the test thread through a test host with `AdvanceTicks(n)`.
-- Everything else reaches it through a lock-free command queue (`Channel`). Commands that answer carry a `TaskCompletionSource` (`RunContinuationsAsynchronously`) completed in their tick. A command that throws fails only its own task; a throwing scheduled action or `OnAddedToWorld` is logged, throttled, and the tick goes on.
+- Everything else reaches it through a lock-free command queue (`Channel`). Commands that answer carry a `TaskCompletionSource` (`RunContinuationsAsynchronously`) completed at the end of their tick, after the tick handlers, so a caller sees what the tick published. A command that throws fails only its own task; a throwing scheduled action or `OnAddedToWorld` is logged, throttled, and the tick goes on.
 - State, touched only on the simulation thread:
   - players by client id: area, facing, connected, title, rate limiters, last message time, voice pages;
   - objects by name: the subject and its generic entry (area, movement blocking, sound blocking, visible, visual), read from the subject when a command changed it;
   - the chunk index (`GameWorldIndex`, chunks of 16 by 16 tiles) and the chunks changed in this tick;
   - schedules in a priority queue by due tick.
 - Each tick, in order:
-  1. Run the due schedules, then the queued commands: steps and turns, world commands, object changes, take-overs, teleports, voice switches, client changes (then reconcile players), view sessions joining and leaving.
+  1. Run the due schedules, then the queued commands: steps and turns, world commands, object changes, take-overs, teleports, voice switches, client changes (then reconcile players), view sessions joining and leaving. Then write a changed object set to `Game.Objects` right away, so placed objects are attached to the game when their command completes, and call `OnAddedToWorld` for the placed objects and replacements it attached.
   2. Publish the occupancy snapshot for `IsFree`: immutable chunks, only changed chunks replaced, swapped in with a volatile write.
   3. Update the view sessions (see Views).
   4. Rebuild the volume table at most every 100 ms when positions or sound blocking changed.
-  5. Publish to the subjects when the publish interval (250 ms) passed.
+  5. Publish the players' state to the subjects when the publish interval (250 ms) passed.
   6. Start a save when the save interval (10 s) passed and something changed.
 - `Step` keeps the browser protocol: the page awaits the `MoveResult` of its command, at most one tick later than today; the browser's prediction hides that. Steps and turns keep the token buckets (`StepInterval` 180 ms, burst 3).
 - `GameSimulationSettings` (code-configurable, like `GameVoiceSettings`) holds the tick, publish, save and volume table intervals.

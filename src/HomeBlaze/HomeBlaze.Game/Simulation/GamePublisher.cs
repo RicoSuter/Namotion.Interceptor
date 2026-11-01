@@ -1,8 +1,9 @@
 namespace HomeBlaze.Game.Simulation;
 
 /// <summary>
-/// Writes the simulation's state to the facade subjects: the changed players' values and the player and object sets of
-/// the game. Used only on the simulation thread.
+/// Writes the simulation's state to the facade subjects: the changed players' values and the player set of the game at
+/// most every <see cref="GameSimulationSettings.PublishInterval"/>, and the object set of the game whenever it changed.
+/// Used only on the simulation thread.
 /// </summary>
 internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvider timeProvider)
 {
@@ -34,7 +35,8 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         ReferenceEquals(subject, _writingSubject) && property == _writingProperty && ReferenceEquals(set, _writingSet);
 
     /// <summary>
-    /// Publishes when <see cref="GameSimulationSettings.PublishInterval"/> passed since the last publish, unless paused.
+    /// Publishes everything when <see cref="GameSimulationSettings.PublishInterval"/> passed since the last publish, and
+    /// otherwise a changed object set only, unless paused.
     /// </summary>
     /// <returns>Whether anything was written.</returns>
     public bool TryPublish()
@@ -47,10 +49,35 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         var now = timeProvider.GetTimestamp();
         if (_hasPublished && timeProvider.GetElapsedTime(_lastPublishTimestamp, now) < GameSimulationSettings.PublishInterval)
         {
-            return false;
+            return TryPublishObjectSet();
         }
 
         return Publish();
+    }
+
+    /// <summary>
+    /// Writes the object set when it changed, unless paused, so that placed objects are attached to the game in the tick
+    /// that adds them.
+    /// </summary>
+    /// <returns>Whether the set was written.</returns>
+    public bool TryPublishObjectSet()
+    {
+        if (IsPaused || !world.IsObjectSetChanged)
+        {
+            return false;
+        }
+
+        try
+        {
+            WriteObjectSet();
+        }
+        finally
+        {
+            SetWriting(null, null);
+            Interlocked.Increment(ref _version);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -103,16 +130,7 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
 
             if (world.IsObjectSetChanged)
             {
-                world.IsObjectSetChanged = false;
-                var objects = new Dictionary<string, Abstractions.GameObject>(world.Objects.Count);
-                foreach (var (name, entity) in world.Objects)
-                {
-                    objects[name] = entity.Subject;
-                }
-
-                SetWriting(game, nameof(Game.Objects), objects);
-                game.Objects = objects;
-                world.OnObjectSetPublished();
+                WriteObjectSet();
             }
         }
         finally
@@ -122,6 +140,20 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         }
 
         return true;
+    }
+
+    private void WriteObjectSet()
+    {
+        world.IsObjectSetChanged = false;
+        var objects = new Dictionary<string, Abstractions.GameObject>(world.Objects.Count);
+        foreach (var (name, entity) in world.Objects)
+        {
+            objects[name] = entity.Subject;
+        }
+
+        SetWriting(game, nameof(Game.Objects), objects);
+        game.Objects = objects;
+        world.OnObjectSetPublished();
     }
 
     private void SetWriting(object? subject, string? property, object? set = null)
