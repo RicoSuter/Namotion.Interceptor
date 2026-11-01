@@ -240,11 +240,13 @@ public class DoorTests
         var isOpenWhileOccupied = door.IsOpen;
         player.X = 20;
         _context.Tick();
+        var isOpenAfterThePlayerLeft = door.IsOpen;
         _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
         _context.Tick();
 
         // Assert
         Assert.True(isOpenWhileOccupied);
+        Assert.True(isOpenAfterThePlayerLeft);
         Assert.False(door.IsOpen);
     }
 
@@ -294,7 +296,7 @@ public class DoorTests
     }
 
     [Fact]
-    public void WhenAnAutoClosingDoorIsClosedAndReopened_ThenTheFirstOpeningDoesNotCloseItEarly()
+    public void WhenAnAutoClosingDoorIsReopened_ThenItClosesTheDelayAfterTheReopening()
     {
         // Arrange
         var door = _context.AddDoor(0, 10);
@@ -340,6 +342,65 @@ public class DoorTests
         _context.Tick();
         _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
         _context.Tick();
+
+        // Assert
+        Assert.True(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenIsOpenIsWrittenDirectly_ThenTheDoorClosesAfterTheDelay()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 10);
+        door.AutoCloseDelay = TimeSpan.FromSeconds(5);
+        _context.Tick();
+
+        // Act
+        door.IsOpen = true;
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        _context.Tick();
+
+        // Assert
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenIsOpenIsWrittenFalseAndTrueAgain_ThenTheDoorIsNotClosedEarly()
+    {
+        // Arrange
+        var door = _context.AddDoor(0, 10);
+        door.AutoCloseDelay = TimeSpan.FromSeconds(10);
+        _context.Tick();
+        door.IsOpen = true;
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        _context.Tick();
+        door.IsOpen = false;
+        _context.Tick();
+
+        // Act
+        door.IsOpen = true;
+        _context.Tick();
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        _context.Tick();
+        var isOpenBeforeTheSecondDelay = door.IsOpen;
+        _context.TimeProvider.Advance(TimeSpan.FromSeconds(4));
+        _context.Tick();
+
+        // Assert
+        Assert.True(isOpenBeforeTheSecondDelay);
+        Assert.False(door.IsOpen);
+    }
+
+    [Fact]
+    public void WhenADoorOutsideAGameWithADelayIsOpened_ThenItOpens()
+    {
+        // Arrange
+        var door = new Door { AutoCloseDelay = TimeSpan.FromSeconds(5) };
+
+        // Act
+        door.Open();
 
         // Assert
         Assert.True(door.IsOpen);

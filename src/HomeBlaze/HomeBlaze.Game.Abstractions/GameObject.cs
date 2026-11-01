@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -87,6 +88,15 @@ public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
     /// <exception cref="InvalidOperationException">The object is not part of a game.</exception>
     protected IGameWorld World =>
         this.TryGetFirstParent<IGameWorld>() ?? throw new InvalidOperationException("The object is not part of a game.");
+
+    /// <summary>
+    /// Whether the object is part of a game; false while it is being loaded or after it was removed.
+    /// </summary>
+    protected bool TryGetWorld([NotNullWhen(true)] out IGameWorld? world)
+    {
+        world = this.TryGetFirstParent<IGameWorld>();
+        return world is not null;
+    }
 
     protected GameObject()
     {

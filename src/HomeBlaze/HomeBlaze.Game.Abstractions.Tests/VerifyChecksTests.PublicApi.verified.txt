@@ -75,6 +75,7 @@ namespace HomeBlaze.Game.Abstractions
         protected virtual void OnAddedToWorld() { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        protected bool TryGetWorld([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Game.Abstractions.IGameWorld? world) { }
     }
     public readonly struct GameSpot : System.IEquatable<HomeBlaze.Game.Abstractions.GameSpot>
     {

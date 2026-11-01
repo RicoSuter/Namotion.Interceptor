@@ -23,7 +23,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     private const string LeafColor = "#8b5a2b";
     private const double OpenRotation = -90;
 
-    // Disposed before a new schedule is made, so one opening has at most one pending close.
+    // The latest close schedule; replacing or clearing it disposes the previous one, so at most one is live.
     private IDisposable? _pendingClose;
 
     private readonly GameVisualCache<(int Width, int Depth, int Height, bool IsOpen, WallMaterial Material)> _visual = new();
@@ -75,7 +75,9 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
     public partial WallMaterial Material { get; set; }
 
     /// <summary>
-    /// The time after which an opened door closes itself; zero keeps it open. Negative values become zero.
+    /// The time after which an opened door closes itself, by <see cref="Open"/> or by writing <see cref="IsOpen"/>; zero
+    /// keeps it open. A change applies from the next opening. While something stands in the doorway, the door tries again
+    /// after another delay. Negative values become zero.
     /// </summary>
     [Configuration]
     public partial TimeSpan AutoCloseDelay { get; set; }
@@ -117,11 +119,23 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         }
     }
 
+    partial void OnIsOpenChanged(bool newValue)
+    {
+        if (!newValue)
+        {
+            Interlocked.Exchange(ref _pendingClose, null)?.Dispose();
+        }
+        else if (TryGetWorld(out var world))
+        {
+            ScheduleAutoClose(world);
+        }
+    }
+
     protected override void OnAddedToWorld()
     {
         if (IsOpen)
         {
-            ScheduleAutoClose();
+            ScheduleAutoClose(World);
         }
     }
 
@@ -135,7 +149,6 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         }
 
         IsOpen = true;
-        ScheduleAutoClose();
     }
 
     /// <exception cref="InvalidOperationException">The door is already closed, something stands in it, or it is not part of a game.</exception>
@@ -152,18 +165,17 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
             throw new InvalidOperationException(GameMessages.Blocked);
         }
 
-        Interlocked.Exchange(ref _pendingClose, null)?.Dispose();
         IsOpen = false;
     }
 
-    private void ScheduleAutoClose()
+    private void ScheduleAutoClose(IGameWorld world)
     {
         if (AutoCloseDelay <= TimeSpan.Zero)
         {
             return;
         }
 
-        var schedule = World.Schedule(this, AutoCloseDelay, CloseOrTryAgain);
+        var schedule = world.Schedule(this, AutoCloseDelay, CloseOrTryAgain);
         Interlocked.Exchange(ref _pendingClose, schedule)?.Dispose();
     }
 
@@ -181,7 +193,7 @@ public partial class Door : GameObject, ITitleProvider, IIconProvider
         }
         else
         {
-            ScheduleAutoClose();
+            ScheduleAutoClose(World);
         }
     }
 

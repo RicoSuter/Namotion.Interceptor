@@ -51,7 +51,7 @@ North is +Y and east is +X. An object covers the tiles from `X` to `X + Width - 
 | | `Material` | Configuration | `Bricks` (default), `Concrete` or `Wood` |
 | `Door` | `Width`, `Depth`, `Height` | Configuration, `[Range(1, 1024)]` | Defaults 4 x 1 x 10; use 1 x 4 in a north-south wall |
 | | `Material` | Configuration | The material of the lintel, `Bricks` by default; "Add door" copies the wall's |
-| | `AutoCloseDelay` | Configuration | Zero by default, which keeps an opened door open; otherwise the door closes itself that long after it was opened or loaded open, and tries again after another delay while something stands in it. Negative values become zero |
+| | `AutoCloseDelay` | Configuration | Zero by default, which keeps an opened door open; otherwise the door closes itself that long after it was opened (by `Open` or by writing `IsOpen`) or loaded open, and tries again after another delay while something stands in it. Negative values become zero |
 | | `IsOpen` | Configuration | Closed by default. `IsMovementBlocking` and `IsSoundBlocking` are `!IsOpen`, whatever the height |
 | `Tree` | `Variant`, `Rotation`, `Scale` | Configuration, `[Range]` | 0 to 6, 0 to 359 degrees clockwise, 80 to 120 percent; defaults 0, 0, 100. A loaded value outside the range shows variant 0, the rotation modulo 360 or the nearest scale |
 | | `Width`, `Depth`, `Height` | Computed | The trunk footprint and height of the variant times the scale; not configurable. Blocks movement, not sound |
