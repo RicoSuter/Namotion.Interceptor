@@ -30,6 +30,10 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
     private bool _isResumeTried;
     private bool _isCaptureEnded;
     private bool _isSynchronizationRequested;
+    // Whether a toggle runs; the toggles ignore clicks meanwhile.
+    private bool _isBusy;
+    // Why the last toggle left the voice off, if it did.
+    private string? _error;
     private bool _isDisposed;
 
     /// <param name="jsRuntime">The JS runtime of the page.</param>
@@ -67,19 +71,9 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
     public bool IsAudioSuspended { get; private set; }
 
     /// <summary>
-    /// Whether a toggle runs; the toggles ignore clicks meanwhile.
-    /// </summary>
-    public bool IsBusy { get; private set; }
-
-    /// <summary>
-    /// Why the last toggle left the voice off, if it did.
-    /// </summary>
-    public string? Error { get; private set; }
-
-    /// <summary>
     /// The message the panel shows about the voice, if any.
     /// </summary>
-    public string? Message => IsAudioSuspended && (IsAudioOn || IsMicrophoneOn) ? ResumeMessage : Error;
+    public string? Message => IsAudioSuspended && (IsAudioOn || IsMicrophoneOn) ? ResumeMessage : _error;
 
     /// <summary>
     /// Raised on the renderer when the state of the toggles changed.
@@ -153,7 +147,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
             return;
         }
 
-        if (IsBusy)
+        if (_isBusy)
         {
             // RunToggleAsync synchronizes once the running toggle ended.
             _isSynchronizationRequested = true;
@@ -170,9 +164,11 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         }
     }
 
-    // Removes only this page's share of the player's toggles; the other pages of the player keep theirs. Does not wait
-    // for the game, which switches them in its next tick. Also drops the page's speaker in the game's mixer, and the
-    // player, so the toggles that still run leave the game alone.
+    /// <summary>
+    /// Switches off this page's share of the player's toggles, which the other pages of the player keep, drops the page's
+    /// speaker in the game's mixer and clears <see cref="Player"/>, so a toggle that still runs leaves the game alone.
+    /// Does not wait for the game, which switches the toggles in its next tick.
+    /// </summary>
     public void StopInGame()
     {
         _sinkRegistration?.Dispose();
@@ -228,7 +224,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         }
     }
 
-    private bool CanToggle() => !_isDisposed && !IsBusy && IsSupported == true;
+    private bool CanToggle() => !_isDisposed && !_isBusy && IsSupported == true;
 
     // Turning off works without a player, so a page that lost its player can still stop a live capture.
     private async Task ToggleAsync(bool isMicrophone)
@@ -270,16 +266,16 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
 
     private async Task RunToggleAsync(Func<Task> toggle)
     {
-        IsBusy = true;
+        _isBusy = true;
         try
         {
-            Error = null;
+            _error = null;
             RaiseChanged();
             await toggle();
         }
         finally
         {
-            IsBusy = false;
+            _isBusy = false;
         }
 
         if (_isDisposed)
@@ -311,7 +307,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
             await RunToggleAsync(async () =>
             {
                 await StopMicrophoneAsync(module, Player);
-                Error = MicrophoneEndedMessage;
+                _error = MicrophoneEndedMessage;
             });
         }
     }
@@ -322,7 +318,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         var result = await module.TryStartAsync("startCapture", "stopCapture", GameVoiceSettings.CaptureStartTimeout);
         if (!result.IsStarted)
         {
-            Error = GetMicrophoneError(result.Error);
+            _error = GetMicrophoneError(result.Error);
             return;
         }
 
@@ -331,13 +327,14 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
             return;
         }
 
-        if (await TrySetVoiceAsync(_game.SetMicrophoneAsync(player.ClientId, _viewId, isOn: true, _lifetimeToken)))
+        var isOn = await TrySetVoiceAsync(_game.SetMicrophoneAsync(player.ClientId, _viewId, isOn: true, _lifetimeToken));
+        if (isOn && IsPlayerKept(player))
         {
             IsMicrophoneOn = true;
             return;
         }
 
-        Error = NotConnectedMessage;
+        await SwitchBackOffAsync(isOn, player, _game.SetMicrophoneAsync);
         await module.TryInvokeAsync("stopCapture", GameVoiceSettings.BrowserCallTimeout);
     }
 
@@ -358,7 +355,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         var result = await module.TryStartAsync("startPlayback", "stopPlayback", GameVoiceSettings.BrowserCallTimeout);
         if (!result.IsStarted)
         {
-            Error = "The speaker could not be started";
+            _error = "The speaker could not be started";
             return;
         }
 
@@ -368,7 +365,8 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         }
 
         var registration = _game.VoiceMixer.RegisterSink(player.ClientId, this);
-        if (await TrySetVoiceAsync(_game.SetAudioAsync(player.ClientId, _viewId, isOn: true, _lifetimeToken)))
+        var isOn = await TrySetVoiceAsync(_game.SetAudioAsync(player.ClientId, _viewId, isOn: true, _lifetimeToken));
+        if (isOn && IsPlayerKept(player))
         {
             _sinkRegistration = registration;
             IsAudioOn = true;
@@ -376,7 +374,7 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         }
 
         registration.Dispose();
-        Error = NotConnectedMessage;
+        await SwitchBackOffAsync(isOn, player, _game.SetAudioAsync);
         await module.TryInvokeAsync("stopPlayback", GameVoiceSettings.BrowserCallTimeout);
     }
 
@@ -403,6 +401,22 @@ internal sealed class GameVoiceConnection : IGameVoiceSink, IAsyncDisposable
         if (isAudioLost)
         {
             await StopAudioAsync(module, Player);
+        }
+    }
+
+    // False after a disposal or a change of the player during a switch on: StopInGame found the toggle still off then.
+    private bool IsPlayerKept(GamePlayer player) => !_isDisposed && ReferenceEquals(Player, player);
+
+    // Switches a toggle that the game turned on back off, or shows why the game refused it.
+    private async Task SwitchBackOffAsync(bool isOn, GamePlayer player, Func<string, int, bool, CancellationToken, Task<bool>> setAsync)
+    {
+        if (isOn)
+        {
+            await TrySetVoiceAsync(setAsync(player.ClientId, _viewId, false, CancellationToken.None));
+        }
+        else
+        {
+            _error = NotConnectedMessage;
         }
     }
 

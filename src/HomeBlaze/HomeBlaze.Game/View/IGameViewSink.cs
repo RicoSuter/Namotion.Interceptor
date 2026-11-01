@@ -1,7 +1,7 @@
 namespace HomeBlaze.Game.View;
 
 /// <summary>
-/// Where a view session delivers its updates; implemented by the page.
+/// Where a view session delivers its updates; implemented by the page's view connection.
 /// </summary>
 internal interface IGameViewSink
 {

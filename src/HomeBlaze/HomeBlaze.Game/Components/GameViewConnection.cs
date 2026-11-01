@@ -26,7 +26,11 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     private GameViewSession? _session;
     // The client the view session follows.
     private string? _clientId;
-    private ViewDelivery? _delivery;
+    // The delivered update and panel, published by _hasDelivery. The session delivers nothing while _isBusy is set, which
+    // only ApplyDeliveredAsync clears after it read them, so a delivery never overwrites them while they are read.
+    private GameViewUpdate? _update;
+    private GamePanelState? _panel;
+    private int _hasDelivery;
     // Set from a delivery until the flush that applied it released it, so at most one update is on its way to the
     // browser and the session collects the changes meanwhile.
     private int _isBusy;
@@ -60,10 +64,9 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     /// Raised on the thread pool after the session delivered an update, which <see cref="ApplyDeliveredAsync"/> takes. A
     /// handler must not throw, which would end the process.
     /// </summary>
-    public event Action? PanelChanged;
+    public event Action? Delivered;
 
-    /// <inheritdoc />
-    public bool IsBusy => Volatile.Read(ref _isBusy) == 1 || Volatile.Read(ref _isClosed) == 1;
+    bool IGameViewSink.IsBusy => Volatile.Read(ref _isBusy) == 1 || Volatile.Read(ref _isClosed) == 1;
 
     /// <summary>
     /// Starts the view in the browser; a disposal meanwhile makes the module release the view.
@@ -107,15 +110,16 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
 
     // On the simulation thread, so the flush runs on the thread pool: the renderer may run work inline on the calling
     // thread when it is idle. The work item carries no state, so an instance that is still queued may be queued again.
-    /// <inheritdoc />
-    public void Deliver(GameViewUpdate update, GamePanelState panel)
+    void IGameViewSink.Deliver(GameViewUpdate update, GamePanelState panel)
     {
         Volatile.Write(ref _isBusy, 1);
-        Volatile.Write(ref _delivery, new ViewDelivery(update, panel));
+        _update = update;
+        _panel = panel;
+        Volatile.Write(ref _hasDelivery, 1);
         ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
     }
 
-    void IThreadPoolWorkItem.Execute() => PanelChanged?.Invoke();
+    void IThreadPoolWorkItem.Execute() => Delivered?.Invoke();
 
     /// <summary>
     /// Applies the update the session delivered, if any, in the browser and releases the session for the next one; returns
@@ -123,19 +127,21 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     /// </summary>
     public async Task<bool> ApplyDeliveredAsync()
     {
-        if (Interlocked.Exchange(ref _delivery, null) is not { } delivery)
+        if (Interlocked.Exchange(ref _hasDelivery, 0) == 0)
         {
             return false;
         }
 
+        var update = _update!;
+        _update = null;
         // Taken first, so an update the browser refused does not drop the panel. The panel keeps following the game
         // after the view broke, so the session is released for every update all the same.
-        PanelState = delivery.Panel;
+        PanelState = _panel!;
         try
         {
-            if (!_isBroken && !delivery.Update.IsEmpty && _module is { } module)
+            if (!_isBroken && !update.IsEmpty && _module is { } module)
             {
-                await TryApplyUpdateAsync(module, delivery.Update);
+                await TryApplyUpdateAsync(module, update);
             }
         }
         finally
@@ -148,16 +154,14 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     }
 
     /// <summary>
-    /// Moves the player of the client; returns null when the game did not answer, has stopped, or the connection was
-    /// disposed, which the browser treats as an unanswered step.
+    /// Moves the player of the client; returns null when the client has no player, the game has stopped, or the connection
+    /// was disposed.
     /// </summary>
-    public async Task<GamePage.StepResult?> StepAsync(string clientId, int sequence, int direction, bool turnOnly)
+    public async Task<MoveResult?> StepAsync(string clientId, GameDirection direction, bool turnOnly)
     {
         try
         {
-            return await Game.StepAsync(clientId, (GameDirection)direction, turnOnly, _lifetimeToken) is { } result
-                ? new GamePage.StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing)
-                : null;
+            return await Game.StepAsync(clientId, direction, turnOnly, _lifetimeToken);
         }
         catch (Exception exception) when (exception is GameStoppedException or OperationCanceledException)
         {
@@ -224,6 +228,4 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     }
 
     public sealed record StartResult(bool IsStarted, string? Error);
-
-    private sealed record ViewDelivery(GameViewUpdate Update, GamePanelState Panel);
 }

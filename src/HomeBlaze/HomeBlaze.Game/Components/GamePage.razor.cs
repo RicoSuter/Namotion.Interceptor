@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.View;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
@@ -32,6 +33,8 @@ public partial class GamePage
     private Game? _subscribedGame;
     private GameViewConnection? _view;
     private GameVoiceConnection? _voice;
+    // The disposal of the connections the page left, which a start awaits, so the browser dropped the former view first.
+    private Task _detaching = Task.CompletedTask;
     // The page's client and its player, resolved on every flush; the client id is the player's key in Game.Players.
     private string? _clientId;
     private GamePlayer? _player;
@@ -84,10 +87,17 @@ public partial class GamePage
     /// Moves the player of this page; returns null while the page has none, which the browser treats as an unanswered step.
     /// </summary>
     [JSInvokable]
-    public Task<StepResult?> Step(int sequence, int direction, bool turnOnly) =>
-        _view is { } view && _player is not null && _clientId is { } clientId
-            ? view.StepAsync(clientId, sequence, direction, turnOnly)
-            : Task.FromResult<StepResult?>(null);
+    public async Task<StepResult?> Step(int sequence, int direction, bool turnOnly)
+    {
+        if (_view is not { } view || _player is null || _clientId is not { } clientId)
+        {
+            return null;
+        }
+
+        return await view.StepAsync(clientId, (GameDirection)direction, turnOnly) is { } result
+            ? new StepResult(sequence, result.IsAccepted, result.X, result.Y, (int)result.Facing)
+            : null;
+    }
 
     /// <summary>
     /// Invokes the target action with the zero-based number key index, as the panel numbers them.
@@ -143,15 +153,12 @@ public partial class GamePage
 
     private Task ToggleAudioAsync() => _voice?.ToggleAudioAsync() ?? Task.CompletedTask;
 
-    // Disposes the connections of a former game first; a start for another game or a disposal meanwhile ends this one.
+    // Waits for the connections of a former game to be disposed; a start for another game or a disposal meanwhile ends
+    // this one.
     private async Task StartAsync(Game game)
     {
-        var formerView = _view;
-        var formerVoice = _voice;
         _startedGame = game;
-        _view = null;
-        _voice = null;
-        await DisposeConnectionsAsync(formerView, formerVoice);
+        await _detaching;
         if (_isDisposed || !ReferenceEquals(_startedGame, game))
         {
             return;
@@ -159,7 +166,7 @@ public partial class GamePage
 
         _reference ??= DotNetObjectReference.Create(this);
         var view = new GameViewConnection(JsRuntime, game);
-        view.PanelChanged += OnPanelChanged;
+        view.Delivered += OnDelivered;
         _view = view;
         try
         {
@@ -197,6 +204,11 @@ public partial class GamePage
 
         var game = view.Game;
         _isStarted = true;
+        if (_subscribedGame is { } formerGame)
+        {
+            formerGame.VolumeTableChanged -= OnVolumeTableChanged;
+        }
+
         _subscribedGame = game;
         game.VolumeTableChanged += OnVolumeTableChanged;
         view.Open(CurrentConnection.Connection?.ClientId);
@@ -207,13 +219,22 @@ public partial class GamePage
     }
 
     // Leaves the game without waiting for it or the browser: drops the page's share of the voice toggles, its speaker,
-    // its view session and its handler, and clears the panel.
+    // its view session and its handler, clears the panel and starts disposing the connections.
     private void Detach()
     {
         _startedGame = null;
         _layoutKey++;
-        _voice?.StopInGame();
-        _view?.Close();
+        var view = _view;
+        var voice = _voice;
+        _view = null;
+        _voice = null;
+        voice?.StopInGame();
+        view?.Close();
+        if (view is not null || voice is not null)
+        {
+            _detaching = DisposeConnectionsAsync(_detaching, view, voice);
+        }
+
         if (_subscribedGame is { } game)
         {
             game.VolumeTableChanged -= OnVolumeTableChanged;
@@ -233,10 +254,11 @@ public partial class GamePage
         _actions = [];
     }
 
-    // The voice first, separately from the view, so a voice module that the browser already dropped does not keep the
-    // game module.
-    private static async Task DisposeConnectionsAsync(GameViewConnection? view, GameVoiceConnection? voice)
+    // After the disposal of connections left before. The voice first, separately from the view, so a voice module that
+    // the browser already dropped does not keep the game module.
+    private static async Task DisposeConnectionsAsync(Task previous, GameViewConnection? view, GameVoiceConnection? voice)
     {
+        await previous;
         if (voice is not null)
         {
             await voice.DisposeAsync();
@@ -249,7 +271,7 @@ public partial class GamePage
     }
 
     // Raised on the thread pool, so it must not throw.
-    private void OnPanelChanged() => _ = FlushDeliveredAsync();
+    private void OnDelivered() => _ = FlushDeliveredAsync();
 
     private async Task FlushDeliveredAsync()
     {
@@ -392,14 +414,10 @@ public partial class GamePage
     {
         _isDisposed = true;
         Detach();
-        var view = _view;
-        var voice = _voice;
-        _view = null;
-        _voice = null;
         try
         {
             await _lifetime.CancelAsync();
-            await DisposeConnectionsAsync(view, voice);
+            await _detaching;
         }
         finally
         {
