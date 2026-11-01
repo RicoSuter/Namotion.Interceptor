@@ -69,6 +69,10 @@
     "garden-04": {"$type": "HomeBlaze.Game.Nature.Tree", "x": -26, "y": -16, "variant": 6, "rotation": 67, "scale": 115},
     "backyard-01": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 7, "y": 59, "variant": 1, "rotation": 178, "scale": 82},
     "backyard-02": {"$type": "HomeBlaze.Game.Nature.Tree", "x": -20, "y": 60, "variant": 3, "rotation": 315, "scale": 118},
-    "backyard-03": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 10, "y": 52, "variant": 5, "rotation": 185, "scale": 109}
+    "backyard-03": {"$type": "HomeBlaze.Game.Nature.Tree", "x": 10, "y": 52, "variant": 5, "rotation": 185, "scale": 109},
+    "animal-01": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 58, "y": 43, "variant": "Deer"},
+    "animal-02": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 67, "y": 34, "variant": "Stag"},
+    "animal-03": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 50, "y": 26, "variant": "Deer"},
+    "animal-04": {"$type": "HomeBlaze.Game.Nature.Animal", "x": 69, "y": 16, "variant": "Deer"}
   }
 }

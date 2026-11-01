@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
@@ -239,6 +240,35 @@ public class GamePageTests
         var canvas = page.GetByTestId("game-canvas");
         await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
         await Expect(canvas).ToHaveAttributeAsync("data-game-model-failures", "0", new() { Timeout = Timeout });
+    }
+
+    [Fact]
+    public async Task WhenAnAnimalIsFed_ThenItsModelLoadsAndPlaysItsEatAnimationOnce()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var warnings = new ConcurrentQueue<string>();
+        page.Console += (_, message) =>
+        {
+            if (message.Type is "warning" or "error")
+            {
+                warnings.Enqueue(message.Text);
+            }
+        };
+        var canvas = page.GetByTestId("game-canvas");
+        // North of the player, with a gap so that a step toward the player stays free.
+        var animal = new Animal { X = player.X - 1, Y = player.Y + GamePlayer.Size + 3, Variant = AnimalVariant.Stag };
+        world.Game.Objects = new Dictionary<string, GameObject> { ["animal"] = animal };
+        await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
+
+        // Act
+        animal.Feed();
+
+        // Assert
+        await Expect(canvas).ToHaveAttributeAsync("data-game-animations-once", "1", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-model-failures", "0", new() { Timeout = Timeout });
+        Assert.DoesNotContain(warnings, warning => warning.Contains("animation", StringComparison.Ordinal) || warning.Contains("model", StringComparison.Ordinal));
     }
 
     [Fact]

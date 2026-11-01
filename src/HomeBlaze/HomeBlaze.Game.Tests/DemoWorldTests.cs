@@ -28,7 +28,7 @@ public class DemoWorldTests
     public DemoWorldTests()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(Game), typeof(GamePlayer), typeof(Wall), typeof(Door), typeof(Tree), typeof(WallTool), typeof(TreeTool)]);
+        typeProvider.AddTypes([typeof(Game), typeof(GamePlayer), typeof(Wall), typeof(Door), typeof(Tree), typeof(Animal), typeof(WallTool), typeof(TreeTool)]);
         var serializer = new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().AddLogging().BuildServiceProvider());
         _game = Assert.IsType<Game>(serializer.Deserialize(File.ReadAllText(RepositoryPaths.Get(DemoWorldPath))));
     }
@@ -78,6 +78,24 @@ public class DemoWorldTests
 
         // Assert
         Assert.Empty(blocking);
+    }
+
+    [Fact]
+    public void WhenTheDemoWorldLoads_ThenADeerAndAStagStandOnFreeTiles()
+    {
+        // Arrange
+        var animals = _game.Objects.Values.OfType<Animal>().ToArray();
+        var others = _game.Objects.Values.Where(gameObject => gameObject.IsMovementBlocking).ToArray();
+
+        // Act
+        var overlapping = animals
+            .Where(animal => others.Any(other => !ReferenceEquals(other, animal) && other.Area.Intersects(animal.Area)))
+            .ToArray();
+
+        // Assert
+        Assert.Equal(4, animals.Length);
+        Assert.Equal([AnimalVariant.Deer, AnimalVariant.Stag], animals.Select(animal => animal.Variant).Distinct().Order());
+        Assert.Empty(overlapping);
     }
 
     // The door and 3 tiles on both sides of it, where a player stands to walk through.
