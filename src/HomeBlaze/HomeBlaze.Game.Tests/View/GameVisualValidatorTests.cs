@@ -36,7 +36,7 @@ public class GameVisualValidatorTests
             CustomVisual = new GameVisual([new GameVisualPart
             {
                 Shape = GameVisualShape.Model, Size = new GameVisualVector(20, 20, 20), Offset = new GameVisualVector(-9, 0, -9),
-                Model = "_content/HomeBlaze.Game/objects/nature/models/pine_tree_1.glb", Effect = GameVisualEffect.Wind, Rotation = 270
+                Model = "_content/HomeBlaze.Game.Nature/objects/nature/models/pine_tree_1.glb", Effect = GameVisualEffect.Wind, Rotation = 270
             }])
         };
 

@@ -6,7 +6,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Game.Objects.Nature;
+namespace HomeBlaze.Game.Nature;
 
 /// <summary>
 /// A tree that sways in the wind. Its trunk covers a square of tiles that depends on its variant and scale and blocks

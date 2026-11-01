@@ -2,7 +2,7 @@ using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry;
 
-namespace HomeBlaze.Game.Tests.Objects.Buildings;
+namespace HomeBlaze.Game.Buildings.Tests;
 
 public class DoorTests
 {

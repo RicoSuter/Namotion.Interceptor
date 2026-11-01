@@ -1,6 +1,6 @@
 using HomeBlaze.Game.Tests.Testing;
 
-namespace HomeBlaze.Game.Tests.Objects.Nature;
+namespace HomeBlaze.Game.Nature.Tests;
 
 public class TreeTests
 {
@@ -73,7 +73,7 @@ public class TreeTests
         var crown = 13 * (110 / 100.0);
         Assert.Equal(4, tree.Width);
         Assert.Equal(GameVisualShape.Model, part.Shape);
-        Assert.Equal("_content/HomeBlaze.Game/objects/nature/models/pine_tree_1.glb", part.Model);
+        Assert.Equal("_content/HomeBlaze.Game.Nature/objects/nature/models/pine_tree_1.glb", part.Model);
         Assert.Equal(new GameVisualVector(crown, height, crown), part.Size);
         Assert.Equal(new GameVisualVector((4 - crown) / 2, 0, (4 - crown) / 2), part.Offset);
         Assert.Equal(new GameVisualPoint(2, 2), part.Pivot);
@@ -134,7 +134,7 @@ public class TreeTests
     public void WhenTheVariantsAreListed_ThenEveryModelFileExists()
     {
         // Act
-        var paths = Tree.Variants.Select(variant => $"src/HomeBlaze/HomeBlaze.Game/wwwroot/objects/nature/models/{variant.File}").ToArray();
+        var paths = Tree.Variants.Select(variant => $"src/HomeBlaze/HomeBlaze.Game.Nature/wwwroot/objects/nature/models/{variant.File}").ToArray();
 
         // Assert
         Assert.Equal(Tree.VariantCount, Tree.Variants.Length);

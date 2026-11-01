@@ -1,6 +1,6 @@
 using HomeBlaze.Game.Tests.Testing;
 
-namespace HomeBlaze.Game.Tests.Objects.Nature;
+namespace HomeBlaze.Game.Nature.Tests;
 
 public class TreeToolTests
 {

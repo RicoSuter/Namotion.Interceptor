@@ -24,7 +24,7 @@ public class GameSerializationTests
               "$type": "HomeBlaze.Game.Game",
               "name": "Demo world",
               "objects": {
-                "wall-1": { "$type": "HomeBlaze.Game.Objects.Buildings.Wall", "x": -20, "y": 8, "width": 19, "depth": 1, "height": 10 }
+                "wall-1": { "$type": "HomeBlaze.Game.Buildings.Wall", "x": -20, "y": 8, "width": 19, "depth": 1, "height": 10 }
               },
               "players": {
                 "kitchen": { "x": 3, "y": -2, "facing": "East" }
@@ -57,7 +57,7 @@ public class GameSerializationTests
         var json = _serializer.Serialize(game);
 
         // Assert
-        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Buildings.Wall\"", json);
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Buildings.Wall\"", json);
         Assert.Contains("\"width\": 4", json);
     }
 
@@ -132,7 +132,7 @@ public class GameSerializationTests
         var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
 
         // Assert
-        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Buildings.Door\"", json);
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Buildings.Door\"", json);
         var door = Assert.IsType<Door>(loaded.Objects["door-1"]);
         Assert.Equal((3, -4, 1, 4, 10, true), (door.X, door.Y, door.Width, door.Depth, door.Height, door.IsOpen));
     }
@@ -187,7 +187,7 @@ public class GameSerializationTests
         var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
 
         // Assert
-        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Buildings.WallTool\"", json);
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Buildings.WallTool\"", json);
         Assert.IsType<WallTool>(loaded.Tools["wall-tool"]);
     }
 
@@ -216,8 +216,8 @@ public class GameSerializationTests
         var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
 
         // Assert
-        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Nature.Tree\"", json);
-        Assert.Contains("\"$type\": \"HomeBlaze.Game.Objects.Nature.TreeTool\"", json);
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Nature.Tree\"", json);
+        Assert.Contains("\"$type\": \"HomeBlaze.Game.Nature.TreeTool\"", json);
         var tree = Assert.IsType<Tree>(loaded.Objects["tree-1"]);
         Assert.Equal((3, 4, 5, 120, 90), (tree.X, tree.Y, tree.Variant, tree.Rotation, tree.Scale));
         Assert.IsType<TreeTool>(loaded.Tools["tree-tool"]);

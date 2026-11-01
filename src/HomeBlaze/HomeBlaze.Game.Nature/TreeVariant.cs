@@ -1,6 +1,6 @@
 using HomeBlaze.Game.Abstractions;
 
-namespace HomeBlaze.Game.Objects.Nature;
+namespace HomeBlaze.Game.Nature;
 
 /// <summary>
 /// A tree model under <c>wwwroot/objects/nature/models/</c> and its sizes in tiles at a scale of 100 percent.

@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Objects.Buildings;
+namespace HomeBlaze.Game.Buildings;
 
 /// <summary>
 /// What a wall or a door lintel is made of, which only its look follows.

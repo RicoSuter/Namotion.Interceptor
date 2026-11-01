@@ -5,7 +5,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Game.Objects.Nature;
+namespace HomeBlaze.Game.Nature;
 
 /// <summary>
 /// Plants trees in front of the player.

@@ -6,7 +6,7 @@ using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
-namespace HomeBlaze.Game.Objects.Buildings;
+namespace HomeBlaze.Game.Buildings;
 
 /// <summary>
 /// A wall segment that blocks the tiles it stands on.

@@ -1,4 +1,4 @@
-namespace HomeBlaze.Game.Tests.Objects.Buildings;
+namespace HomeBlaze.Game.Buildings.Tests;
 
 public class WallTests
 {
@@ -14,7 +14,7 @@ public class WallTests
         // Assert
         Assert.Equal(GameVisualShape.Box, part.Shape);
         Assert.Equal(new GameVisualVector(6, 10, 1), part.Size);
-        Assert.Equal("_content/HomeBlaze.Game/objects/buildings/textures/bricks.jpg", part.Texture);
+        Assert.Equal("_content/HomeBlaze.Game.Buildings/objects/buildings/textures/bricks.jpg", part.Texture);
         Assert.Equal(8, part.TextureScale);
     }
 
@@ -73,7 +73,7 @@ public class WallTests
 
         // Assert
         var part = Assert.Single(wall.Visual.Parts);
-        Assert.Equal($"_content/HomeBlaze.Game/objects/buildings/textures/{file}", part.Texture);
+        Assert.Equal($"_content/HomeBlaze.Game.Buildings/objects/buildings/textures/{file}", part.Texture);
         Assert.Equal(scale, part.TextureScale);
     }
 
@@ -87,7 +87,7 @@ public class WallTests
         wall.Material = (WallMaterial)7;
 
         // Assert
-        Assert.Equal("_content/HomeBlaze.Game/objects/buildings/textures/bricks.jpg", Assert.Single(wall.Visual.Parts).Texture);
+        Assert.Equal("_content/HomeBlaze.Game.Buildings/objects/buildings/textures/bricks.jpg", Assert.Single(wall.Visual.Parts).Texture);
     }
 
     [Fact]
@@ -100,6 +100,6 @@ public class WallTests
         var lintel = door.Visual.Parts[0];
 
         // Assert
-        Assert.Equal("_content/HomeBlaze.Game/objects/buildings/textures/wood.jpg", lintel.Texture);
+        Assert.Equal("_content/HomeBlaze.Game.Buildings/objects/buildings/textures/wood.jpg", lintel.Texture);
     }
 }

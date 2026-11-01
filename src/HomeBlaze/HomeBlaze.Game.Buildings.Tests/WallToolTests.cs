@@ -1,6 +1,6 @@
 using HomeBlaze.Game.Tests.Testing;
 
-namespace HomeBlaze.Game.Tests.Objects.Buildings;
+namespace HomeBlaze.Game.Buildings.Tests;
 
 public class WallToolTests
 {

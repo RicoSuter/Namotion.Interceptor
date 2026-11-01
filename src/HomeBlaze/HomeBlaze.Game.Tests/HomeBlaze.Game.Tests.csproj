@@ -25,13 +25,15 @@
     <ItemGroup>
         <Using Include="Xunit" />
         <Using Include="HomeBlaze.Game.Abstractions" />
-        <Using Include="HomeBlaze.Game.Objects.Buildings" />
-        <Using Include="HomeBlaze.Game.Objects.Nature" />
+        <Using Include="HomeBlaze.Game.Buildings" />
+        <Using Include="HomeBlaze.Game.Nature" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.E2E.Tests\HomeBlaze.E2E.Tests.csproj" />
         <ProjectReference Include="..\HomeBlaze.Game\HomeBlaze.Game.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Game.Buildings\HomeBlaze.Game.Buildings.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Game.Nature\HomeBlaze.Game.Nature.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>

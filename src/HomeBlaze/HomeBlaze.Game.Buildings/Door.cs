@@ -6,7 +6,7 @@ using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
-namespace HomeBlaze.Game.Objects.Buildings;
+namespace HomeBlaze.Game.Buildings;
 
 /// <summary>
 /// A door that fills an opening in a wall, one tile deep in a wall running east to west or one tile wide in one running

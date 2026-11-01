@@ -11,7 +11,7 @@ A `Game` subject is a multiplayer world that HomeBlaze shows as a page. Every br
 | `HomeBlaze.Game` (Razor SDK) | Subjects, the page component, the JS modules and the vendored assets under `wwwroot/` |
 | `HomeBlaze.Game.Tests` | Unit tests and E2E tests |
 
-The app registers the library with a project reference in `HomeBlaze.csproj` and `.AddAssembly(typeof(HomeBlaze.Game.Game).Assembly)` in `Program.cs`. `Data/Files/Demo/Game.json` of the app holds the demo world, served at `/pages/Demo/Game`: a house of 56 x 40 tiles (14 x 10 m) with six rooms (living room, hall, kitchen, two bedrooms and a bathroom), brick outer walls, concrete inner walls and doors 4 to 6 tiles wide, a wooden shed with a closed door to the west, a forest of 32 trees to the east, 7 more trees around the house, and the tools `wall-tool` and `tree-tool`. New players spawn at 0, 0, just south of the open entrance. A script generated the file once with a fixed random seed; the script is not part of the repository, and the file is edited like any saved world. `DemoWorldTests` checks that it loads, that every room is reachable from the spawn point and that no tree blocks a door.
+The app registers the library and the object libraries `HomeBlaze.Game.Buildings` and `HomeBlaze.Game.Nature` with project references in `HomeBlaze.csproj` and one `.AddAssembly(...)` each in `Program.cs`. `Data/Files/Demo/Game.json` of the app holds the demo world, served at `/pages/Demo/Game`: a house of 56 x 40 tiles (14 x 10 m) with six rooms (living room, hall, kitchen, two bedrooms and a bathroom), brick outer walls, concrete inner walls and doors 4 to 6 tiles wide, a wooden shed with a closed door to the west, a forest of 32 trees to the east, 7 more trees around the house, and the tools `wall-tool` and `tree-tool`. New players spawn at 0, 0, just south of the open entrance. A script generated the file once with a fixed random seed; the script is not part of the repository, and the file is edited like any saved world. `DemoWorldTests` checks that it loads, that every room is reachable from the spawn point and that no tree blocks a door.
 
 The extension contract (`GameObject`, `GameTool`, `IGameWorld`, `GameCaller`, `GameMessages`, `GameArea`, `GameSpot`, `GameDirection`, `GameVisual` and its parts, `GameAssets`) lives in `HomeBlaze.Game.Abstractions`, which this library references; `Game` implements `IGameWorld`. The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Components` (`OperationInvoker`), `HomeBlaze.Services` (`CurrentClientConnection`, the configuration serializer), `HomeBlaze.Installation` (clients), `HomeBlaze.Storage.Abstractions` (`IConfigurationWriter`) and the Namotion.Interceptor generator, tracking and registry libraries. Dependency rule: `HomeBlaze.Game` may reference `HomeBlaze.AI` for agent players; `HomeBlaze.AI` never references or mentions the game.
 
@@ -19,14 +19,12 @@ The extension contract (`GameObject`, `GameTool`, `IGameWorld`, `GameCaller`, `G
 |---|---|
 | `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, copy-on-write helpers), `Game.Runtime.cs` (loops, change observer), `Game.Index.cs`, `Game.Players.cs`, `Game.Movement.cs`, `Game.Actions.cs` (`GetActor`, messages), `Game.Objects.cs` and `Game.Placement.cs` (the `IGameWorld` API), `Game.Persistence.cs`, `Game.View.cs`, `Game.Volume.cs` (volume table), `Game.Voice.cs` (toggles, voice loop) |
 | `GamePlayer.cs` | The player |
-| `Objects/Buildings/` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures` |
-| `Objects/Nature/` | `Tree`, `TreeVariant`, `TreeTool` |
 | `Clients/` | `IGameClientDirectory` and its installation implementation |
 | `World/` | Pure grid logic: `GameWorldIndex`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `FrontPlacement` |
 | `View/` | `GameViewTracker` and what it sends to the browser: `GameViewObject`, `GameViewPart`, `GameViewUpdate`, `GameVisualValidator`, `GameDirectionNames`, and `GameColors` for players |
 | `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVolumeTable`, `TalkerQueue`, `GameVoiceMixer`, `IGameVoiceSink` |
 | `Components/` | `GamePage.razor`, `GameNameDialog.razor` and `GameCallerServiceProvider` |
-| `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera, frame rate), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (parts, models, wind, glides, fading, players, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/`, `objects/` (assets of the object types) |
+| `wwwroot/` | `game.js` (lifecycle, Babylon loader, camera, frame rate), `game-input.js` (keyboard, pad, prediction), `game-entities.js` (parts, models, wind, glides, fading, players, tweens, ground, target marker), `game-voice.js` (audio context, capture, playback, codec seam), `game-voice-worklet.js` (capture and playback processors), `lib/`, `models/`, `textures/` |
 
 ## Model
 
@@ -70,14 +68,14 @@ Persistence:
 
 ## Objects and extension points
 
-The core (`Game*.cs`, `GamePlayer`, `World/`, `View/`, `Voice/`, `Components/`) names no object type. Every object type lives in a folder of `Objects/` with a namespace of its own and uses only `HomeBlaze.Game.Abstractions`, reaching its game through `World`, so a later split into libraries only moves files and changes the `$type` names in saved worlds. Reviews check this rule; members an object folder declares itself may be internal, such as `WallTextures` or `Tree.Variants`.
+The core (`Game*.cs`, `GamePlayer`, `World/`, `View/`, `Voice/`, `Components/`) names no object type. Every object type lives in an object library of its own and uses only `HomeBlaze.Game.Abstractions`, reaching its game through `World`. The object libraries reference `HomeBlaze.Abstractions`, `HomeBlaze.Game.Abstractions`, Namotion.Interceptor and its generator (`HomeBlaze.Game.Buildings` also the registry, for `[PropertyAttribute]`), never this library. Members an object library declares itself may be internal, such as `WallTextures` or `Tree.Variants`.
 
-| Folder | Namespace | Types |
-|---|---|---|
-| `Objects/Buildings/` | `HomeBlaze.Game.Objects.Buildings` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures`; walls and doors share a folder because "Add door" creates doors |
-| `Objects/Nature/` | `HomeBlaze.Game.Objects.Nature` | `Tree`, `TreeVariant`, `TreeTool` |
+| Project and namespace | Types |
+|---|---|
+| `HomeBlaze.Game.Buildings` | `Wall`, `WallMaterial`, `WallTool`, `Door`, `WallTextures`; walls and doors share a library because "Add door" creates doors |
+| `HomeBlaze.Game.Nature` | `Tree`, `TreeVariant`, `TreeTool` |
 
-Moving `Wall` and `Door` into `Objects/Buildings` changed their `$type` from `HomeBlaze.Game.Wall` and `HomeBlaze.Game.Door` to `HomeBlaze.Game.Objects.Buildings.Wall` and `HomeBlaze.Game.Objects.Buildings.Door`. The loader has no rename mapping, so a world saved before needs those names replaced in its file.
+Moving the object types into these libraries removed the `Objects.` segment from their `$type` names, which are now `HomeBlaze.Game.Buildings.Wall`, `HomeBlaze.Game.Nature.Tree` and so on; walls and doors saved before an earlier move are named `HomeBlaze.Game.Wall` and `HomeBlaze.Game.Door`. The loader has no rename mapping, so a world saved before needs those names replaced in its file.
 
 Extension points:
 
@@ -357,22 +355,24 @@ Side panel (240 px, below the canvas under the `Md` breakpoint): **Position** wi
 
 ## Assets and licenses
 
-Everything is vendored under `wwwroot/`, served by `MapStaticAssets` (compressed and fingerprinted at build time). Each folder has a `LICENSE.md` with source and terms, which lists every file of the folder. The assets of an object type live under `objects/<folder>/`, apart from those of the core, so they move with the type into another library.
+Everything is vendored under the `wwwroot/` of the library that uses it, served by `MapStaticAssets` (compressed and fingerprinted at build time) at `_content/<assembly name>/`. Each folder has a `LICENSE.md` with source and terms, which lists every file of the folder. The assets of an object type live in its object library under `objects/<folder>/`, which `GameAssets.Url` turns into `_content/HomeBlaze.Game.Nature/objects/nature/models/...`, for example.
 
 | Folder | Asset | License |
 |---|---|---|
-| `lib/babylonjs/` | Babylon.js 9.31.0 core and glTF loader (UMD builds) | Apache 2.0 |
-| `models/` | `Casual_2.glb` from the Ultimate Modular Men pack by Quaternius, only `Idle_Neutral` and `Walk` kept | CC0 |
-| `textures/` | ambientCG Grass004 (`grass.jpg`), re-encoded | CC0 |
-| `objects/buildings/textures/` | ambientCG Bricks097 (`bricks.jpg`, stacked to a square), Concrete046 (`concrete.jpg`) and Planks021 (`wood.jpg`), re-encoded to 512 x 512 | CC0 |
-| `objects/nature/models/` | Seven trees of the low poly nature pack by flo-bit, unchanged GLB files from a pinned commit | CC0 |
+| `HomeBlaze.Game`: `lib/babylonjs/` | Babylon.js 9.31.0 core and glTF loader (UMD builds) | Apache 2.0 |
+| `HomeBlaze.Game`: `models/` | `Casual_2.glb` from the Ultimate Modular Men pack by Quaternius, only `Idle_Neutral` and `Walk` kept | CC0 |
+| `HomeBlaze.Game`: `textures/` | ambientCG Grass004 (`grass.jpg`), re-encoded | CC0 |
+| `HomeBlaze.Game.Buildings`: `objects/buildings/textures/` | ambientCG Bricks097 (`bricks.jpg`, stacked to a square), Concrete046 (`concrete.jpg`) and Planks021 (`wood.jpg`), re-encoded to 512 x 512 | CC0 |
+| `HomeBlaze.Game.Nature`: `objects/nature/models/` | Seven trees of the low poly nature pack by flo-bit, unchanged GLB files from a pinned commit | CC0 |
 
 To swap the character, replace the GLB and its license, then update `game-entities.js`: the file name in `LoadAssetContainerAsync`, `IDLE_ANIMATION`, `WALKING_ANIMATION`, `SHIRT_MATERIAL` (the material tinted with the player color) and `WALKING_SPEED_RATIO` so the feet keep pace with one tile per step. The model is scaled from its bounding box to the player's `Height` and must face north (+z) after the loader's handedness conversion.
 
 ## Testing
 
 ```
-dotnet test src/HomeBlaze/HomeBlaze.Game.Tests --filter "Category!=Integration"   # unit tests
+dotnet test src/HomeBlaze/HomeBlaze.Game.Tests --filter "Category!=Integration"   # unit tests of the core
+dotnet test src/HomeBlaze/HomeBlaze.Game.Buildings.Tests                         # walls and doors
+dotnet test src/HomeBlaze/HomeBlaze.Game.Nature.Tests                            # trees
 dotnet test src/HomeBlaze/HomeBlaze.Game.Tests --filter "Category=Integration"    # E2E tests
 ```
 
@@ -390,6 +390,8 @@ The E2E tests need Playwright's Chromium (`playwright.ps1 install chromium` from
 | `FrozenTimeProvider` | A stopped clock that runs a callback inside its next reading, which lets a test act while the game holds its lock |
 | `VoiceFrames` | Builds and reads frames of 16-bit little-endian samples |
 | `RecordingVoiceSink` | A thread-safe sink that records the frames the mixer sends |
+
+The helpers live in `HomeBlaze.Game.Tests/Testing/`; `HomeBlaze.Game.Buildings.Tests` and `HomeBlaze.Game.Nature.Tests` link the ones they use into their projects, keeping the namespace `HomeBlaze.Game.Tests.Testing`.
 
 The E2E tests use `PlaywrightFixture` from `HomeBlaze.E2E.Tests` through their own `GameE2ECollection`, because xUnit only finds collection definitions in the test assembly. They assert the side panel, not canvas pixels; headless Chromium renders WebGL in software. Every installation sees all circuits of the shared server, and circuits of closed browser contexts stay connected for minutes, so players of earlier tests may still stand in a new game. The tests therefore read where their own player joined, move the other players far aside, and assert positions relative to the join point.
 
