@@ -92,9 +92,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         Regions = new Dictionary<string, GameRegion>();
         Tools = new Dictionary<string, GameTool>();
 
-        // Index.Changes is cleared last, after everything that reads it in the tick; the view sessions come right before,
-        // so they also see what the hooks of a save's publish changed. The object set is published and the objects'
-        // hooks run first, so what they write is read again in the same tick.
+        // The index changes are cleared last, after everything that reads them in the tick; the view sessions come right
+        // before, so they also see what the hooks of a save's publish changed. The object set is published and the
+        // objects' hooks run first, so what they write is read again in the same tick.
         _simulation.AddTickHandler(PublishObjectSetWhenChanged);
         _simulation.AddTickHandler(_world.RefreshChangedSubjects);
         _simulation.AddTickHandler(_world.PublishSnapshot);
@@ -104,7 +104,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation.AddTickHandler(StartSaveWhenDue);
         _simulation.AddTickHandler(CompleteWrittenPlacements);
         _simulation.AddTickHandler(UpdateViewSessions);
-        _simulation.AddTickHandler(_world.Index.Changes.Clear);
+        _simulation.AddTickHandler(_world.Index.ClearChanges);
     }
 
     /// <summary>

@@ -34,6 +34,9 @@ internal sealed class GameWorldIndex
     // Queries write these stamps, so no two queries may run at the same time, not even two read-only ones.
     private long _queryStamp;
 
+    // Marks the slots recorded in EntityChanges since the last ClearChanges, so each is recorded once.
+    private long _changeStamp = 1;
+
     public int Count => _slots.Count;
 
     /// <summary>
@@ -52,10 +55,16 @@ internal sealed class GameWorldIndex
 
     /// <summary>
     /// The chunks whose entities were added, moved, removed or changed, including a change of only the visual, title or
-    /// height.
-    /// The index only adds to it; its reader clears it.
+    /// height. The index only adds to it; <see cref="ClearChanges"/> clears it.
     /// </summary>
     public ChangedChunks Changes { get; } = new();
+
+    /// <summary>
+    /// The entities that were added, moved, removed or changed, including a change of only the visual, title or height
+    /// and one reported by <see cref="MarkChanged"/>, each with its indexed area and visibility before. An entity removed
+    /// and added again shows twice. The index only adds to it; <see cref="ClearChanges"/> clears it.
+    /// </summary>
+    public ChangedEntities EntityChanges { get; } = new();
 
     /// <summary>
     /// The chunks whose sound blocked tiles may have changed, a subset of what <see cref="Changes"/> got. The index only
@@ -80,8 +89,28 @@ internal sealed class GameWorldIndex
     /// </summary>
     public static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
 
+    /// <summary>
+    /// Clears <see cref="Changes"/> and <see cref="EntityChanges"/>.
+    /// </summary>
+    public void ClearChanges()
+    {
+        Changes.Clear();
+        EntityChanges.Clear();
+        _changeStamp++;
+    }
+
+    /// <summary>
+    /// Whether the entity is indexed.
+    /// </summary>
+    public bool Contains(GameEntity entity) => _slots.ContainsKey(entity);
+
     public void Clear()
     {
+        foreach (var slot in _slots.Values)
+        {
+            RecordChange(slot);
+        }
+
         foreach (var (chunk, slots) in _chunks)
         {
             Changes.Add(chunk);
@@ -127,6 +156,7 @@ internal sealed class GameWorldIndex
             return;
         }
 
+        RecordChange(slot);
         slot.Visual = entity.Visual;
         slot.Title = entity.Title;
         slot.Height = entity.Height;
@@ -148,8 +178,12 @@ internal sealed class GameWorldIndex
 
     private void Add(GameEntity entity, Entry entry)
     {
-        var slot = new Slot(entity) { Entry = entry, Visual = entity.Visual, Title = entity.Title, Height = entity.Height };
+        var slot = new Slot(entity)
+        {
+            Entry = entry, Visual = entity.Visual, Title = entity.Title, Height = entity.Height, ChangeStamp = _changeStamp
+        };
         _slots.Add(entity, slot);
+        EntityChanges.Add(new GameEntityChange(entity, default, WasVisible: false));
         AddToChunks(slot, entry.Area);
         AddChangedChunks(entry.Area);
         Version++;
@@ -163,6 +197,7 @@ internal sealed class GameWorldIndex
     {
         if (_slots.Remove(entity, out var slot))
         {
+            RecordChange(slot);
             RemoveFromChunks(slot, slot.Entry.Area);
             AddChangedChunks(slot.Entry.Area);
             Version++;
@@ -181,6 +216,7 @@ internal sealed class GameWorldIndex
     {
         if (_slots.TryGetValue(entity, out var slot))
         {
+            RecordChange(slot);
             AddChangedChunks(slot.Entry.Area);
         }
     }
@@ -345,6 +381,16 @@ internal sealed class GameWorldIndex
         }
     }
 
+    // Called before the slot changes, so the change holds the state before.
+    private void RecordChange(Slot slot)
+    {
+        if (slot.ChangeStamp != _changeStamp)
+        {
+            slot.ChangeStamp = _changeStamp;
+            EntityChanges.Add(new GameEntityChange(slot.Entity, slot.Entry.Area, slot.Entry.IsVisible));
+        }
+    }
+
     private void AddChangedChunks(GameArea area)
     {
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
@@ -446,5 +492,7 @@ internal sealed class GameWorldIndex
         public int Height { get; set; }
 
         public long QueryStamp { get; set; }
+
+        public long ChangeStamp { get; set; }
     }
 }

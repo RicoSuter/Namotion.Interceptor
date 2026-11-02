@@ -374,7 +374,7 @@ public class GameRuntimeTests
             Assert.Equal(0, deliveredWhileStopped);
             var update = sink.Deliveries[0].Update;
             Assert.Contains(update.Upserted, view => view.IsSelf);
-            Assert.Contains(update.Upserted, view => view is { IsSelf: false, X: -20, Y: 8 });
+            Assert.Contains(update.Upserted, view => view is { IsSelf: false, Payload.X: -20, Payload.Y: 8 });
         }
         finally
         {
@@ -398,7 +398,8 @@ public class GameRuntimeTests
         try
         {
             // Assert
-            await WaitUntilAsync(() => sink.Updates.Any(update => update.Upserted.Any(view => view is { IsSelf: false, X: -20, Y: 8 })),
+            await WaitUntilAsync(
+                () => sink.Updates.Any(update => update.Upserted.Any(view => view is { IsSelf: false, Payload.X: -20, Payload.Y: 8 })),
                 "The view did not show the object added while the game was stopped");
         }
         finally

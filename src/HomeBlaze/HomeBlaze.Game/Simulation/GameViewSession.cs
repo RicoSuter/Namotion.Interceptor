@@ -1,22 +1,29 @@
+using System.Runtime.InteropServices;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.View;
 using HomeBlaze.Game.World;
-using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.Simulation;
 
 /// <summary>
 /// The simulation's side of a page's view: the window around the page's player, what the page knows of it, and the
-/// chunks changed while the page was busy. Touched only on the simulation thread, except <see cref="Dispose"/>,
+/// entities changed while the page was busy. Touched only on the simulation thread, except <see cref="Dispose"/>,
 /// <see cref="IsDisposed"/> and <see cref="ClientId"/>.
 /// </summary>
 internal sealed class GameViewSession : IDisposable
 {
+    /// <summary>
+    /// The changed entities a busy session collects at most; one more makes its next update a full refresh instead.
+    /// </summary>
+    public const int MaximumPendingEntities = 4096;
+
     private readonly GameViewTracker _tracker = new();
     private readonly IGameViewSink _sink;
 
-    // The changed chunks of the ticks the sink was busy in, limited to the window the page knows.
-    private readonly ChangedChunks _pendingChunks = new();
+    // The changed entities of the ticks the sink was busy in that touched the window the page knows, each once with the
+    // area it had at the last delivery.
+    private readonly List<GameEntityChange> _pendingEntities = [];
+    private readonly HashSet<GameEntity> _pendingSet = new(ReferenceEqualityComparer.Instance);
     private readonly List<GameEntity> _targetResults = [];
     private readonly List<GameArea> _targetTiles = new(3);
 
@@ -68,20 +75,22 @@ internal sealed class GameViewSession : IDisposable
     /// <summary>
     /// Delivers what changed in the window since the last delivery, with the panel state, unless the sink is busy, a full
     /// refresh is due but not allowed, or nothing changed; call once per tick, after the world changes of the tick were
-    /// applied and before <see cref="GameWorldIndex.Changes"/> is cleared.
+    /// applied and before <see cref="GameWorldIndex.ClearChanges"/>.
     /// </summary>
     /// <param name="world">The world state.</param>
     /// <param name="publishVersion">The version of the last publish; a new one is delivered so the page reads the subjects again.</param>
     /// <param name="canFullRefresh">Whether this tick still allows a refresh of every chunk of the window; without it a
     /// session that needs one waits like one whose sink is busy.</param>
-    /// <param name="logger">Warns about object types with an invalid visual.</param>
+    /// <param name="payloads">Gives the payloads of the upserted entities, shared with the other sessions of the tick.</param>
+    /// <param name="changes">Finds the entity changes of the tick near the window, shared with the other sessions of the
+    /// tick.</param>
     /// <returns>Whether the session refreshed every chunk of its window.</returns>
-    public bool Update(GameWorldState world, long publishVersion, bool canFullRefresh, ILogger logger)
+    public bool Update(GameWorldState world, long publishVersion, bool canFullRefresh, GameViewPayloads payloads, GameViewChanges changes)
     {
-        var changes = world.Index.Changes;
+        var index = world.Index;
         if (_sink.IsBusy)
         {
-            CollectPending(changes);
+            CollectPending(index, changes, isBounded: true);
             return false;
         }
 
@@ -93,16 +102,19 @@ internal sealed class GameViewSession : IDisposable
             // The full refresh reads every chunk of the window, so the changes meanwhile need not be collected. It stays
             // due also when its reason goes away, as for a player that jumps away and back before it ran.
             _isFullRefreshRequested = true;
+            ClearPending();
             return false;
         }
 
-        var chunks = GetChangedChunks(changes);
-        var update = chunks.Count > 0 || isFullRefresh || _tracker.Window != window
-            ? _tracker.UpdateChunks(world.Index, chunks, window, self, isFullRefresh, logger)
+        // The ticks the sink was busy in may have changed what stands in front without a change in this tick.
+        var hadPending = _pendingEntities.Count > 0;
+        var changed = isFullRefresh ? [] : GetChangedEntities(index, changes);
+        var update = changed.Length > 0 || isFullRefresh || _tracker.Window != window
+            ? _tracker.Update(index, changed, window, self, isFullRefresh, payloads)
             : GameViewTracker.Empty;
-        var panel = GetPanel(world, self, chunks, isFullRefresh);
+        var panel = GetPanel(world, self, hadPending || IsInFrontChanged(self, index.Changes), isFullRefresh);
         _isFullRefreshRequested = false;
-        _pendingChunks.Clear();
+        ClearPending();
         DeliverWhenChanged(update, panel, publishVersion);
         return isFullRefresh;
     }
@@ -123,16 +135,18 @@ internal sealed class GameViewSession : IDisposable
         _sink.Deliver(update, panel);
     }
 
-    // The changes of this tick, joined to the ones collected while the sink was busy.
-    private ChangedChunks GetChangedChunks(ChangedChunks changes)
+    // The changes of this tick near the window the page knows, which holds every chunk the tracker reads changes for,
+    // joined to the ones collected while the sink was busy; valid until the pending ones are cleared or the shared
+    // changes collected again.
+    private ReadOnlySpan<GameEntityChange> GetChangedEntities(GameWorldIndex index, GameViewChanges changes)
     {
-        if (_pendingChunks.Count == 0)
+        if (_pendingEntities.Count == 0)
         {
-            return changes;
+            return changes.Collect(index, _tracker.Window);
         }
 
-        CollectPending(changes);
-        return _pendingChunks;
+        CollectPending(index, changes, isBounded: false);
+        return CollectionsMarshal.AsSpan(_pendingEntities);
     }
 
     // A different own player, or none, changes IsSelf, so every chunk is refreshed.
@@ -148,27 +162,44 @@ internal sealed class GameViewSession : IDisposable
         return self;
     }
 
-    // Only chunks of the window the page knows matter: a chunk of the window that the page enters later is refreshed
-    // then anyway.
-    private void CollectPending(ChangedChunks changes)
+    // Only entities that touched the window the page knows matter: a chunk of the window that the page enters later is
+    // read whole then anyway. The first change of an entity carries the area the page knows, and its current area at the
+    // end of each tick tells whether it entered the window, so nothing the page needs is skipped. Beyond the bound the
+    // next update reads every chunk of the window instead.
+    private void CollectPending(GameWorldIndex index, GameViewChanges changes, bool isBounded)
     {
-        if (!_tracker.HasWindow)
+        if (!_tracker.HasWindow || _isFullRefreshRequested)
         {
             return;
         }
 
         var window = _tracker.Window;
-        foreach (var chunk in changes)
+        foreach (ref readonly var change in changes.Collect(index, window))
         {
-            if (window.Contains(chunk))
+            if (!(window.HeldBefore(change) || window.Holds(change.Entity, index)) || !_pendingSet.Add(change.Entity))
             {
-                _pendingChunks.Add(chunk);
+                continue;
             }
+
+            if (isBounded && _pendingEntities.Count == MaximumPendingEntities)
+            {
+                _isFullRefreshRequested = true;
+                ClearPending();
+                return;
+            }
+
+            _pendingEntities.Add(change);
         }
     }
 
+    private void ClearPending()
+    {
+        _pendingEntities.Clear();
+        _pendingSet.Clear();
+    }
+
     // Returns the delivered panel while nothing it shows changed, so an unchanged panel allocates nothing.
-    private GamePanelState GetPanel(GameWorldState world, PlayerEntity? self, ChangedChunks chunks, bool isFullRefresh)
+    private GamePanelState GetPanel(GameWorldState world, PlayerEntity? self, bool isInFrontChanged, bool isFullRefresh)
     {
         if (self is null)
         {
@@ -176,7 +207,7 @@ internal sealed class GameViewSession : IDisposable
         }
 
         var isPositionChanged = IsPositionChanged(self);
-        var targets = isPositionChanged || isFullRefresh || IsInFrontChanged(self, chunks)
+        var targets = isPositionChanged || isFullRefresh || isInFrontChanged
             ? GetTargets(world, self, _panel.Targets)
             : _panel.Targets;
         if (!isPositionChanged && ReferenceEquals(targets, _panel.Targets))
@@ -198,9 +229,9 @@ internal sealed class GameViewSession : IDisposable
         _panel.PlayerClientId != self.ClientId || self.Area != _panelArea || self.Facing != _panelFacing || self.IsVisible != _isPanelSelfVisible;
 
     // Whether a chunk that the tiles in front of the player touch changed.
-    private static bool IsInFrontChanged(PlayerEntity self, ChangedChunks chunks)
+    private static bool IsInFrontChanged(PlayerEntity? self, ChangedChunks chunks)
     {
-        if (chunks.Count == 0 || !self.Area.TryMove(self.Facing.GetOffsetX(), self.Facing.GetOffsetY(), out var shifted))
+        if (self is null || chunks.Count == 0 || !self.Area.TryMove(self.Facing.GetOffsetX(), self.Facing.GetOffsetY(), out var shifted))
         {
             return false;
         }

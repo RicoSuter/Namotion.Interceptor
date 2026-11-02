@@ -21,7 +21,8 @@ internal sealed class GameViewSessions
     private readonly ConcurrentQueue<GameViewSession> _opened = new();
     private readonly GameSimulation _simulation;
     private readonly GameWorldState _world;
-    private readonly ILogger _logger;
+    private readonly GameViewPayloads _payloads;
+    private readonly GameViewChanges _changes = new();
     private readonly Action<(GameViewSession Session, long PublishVersion)> _update;
     private int _remainingFullRefreshes;
 
@@ -29,7 +30,7 @@ internal sealed class GameViewSessions
     {
         _simulation = simulation;
         _world = world;
-        _logger = logger;
+        _payloads = new GameViewPayloads(logger);
         _update = Update;
     }
 
@@ -49,8 +50,9 @@ internal sealed class GameViewSessions
     }
 
     /// <summary>
-    /// Takes in the opened sessions, drops the disposed ones and updates the others; a session that throws is logged and
-    /// leaves the others alone.
+    /// Takes in the opened sessions, drops the disposed ones and updates the others, which share the payloads of the
+    /// entities they upsert and the search of the changed entities; a session that throws is logged and leaves the others
+    /// alone.
     /// </summary>
     public void Update(long publishVersion)
     {
@@ -71,6 +73,10 @@ internal sealed class GameViewSessions
 
             _simulation.RunLogged(_update, (session, publishVersion));
         }
+
+        // The entities change in the next tick.
+        _payloads.Clear();
+        _changes.Clear();
     }
 
     public void RequestFullRefresh()
@@ -83,7 +89,7 @@ internal sealed class GameViewSessions
 
     private void Update((GameViewSession Session, long PublishVersion) state)
     {
-        if (state.Session.Update(_world, state.PublishVersion, _remainingFullRefreshes > 0, _logger))
+        if (state.Session.Update(_world, state.PublishVersion, _remainingFullRefreshes > 0, _payloads, _changes))
         {
             _remainingFullRefreshes--;
         }

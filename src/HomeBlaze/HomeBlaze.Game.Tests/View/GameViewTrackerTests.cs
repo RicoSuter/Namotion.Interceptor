@@ -10,13 +10,22 @@ public class GameViewTrackerTests
 {
     private readonly GameViewTracker _tracker = new();
     private readonly GameWorldIndex _index = new();
+    private readonly GameViewPayloads _payloads = new(NullLogger.Instance);
 
-    // Takes the chunks the index changed since the last update, as the view session does.
-    private GameViewUpdate Update(PlayerEntity? self, int centerX = 0, int centerY = 0)
+    // Takes the entities the index changed since the last update, as the view session does.
+    private GameViewUpdate Update(PlayerEntity? self, int centerX = 0, int centerY = 0) =>
+        Update(_tracker, self, centerX, centerY);
+
+    private GameViewUpdate Update(GameViewTracker tracker, PlayerEntity? self, int centerX = 0, int centerY = 0, bool isLastPage = true)
     {
-        var update = _tracker.UpdateChunks(_index, _index.Changes, GameViewWindow.Around(centerX, centerY), self, isFullRefresh: false,
-            NullLogger.Instance);
-        _index.Changes.Clear();
+        var update = tracker.Update(_index, _index.EntityChanges.AsSpan(), GameViewWindow.Around(centerX, centerY), self,
+            isFullRefresh: false, _payloads);
+        if (isLastPage)
+        {
+            _index.ClearChanges();
+            _payloads.Clear();
+        }
+
         return update;
     }
 
@@ -51,12 +60,12 @@ public class GameViewTrackerTests
         // Assert
         Assert.Equal(2, update.Upserted.Count);
         var self = Assert.Single(update.Upserted, view => view.IsSelf);
-        Assert.Equal(GameViewObject.PlayerKind, self.Kind);
-        Assert.Equal((0, 0, 2, 2, 7), (self.X, self.Y, self.Width, self.Depth, self.Height));
-        var wall = Assert.Single(update.Upserted, view => view.Kind == GameViewObject.ObjectKind);
-        Assert.Equal((-20, 8, 19), (wall.X, wall.Y, wall.Width));
-        Assert.True(wall.IsMovementBlocking);
-        Assert.Equal(19d, Assert.Single(wall.Parts).Width);
+        Assert.Equal(GameViewPayload.PlayerKind, self.Payload.Kind);
+        Assert.Equal((0, 0, 2, 2, 7), (self.Payload.X, self.Payload.Y, self.Payload.Width, self.Payload.Depth, self.Payload.Height));
+        var wall = Assert.Single(update.Upserted, view => view.Payload.Kind == GameViewPayload.ObjectKind);
+        Assert.Equal((-20, 8, 19), (wall.Payload.X, wall.Payload.Y, wall.Payload.Width));
+        Assert.True(wall.Payload.IsMovementBlocking);
+        Assert.Equal(19d, Assert.Single(wall.Payload.Parts).Width);
         Assert.Empty(update.Removed);
     }
 
@@ -94,7 +103,7 @@ public class GameViewTrackerTests
 
         // Assert
         var moved = Assert.Single(update.Upserted);
-        Assert.Equal((otherId, 17), (moved.Id, moved.X));
+        Assert.Equal((otherId, 17), (moved.Id, moved.Payload.X));
         Assert.Empty(update.Removed);
         Assert.Equal(2, _tracker.Count);
     }
@@ -134,8 +143,8 @@ public class GameViewTrackerTests
         // Assert
         Assert.Equal(new[] { nearId }, update.Removed);
         Assert.Equal(2, update.Upserted.Count);
-        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 5000 });
-        Assert.Contains(update.Upserted, view => view is { IsSelf: false, X: 5000, Y: 0 });
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, Payload.X: 5000 });
+        Assert.Contains(update.Upserted, view => view is { IsSelf: false, Payload.X: 5000, Payload.Y: 0 });
         Assert.Equal(2, _tracker.Count);
     }
 
@@ -164,7 +173,7 @@ public class GameViewTrackerTests
         Assert.Single(first.Upserted, view => !view.IsSelf);
         Assert.Single(changed.Upserted);
         Assert.Empty(changed.Removed);
-        Assert.Equal(10, Assert.Single(shrunk.Upserted).Width);
+        Assert.Equal(10, Assert.Single(shrunk.Upserted).Payload.Width);
         Assert.Empty(shrunk.Removed);
         Assert.Single(removed.Removed);
         Assert.Equal(1, _tracker.Count);
@@ -219,7 +228,7 @@ public class GameViewTrackerTests
 
         // Assert
         var moved = Assert.Single(update.Upserted);
-        Assert.Equal(11, moved.X);
+        Assert.Equal(11, moved.Payload.X);
         Assert.False(moved.IsSelf);
     }
 
@@ -258,9 +267,11 @@ public class GameViewTrackerTests
         var update = Update(player);
 
         // Assert
-        Assert.Equal(("Door", true, 0d), (closed.Title, closed.IsMovementBlocking, closed.Parts[1].Rotation));
+        Assert.Equal(("Door", true, 0d),
+            (closed.Payload.Title, closed.Payload.IsMovementBlocking, closed.Payload.Parts[1].Rotation));
         var open = Assert.Single(update.Upserted);
-        Assert.Equal((closed.Id, GameViewObject.ObjectKind, false, -90d), (open.Id, open.Kind, open.IsMovementBlocking, open.Parts[1].Rotation));
+        Assert.Equal((closed.Id, GameViewPayload.ObjectKind, false, -90d),
+            (open.Id, open.Payload.Kind, open.Payload.IsMovementBlocking, open.Payload.Parts[1].Rotation));
     }
 
     [Fact]
@@ -277,8 +288,8 @@ public class GameViewTrackerTests
 
         // Assert
         var view = Assert.Single(update.Upserted);
-        Assert.True(view.IsMicrophoneOn);
-        Assert.False(view.IsAudioOn);
+        Assert.True(view.Payload.IsMicrophoneOn);
+        Assert.False(view.Payload.IsAudioOn);
     }
 
     [Fact]
@@ -294,7 +305,7 @@ public class GameViewTrackerTests
         var update = Update(player);
 
         // Assert
-        Assert.Equal((int)GameDirection.West, Assert.Single(update.Upserted).Facing);
+        Assert.Equal((int)GameDirection.West, Assert.Single(update.Upserted).Payload.Facing);
     }
 
     [Fact]
@@ -333,7 +344,7 @@ public class GameViewTrackerTests
 
         // Assert
         var view = Assert.Single(update.Upserted);
-        var part = Assert.Single(view.Parts);
+        var part = Assert.Single(view.Payload.Parts);
         Assert.Equal(("box", 3d, "#112233"), (part.Shape, part.Height, part.Color));
     }
 
@@ -349,7 +360,7 @@ public class GameViewTrackerTests
 
         // Assert
         var view = Assert.Single(update.Upserted, view => !view.IsSelf);
-        var part = Assert.Single(view.Parts);
+        var part = Assert.Single(view.Payload.Parts);
         Assert.Equal((1d, 1d, 1d, GameVisual.DefaultColor), (part.Width, part.Height, part.Depth, part.Color));
     }
 
@@ -364,8 +375,7 @@ public class GameViewTrackerTests
 
         // Assert
         var self = Assert.Single(update.Upserted);
-        Assert.Empty(self.Parts);
-        Assert.Null(self.Visual);
+        Assert.Empty(self.Payload.Parts);
     }
 
     [Fact]
@@ -378,7 +388,7 @@ public class GameViewTrackerTests
         var view = Assert.Single(Update(player).Upserted);
 
         // Assert
-        Assert.Equal(GameColors.FromId("tab-1"), view.Color);
+        Assert.Equal(GameColors.FromId("tab-1"), view.Payload.Color);
     }
 
     [Fact]
@@ -395,7 +405,7 @@ public class GameViewTrackerTests
         var update = Update(player);
 
         // Assert
-        Assert.Equal(4, Assert.Single(update.Upserted).Height);
+        Assert.Equal(4, Assert.Single(update.Upserted).Payload.Height);
     }
 
     [Fact]
@@ -412,9 +422,9 @@ public class GameViewTrackerTests
         _index.Clear();
         var newPlayer = AddPlayer("tab-1");
         AddObject(wall);
-        _index.Changes.Clear();
-        var update = _tracker.UpdateChunks(_index, _index.Changes, GameViewWindow.Around(0, 0), newPlayer, isFullRefresh: true,
-            NullLogger.Instance);
+        _index.ClearChanges();
+        var update = _tracker.Update(_index, _index.EntityChanges.AsSpan(), GameViewWindow.Around(0, 0), newPlayer, isFullRefresh: true,
+            _payloads);
 
         // Assert
         Assert.Equal(formerIds, update.Removed.ToHashSet());
@@ -422,5 +432,141 @@ public class GameViewTrackerTests
         Assert.DoesNotContain(update.Upserted, view => formerIds.Contains(view.Id));
         Assert.Equal(2, _tracker.Count);
     }
-}
 
+    [Fact]
+    public void WhenAnEntityMovesInTheViewOfTwoPages_ThenBothUpdatesShareItsPayloadWithTheirOwnIdAndSelf()
+    {
+        // Arrange
+        var first = AddPlayer("tab-1");
+        var second = AddPlayer("tab-2", x: 10);
+        AddObject(new Wall { X = -20, Y = 8 });
+        var otherTracker = new GameViewTracker();
+        Update(_tracker, first, isLastPage: false);
+        var otherFirst = Update(otherTracker, second);
+
+        // Act
+        second.Area = second.Area with { X = 11 };
+        _index.AddOrUpdate(second);
+        var firstUpdate = Update(_tracker, first, isLastPage: false);
+        var secondUpdate = Update(otherTracker, second);
+
+        // Assert
+        var seenByFirst = Assert.Single(firstUpdate.Upserted);
+        var seenBySecond = Assert.Single(secondUpdate.Upserted);
+        Assert.Same(seenByFirst.Payload, seenBySecond.Payload);
+        Assert.Equal(11, seenByFirst.Payload.X);
+        Assert.False(seenByFirst.IsSelf);
+        Assert.True(seenBySecond.IsSelf);
+        Assert.Equal(Assert.Single(otherFirst.Upserted, view => view.IsSelf).Id, seenBySecond.Id);
+    }
+
+    [Fact]
+    public void WhenAnEntityChangesOutsideTheWindow_ThenNoPayloadIsBuilt()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var door = new Door { X = 1000, Y = 0 };
+        var entity = AddObject(door);
+        Update(player);
+
+        // Act
+        door.IsOpen = true;
+        entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
+        var update = Update(_tracker, player, isLastPage: false);
+
+        // Assert
+        Assert.True(update.IsEmpty);
+        Assert.Equal(0, _payloads.Count);
+    }
+
+    [Fact]
+    public void WhenAnAnimalMovesAmongTreesOfItsChunk_ThenOnlyItIsComparedAndUpserted()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1", x: 100);
+        for (var i = 0; i < 10; i++)
+        {
+            AddObject(new VisualObject { X = 2 + i, Y = 4 });
+        }
+
+        var animal = AddObject(new VisualObject { X = 5, Y = 6 });
+        Update(player, centerX: 100);
+        var comparisons = _tracker.ComparisonCount;
+
+        // Act
+        animal.Area = animal.Area with { X = 6 };
+        _index.AddOrUpdate(animal);
+        var update = Update(player, centerX: 100);
+
+        // Assert
+        Assert.Equal(6, Assert.Single(update.Upserted).Payload.X);
+        Assert.Equal(1, _tracker.ComparisonCount - comparisons);
+    }
+
+    [Fact]
+    public void WhenAnEntityEntersTheWindowFromOutside_ThenItIsAdded()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 1000);
+        Update(player);
+
+        // Act
+        other.Area = other.Area with { X = 20 };
+        _index.AddOrUpdate(other);
+        var update = Update(player);
+
+        // Assert
+        var entered = Assert.Single(update.Upserted);
+        Assert.Equal((20, false), (entered.Payload.X, entered.IsSelf));
+        Assert.Equal(2, _tracker.Count);
+    }
+
+    [Fact]
+    public void WhenAnEntityIsRemovedAndAddedAgainInOneUpdate_ThenItKeepsItsId()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var other = AddPlayer("tab-2", x: 10);
+        var otherId = Assert.Single(Update(player).Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        _index.Remove(other);
+        other.Area = other.Area with { X = 12 };
+        _index.AddOrUpdate(other);
+        var update = Update(player);
+
+        // Assert
+        var moved = Assert.Single(update.Upserted);
+        Assert.Equal((otherId, 12), (moved.Id, moved.Payload.X));
+        Assert.Empty(update.Removed);
+    }
+
+    [Fact]
+    public void WhenAWallSpanningTheWindowEdgeMovesAlongIt_ThenItStaysKnownOnce()
+    {
+        // Arrange: the window ends with the chunk of the tiles from 192 to 207.
+        var player = AddPlayer("tab-1");
+        var wall = new Wall { X = 180, Y = 8, Width = 40 };
+        var entity = AddObject(wall);
+        var wallId = Assert.Single(Update(player).Upserted, view => !view.IsSelf).Id;
+
+        // Act
+        wall.X = 200;
+        entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
+        var inside = Update(player);
+        wall.X = 210;
+        entity.ReadFromSubject();
+        _index.AddOrUpdate(entity);
+        var outside = Update(player);
+
+        // Assert
+        Assert.Equal((wallId, 200), (Assert.Single(inside.Upserted).Id, inside.Upserted[0].Payload.X));
+        Assert.Empty(inside.Removed);
+        Assert.Equal(new[] { wallId }, outside.Removed);
+        Assert.Empty(outside.Upserted);
+        Assert.Equal(1, _tracker.Count);
+    }
+}

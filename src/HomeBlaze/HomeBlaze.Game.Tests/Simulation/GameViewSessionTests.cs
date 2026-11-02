@@ -10,7 +10,7 @@ public class GameViewSessionTests
     private readonly RecordingViewSink _sink = new();
 
     private static string GetId(GameViewUpdate update, int x, int y) =>
-        Assert.Single(update.Upserted, view => view.X == x && view.Y == y).Id;
+        Assert.Single(update.Upserted, view => view.Payload.X == x && view.Payload.Y == y).Id;
 
     [Fact]
     public void WhenASessionJoins_ThenItsFirstUpdateHoldsEverythingInView()
@@ -27,9 +27,9 @@ public class GameViewSessionTests
         var (update, panel) = Assert.Single(_sink.Deliveries);
         Assert.Equal(2, update.Upserted.Count);
         var self = Assert.Single(update.Upserted, view => view.IsSelf);
-        Assert.Equal((GameViewObject.PlayerKind, 0, 0), (self.Kind, self.X, self.Y));
+        Assert.Equal((GameViewPayload.PlayerKind, 0, 0), (self.Payload.Kind, self.Payload.X, self.Payload.Y));
         var wall = Assert.Single(update.Upserted, view => !view.IsSelf);
-        Assert.Equal((-20, 8, 19), (wall.X, wall.Y, wall.Width));
+        Assert.Equal((-20, 8, 19), (wall.Payload.X, wall.Payload.Y, wall.Payload.Width));
         Assert.Empty(update.Removed);
         Assert.Equal(("X 0 · Y 0 · facing N", true, "tab-1"), (panel.PositionText, panel.HasPlayer, panel.PlayerClientId));
     }
@@ -52,7 +52,7 @@ public class GameViewSessionTests
         // Assert
         var update = Assert.Single(_sink.Updates);
         var view = Assert.Single(update.Upserted);
-        Assert.Equal((doorId, false), (view.Id, view.IsMovementBlocking));
+        Assert.Equal((doorId, false), (view.Id, view.Payload.IsMovementBlocking));
         Assert.Empty(update.Removed);
     }
 
@@ -84,8 +84,8 @@ public class GameViewSessionTests
         _context.OpenView("tab-1", _sink);
         var first = _sink.Updates[0];
         var leavingId = GetId(first, leaving.X, leaving.Y);
-        Assert.Contains(first.Upserted, view => view.X == staying.X);
-        Assert.DoesNotContain(first.Upserted, view => view.X == entering.X);
+        Assert.Contains(first.Upserted, view => view.Payload.X == staying.X);
+        Assert.DoesNotContain(first.Upserted, view => view.Payload.X == entering.X);
         _sink.Clear();
 
         // Act
@@ -95,8 +95,8 @@ public class GameViewSessionTests
         var update = Assert.Single(_sink.Updates);
         Assert.Equal(new[] { leavingId }, update.Removed);
         Assert.Equal(2, update.Upserted.Count);
-        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 8 });
-        Assert.Contains(update.Upserted, view => view.X == entering.X);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, Payload.X: 8 });
+        Assert.Contains(update.Upserted, view => view.Payload.X == entering.X);
     }
 
     [Fact]
@@ -127,9 +127,9 @@ public class GameViewSessionTests
         Assert.Equal(0, deliveredWhileBusy);
         var (update, panel) = Assert.Single(_sink.Deliveries);
         Assert.Equal(3, update.Upserted.Count);
-        Assert.Contains(update.Upserted, view => view.Id == firstId && !view.IsMovementBlocking);
-        Assert.Contains(update.Upserted, view => view.Id == secondId && !view.IsMovementBlocking);
-        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 1 });
+        Assert.Contains(update.Upserted, view => view.Id == firstId && !view.Payload.IsMovementBlocking);
+        Assert.Contains(update.Upserted, view => view.Id == secondId && !view.Payload.IsMovementBlocking);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, Payload.X: 1 });
         Assert.Equal("X 1 · Y 0 · facing E", panel.PositionText);
     }
 
@@ -160,7 +160,7 @@ public class GameViewSessionTests
         var wall = _context.AddWall(180, 8, width: 40);
         var door = _context.AddDoor(176, 0, width: 2);
         _context.OpenView("tab-1", _sink);
-        var wallId = Assert.Single(_sink.Updates[0].Upserted, view => view.X == 180).Id;
+        var wallId = Assert.Single(_sink.Updates[0].Upserted, view => view.Payload.X == 180).Id;
         _sink.Clear();
 
         // Act
@@ -229,7 +229,7 @@ public class GameViewSessionTests
         var wallId = Assert.Single(first.Upserted).Id;
         var updates = _sink.Updates;
         Assert.Contains(updates, update => update.Removed.Contains(wallId));
-        Assert.Contains(updates, update => update.Upserted.Any(view => view is { IsSelf: true, X: 1000 }));
+        Assert.Contains(updates, update => update.Upserted.Any(view => view is { IsSelf: true, Payload.X: 1000 }));
         Assert.Equal(("X 1000 · Y 0 · facing N", "tab-1"), (_sink.Panel.PositionText, _sink.Panel.PlayerClientId));
     }
 
@@ -310,8 +310,8 @@ public class GameViewSessionTests
         // Assert
         var update = Assert.Single(_sink.Updates);
         Assert.Equal(new[] { leavingId }, update.Removed);
-        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 8 });
-        Assert.Contains(update.Upserted, view => view.X == entering.X);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, Payload.X: 8 });
+        Assert.Contains(update.Upserted, view => view.Payload.X == entering.X);
     }
 
     [Fact]
@@ -331,8 +331,8 @@ public class GameViewSessionTests
         // Assert
         var update = Assert.Single(_sink.Updates);
         Assert.Empty(update.Removed);
-        Assert.Contains(update.Upserted, view => view.Id == otherId && view.X == 210);
-        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 8 });
+        Assert.Contains(update.Upserted, view => view.Id == otherId && view.Payload.X == 210);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, Payload.X: 8 });
     }
 
     [Fact]
@@ -352,7 +352,7 @@ public class GameViewSessionTests
         // Assert
         var (update, panel) = Assert.Single(_sink.Deliveries);
         Assert.Equal(new[] { formerId }, update.Removed);
-        Assert.Contains(update.Upserted, view => view is { IsSelf: true, X: 1000 });
+        Assert.Contains(update.Upserted, view => view is { IsSelf: true, Payload.X: 1000 });
         Assert.Equal(("tab-2", "X 1000 · Y 0 · facing N"), (panel.PlayerClientId, panel.PositionText));
     }
 
@@ -430,7 +430,88 @@ public class GameViewSessionTests
 
         // Assert
         Assert.Equal(0, deliveredInDeferredTick);
-        Assert.Contains(_sink.Updates, update => update.Upserted.Any(view => view.Id == doorId && !view.IsMovementBlocking));
+        Assert.Contains(_sink.Updates, update => update.Upserted.Any(view => view.Id == doorId && !view.Payload.IsMovementBlocking));
+    }
+
+    [Fact]
+    public void WhenTheSinkIsBusyWhileEntitiesMoveInAndOutOfTheWindow_ThenTheNextUpdateCarriesThemAll()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var other = _context.AddConnectedPlayer("tab-2", x: 10);
+        var leaving = _context.AddWall(-20, 8);
+        var entering = _context.AddWall(1000, 0);
+        var door = _context.AddDoor(10, 10);
+        _context.OpenView("tab-1", _sink);
+        var first = _sink.Updates[0];
+        var otherId = GetId(first, 10, 0);
+        var leavingId = GetId(first, -20, 8);
+        var doorId = GetId(first, 10, 10);
+        _sink.Clear();
+
+        // Act
+        _sink.IsBusy = true;
+        other.X = 20;
+        door.IsOpen = true;
+        _context.Tick();
+        other.X = 30;
+        leaving.X = 1000;
+        leaving.Y = 100;
+        entering.X = 40;
+        _context.Tick();
+        var deliveredWhileBusy = _sink.Deliveries.Count;
+        _sink.IsBusy = false;
+        _context.Tick();
+
+        // Assert
+        Assert.Equal(0, deliveredWhileBusy);
+        var update = Assert.Single(_sink.Updates);
+        Assert.Equal(new[] { leavingId }, update.Removed);
+        Assert.Equal(3, update.Upserted.Count);
+        Assert.Contains(update.Upserted, view => view.Id == otherId && view.Payload.X == 30);
+        Assert.Contains(update.Upserted, view => view.Id == doorId && !view.Payload.IsMovementBlocking);
+        Assert.Contains(update.Upserted, view => view is { IsSelf: false, Payload.X: 40, Payload.Y: 0 });
+    }
+
+    [Fact]
+    public void WhenABusySinkMissesMoreChangedEntitiesThanTheBound_ThenTheNextUpdateRefreshesTheWholeWindow()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.OpenView("tab-1", _sink);
+        _sink.Clear();
+        var objects = new Dictionary<string, GameObject>();
+        for (var i = 0; i <= GameViewSession.MaximumPendingEntities; i++)
+        {
+            objects[$"box-{i}"] = new VisualObject { X = 10 + i % 64 * 2, Y = 10 + i / 64 * 2 };
+        }
+
+        // Act
+        _sink.IsBusy = true;
+        _context.Game.SetObjects(objects);
+        _context.Tick();
+        var moved = (VisualObject)objects["box-0"];
+        moved.X = 9;
+        _context.Tick();
+
+        // Sessions opened later are updated first in a tick and take its full refreshes, so the busy session's full
+        // refresh waits a tick.
+        for (var i = 0; i < GameViewSessions.MaximumFullRefreshesPerTick; i++)
+        {
+            _context.Game.Views.Open("tab-1", new RecordingViewSink());
+        }
+
+        _sink.IsBusy = false;
+        _context.Tick();
+        var deliveredWhileDeferred = _sink.Deliveries.Count;
+        _context.Tick();
+
+        // Assert
+        Assert.Equal(0, deliveredWhileDeferred);
+        var update = Assert.Single(_sink.Updates);
+        Assert.Equal(objects.Count, update.Upserted.Count);
+        Assert.Contains(update.Upserted, view => view.Payload is { X: 9, Y: 10 });
+        Assert.Empty(update.Removed);
     }
 }
 

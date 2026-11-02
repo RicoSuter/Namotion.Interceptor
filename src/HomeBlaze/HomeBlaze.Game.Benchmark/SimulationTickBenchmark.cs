@@ -25,6 +25,8 @@ public class SimulationTickBenchmark
     private const int MovingPlayersInView = 10;
 
     private readonly GameVolumeTableBuilder _volumeTableBuilder = new();
+    private readonly GameViewPayloads _payloads = new(NullLogger.Instance);
+    private readonly GameViewChanges _changes = new();
 
     private BenchmarkWorld _world = null!;
     private Action _publishMovedPlayers = null!;
@@ -64,8 +66,10 @@ public class SimulationTickBenchmark
 
         // A session of its own, outside the game's sessions, which no tick updates anymore.
         _session = new GameViewSession(_world.ClientIds[0], DiscardingSink.Instance);
-        _session.Update(_world.World, _world.Game.PublishVersion, canFullRefresh: true, NullLogger.Instance);
-        _world.World.Index.Changes.Clear();
+        _session.Update(_world.World, _world.Game.PublishVersion, canFullRefresh: true, _payloads, _changes);
+        _payloads.Clear();
+        _changes.Clear();
+        _world.World.Index.ClearChanges();
     }
 
     [GlobalSetup(Target = nameof(PublishObjectSetAfterOnePlace))]
@@ -110,8 +114,10 @@ public class SimulationTickBenchmark
     public object? ViewSessionWithTenMovingPlayers()
     {
         MovePlayersInIndex(_world.Players.AsSpan(1, MovingPlayersInView), NextOffset());
-        _session.Update(_world.World, _world.Game.PublishVersion, canFullRefresh: true, NullLogger.Instance);
-        _world.World.Index.Changes.Clear();
+        _session.Update(_world.World, _world.Game.PublishVersion, canFullRefresh: true, _payloads, _changes);
+        _payloads.Clear();
+        _changes.Clear();
+        _world.World.Index.ClearChanges();
         return DiscardingSink.Instance.LastUpdate;
     }
 
@@ -174,7 +180,7 @@ public class SimulationTickBenchmark
     public void MovePlayers()
     {
         TeleportPlayers(NextOffset());
-        _world.World.Index.Changes.Clear();
+        _world.World.Index.ClearChanges();
     }
 
     /// <summary>
@@ -186,7 +192,7 @@ public class SimulationTickBenchmark
     {
         TeleportPlayers(NextOffset());
         _world.World.PublishSnapshot();
-        _world.World.Index.Changes.Clear();
+        _world.World.Index.ClearChanges();
     }
 
     private void SetupStopped(PlayerSpread spread)
@@ -222,7 +228,7 @@ public class SimulationTickBenchmark
     {
         MovePlayersInIndex(_world.Players, NextOffset());
         _world.Game.Views.Update(_world.Game.PublishVersion);
-        _world.World.Index.Changes.Clear();
+        _world.World.Index.ClearChanges();
     }
 
     private GameVolumeTable BuildVolumeTableAfterMoves(bool isDoorToggled)
@@ -235,7 +241,7 @@ public class SimulationTickBenchmark
             index.AddOrUpdate(_door);
         }
 
-        index.Changes.Clear();
+        index.ClearChanges();
         _soundSnapshot = _soundSnapshot.TakeChanges(index);
         var positions = new HearingPosition[_world.Players.Length];
         for (var i = 0; i < positions.Length; i++)
@@ -278,6 +284,9 @@ public class SimulationTickBenchmark
         {
             throw new InvalidOperationException("The object set was not published.");
         }
+
+        // As the end of a tick does, so the changes do not pile up over the invocations.
+        _world.World.Index.ClearChanges();
     }
 
     private sealed class DiscardingSink : IGameViewSink
