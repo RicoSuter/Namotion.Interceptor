@@ -41,8 +41,7 @@ public class ReadInvariantAccessTests
         { "browse", JsonSerializer.Serialize(new { format = "json", depth = 0, includeProperties = true }) },
         { "browse", JsonSerializer.Serialize(new { format = "json", path = "Device", depth = 0, includeProperties = true }) },
         { "search", JsonSerializer.Serialize(new { format = "json", includeProperties = true, includeAttributes = true }) },
-        { "get_property", JsonSerializer.Serialize(new { path = "Temperature" }) },
-        { "get_property", JsonSerializer.Serialize(new { path = "Device.DeviceName" }) }
+        { "get_property", JsonSerializer.Serialize(new { path = "Name" }) }
     };
 
     [Theory]
@@ -62,6 +61,24 @@ public class ReadInvariantAccessTests
         Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
     }
 
+    [Theory]
+    [InlineData("Temperature")]
+    [InlineData("Device.DeviceName")]
+    public async Task WhenThePolicyDeniesOnlyWritesAndThePathPassesAPropertyTheProviderExcludes_ThenGetPropertyAnswersAsWithoutAPolicy(string path)
+    {
+        // Arrange
+        var room = CreateRoom();
+        var request = JsonSerializer.SerializeToElement(new { path });
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(room, CreateConfiguration(policy: null), "get_property", request);
+        var withPolicy = await McpToolCaller.CallAsync(room, CreateConfiguration(DenyAllWrites), "get_property", request);
+
+        // Assert
+        Assert.Equal($"Path not found: {path}", withoutPolicy.GetProperty("error").GetString());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+    }
+
     [Fact]
     public void WhenThePolicyDeniesOnlyWrites_ThenTheHelpersResolveAsWithoutAPolicy()
     {
@@ -71,11 +88,13 @@ public class ReadInvariantAccessTests
         var configuration = CreateConfiguration(DenyAllWrites);
 
         // Act
-        var property = configuration.TryGetReadableProperty(root, "Device.DeviceName");
+        var property = configuration.TryGetReadableProperty(root, "Name");
+        var excludedProperty = configuration.TryGetReadableProperty(root, "Device.DeviceName");
         var subject = configuration.TryGetReadableSubject(root, "Device");
 
         // Assert
-        Assert.Equal(nameof(TestDevice.DeviceName), property!.Value.Property.Name);
+        Assert.Equal(nameof(TestRoom.Name), property!.Value.Property.Name);
+        Assert.Null(excludedProperty);
         Assert.Same(room.Device, subject!.Subject);
     }
 
@@ -121,6 +140,45 @@ public class ReadInvariantAccessTests
         Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
     }
 
+    // The text the answer without a policy contains: the device's path through its second parent, as its first is
+    // excluded by the provider, or the answer for the path through the first.
+    public static TheoryData<string, string, string> ExcludedFirstParentCalls => new()
+    {
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestDevice) } }), "\"Items[group].Devices[lamp]\"" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[group].Devices[lamp]", depth = 0 }), "\"$path\":\"Items[group].Devices[lamp]\"" },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[group].Devices[lamp].DeviceName" }), "Lamp" },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[room].Device.DeviceName" }), "Path not found: Items[room].Device.DeviceName" }
+    };
+
+    [Theory]
+    [MemberData(nameof(ExcludedFirstParentCalls))]
+    public async Task WhenTheProviderExcludesTheFirstParentOfASubject_ThenADenyWritesPolicyAnswersAsWithoutAPolicy(string toolName, string input, string expectedText)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var room = new TestRoom(context) { Name = "Kitchen" };
+        var group = new TestDeviceGroup(context);
+        var root = new TestMixedGroup(context)
+        {
+            Items = new Dictionary<string, IInterceptorSubject> { ["room"] = room, ["group"] = group }
+        };
+        var device = new TestDevice(context) { DeviceName = "Lamp" };
+        room.Device = device;
+        group.Devices = new Dictionary<string, TestDevice> { ["lamp"] = device };
+        var pathProvider = new ExcludingPathProvider(nameof(TestRoom.Device));
+        var request = JsonSerializer.Deserialize<JsonElement>(input);
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(root, new McpServerConfiguration { PathProvider = pathProvider }, toolName, request);
+        var withPolicy = await McpToolCaller.CallAsync(root, new McpServerConfiguration { PathProvider = pathProvider, AccessPolicy = DenyAllWrites }, toolName, request);
+
+        // Assert
+        Assert.Contains(expectedText, withoutPolicy.GetRawText());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(0)]
@@ -151,6 +209,11 @@ public class ReadInvariantAccessTests
     {
         public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
             property.Name == nameof(TestHouse.Private) ? "My.Private" : property.BrowseName;
+    }
+
+    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
 
     private sealed class NameAndSubjectsPathProvider : PathProviderBase
