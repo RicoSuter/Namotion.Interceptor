@@ -202,8 +202,8 @@ namespace Namotion.Interceptor.Registry.Paths
         public virtual char IndexClose { get; }
         public virtual char IndexOpen { get; }
         public virtual char PathSeparator { get; }
+        public bool IsPropertyEffectivelyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public virtual bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public bool IsPropertyIncludedInPaths(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         protected virtual bool TryGetIncludedPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
         public virtual Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment) { }
         public virtual string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
