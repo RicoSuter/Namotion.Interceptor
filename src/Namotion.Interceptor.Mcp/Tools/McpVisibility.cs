@@ -50,22 +50,15 @@ internal sealed class McpVisibility
             : Unrestricted;
 
     /// <summary>
-    /// The configuration's tool path provider, <paramref name="pathProvider"/>, restricted with a policy to properties
-    /// whose owner is shown, so a path resolved with it passes shown subjects only. Without a policy,
-    /// <paramref name="pathProvider"/> itself.
+    /// The configuration's tool path provider, <paramref name="toolPathProvider"/>, restricted with a policy to
+    /// properties whose owner is shown, so a path resolved with it passes shown subjects only. Without a policy,
+    /// <paramref name="toolPathProvider"/> itself.
     /// </summary>
-    public PathProviderBase GetPathProvider(PathProviderBase pathProvider)
-    {
-        if (_policy is null)
-        {
-            return pathProvider;
-        }
-
-        // The cache is kept per inner provider, so a call with another provider never gets one wrapping the first.
-        return _shownSubjectsPathProvider is not null && _shownSubjectsPathProvider.Inner == pathProvider
-            ? _shownSubjectsPathProvider
-            : _shownSubjectsPathProvider = new ShownSubjectsPathProvider(pathProvider, this);
-    }
+    /// <param name="toolPathProvider">The <see cref="McpServerConfiguration.ToolPathProvider"/> of the configuration this visibility is for.</param>
+    public PathProviderBase GetPathProvider(PathProviderBase toolPathProvider) =>
+        _policy is null
+            ? toolPathProvider
+            : _shownSubjectsPathProvider ??= new ShownSubjectsPathProvider(toolPathProvider, this);
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute that the
@@ -170,8 +163,6 @@ internal sealed class McpVisibility
 
     private sealed class ShownSubjectsPathProvider(PathProviderBase inner, McpVisibility visibility) : PathProviderBase
     {
-        public PathProviderBase Inner => inner;
-
         public override char PathSeparator => inner.PathSeparator;
 
         public override char IndexOpen => inner.IndexOpen;
