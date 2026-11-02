@@ -104,7 +104,7 @@ public class GamePlayerAnimationTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         _context.Game.PlayAnimation(new GameCaller("tab-1"), "Sitting", GameVisualAnimationMode.Loop);
-        _context.Tick(TicksOfLimit);
+        _context.Tick();
 
         // Act
         await _context.StepAsync("tab-1", GameDirection.East);
@@ -198,5 +198,65 @@ public class GamePlayerAnimationTests
 
         // Assert
         Assert.Null(player.Animation);
+    }
+
+    [Fact]
+    public async Task WhenABlockedStepIsTried_ThenTheAnimationStays()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.AddWall(2, 0, width: 1, depth: 1);
+        _context.Game.PlayAnimation(new GameCaller("tab-1"), "Sitting", GameVisualAnimationMode.Loop);
+        _context.Tick();
+
+        // Act
+        var result = await _context.StepAsync("tab-1", GameDirection.East);
+        _context.Publish();
+
+        // Assert
+        Assert.False(result!.Value.IsAccepted);
+        Assert.Equal("Sitting", player.Animation);
+    }
+
+    [Fact]
+    public void WhenAnOutsideWriteMovesThePlayer_ThenItsAnimationIsCleared()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        _context.Game.PlayAnimation(new GameCaller("tab-1"), "Sitting", GameVisualAnimationMode.Loop);
+        _context.Publish();
+
+        // Act
+        player.X = 10;
+        _context.Publish();
+
+        // Assert
+        Assert.Null(player.Animation);
+    }
+
+    [Fact]
+    public void WhenThePlayerDisconnectsBeforeTheTickThatStartsTheAnimation_ThenNothingPlays()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1", isNamed: true);
+        _context.Game.PlayAnimation(new GameCaller("tab-1"), "Sitting", GameVisualAnimationMode.Loop);
+
+        // Act
+        _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
+        _context.Reconcile();
+        _context.Publish();
+
+        // Assert
+        Assert.Null(player.Animation);
+    }
+
+    [Fact]
+    public void WhenTheModeIsNotDefined_ThenPlayingThrows()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => _context.Game.PlayAnimation(new GameCaller("tab-1"), "Clapping", (GameVisualAnimationMode)99));
     }
 }

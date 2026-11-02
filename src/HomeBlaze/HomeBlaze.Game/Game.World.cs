@@ -171,6 +171,11 @@ public partial class Game
             throw new ArgumentException("Idle and Walk are played by the game.", nameof(animation));
         }
 
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode));
+        }
+
         if (caller is null || GetActor(caller) is null)
         {
             throw new InvalidOperationException(NoAnimationActorMessage);

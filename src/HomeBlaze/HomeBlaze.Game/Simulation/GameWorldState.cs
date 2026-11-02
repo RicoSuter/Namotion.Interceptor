@@ -321,7 +321,13 @@ internal sealed class GameWorldState
         }
 
         var area = player.Area;
-        player.Area = area with { X = x ?? area.X, Y = y ?? area.Y };
+        var moved = area with { X = x ?? area.X, Y = y ?? area.Y };
+        if (moved != area)
+        {
+            ClearAnimation(player);
+        }
+
+        player.Area = moved;
         Index.AddOrUpdate(player);
         OnPositionChanged(player);
     }
