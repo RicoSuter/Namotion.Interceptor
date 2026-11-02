@@ -280,36 +280,42 @@ Path providers map between subject property paths and external system paths. The
 ```csharp
 public interface IPathProvider
 {
-    /// <summary>
-    /// Should this property be included in paths?
-    /// </summary>
-    bool IsPropertyIncluded(RegisteredSubjectProperty property);
+    // False when the property is excluded; true with its segment, never null, when it is included.
+    bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment);
 
-    /// <summary>
-    /// Get the path segment for a property.
-    /// Returns null if no explicit mapping exists.
-    /// </summary>
-    string? TryGetPropertySegment(RegisteredSubjectProperty property);
+    // The inverse: the first included property whose segment matches, or the [InlinePaths] property whose key the
+    // segment is. Never an excluded property.
+    bool TryGetPropertyFromSegment(RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property);
+}
+```
 
-    /// <summary>
-    /// Find a property by its path segment.
-    /// </summary>
-    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
+Both methods may be called concurrently. `IsPropertyIncluded` and `IsPropertyEffectivelyIncluded` are extension methods on `IPathProvider` in `PathProviderExtensions`; the first returns what `TryGetPropertySegment` returns, the second is described below.
+
+A custom provider derives from `PathProviderBase` and overrides `TryGetPropertySegment`. The base class includes every property under its `BrowseName`, matches segments through `TryGetPropertySegment` so that only included properties resolve, falls back to the `[InlinePaths]` property, and has the virtual `PathSeparator`, `IndexOpen` and `IndexClose`:
+
+```csharp
+public class StatePathProvider : PathProviderBase
+{
+    public override char PathSeparator => '/';
+
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        segment = property.TryGetAttribute("State") is not null || property.CanContainSubjects ? property.Name : null;
+        return segment is not null;
+    }
 }
 ```
 
 ### Included properties
 
-A path provider defines a view of the graph: `IsPropertyIncluded` decides which properties are in it and `TryGetPropertySegment` gives their segments. Paths go only through properties the provider includes, in both directions:
+A path provider defines a view of the graph: `TryGetPropertySegment` decides which properties are in it and gives their segments. Paths go only through properties the provider includes, in both directions:
 
 - `TryGetPath` and `GetPaths` build no path for a property when it or any property holding it up to the root is excluded, including an `[InlinePaths]` dictionary whose key is a bare segment. When a subject on the way has several parents and a root is given, the path is the first path, in parent order, that reaches the root through properties the provider includes, and there is none only when no such path exists. Without a root, the path follows the first parent of each subject.
 - `TryGetPropertyFromPath`, `TryGetSubjectFromPath` and `GetPropertiesFromPaths` resolve a path only when every segment names a property the provider includes.
 
-So a path built with a provider never passes an excluded property, and resolves back with the same provider to the same property when the provider's `TryGetPropertyFromSegment` finds each property by the segment `TryGetPropertySegment` gives it (or by its `BrowseName` when that is null), which the built-in providers do. Within that, the limits in [Path Syntax](#path-syntax) apply: a segment that contains the separator does not resolve back, and a key of a type other than string, integer, `Guid` or enum resolves to the first entry with the same text. With `DefaultPathProvider`, or any provider that gives an attribute its `BrowseName` as segment, an attribute's segment is its bare name, so two attributes with the same name on one subject, or an attribute named like a property, share a segment and resolve back to the first of them in the subject's property order: the `Unit` attributes of `FirstName` and `LastName` both build the path `Unit`. A nested property has a path only when every level above it is included: with `AttributeBasedPathProvider`, every property holding a subject on the way needs a `[Path]` attribute of its own.
+So a path built with a provider never passes an excluded property, and resolves back with the same provider to the same property when its `TryGetPropertyFromSegment` is the inverse of its `TryGetPropertySegment`, as in `PathProviderBase`. Within that, the limits in [Path Syntax](#path-syntax) apply: a segment that contains the separator does not resolve back, and a key of a type other than string, integer, `Guid` or enum resolves to the first entry with the same text. With `DefaultPathProvider`, or any provider that gives an attribute its `BrowseName` as segment, an attribute's segment is its bare name, so two attributes with the same name on one subject, or an attribute named like a property, share a segment and resolve back to the first of them in the subject's property order: the `Unit` attributes of `FirstName` and `LastName` both build the path `Unit`. A nested property has a path only when every level above it is included: with `AttributeBasedPathProvider`, every property holding a subject on the way needs a `[Path]` attribute of its own.
 
-An attribute belongs to its property, so paths pass only properties that are effectively included: the provider includes the property and, for an attribute, the property it belongs to, recursively. The properties holding its subject are not part of this check. `PathProviderBase.IsPropertyEffectivelyIncluded` checks it for one property, for code that lists or filters properties as paths do. Excluding a property therefore excludes its attributes too, so no path is built or resolved to them or through a subject one of them holds. Attributes that belong to each other in a cycle are not included. To give an attribute a path with `AttributeBasedPathProvider`, annotate the attribute and its property.
-
-Paths ask a `PathProviderBase` for inclusion and segment together through `TryGetIncludedPropertySegment`. A provider that finds both with one lookup can override this protected method, as the built-in providers do. The override must agree with `IsPropertyIncluded` and `TryGetPropertySegment`, and in a class that can be derived from it must call `base.TryGetIncludedPropertySegment` when the instance is of a derived type, which may override either of them alone.
+An attribute belongs to its property, so paths pass only properties that are effectively included: the provider includes the property and, for an attribute, the property it belongs to, recursively. The properties holding its subject are not part of this check. The registry applies this rule, not the provider: `IsPropertyEffectivelyIncluded` checks it for one property, for code that lists or filters properties as paths do. Excluding a property therefore excludes its attributes too, so no path is built or resolved to them or through a subject one of them holds. Attributes that belong to each other in a cycle are not included. To give an attribute a path with `AttributeBasedPathProvider`, annotate the attribute and its property.
 
 ```csharp
 [InterceptorSubject]
@@ -334,7 +340,7 @@ var pathProvider = new AttributeBasedPathProvider("mqtt", '/');
 
 - **DefaultPathProvider** - Uses property names exactly as defined
 - **CamelCasePathProvider** - Converts property names to camelCase for JSON APIs
-- **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping
+- **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping and includes only the properties that have one with its name, and the `[InlinePaths]` property
 
 ### [Path] Attribute
 
