@@ -498,7 +498,22 @@ internal sealed class StorageReconciler
     {
         // A file that is gone has nothing to apply; the write creates it again.
         var version = await GetVersionAsync(entry.Path, cancellationToken);
-        if (version == default || version == entry.Version || !await RefreshAsync(entry, version, content: null, cancellationToken))
+        if (version == default || version == entry.Version)
+        {
+            return false;
+        }
+
+        var hash = entry.Hash;
+        var isReplaced = await RefreshAsync(entry, version, content: null, cancellationToken);
+        if (isReplaced || entry.Hash != hash)
+        {
+            // The log of the reload does not tell that configuration which was not saved yet is gone.
+            _logger?.LogWarning(
+                "Applied an edit of {Path} before saving it, which replaced configuration of its subject that was not saved yet",
+                entry.Path);
+        }
+
+        if (!isReplaced)
         {
             return false;
         }

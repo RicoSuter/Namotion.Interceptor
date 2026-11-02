@@ -14,5 +14,10 @@ public interface IConfigurationWriter
     /// <param name="subject">The subject whose containing configuration is written.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>true if the configuration was written; false if nothing was written, such as when this writer stores no configuration that contains the subject.</returns>
+    /// <remarks>
+    /// A writer can first apply an edit of the stored configuration that it has not loaded yet, so that the edit is
+    /// written back instead of being overwritten. Configuration of the subjects that was not saved yet is then
+    /// replaced by the edit, and a subject can be replaced by a new one.
+    /// </remarks>
     Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken);
 }

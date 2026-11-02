@@ -102,6 +102,26 @@ public class FluentStorageContainerConfigurationWriterTests : StorageTestBase
         Assert.Contains("\"name\": \"added\"", content);
     }
 
+    [Fact]
+    public async Task WhenFileWasEditedIntoAnotherSubjectBeforeAPassAppliedIt_ThenTheSaveWritesNothingAndTheNewSubjectIsPlaced()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var file = new ConfigurationWriterTestSubject(Context!) { Name = "original" };
+        await storage.AddSubjectAsync(FilePath, file, CancellationToken.None);
+        var editedContent = SerializeMotor("edited");
+        WriteFile(FilePath, editedContent);
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(file, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(editedContent, await ReadFileAsync());
+        var motor = Assert.IsType<Samples.Motor>(storage.Children[Path.GetFileNameWithoutExtension(FilePath)]);
+        Assert.Equal("edited", motor.Name);
+    }
+
     private Task<string> ReadFileAsync() => File.ReadAllTextAsync(GetFullPath(FilePath));
 }
 

@@ -518,12 +518,19 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// IConfigurationWriter - Saves the file of the subject, or of the subject it is nested in through
-    /// [Configuration] properties. An edit of the file that was not loaded yet is applied to the subject first, so it
-    /// is written back instead of being overwritten.
+    /// [Configuration] properties.
     /// </summary>
     /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
-    /// document or of a file that is no configurable subject, when such an edit replaced the subject of the file, or
-    /// the storage is not connected.</returns>
+    /// document or of a file that is no configurable subject, when an edit of the file replaced the subject of the
+    /// file, or the storage is not connected.</returns>
+    /// <remarks>
+    /// When the file was edited since it was last loaded or written, the edit is applied to the subject of the file
+    /// first, as a reload does, and then written back. Configuration of that subject that was not saved yet is
+    /// replaced by the edit, which is logged as a warning, and a subject nested in its configuration can be replaced
+    /// by a new one. <see cref="IConfigurable.ApplyConfigurationAsync"/> of the subject of the file runs before this
+    /// method returns. An edit that cannot be applied, such as text that is no valid JSON or a configuration that
+    /// fails to apply, makes this method throw without writing.
+    /// </remarks>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;
