@@ -45,11 +45,12 @@ internal sealed class MarkdownSearchSourceFinder
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
     {
         var sources = new List<MarkdownSearchSource>();
-        var accessRoot = _configuration.AccessPolicy is null ? null : rootSubject.TryGetRegisteredSubject();
-        if (_configuration.AccessPolicy is not null && accessRoot is null)
+        if (rootSubject.TryGetRegisteredSubject() is not { } root)
         {
             return sources;
         }
+
+        var accessRoot = _configuration.AccessPolicy is null ? null : root;
 
         foreach (var (_, registered) in registry.KnownSubjects)
         {
@@ -58,7 +59,7 @@ internal sealed class MarkdownSearchSourceFinder
 
             // Most subjects are neither, and the path and the exclusion walk up the parents.
             if ((file is null && notes is null) ||
-                TryGetPath(registered, rootSubject) is not { } path ||
+                TryGetPath(registered, root) is not { } path ||
                 !IsInOrUnder(path, pathPrefix))
             {
                 continue;
@@ -139,30 +140,17 @@ internal sealed class MarkdownSearchSourceFinder
         return notes;
     }
 
-    // The path as browse and search show it, after the path prefix: through the first parent, in parent order, from
-    // which a path can be written; null for a subject of an excluded type or below one.
-    private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
+    // The path as search lists it, null for a subject it does not show or of an excluded type or below one.
+    private string? TryGetPath(RegisteredSubject subject, RegisteredSubject root)
     {
-        if (ReferenceEquals(subject.Subject, rootSubject))
+        if (ReferenceEquals(subject.Subject, root.Subject))
         {
             return _pathPrefix;
         }
 
-        var parents = subject.Parents;
-        if (parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, rootSubject, _excludeTypes))
-        {
-            return null;
-        }
-
-        foreach (var parent in parents)
-        {
-            if (parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index) is { } path)
-            {
-                return _pathPrefix + path;
-            }
-        }
-
-        return null;
+        return subject.Parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, root.Subject, _excludeTypes)
+            ? null
+            : _configuration.TryGetSubjectPath(root, subject);
     }
 
     // Whole segments only, so /Docs does not match /DocsArchive/Page.md; every path is under no prefix.

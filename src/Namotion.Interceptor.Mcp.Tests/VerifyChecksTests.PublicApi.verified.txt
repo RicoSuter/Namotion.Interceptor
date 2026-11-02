@@ -67,6 +67,7 @@ namespace Namotion.Interceptor.Mcp
                 "Index"})]
         public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetReadableProperty(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, string path) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetReadableSubject(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, string path) { }
+        public static string? TryGetSubjectPath(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject root, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
     }
     public sealed class McpToolAnnotations : System.IEquatable<Namotion.Interceptor.Mcp.McpToolAnnotations>
     {

@@ -583,7 +583,8 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
 
         // Assert
         var page = GetSinglePage(result);
-        Assert.Equal("/House/Children[Kitchen]", page.GetProperty("path").GetString());
+        // As search writes it: the hidden property is treated as absent, so the key needs no explicit form.
+        Assert.Equal("/House/Kitchen", page.GetProperty("path").GetString());
         Assert.Equal("The shown gasket.", page.GetProperty("matches")[0].GetProperty("snippet").GetString());
     }
 
@@ -649,6 +650,29 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
             Children = new Dictionary<string, IInterceptorSubject> { ["Page"] = page }
         };
         var tool = CreateTool(services, toolRoot, isAgent: false);
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Page"], result.GetProperty("pages").EnumerateArray().Select(match => match.GetProperty("path").GetString()));
+    }
+
+    [Fact]
+    public async Task WhenARoleHidesThePropertyHoldingAPageThroughItsFirstParent_ThenItsPathGoesThroughTheParentTheRoleShows()
+    {
+        // Arrange
+        // The page got the storage first, whose children the role hides.
+        var (root, services) = await CreateGraphAsync([]);
+        var page = ((FluentStorageContainer)root.Children["Storage"]).Children["Notes.md"];
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["Page"] = page };
+        var role = new AuthorizationRole
+        {
+            Name = "NoStorageChildren",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Types = [nameof(FluentStorageContainer)], Members = [nameof(FluentStorageContainer.Children)], Actions = [PermissionAction.Read] }]
+        };
+        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
 
         // Act
         var result = await CallAsync(tool, new { query = "freezer" });
