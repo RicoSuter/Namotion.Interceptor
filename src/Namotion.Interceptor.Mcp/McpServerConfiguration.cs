@@ -11,8 +11,9 @@ namespace Namotion.Interceptor.Mcp;
 public class McpServerConfiguration
 {
     /// <summary>
-    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list and filter
-    /// on the properties it includes, and resolve and build paths with its segments through every property.
+    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list, filter on,
+    /// resolve and build paths only through the properties it effectively includes (see
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>).
     /// </summary>
     public required IPathProvider PathProvider { get; init; }
 
@@ -73,27 +74,12 @@ public class McpServerConfiguration
     public bool IsReadOnly { get; init; } = true;
 
     private PathProviderBase? _toolPathProvider;
-    private PathProviderBase? _resolutionPathProvider;
 
     /// <summary>
-    /// The path provider the tools list, select and filter through: <see cref="PathProvider"/>, which must extend
-    /// <see cref="PathProviderBase"/>, restricted to what <see cref="AccessPolicy"/> allows to read.
+    /// The path provider the tools list, select, filter and resolve through and build the paths they return with:
+    /// <see cref="PathProvider"/>, which must extend <see cref="PathProviderBase"/>, restricted to what
+    /// <see cref="AccessPolicy"/> allows to read.
     /// </summary>
     // Racing first calls create equal providers, so whichever one is kept is correct.
-    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: true);
-
-    /// <summary>
-    /// <see cref="PathProvider"/>, which must extend <see cref="PathProviderBase"/>.
-    /// </summary>
-    internal PathProviderBase BasePathProvider =>
-        PathProvider as PathProviderBase ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
-
-    /// <summary>
-    /// The path provider a requested path resolves through and the paths the tools return are built with: the
-    /// segments of <see cref="PathProvider"/>, including every property, or with an <see cref="AccessPolicy"/> exactly
-    /// what the policy allows to read.
-    /// </summary>
-    internal PathProviderBase ResolutionPathProvider => _resolutionPathProvider ??= AccessPolicy is null
-        ? new UnfilteredPathProvider(BasePathProvider)
-        : McpAccessPathProvider.Create(PathProvider, AccessPolicy, appliesInnerInclusion: false);
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy);
 }

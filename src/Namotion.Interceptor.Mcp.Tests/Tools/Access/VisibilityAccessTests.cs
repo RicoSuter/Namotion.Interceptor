@@ -82,7 +82,7 @@ public class VisibilityAccessTests
     }
 
     [Fact]
-    public void WhenAskedForAnotherInnerProvider_ThenTheVisibilityWrapsThatProvider()
+    public void WhenAskedForThePathProviderTwice_ThenTheVisibilityReturnsTheSameOne()
     {
         // Arrange
         var context = CreateContext();
@@ -95,18 +95,44 @@ public class VisibilityAccessTests
         var visibility = McpVisibility.For(configuration, room);
 
         // Act
-        var first = visibility.GetListingPathProvider(DefaultPathProvider.Instance);
-        var again = visibility.GetListingPathProvider(DefaultPathProvider.Instance);
-        var other = visibility.GetListingPathProvider(new SlashPathProvider());
+        var first = visibility.GetPathProvider(configuration.ToolPathProvider);
+        var again = visibility.GetPathProvider(configuration.ToolPathProvider);
 
         // Assert
         Assert.Same(first, again);
-        Assert.Equal('.', first.PathSeparator);
-        Assert.Equal('/', other.PathSeparator);
     }
 
-    private sealed class SlashPathProvider : PathProviderBase
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenThePolicyDeniesEveryIncludedPropertyOfASubject_ThenItIsHiddenWhateverItAllowsOnExcludedOnes(bool isExcludedPropertyDenied)
     {
-        public override char PathSeparator => '/';
+        // Arrange
+        // The provider excludes the device's IsOn, so only DeviceName decides whether the device is empty.
+        var context = CreateContext();
+        var room = new TestRoom(context) { Name = "Kitchen" };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = new ExcludingPathProvider(nameof(TestDevice.IsOn)),
+            AccessPolicy = isExcludedPropertyDenied
+                ? TestAccessPolicy.DenyRead(nameof(TestDevice.DeviceName), nameof(TestDevice.IsOn))
+                : TestAccessPolicy.DenyRead(nameof(TestDevice.DeviceName))
+        };
+
+        // Act
+        var isShown = McpVisibility.For(configuration, room).IsShown(room.Device.TryGetRegisteredSubject()!);
+        var subject = configuration.TryGetReadableSubject(room.TryGetRegisteredSubject()!, nameof(TestRoom.Device));
+        var result = await McpToolCaller.CallAsync(room, configuration, "search", new { format = "json", types = new[] { nameof(TestDevice) } });
+
+        // Assert
+        Assert.False(isShown);
+        Assert.Null(subject);
+        Assert.Empty(result.GetProperty("results").EnumerateObject());
+    }
+
+    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
 }

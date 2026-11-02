@@ -8,28 +8,31 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// <summary>
 /// Whether the tools show a subject, for one tool call. Without an access policy every subject is shown. With one, a
 /// subject is shown when it is the root, or when it is not empty for the policy and has a readable path: a path from the
-/// root, through one of its parents, that passes only properties the policy allows to read.
+/// root, through one of its parents, that passes only properties the configuration's tool path provider effectively
+/// includes, which are ones the path provider effectively includes and the policy allows to read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpVisibility
 {
     private readonly IMcpAccessPolicy? _policy;
     private readonly IInterceptorSubject? _rootSubject;
-    private readonly PathProviderBase? _readablePathProvider;
+    private readonly PathProviderBase? _pathProvider;
+    private readonly PathProviderBase? _toolPathProvider;
     private Dictionary<RegisteredSubject, bool>? _isShown;
-    private ShownSubjectsPathProvider? _listingPathProvider;
-    private ShownSubjectsPathProvider? _resolutionPathProvider;
+    private ShownSubjectsPathProvider? _shownSubjectsPathProvider;
 
     private McpVisibility()
     {
     }
 
-    // readablePathProvider includes exactly what the policy allows to read.
-    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, PathProviderBase readablePathProvider)
+    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, McpServerConfiguration configuration)
     {
         _policy = policy;
         _rootSubject = rootSubject;
-        _readablePathProvider = readablePathProvider;
+        _toolPathProvider = configuration.ToolPathProvider;
+
+        // ToolPathProvider has checked that the configured provider extends PathProviderBase.
+        _pathProvider = (PathProviderBase)configuration.PathProvider;
     }
 
     /// <summary>
@@ -43,44 +46,42 @@ internal sealed class McpVisibility
     /// </summary>
     public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
         configuration.AccessPolicy is { } policy
-            ? new McpVisibility(policy, rootSubject, configuration.ResolutionPathProvider)
+            ? new McpVisibility(policy, rootSubject, configuration)
             : Unrestricted;
 
     /// <summary>
-    /// The configuration's listing provider, <paramref name="listingPathProvider"/>, restricted with a policy to
-    /// properties whose owner is shown, so a path resolved with it passes shown subjects
-    /// only. Without a policy, <paramref name="listingPathProvider"/> itself.
+    /// The configuration's tool path provider, <paramref name="toolPathProvider"/>, restricted with a policy to
+    /// properties whose owner is shown, so a path resolved with it passes shown subjects only. Without a policy,
+    /// <paramref name="toolPathProvider"/> itself.
     /// </summary>
-    public PathProviderBase GetListingPathProvider(PathProviderBase listingPathProvider) =>
-        _policy is null ? listingPathProvider : GetShownSubjectsPathProvider(ref _listingPathProvider, listingPathProvider);
+    /// <param name="toolPathProvider">The <see cref="McpServerConfiguration.ToolPathProvider"/> of the configuration this visibility is for.</param>
+    public PathProviderBase GetPathProvider(PathProviderBase toolPathProvider) =>
+        _policy is null
+            ? toolPathProvider
+            : _shownSubjectsPathProvider ??= new ShownSubjectsPathProvider(toolPathProvider, this);
 
     /// <summary>
-    /// The configuration's resolution provider, <paramref name="resolutionPathProvider"/>, restricted as
-    /// <see cref="GetListingPathProvider"/> restricts the listing provider.
+    /// Whether the subject is empty for the policy: it has at least one property other than an attribute that the
+    /// configuration's path provider effectively includes, and the policy denies read on every one of them. A subject
+    /// without such properties is not empty. Always false without a policy.
     /// </summary>
-    public PathProviderBase GetResolutionPathProvider(PathProviderBase resolutionPathProvider) =>
-        _policy is null ? resolutionPathProvider : GetShownSubjectsPathProvider(ref _resolutionPathProvider, resolutionPathProvider);
-
-    // The cache is kept per inner provider, so a call with another provider never gets one wrapping the first.
-    private ShownSubjectsPathProvider GetShownSubjectsPathProvider(ref ShownSubjectsPathProvider? cached, PathProviderBase inner) =>
-        cached is not null && cached.Inner == inner ? cached : cached = new ShownSubjectsPathProvider(inner, this);
-
-    /// <summary>
-    /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
-    /// policy denies read on every one of them. A subject without such properties is not empty.
-    /// </summary>
-    internal static bool IsEmptyForPolicy(RegisteredSubject subject, IMcpAccessPolicy policy)
+    internal bool IsEmptyForPolicy(RegisteredSubject subject)
     {
+        if (_policy is null)
+        {
+            return false;
+        }
+
         // Attributes are listed only on a listed property, so they make a subject neither shown nor empty.
         var hasProperty = false;
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
+            if (property.IsAttribute || !_pathProvider!.IsPropertyEffectivelyIncluded(property))
             {
                 continue;
             }
 
-            if (policy.IsAllowed(property, McpAccessActions.Read))
+            if (_policy.IsAllowed(property, McpAccessActions.Read))
             {
                 return false;
             }
@@ -111,7 +112,30 @@ internal sealed class McpVisibility
         _isShown ??= [];
         if (!_isShown.TryGetValue(subject, out var isShown))
         {
-            isShown = Evaluate(subject, _policy);
+            isShown = Evaluate(subject);
+            _isShown[subject] = isShown;
+        }
+
+        return isShown;
+    }
+
+    /// <summary>
+    /// <see cref="IsShown(RegisteredSubject)"/> for a subject whose path <see cref="McpToolHelper.TryGetSubjectPath"/>
+    /// has written from the root this visibility is for, which is a readable path, so only whether the subject is empty
+    /// for the policy is left to check.
+    /// </summary>
+    public bool IsShownWithWrittenPath(RegisteredSubject subject)
+    {
+        if (_policy is null || subject.Subject == _rootSubject)
+        {
+            return true;
+        }
+
+        // Seeds the cache that IsShown reads, as a where filter of the same call may ask about this subject again.
+        _isShown ??= [];
+        if (!_isShown.TryGetValue(subject, out var isShown))
+        {
+            isShown = !IsEmptyForPolicy(subject);
             _isShown[subject] = isShown;
         }
 
@@ -120,16 +144,16 @@ internal sealed class McpVisibility
 
     // A subject with several parents is shown through any of them, so hiding one link hides only that link. A subject
     // without a readable path from the root is not shown, also when no path reaches the root at all.
-    private bool Evaluate(RegisteredSubject subject, IMcpAccessPolicy policy)
+    private bool Evaluate(RegisteredSubject subject)
     {
-        if (IsEmptyForPolicy(subject, policy))
+        if (IsEmptyForPolicy(subject))
         {
             return false;
         }
 
         foreach (var parent in subject.Parents)
         {
-            if (parent.Property.HasIncludedPath(_readablePathProvider!, _rootSubject))
+            if (parent.Property.HasIncludedPath(_toolPathProvider!, _rootSubject))
             {
                 return true;
             }
@@ -140,8 +164,6 @@ internal sealed class McpVisibility
 
     private sealed class ShownSubjectsPathProvider(PathProviderBase inner, McpVisibility visibility) : PathProviderBase
     {
-        public PathProviderBase Inner => inner;
-
         public override char PathSeparator => inner.PathSeparator;
 
         public override char IndexOpen => inner.IndexOpen;
