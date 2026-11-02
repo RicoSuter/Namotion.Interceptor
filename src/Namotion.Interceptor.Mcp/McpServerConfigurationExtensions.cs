@@ -42,6 +42,31 @@ public static class McpServerConfigurationExtensions
         => configuration.TryGetReadableSubject(root, path, McpVisibility.For(configuration, root.Subject));
 
     /// <summary>
+    /// Writes the path of <paramref name="subject"/> from <paramref name="root"/> as search lists it, and browse as its
+    /// <c>$path</c>: after <see cref="McpServerConfiguration.PathPrefix"/>, through the first parent, in parent order,
+    /// from which the path can be written; for <paramref name="root"/> itself the prefix, or null when the prefix is
+    /// empty. Null when no path can be written or the <see cref="McpServerConfiguration.AccessPolicy"/> does not show the
+    /// subject, see "Access Policy" in the MCP documentation, so that a subject gets a path exactly when search can list
+    /// it. <see cref="McpServerConfiguration.ExcludeTypes"/> is not applied. The counterpart of
+    /// <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/>, which resolves a path this
+    /// returns for a subject other than <paramref name="root"/> back to the subject.
+    /// </summary>
+    /// <returns>The path, or null.</returns>
+    public static string? TryGetSubjectPath(
+        this McpServerConfiguration configuration, RegisteredSubject root, RegisteredSubject subject)
+    {
+        var path = McpToolHelper.TryGetSubjectPath(subject, configuration, root.Subject);
+
+        // A written path is a readable one, so whether the subject is empty for the policy is left, as search checks it.
+        return path is not null &&
+            configuration.AccessPolicy is { } policy &&
+            subject.Subject != root.Subject &&
+            McpVisibility.IsEmptyForPolicy(policy, (PathProviderBase)configuration.PathProvider, subject)
+                ? null
+                : path;
+    }
+
+    /// <summary>
     /// <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/> with the visibility of
     /// the current call, whose root is <paramref name="root"/>.
     /// </summary>
