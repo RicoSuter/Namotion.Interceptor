@@ -13,9 +13,10 @@
             @foreach (var person in GamePeople.Names)
             {
                 <button type="button" class="@(person == _character ? "game-person selected" : "game-person")"
-                        @onclick="() => _character = person" title="@person" aria-pressed="@(person == _character)"
+                        @onclick="() => _character = person" title="@GamePeople.GetLabel(person)"
+                        aria-pressed="@(person == _character ? "true" : "false")"
                         data-testid="game-person-@person">
-                    <img src="_content/HomeBlaze.Game/models/people/@(person).png" alt="@person" />
+                    <img src="_content/HomeBlaze.Game/models/people/@(person).png" alt="@GamePeople.GetLabel(person)" />
                 </button>
             }
         </div>
@@ -67,7 +68,6 @@
 
     private void Save()
     {
-        // The picker also formats an alpha channel; the shirt color is #rrggbb only.
         var color = _color.ToString(MudColorOutputFormats.Hex).ToLowerInvariant();
         var name = string.IsNullOrWhiteSpace(_name) ? null : _name.Trim();
         MudDialog?.Close(DialogResult.Ok(new GamePlayerEdit(name, _character, color)));
@@ -80,7 +80,7 @@
     /// <param name="dialogService">The service that shows the dialog.</param>
     /// <param name="player">The player to edit.</param>
     /// <param name="name">The name of its client, null while the client is anonymous.</param>
-    public static async Task<GamePlayerEdit?> ShowAsync(IDialogService dialogService, GamePlayer player, string? name)
+    internal static async Task<GamePlayerEdit?> ShowAsync(IDialogService dialogService, GamePlayer player, string? name)
     {
         var parameters = new DialogParameters<GamePlayerDialog>
         {

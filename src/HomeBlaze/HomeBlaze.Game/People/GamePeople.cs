@@ -12,6 +12,20 @@ internal static class GamePeople
         ["male-casual", "male-shirt", "male-long-sleeve", "female-casual", "female-alternative", "female-tank-top"];
 
     /// <summary>
+    /// Gets a readable label of a person name, such as "Male, casual" for <c>male-casual</c>.
+    /// </summary>
+    public static string GetLabel(string person)
+    {
+        var separator = person.IndexOf('-');
+        if (separator < 0)
+        {
+            return person;
+        }
+
+        return $"{char.ToUpperInvariant(person[0])}{person[1..separator]}, {person[(separator + 1)..].Replace('-', ' ')}";
+    }
+
+    /// <summary>
     /// Gets the person a client looks like until its player chooses one; stays the same across sessions.
     /// </summary>
     public static string GetDefault(string clientId) =>

@@ -16,6 +16,15 @@ public class GamePeopleTests
         Assert.Contains(first, GamePeople.Names);
     }
 
+    [Theory]
+    [InlineData("male-casual", "Male, casual")]
+    [InlineData("female-tank-top", "Female, tank top")]
+    public void WhenAPersonIsLabeled_ThenTheLabelIsReadable(string person, string label)
+    {
+        // Act & Assert
+        Assert.Equal(label, GamePeople.GetLabel(person));
+    }
+
     [Fact]
     public void WhenManyClientsJoin_ThenEveryPersonIsUsed()
     {

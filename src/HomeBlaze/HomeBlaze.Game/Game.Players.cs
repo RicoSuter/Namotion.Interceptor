@@ -14,7 +14,7 @@ public partial class Game
     /// <summary>
     /// The message with which renaming and editing are refused for a caller that is not a player of this game.
     /// </summary>
-    internal const string NoRenameActorMessage = "Only a player in the game can edit their name and look.";
+    internal const string NoPlayerActorMessage = "Only a player in the game can edit their name and look.";
 
     /// <summary>
     /// How often the game reconciles its players without a signal.
@@ -64,7 +64,7 @@ public partial class Game
 
         if (GetActor(caller) is null)
         {
-            throw new InvalidOperationException(NoRenameActorMessage);
+            throw new InvalidOperationException(NoPlayerActorMessage);
         }
 
         await _clients.RenameAsync(caller!.ClientId, trimmed, cancellationToken);
@@ -74,8 +74,9 @@ public partial class Game
     }
 
     /// <summary>
-    /// Changes the caller's player: renames its client when <paramref name="name"/> is not empty, and sets the person
-    /// and shirt color, where null shows the default of the client.
+    /// Changes the caller's player: renames its client when <paramref name="name"/> is not empty and differs from the
+    /// current name of the client, and sets the person and shirt color, where null shows the default of the client.
+    /// An empty name keeps the name.
     /// </summary>
     /// <exception cref="ArgumentException">The name is longer than <see cref="MaximumNameLength"/> after trimming.</exception>
     /// <exception cref="InvalidOperationException">The caller is not a player of this game, or its client is gone.</exception>
@@ -83,10 +84,11 @@ public partial class Game
     {
         if (GetActor(caller) is not { } player)
         {
-            throw new InvalidOperationException(NoRenameActorMessage);
+            throw new InvalidOperationException(NoPlayerActorMessage);
         }
 
-        if (!string.IsNullOrWhiteSpace(name))
+        // An unchanged name is not written, because a rename saves the configuration of the installation.
+        if (!string.IsNullOrWhiteSpace(name) && name.Trim() != GetClientName(caller))
         {
             await RenameAsync(caller, name, cancellationToken);
         }

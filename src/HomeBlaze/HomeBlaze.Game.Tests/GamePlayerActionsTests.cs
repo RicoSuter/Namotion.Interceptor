@@ -64,6 +64,24 @@ public class GamePlayerActionsTests
     }
 
     [Fact]
+    public async Task WhenANamedPlayerEditsItsLookWithItsOwnName_ThenTheClientIsNotRenamed()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        await _context.Game.RenameAsync(new GameCaller("tab-1"), "Kitchen", CancellationToken.None);
+        _context.Reconcile();
+        var renamesBefore = _context.Clients.RenameCount;
+
+        // Act
+        await _context.Game.EditAsync(new GameCaller("tab-1"), " Kitchen ", "male-shirt", null, CancellationToken.None);
+        _context.Publish();
+
+        // Assert
+        Assert.Equal(renamesBefore, _context.Clients.RenameCount);
+        Assert.Equal(("Kitchen", "male-shirt"), (player.ClientTitle, player.Character));
+    }
+
+    [Fact]
     public async Task WhenAPlayerEditsItsNameAndLook_ThenAllThreeChange()
     {
         // Arrange

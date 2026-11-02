@@ -83,7 +83,7 @@ public class GamePageTests
 
         // Assert
         await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
-        await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top");
+        await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top" && player.Color is not null);
         Assert.Matches("^#[0-9a-f]{6}$", player.Color);
     }
 
