@@ -13,7 +13,7 @@ public class GamePlayersTests
         _context.Clients.Set("tab-1", isNamed: false, isConnected: true, title: "Anonymous client (tab-…)");
 
         // Act
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         var player = Assert.Single(_context.Game.Players).Value;
@@ -31,7 +31,7 @@ public class GamePlayersTests
 
         // Act
         _context.Clients.Set("tab-1", isNamed: false, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         Assert.Empty(_context.Game.Players);
@@ -42,11 +42,11 @@ public class GamePlayersTests
     {
         // Arrange
         _context.Clients.Set("kitchen", isNamed: true, isConnected: true);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Act
         _context.Clients.Set("kitchen", isNamed: true, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         var player = _context.Game.Players["kitchen"];
@@ -63,7 +63,7 @@ public class GamePlayersTests
 
         // Act
         _context.Clients.Set("tab-1", isNamed: true, isConnected: true, title: "Kitchen");
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         Assert.Same(player, _context.Game.Players["tab-1"]);
@@ -76,11 +76,11 @@ public class GamePlayersTests
     {
         // Arrange
         _context.Clients.Set("kitchen", isNamed: true, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Act
         _context.Clients.Remove("kitchen");
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         Assert.Empty(_context.Game.Players);
@@ -94,11 +94,11 @@ public class GamePlayersTests
 
         // Act
         _context.Clients.Set("tab-1", isNamed: false, isConnected: true);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         var player = _context.Game.Players["tab-1"];
-        Assert.False(player.Footprint.Intersects(new HomeBlaze.Game.World.Footprint(-1, 0, 4, 1)));
+        Assert.False(player.Area.Intersects(new GameArea(-1, 0, 4, 1)));
         Assert.True(Math.Abs(player.X) <= 2 && Math.Abs(player.Y) <= 2);
     }
 
@@ -107,19 +107,19 @@ public class GamePlayersTests
     {
         // Arrange
         _context.Clients.Set("kitchen", isNamed: true, isConnected: true);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
         _context.Clients.Set("kitchen", isNamed: true, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
         _context.AddConnectedPlayer("tab-2", x: 0, y: 0);
 
         // Act
         _context.Clients.Set("kitchen", isNamed: true, isConnected: true);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         var kitchen = _context.Game.Players["kitchen"];
         var other = _context.Game.Players["tab-2"];
-        Assert.False(kitchen.Footprint.Intersects(other.Footprint));
+        Assert.False(kitchen.Area.Intersects(other.Area));
     }
 
     [Fact]
@@ -127,11 +127,11 @@ public class GamePlayersTests
     {
         // Arrange
         _context.Clients.Set("kitchen", isNamed: true, isConnected: true);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Act
         _context.Clients.RemoveInstallation();
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
 
         // Assert
         Assert.Single(_context.Game.Players);
@@ -147,7 +147,8 @@ public class GamePlayersTests
         _context.Game.Players = new Dictionary<string, GamePlayer> { ["tab-1"] = player, ["kitchen"] = kitchen };
 
         // Act
-        _context.Game.ReconcilePlayers();
+        _context.Tick();
+        _context.Reconcile();
 
         // Assert
         Assert.Same(player, _context.Game.Players["tab-1"]);
@@ -167,7 +168,8 @@ public class GamePlayersTests
         _context.Clients.Set("kitchen", isNamed: true, isConnected: false);
 
         // Act
-        _context.Game.ReconcilePlayers();
+        _context.Tick();
+        _context.Reconcile();
 
         // Assert
         Assert.Equal(new[] { "kitchen" }, _context.Game.Players.Keys);

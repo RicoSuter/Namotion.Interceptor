@@ -7,19 +7,32 @@ public class GameVoiceTests
 {
     private readonly GameTestContext _context = new();
 
-    private static GameCaller Caller(GamePlayer player) => new(player);
+    // Switches and publishes, so the subject shows the result.
+    private bool SetMicrophone(GamePlayer player, int pageId, bool isOn) => Run(_context.Game.SetMicrophoneAsync(player.ClientId, pageId, isOn));
 
-    // One tick of the mixer with the table as it is now.
+    private bool SetAudio(GamePlayer player, int pageId, bool isOn) => Run(_context.Game.SetAudioAsync(player.ClientId, pageId, isOn));
+
+    private bool Run(Task<bool> task)
+    {
+        var result = _context.RunAsync(task).GetAwaiter().GetResult();
+        _context.Publish();
+        return result;
+    }
+
+    private (bool IsMicrophonePage, bool IsAudioPage) GetVoicePages(GamePlayer player, int pageId) =>
+        _context.RunAsync(_context.Game.GetVoicePagesAsync(player.ClientId, pageId)).GetAwaiter().GetResult();
+
+    // Lets the volume table follow the changes, then mixes one frame with it.
     private void Mix()
     {
-        _context.Game.UpdateVolumeTable();
+        _context.BuildVolumeTable();
         _context.Game.VoiceMixer.Mix(_context.Game.VolumeTable);
     }
 
     private void Disconnect(string clientId, bool isNamed)
     {
         _context.Clients.Set(clientId, isNamed, isConnected: false);
-        _context.Game.ReconcilePlayers();
+        _context.Reconcile();
     }
 
     [Fact]
@@ -32,7 +45,7 @@ public class GameVoiceTests
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
 
         // Act
-        var isAccepted = _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
+        var isAccepted = SetMicrophone(talker, pageId: 1, isOn: true);
         _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
         Mix();
 
@@ -50,10 +63,10 @@ public class GameVoiceTests
         _context.AddConnectedPlayer("tab-2", x: 10);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
+        SetMicrophone(talker, pageId: 1, isOn: true);
 
         // Act
-        _context.Game.SetMicrophone(Caller(talker), pageId: 2, isOn: true);
+        SetMicrophone(talker, pageId: 2, isOn: true);
         _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
         _context.Game.VoiceMixer.Receive("tab-1", 2, VoiceFrames.Create(2000));
         Mix();
@@ -67,16 +80,16 @@ public class GameVoiceTests
     {
         // Arrange
         var talker = _context.AddConnectedPlayer("tab-1");
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
-        _context.Game.SetMicrophone(Caller(talker), pageId: 2, isOn: true);
+        SetMicrophone(talker, pageId: 1, isOn: true);
+        SetMicrophone(talker, pageId: 2, isOn: true);
 
         // Act
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: false);
+        SetMicrophone(talker, pageId: 1, isOn: false);
 
         // Assert
         Assert.True(talker.IsMicrophoneOn);
-        Assert.Equal((false, false), _context.Game.GetVoicePages(talker, 1));
-        Assert.Equal((true, false), _context.Game.GetVoicePages(talker, 2));
+        Assert.Equal((false, false), GetVoicePages(talker, 1));
+        Assert.Equal((true, false), GetVoicePages(talker, 2));
     }
 
     [Fact]
@@ -84,13 +97,13 @@ public class GameVoiceTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.SetAudio(Caller(player), pageId: 1, isOn: true);
-        _context.Game.SetAudio(Caller(player), pageId: 2, isOn: true);
+        SetAudio(player, pageId: 1, isOn: true);
+        SetAudio(player, pageId: 2, isOn: true);
 
         // Act
-        _context.Game.SetAudio(Caller(player), pageId: 1, isOn: false);
+        SetAudio(player, pageId: 1, isOn: false);
         var isOnWithOnePage = player.IsAudioOn;
-        _context.Game.SetAudio(Caller(player), pageId: 2, isOn: false);
+        SetAudio(player, pageId: 2, isOn: false);
 
         // Assert
         Assert.True(isOnWithOnePage);
@@ -98,21 +111,20 @@ public class GameVoiceTests
     }
 
     [Fact]
-    public void WhenTheCallerPlaysAnotherGame_ThenTheTogglesAreRefused()
+    public void WhenTheCallersClientHasNoPlayerInTheGame_ThenTheTogglesAreRefused()
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        var stranger = new GameTestContext().AddConnectedPlayer("tab-1");
+        var stranger = new GameCaller("tab-2");
 
         // Act
-        var isMicrophoneAccepted = _context.Game.SetMicrophone(Caller(stranger), pageId: 1, isOn: true);
-        var isAudioAccepted = _context.Game.SetAudio(Caller(stranger), pageId: 1, isOn: true);
+        var isMicrophoneAccepted = Run(_context.Game.SetMicrophoneAsync(stranger.ClientId, pageId: 1, isOn: true));
+        var isAudioAccepted = Run(_context.Game.SetAudioAsync(stranger.ClientId, pageId: 1, isOn: true));
 
         // Assert
         Assert.False(isMicrophoneAccepted);
         Assert.False(isAudioAccepted);
         Assert.False(player.IsMicrophoneOn || player.IsAudioOn);
-        Assert.False(stranger.IsMicrophoneOn || stranger.IsAudioOn);
     }
 
     [Fact]
@@ -123,8 +135,8 @@ public class GameVoiceTests
         Disconnect("kitchen", isNamed: true);
 
         // Act
-        var isTurnedOn = _context.Game.SetMicrophone(Caller(kitchen), pageId: 1, isOn: true);
-        var isTurnedOff = _context.Game.SetMicrophone(Caller(kitchen), pageId: 1, isOn: false);
+        var isTurnedOn = SetMicrophone(kitchen, pageId: 1, isOn: true);
+        var isTurnedOff = SetMicrophone(kitchen, pageId: 1, isOn: false);
 
         // Assert
         Assert.False(isTurnedOn);
@@ -140,8 +152,8 @@ public class GameVoiceTests
         _context.AddConnectedPlayer("tab-2", x: 10);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(Caller(kitchen), pageId: 1, isOn: true);
-        _context.Game.SetAudio(Caller(kitchen), pageId: 1, isOn: true);
+        SetMicrophone(kitchen, pageId: 1, isOn: true);
+        SetAudio(kitchen, pageId: 1, isOn: true);
         _context.Game.VoiceMixer.Receive("kitchen", 1, VoiceFrames.Create(1000));
 
         // Act
@@ -151,7 +163,7 @@ public class GameVoiceTests
         // Assert
         Assert.False(kitchen.IsMicrophoneOn);
         Assert.False(kitchen.IsAudioOn);
-        Assert.Equal((false, false), _context.Game.GetVoicePages(kitchen, 1));
+        Assert.Equal((false, false), GetVoicePages(kitchen, 1));
         Assert.Empty(sink.Frames);
     }
 
@@ -163,8 +175,8 @@ public class GameVoiceTests
         _context.AddConnectedPlayer("tab-2", x: 10);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
-        _context.Game.SetAudio(Caller(talker), pageId: 1, isOn: true);
+        SetMicrophone(talker, pageId: 1, isOn: true);
+        SetAudio(talker, pageId: 1, isOn: true);
         _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
 
         // Act
@@ -187,8 +199,8 @@ public class GameVoiceTests
         Disconnect("kitchen", isNamed: true);
 
         // Act
-        var isTurnedOn = _context.Game.SetAudio(Caller(kitchen), pageId: 1, isOn: true);
-        var isTurnedOff = _context.Game.SetAudio(Caller(kitchen), pageId: 1, isOn: false);
+        var isTurnedOn = SetAudio(kitchen, pageId: 1, isOn: true);
+        var isTurnedOff = SetAudio(kitchen, pageId: 1, isOn: false);
 
         // Assert
         Assert.False(isTurnedOn);
@@ -204,14 +216,15 @@ public class GameVoiceTests
         _context.AddConnectedPlayer("tab-2", x: 10);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
-        _context.Game.SetAudio(Caller(talker), pageId: 1, isOn: true);
+        SetMicrophone(talker, pageId: 1, isOn: true);
+        SetAudio(talker, pageId: 1, isOn: true);
         _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
         var replacement = new GamePlayer { X = 0, Y = 0 };
         _context.Game.Players = new Dictionary<string, GamePlayer>(_context.Game.Players) { ["tab-1"] = replacement };
 
         // Act
-        _context.Game.ReconcilePlayers();
+        _context.Tick();
+        _context.Reconcile();
         _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
         Mix();
         Disconnect("tab-1", isNamed: false);
@@ -222,7 +235,7 @@ public class GameVoiceTests
         Assert.False(talker.IsMicrophoneOn);
         Assert.False(talker.IsAudioOn);
         Assert.False(replacement.IsMicrophoneOn);
-        Assert.Equal((false, false), _context.Game.GetVoicePages(talker, 1));
+        Assert.Equal((false, false), GetVoicePages(talker, 1));
         Assert.Empty(sink.Frames);
     }
 
@@ -234,14 +247,15 @@ public class GameVoiceTests
         _context.AddConnectedPlayer("tab-2", x: 10);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
+        SetMicrophone(talker, pageId: 1, isOn: true);
         var replacement = new GamePlayer();
         _context.Game.Players = new Dictionary<string, GamePlayer>(_context.Game.Players) { ["tab-1"] = replacement };
-        _context.Game.ReconcilePlayers();
+        _context.Tick();
+        _context.Reconcile();
         replacement = _context.Game.Players["tab-1"];
 
         // Act
-        _context.Game.SetMicrophone(Caller(replacement), pageId: 2, isOn: true);
+        SetMicrophone(replacement, pageId: 2, isOn: true);
         _context.Game.VoiceMixer.Receive("tab-1", 2, VoiceFrames.Create(1000));
         Mix();
 
@@ -256,29 +270,28 @@ public class GameVoiceTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
-        _context.Game.UpdateVolumeTable();
-        _context.TimeProvider.Advance(GameVoiceSettings.VolumeTableInterval);
-        var isRebuiltWithoutChange = _context.Game.UpdateVolumeTable();
+        var rebuilds = 0;
+        _context.Game.VolumeTableChanged += () => rebuilds++;
+        _context.Publish();
+        var rebuildsWithoutChange = rebuilds;
 
         // Act
-        _context.Game.SetAudio(Caller(player), pageId: 1, isOn: true);
-        var isRebuilt = _context.Game.UpdateVolumeTable();
+        SetAudio(player, pageId: 1, isOn: true);
 
         // Assert
-        Assert.False(isRebuiltWithoutChange);
-        Assert.True(isRebuilt);
+        Assert.Equal(0, rebuildsWithoutChange);
+        Assert.Equal(1, rebuilds);
     }
 
     [Fact]
-    public void WhenAVolumeTableChangedHandlerThrows_ThenTheTickStillMixes()
+    public void WhenAVolumeTableChangedHandlerThrows_ThenTheTickGoesOn()
     {
         // Arrange
         var talker = _context.AddConnectedPlayer("tab-1");
         _context.AddConnectedPlayer("tab-2", x: 20);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
-        _context.Game.SetMicrophone(Caller(talker), pageId: 1, isOn: true);
-        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+        _context.BuildVolumeTable();
         var calls = 0;
         _context.Game.VolumeTableChanged += () =>
         {
@@ -289,10 +302,14 @@ public class GameVoiceTests
         };
 
         // Act
-        var exception = Record.Exception(() => _context.Game.TickVoice());
+        var exception = Record.Exception(() => SetMicrophone(talker, pageId: 1, isOn: true));
+        _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+        _context.Game.TickVoice();
 
         // Assert
         Assert.Null(exception);
+        Assert.Equal(1, calls);
+        Assert.True(talker.IsMicrophoneOn);
         Assert.Equal(200, VoiceFrames.ReadLastSample(Assert.Single(sink.Frames)));
     }
 }

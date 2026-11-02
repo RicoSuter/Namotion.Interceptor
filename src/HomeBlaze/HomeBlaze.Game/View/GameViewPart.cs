@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using HomeBlaze.Game.Visuals;
+using HomeBlaze.Game.Abstractions;
 
 namespace HomeBlaze.Game.View;
 
@@ -62,6 +62,10 @@ internal sealed class GameViewPart
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Animation { get; init; }
 
+    [JsonPropertyName("am")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int AnimationMode { get; init; }
+
     public static GameViewPart[] FromVisual(GameVisual visual)
     {
         var parts = new GameViewPart[visual.Parts.Length];
@@ -90,6 +94,7 @@ internal sealed class GameViewPart
         Color = part.Color,
         Model = part.Model,
         Effect = part.Effect == GameVisualEffect.Wind ? "wind" : null,
-        Animation = part.Animation
+        Animation = part.Animation,
+        AnimationMode = (int)part.AnimationMode
     };
 }

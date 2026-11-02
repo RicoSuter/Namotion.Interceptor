@@ -2,7 +2,7 @@ namespace HomeBlaze.Game.World;
 
 /// <summary>
 /// A token bucket that refills one token per interval up to a burst, so network jitter does not refuse what a client
-/// sent in time. Not thread-safe: its owner guards it with a lock.
+/// sent in time. Not thread-safe: its owner makes the calls one at a time.
 /// </summary>
 internal sealed class RateLimiter(TimeProvider timeProvider, TimeSpan interval, int burst)
 {

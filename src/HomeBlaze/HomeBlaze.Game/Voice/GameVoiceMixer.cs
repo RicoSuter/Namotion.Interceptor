@@ -7,7 +7,8 @@ namespace HomeBlaze.Game.Voice;
 
 /// <summary>
 /// Mixes the voices of one game individually for every listener. Its own lock guards the talker queues, microphone
-/// pages and sinks; the game calls it while holding the game's lock, and the mixer never calls into the game.
+/// pages and sinks; the game's simulation sets the microphone pages from its thread, pages pass frames from theirs,
+/// and the mixer never calls into the game.
 /// </summary>
 internal sealed class GameVoiceMixer
 {
@@ -134,6 +135,12 @@ internal sealed class GameVoiceMixer
             ReleaseFrames();
         }
     }
+
+    /// <summary>
+    /// Counts a tick without mixing, as one in which no talker had a frame, so every pair glides up from 0 in the next
+    /// tick. Must not run concurrently with <see cref="Mix"/>.
+    /// </summary>
+    public void SkipTick() => _tick++;
 
     // Clears the scratch state, so sinks unregistered meanwhile are not kept alive until the next tick.
     private void ReleaseFrames()

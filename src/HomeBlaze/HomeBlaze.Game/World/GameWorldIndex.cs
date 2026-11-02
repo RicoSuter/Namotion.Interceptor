@@ -1,84 +1,236 @@
+using System.Collections.Immutable;
+using HomeBlaze.Game.Abstractions;
+using HomeBlaze.Game.Simulation;
+
 namespace HomeBlaze.Game.World;
 
 /// <summary>
-/// Finds the objects of a game by their tiles, in chunks of 16 by 16 tiles. Not thread-safe: the game guards it with its lock.
+/// Finds the entities of a game by their tiles, in chunks of 16 by 16 tiles, from the values they had at their last
+/// <see cref="AddOrUpdate"/>. Not thread-safe: only the simulation thread uses it.
 /// </summary>
 internal sealed class GameWorldIndex
 {
-    private const int ChunkShift = 4;
-
-    private readonly Dictionary<(long X, long Y), List<GameObject>> _chunks = new();
-    private readonly Dictionary<GameObject, Entry> _entries = new(ReferenceEqualityComparer.Instance);
-    private readonly HashSet<GameObject> _found = new(ReferenceEqualityComparer.Instance);
-
-    public int Count => _entries.Count;
+    /// <summary>
+    /// The power of two of the width and depth of a chunk, 16 tiles; a tile's chunk is its position shifted right by it.
+    /// </summary>
+    public const int ChunkShift = 4;
 
     /// <summary>
-    /// Increases with every change of the indexed objects, so a reader can tell whether anything moved, appeared,
-    /// disappeared or changed its movement blocking, sound blocking or visibility since it last looked.
+    /// The width and depth of a chunk in tiles.
+    /// </summary>
+    public const int ChunkSize = 1 << ChunkShift;
+
+    /// <summary>
+    /// The mask that gives a tile's position inside its chunk.
+    /// </summary>
+    public const int ChunkMask = ChunkSize - 1;
+    private const int MaximumPooledLists = 256;
+
+    private readonly Dictionary<(long X, long Y), List<Slot>> _chunks = new();
+    private readonly Dictionary<GameEntity, Slot> _slots = new(ReferenceEqualityComparer.Instance);
+    private readonly Stack<List<Slot>> _pooledLists = new();
+
+    // Marks the slots a query already returned, so an entity spanning several chunks is returned once without a set.
+    // Queries write these stamps, so no two queries may run at the same time, not even two read-only ones.
+    private long _queryStamp;
+
+    // Marks the slots recorded in EntityChanges since the last ClearChanges, so each is recorded once.
+    private long _changeStamp = 1;
+
+    public int Count => _slots.Count;
+
+    /// <summary>
+    /// Increases with every change of the indexed entities' areas, movement blocking, sound blocking or visibility, and
+    /// when one is added or removed, so a reader can tell whether anything relevant to movement or sound changed since
+    /// it last looked. A change of only the visual, title or height leaves it unchanged.
     /// </summary>
     public long Version { get; private set; }
 
-    public void Clear()
+    /// <summary>
+    /// Increases whenever the tiles that sound blocking entities cover may have changed: such an entity was added,
+    /// removed, moved or resized, or its sound blocking turned on or off. Other changes, such as a player's step, leave it
+    /// unchanged.
+    /// </summary>
+    public long SoundVersion { get; private set; }
+
+    /// <summary>
+    /// The chunks whose entities were added, moved, removed or changed, including a change of only the visual, title or
+    /// height. The index only adds to it; <see cref="ClearChanges"/> clears it.
+    /// </summary>
+    public ChangedChunks Changes { get; } = new();
+
+    /// <summary>
+    /// The entities that were added, moved, removed or changed, including a change of only the visual, title or height
+    /// and one reported by <see cref="MarkChanged"/>, each with its indexed area and visibility before. An entity removed
+    /// and added again shows twice. The index only adds to it; <see cref="ClearChanges"/> clears it.
+    /// </summary>
+    public ChangedEntities EntityChanges { get; } = new();
+
+    /// <summary>
+    /// The chunks whose sound blocked tiles may have changed, a subset of what <see cref="Changes"/> got. The index only
+    /// adds to it; its reader, the sound snapshot, clears it.
+    /// </summary>
+    public ChangedChunks SoundChanges { get; } = new();
+
+    /// <summary>
+    /// Returns the chunk that contains the tile.
+    /// </summary>
+    public static (long X, long Y) GetChunk(long x, long y) => (x >> ChunkShift, y >> ChunkShift);
+
+    /// <summary>
+    /// Whether the width and depth of the area and the height are from 1 to <see cref="GameObject.MaximumSize"/>, which
+    /// the index requires.
+    /// </summary>
+    public static bool HasValidSize(GameArea area, int height) =>
+        IsValidSize(area.Width) && IsValidSize(area.Depth) && IsValidSize(height);
+
+    /// <summary>
+    /// Whether the size is from 1 to <see cref="GameObject.MaximumSize"/>.
+    /// </summary>
+    public static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
+
+    /// <summary>
+    /// Clears <see cref="Changes"/> and <see cref="EntityChanges"/>.
+    /// </summary>
+    public void ClearChanges()
     {
-        _chunks.Clear();
-        _entries.Clear();
-        Version++;
+        Changes.Clear();
+        EntityChanges.Clear();
+        _changeStamp++;
     }
 
     /// <summary>
-    /// Adds the object, or moves it to its current footprint and its movement blocking, sound blocking and visibility
-    /// state; leaves out an object with a width, depth or height outside 1 to <see cref="GameObject.MaximumSize"/>.
+    /// Whether the entity is indexed.
     /// </summary>
-    public void AddOrUpdate(GameObject gameObject)
+    public bool Contains(GameEntity entity) => _slots.ContainsKey(entity);
+
+    public void Clear()
     {
-        // A loaded configuration skips the range validation, and a huge footprint would fill the chunks.
-        if (!HasValidSize(gameObject))
+        foreach (var slot in _slots.Values)
         {
-            Remove(gameObject);
+            RecordChange(slot);
+        }
+
+        foreach (var (chunk, slots) in _chunks)
+        {
+            Changes.Add(chunk);
+            SoundChanges.Add(chunk);
+            if (_pooledLists.Count < MaximumPooledLists)
+            {
+                slots.Clear();
+                _pooledLists.Push(slots);
+            }
+        }
+
+        _chunks.Clear();
+        _slots.Clear();
+        Version++;
+        SoundVersion++;
+    }
+
+    /// <summary>
+    /// Adds the entity, or takes over its current area, movement blocking, sound blocking, visibility, visual, title and height;
+    /// removes an entity whose size is not valid by <see cref="HasValidSize"/>.
+    /// </summary>
+    public void AddOrUpdate(GameEntity entity)
+    {
+        // A loaded configuration skips the range validation, and a huge area would fill the chunks.
+        if (!HasValidSize(entity.Area, entity.Height))
+        {
+            Remove(entity);
             return;
         }
 
-        var entry = new Entry(gameObject.Footprint, gameObject.IsMovementBlocking, gameObject.IsSoundBlocking, gameObject.IsVisible);
-        if (_entries.TryGetValue(gameObject, out var existing))
+        var entry = new Entry(entity.Area, entity.IsMovementBlocking, entity.IsSoundBlocking, entity.IsVisible);
+        if (!_slots.TryGetValue(entity, out var slot))
         {
-            if (existing == entry)
-            {
-                return;
-            }
-
-            RemoveFromChunks(gameObject, existing.Footprint);
+            Add(entity, entry);
+            return;
         }
 
-        _entries[gameObject] = entry;
-        AddToChunks(gameObject, entry.Footprint);
-        Version++;
+        var existing = slot.Entry;
+        var isViewChanged = (!ReferenceEquals(slot.Visual, entity.Visual) && slot.Visual != entity.Visual) || slot.Title != entity.Title
+            || slot.Height != entity.Height;
+        if (existing == entry && !isViewChanged)
+        {
+            return;
+        }
+
+        RecordChange(slot);
+        slot.Visual = entity.Visual;
+        slot.Title = entity.Title;
+        slot.Height = entity.Height;
+        if (existing.Area != entry.Area)
+        {
+            RemoveFromChunks(slot, existing.Area);
+            AddChangedChunks(existing.Area);
+            AddToChunks(slot, entry.Area);
+        }
+
+        AddChangedChunks(entry.Area);
+        if (existing != entry)
+        {
+            slot.Entry = entry;
+            Version++;
+            AddSoundChanges(existing, entry);
+        }
     }
 
-    public void Remove(GameObject gameObject)
+    private void Add(GameEntity entity, Entry entry)
     {
-        if (_entries.Remove(gameObject, out var existing))
+        var slot = new Slot(entity)
         {
-            RemoveFromChunks(gameObject, existing.Footprint);
+            Entry = entry, Visual = entity.Visual, Title = entity.Title, Height = entity.Height, ChangeStamp = _changeStamp
+        };
+        _slots.Add(entity, slot);
+        EntityChanges.Add(new GameEntityChange(entity, default, WasVisible: false));
+        AddToChunks(slot, entry.Area);
+        AddChangedChunks(entry.Area);
+        Version++;
+        if (entry.IsSoundBlocking)
+        {
+            AddSoundChange(entry.Area);
+        }
+    }
+
+    public void Remove(GameEntity entity)
+    {
+        if (_slots.Remove(entity, out var slot))
+        {
+            RecordChange(slot);
+            RemoveFromChunks(slot, slot.Entry.Area);
+            AddChangedChunks(slot.Entry.Area);
             Version++;
+            if (slot.Entry.IsSoundBlocking)
+            {
+                AddSoundChange(slot.Entry.Area);
+            }
         }
     }
 
     /// <summary>
-    /// Whether a blocking object other than <paramref name="ignored"/> covers a tile of the area.
+    /// Adds the chunks of the indexed entity to <see cref="Changes"/> for a change the index does not store, such as a
+    /// player's facing; does nothing for an entity that is not indexed.
     /// </summary>
-    public bool IsBlocked(Footprint area, GameObject? ignored)
+    public void MarkChanged(GameEntity entity)
+    {
+        if (_slots.TryGetValue(entity, out var slot))
+        {
+            RecordChange(slot);
+            AddChangedChunks(slot.Entry.Area);
+        }
+    }
+
+    /// <summary>
+    /// Whether a movement blocking entity other than <paramref name="ignored"/> covers a tile of the area.
+    /// </summary>
+    public bool IsBlocked(GameArea area, GameEntity? ignored)
     {
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
             for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
-                if (!_chunks.TryGetValue((chunkX, chunkY), out var objects))
-                {
-                    continue;
-                }
-
-                if (IsBlockedByAny(objects, area, ignored))
+                if (_chunks.TryGetValue((chunkX, chunkY), out var slots) && IsBlockedByAny(slots, area, ignored))
                 {
                     return true;
                 }
@@ -89,38 +241,111 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds each visible object that covers a tile of the area to <paramref name="results"/>, once.
+    /// Whether a movement blocking entity other than <paramref name="self"/> covers a tile of the area without already
+    /// overlapping the current <see cref="GameEntity.Area"/> of <paramref name="self"/>, so an entity can always step
+    /// out of what it stands in.
     /// </summary>
-    public void Query(Footprint area, List<GameObject> results)
+    public bool IsBlockedExceptOverlapping(GameArea area, GameEntity self)
     {
-        _found.Clear();
+        var selfArea = self.Area;
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
             for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
-                if (!_chunks.TryGetValue((chunkX, chunkY), out var objects))
+                if (_chunks.TryGetValue((chunkX, chunkY), out var slots) && IsBlockedByAnyExceptOverlapping(slots, area, self, selfArea))
                 {
-                    continue;
+                    return true;
                 }
+            }
+        }
 
-                AddVisibleIntersecting(objects, area, results);
+        return false;
+    }
+
+    /// <summary>
+    /// Adds each visible entity that covers a tile of the area to <paramref name="results"/>, once.
+    /// </summary>
+    public void Query(GameArea area, List<GameEntity> results)
+    {
+        var stamp = ++_queryStamp;
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        {
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
+            {
+                if (_chunks.TryGetValue((chunkX, chunkY), out var slots))
+                {
+                    AddVisibleIntersecting(slots, area, results, stamp);
+                }
             }
         }
     }
 
     /// <summary>
-    /// Whether an object whose <see cref="GameObject.IsSoundBlocking"/> is true covers the tile, whether visible or not.
+    /// Adds each entity that covers a tile of the chunk to <paramref name="results"/>, whether blocking or visible or not.
     /// </summary>
-    public bool IsSoundBlocked(long x, long y)
+    public void QueryChunk((long X, long Y) chunk, List<GameEntity> results)
     {
-        if (!_chunks.TryGetValue((x >> ChunkShift, y >> ChunkShift), out var objects))
+        if (!_chunks.TryGetValue(chunk, out var slots))
         {
-            return false;
+            return;
         }
 
-        foreach (var gameObject in objects)
+        foreach (var slot in slots)
         {
-            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Contains(x, y))
+            results.Add(slot.Entity);
+        }
+    }
+
+    /// <summary>
+    /// Adds the area and subject each movement blocking entity of the chunk had at its last <see cref="AddOrUpdate"/> to
+    /// <paramref name="results"/>.
+    /// </summary>
+    public void QueryChunkMovementBlocking((long X, long Y) chunk, ImmutableArray<(GameArea Area, GameObject Subject)>.Builder results)
+    {
+        if (!_chunks.TryGetValue(chunk, out var slots))
+        {
+            return;
+        }
+
+        foreach (var slot in slots)
+        {
+            var entry = slot.Entry;
+            if (entry.IsMovementBlocking)
+            {
+                results.Add((entry.Area, slot.Entity.Subject));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the tiles of the chunk that a sound blocking entity covers, whether visible or not.
+    /// </summary>
+    public SoundChunk GetSoundChunk((long X, long Y) chunk)
+    {
+        if (!_chunks.TryGetValue(chunk, out var slots))
+        {
+            return default;
+        }
+
+        Span<ushort> rows = stackalloc ushort[ChunkSize];
+        var originX = chunk.X << ChunkShift;
+        var originY = chunk.Y << ChunkShift;
+        foreach (var slot in slots)
+        {
+            if (slot.Entry.IsSoundBlocking)
+            {
+                SoundChunk.AddArea(rows, originX, originY, slot.Entry.Area);
+            }
+        }
+
+        return SoundChunk.Create(rows);
+    }
+
+    private static bool IsBlockedByAny(List<Slot> slots, GameArea area, GameEntity? ignored)
+    {
+        foreach (var slot in slots)
+        {
+            if (slot.Entry.IsMovementBlocking && !ReferenceEquals(slot.Entity, ignored) && slot.Entry.Area.Intersects(area))
             {
                 return true;
             }
@@ -129,43 +354,13 @@ internal sealed class GameWorldIndex
         return false;
     }
 
-    /// <summary>
-    /// Adds the footprint of each object that stops sound by <see cref="IsSoundBlocked"/> and covers a tile of the area
-    /// to <paramref name="results"/>, once.
-    /// </summary>
-    public void QuerySoundBlocking(Footprint area, List<Footprint> results)
+    private static bool IsBlockedByAnyExceptOverlapping(List<Slot> slots, GameArea area, GameEntity self, GameArea selfArea)
     {
-        _found.Clear();
-        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        foreach (var slot in slots)
         {
-            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
-            {
-                if (_chunks.TryGetValue((chunkX, chunkY), out var objects))
-                {
-                    AddSoundBlockingIntersecting(objects, area, results);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Whether the width, depth and height of the object are from 1 to <see cref="GameObject.MaximumSize"/>, which the
-    /// index requires.
-    /// </summary>
-    internal static bool HasValidSize(GameObject gameObject) =>
-        IsValidSize(gameObject.Width) && IsValidSize(gameObject.Depth) && IsValidSize(gameObject.Height);
-
-    /// <summary>
-    /// Whether the size is from 1 to <see cref="GameObject.MaximumSize"/>.
-    /// </summary>
-    internal static bool IsValidSize(int size) => size is >= 1 and <= GameObject.MaximumSize;
-
-    private bool IsBlockedByAny(List<GameObject> objects, Footprint area, GameObject? ignored)
-    {
-        foreach (var gameObject in objects)
-        {
-            var entry = _entries[gameObject];
-            if (entry.IsMovementBlocking && !ReferenceEquals(gameObject, ignored) && entry.Footprint.Intersects(area))
+            var entry = slot.Entry;
+            if (entry.IsMovementBlocking && !ReferenceEquals(slot.Entity, self) && entry.Area.Intersects(area)
+                && !entry.Area.Intersects(selfArea))
             {
                 return true;
             }
@@ -174,66 +369,130 @@ internal sealed class GameWorldIndex
         return false;
     }
 
-    private void AddVisibleIntersecting(List<GameObject> objects, Footprint area, List<GameObject> results)
+    private static void AddVisibleIntersecting(List<Slot> slots, GameArea area, List<GameEntity> results, long stamp)
     {
-        foreach (var gameObject in objects)
+        foreach (var slot in slots)
         {
-            var entry = _entries[gameObject];
-            if (entry.IsVisible && entry.Footprint.Intersects(area) && _found.Add(gameObject))
+            if (slot.QueryStamp != stamp && slot.Entry.IsVisible && slot.Entry.Area.Intersects(area))
             {
-                results.Add(gameObject);
+                slot.QueryStamp = stamp;
+                results.Add(slot.Entity);
             }
         }
     }
 
-    private void AddSoundBlockingIntersecting(List<GameObject> objects, Footprint area, List<Footprint> results)
+    // Called before the slot changes, so the change holds the state before.
+    private void RecordChange(Slot slot)
     {
-        foreach (var gameObject in objects)
+        if (slot.ChangeStamp != _changeStamp)
         {
-            if (TryGetSoundBlockingFootprint(gameObject, out var footprint) && footprint.Intersects(area) && _found.Add(gameObject))
+            slot.ChangeStamp = _changeStamp;
+            EntityChanges.Add(new GameEntityChange(slot.Entity, slot.Entry.Area, slot.Entry.IsVisible));
+        }
+    }
+
+    private void AddChangedChunks(GameArea area)
+    {
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        {
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
-                results.Add(footprint);
+                Changes.Add((chunkX, chunkY));
             }
         }
     }
 
-    private bool TryGetSoundBlockingFootprint(GameObject gameObject, out Footprint footprint)
+    private void AddSoundChanges(Entry existing, Entry entry)
     {
-        var entry = _entries[gameObject];
-        footprint = entry.Footprint;
-        return entry.IsSoundBlocking;
+        if (existing.IsSoundBlocking == entry.IsSoundBlocking && (!entry.IsSoundBlocking || existing.Area == entry.Area))
+        {
+            return;
+        }
+
+        if (existing.IsSoundBlocking)
+        {
+            AddSoundChange(existing.Area);
+        }
+
+        if (entry.IsSoundBlocking)
+        {
+            AddSoundChange(entry.Area);
+        }
     }
 
-    private void AddToChunks(GameObject gameObject, Footprint footprint)
+    private void AddSoundChange(GameArea area)
     {
-        for (var chunkY = (long)footprint.Y >> ChunkShift; chunkY <= footprint.Top >> ChunkShift; chunkY++)
+        SoundVersion++;
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
-            for (var chunkX = (long)footprint.X >> ChunkShift; chunkX <= footprint.Right >> ChunkShift; chunkX++)
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
-                if (!_chunks.TryGetValue((chunkX, chunkY), out var objects))
+                SoundChanges.Add((chunkX, chunkY));
+            }
+        }
+    }
+
+    private void AddToChunks(Slot slot, GameArea area)
+    {
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        {
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
+            {
+                if (!_chunks.TryGetValue((chunkX, chunkY), out var slots))
                 {
-                    objects = [];
-                    _chunks[(chunkX, chunkY)] = objects;
+                    slots = _pooledLists.Count > 0 ? _pooledLists.Pop() : [];
+                    _chunks[(chunkX, chunkY)] = slots;
                 }
 
-                objects.Add(gameObject);
+                slots.Add(slot);
             }
         }
     }
 
-    private void RemoveFromChunks(GameObject gameObject, Footprint footprint)
+    private void RemoveFromChunks(Slot slot, GameArea area)
     {
-        for (var chunkY = (long)footprint.Y >> ChunkShift; chunkY <= footprint.Top >> ChunkShift; chunkY++)
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
         {
-            for (var chunkX = (long)footprint.X >> ChunkShift; chunkX <= footprint.Right >> ChunkShift; chunkX++)
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
-                if (_chunks.TryGetValue((chunkX, chunkY), out var objects) && objects.Remove(gameObject) && objects.Count == 0)
-                {
-                    _chunks.Remove((chunkX, chunkY));
-                }
+                RemoveFromChunk((chunkX, chunkY), slot);
             }
         }
     }
 
-    private readonly record struct Entry(Footprint Footprint, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
+    private void RemoveFromChunk((long X, long Y) chunk, Slot slot)
+    {
+        if (!_chunks.TryGetValue(chunk, out var slots) || !slots.Remove(slot) || slots.Count > 0)
+        {
+            return;
+        }
+
+        _chunks.Remove(chunk);
+        if (_pooledLists.Count < MaximumPooledLists)
+        {
+            _pooledLists.Push(slots);
+        }
+    }
+
+    private readonly record struct Entry(GameArea Area, bool IsMovementBlocking, bool IsSoundBlocking, bool IsVisible);
+
+    /// <summary>
+    /// The indexed state of an entity, shared by the lists of all chunks it covers, so a query reads it without a lookup.
+    /// </summary>
+    private sealed class Slot(GameEntity entity)
+    {
+        public GameEntity Entity { get; } = entity;
+
+        public Entry Entry { get; set; }
+
+        public GameVisual? Visual { get; set; }
+
+        public string Title { get; set; } = string.Empty;
+
+        public int Height { get; set; }
+
+        public long QueryStamp { get; set; }
+
+        public long ChangeStamp { get; set; }
+    }
 }

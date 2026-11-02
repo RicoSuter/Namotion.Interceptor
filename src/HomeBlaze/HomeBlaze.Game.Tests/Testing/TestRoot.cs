@@ -19,6 +19,11 @@ public partial class TestRoot : IConfigurationWriter
 
     public bool FailsToWrite { get; set; }
 
+    /// <summary>
+    /// A task that a write waits for before it counts, so a test can hold a save while it runs.
+    /// </summary>
+    public Task? WriteBlocker { get; set; }
+
     public int WriteCount => Volatile.Read(ref _writeCount);
 
     public TestRoot()
@@ -27,10 +32,15 @@ public partial class TestRoot : IConfigurationWriter
         Installation = null;
     }
 
-    public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (WriteBlocker is { } blocker)
+        {
+            await blocker.WaitAsync(cancellationToken);
+        }
+
         Interlocked.Increment(ref _writeCount);
-        return Task.FromResult(!FailsToWrite);
+        return !FailsToWrite;
     }
 }

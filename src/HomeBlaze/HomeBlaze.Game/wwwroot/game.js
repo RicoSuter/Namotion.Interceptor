@@ -177,7 +177,11 @@ class GameView {
             }
         }
 
-        for (const view of update.upserted) {
+        // The payload is shared by every page of the server, the id and isSelf are this page's.
+        for (const entry of update.upserted) {
+            const view = entry.payload;
+            view.id = entry.id;
+            view.isSelf = entry.isSelf;
             if (this.entities.upsert(view)) {
                 this.input.reset();
             }

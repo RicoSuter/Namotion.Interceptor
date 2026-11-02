@@ -8,7 +8,7 @@ public class SpawnFinderTests
     public void WhenStartIsFree_ThenStartIsReturned()
     {
         // Arrange
-        var start = new Footprint(0, 0, 2, 2);
+        var start = new GameArea(0, 0, 2, 2);
 
         // Act
         var position = SpawnFinder.FindFreePosition(start, _ => true);
@@ -21,8 +21,8 @@ public class SpawnFinderTests
     public void WhenStartIsBlocked_ThenTheNearestFreePositionIsReturned()
     {
         // Arrange
-        var start = new Footprint(0, 0, 2, 2);
-        var blocker = new Footprint(0, 0, 3, 3);
+        var start = new GameArea(0, 0, 2, 2);
+        var blocker = new GameArea(0, 0, 3, 3);
 
         // Act
         var position = SpawnFinder.FindFreePosition(start, candidate => !candidate.Intersects(blocker));
@@ -36,7 +36,7 @@ public class SpawnFinderTests
     public void WhenNothingIsFree_ThenStartIsReturned()
     {
         // Arrange
-        var start = new Footprint(5, 5, 2, 2);
+        var start = new GameArea(5, 5, 2, 2);
 
         // Act
         var position = SpawnFinder.FindFreePosition(start, _ => false, maximumRadius: 3);

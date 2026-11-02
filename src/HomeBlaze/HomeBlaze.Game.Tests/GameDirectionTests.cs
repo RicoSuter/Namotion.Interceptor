@@ -1,3 +1,5 @@
+using HomeBlaze.Game.View;
+
 namespace HomeBlaze.Game.Tests;
 
 public class GameDirectionTests
@@ -34,6 +36,22 @@ public class GameDirectionTests
 
         // Assert
         Assert.Equal(expected, isDiagonal);
+    }
+
+    [Theory]
+    [InlineData(GameDirection.North, 0)]
+    [InlineData(GameDirection.East, 90)]
+    [InlineData(GameDirection.SouthWest, 225)]
+    [InlineData(GameDirection.NorthWest, 315)]
+    [InlineData((GameDirection)10, 90)]
+    [InlineData((GameDirection)(-1), 315)]
+    public void WhenRotationIsRequested_ThenItTurnsClockwiseFromNorth(GameDirection direction, int expected)
+    {
+        // Act
+        var rotation = direction.GetRotation();
+
+        // Assert
+        Assert.Equal(expected, rotation);
     }
 
     [Fact]

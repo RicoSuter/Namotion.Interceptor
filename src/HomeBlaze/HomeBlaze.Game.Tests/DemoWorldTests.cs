@@ -28,7 +28,7 @@ public class DemoWorldTests
     public DemoWorldTests()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(Game), typeof(GamePlayer), typeof(Wall), typeof(Door), typeof(Tree), typeof(WallTool), typeof(TreeTool)]);
+        typeProvider.AddTypes([typeof(Game), typeof(GamePlayer), typeof(Wall), typeof(Door), typeof(Tree), typeof(Animal), typeof(WallTool), typeof(TreeTool)]);
         var serializer = new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().AddLogging().BuildServiceProvider());
         _game = Assert.IsType<Game>(serializer.Deserialize(File.ReadAllText(RepositoryPaths.Get(DemoWorldPath))));
     }
@@ -37,9 +37,9 @@ public class DemoWorldTests
     public void WhenTheDemoWorldLoads_ThenItHasAHouseAShedAForestAndTheTools()
     {
         // Act
-        var walls = _game.Objects.Values.OfType<Wall>().ToArray();
-        var doors = _game.Objects.Values.OfType<Door>().ToArray();
-        var forest = _game.Objects
+        var walls = _game.GetObjects().Values.OfType<Wall>().ToArray();
+        var doors = _game.GetObjects().Values.OfType<Door>().ToArray();
+        var forest = _game.GetObjects()
             .Where(pair => pair.Key.StartsWith("forest-", StringComparison.Ordinal))
             .Select(pair => Assert.IsType<Tree>(pair.Value))
             .ToArray();
@@ -58,6 +58,20 @@ public class DemoWorldTests
     }
 
     [Fact]
+    public void WhenTheDemoWorldLoads_ThenEveryObjectIsInTheRegionOfItsPosition()
+    {
+        // Act
+        var misplaced = _game.Regions
+            .SelectMany(pair => pair.Value.Objects.Select(gameObject => (Key: pair.Key, Name: gameObject.Key, Object: gameObject.Value)))
+            .Where(entry => GetRegionKey(entry.Object) != entry.Key)
+            .Select(entry => entry.Name)
+            .ToArray();
+
+        // Assert
+        Assert.Empty(misplaced);
+    }
+
+    [Fact]
     public void WhenWalkingFromTheSpawnPoint_ThenEveryRoomIsReachableThroughItsDoors()
     {
         // Act
@@ -71,27 +85,46 @@ public class DemoWorldTests
     public void WhenTheTreesStand_ThenNoneBlocksADoorOrTheSpawnPoint()
     {
         // Arrange
-        var keepClear = _game.Objects.Values.OfType<Door>().Select(GetApproach).Append(new Footprint(-2, -2, 6, 6)).ToArray();
+        var keepClear = _game.GetObjects().Values.OfType<Door>().Select(GetApproach).Append(new GameArea(-2, -2, 6, 6)).ToArray();
 
         // Act
-        var blocking = _game.Objects.Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Footprint))).ToArray();
+        var blocking = _game.GetObjects().Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Area))).ToArray();
 
         // Assert
         Assert.Empty(blocking);
     }
 
+    [Fact]
+    public void WhenTheDemoWorldLoads_ThenTheAnimalsStandOnFreeTiles()
+    {
+        // Arrange
+        var animals = _game.GetObjects().Values.OfType<Animal>().ToArray();
+        var others = _game.GetObjects().Values.Where(gameObject => gameObject.IsMovementBlocking).ToArray();
+
+        // Act
+        var overlapping = animals
+            .Where(animal => others.Any(other => !ReferenceEquals(other, animal) && other.Area.Intersects(animal.Area)))
+            .ToArray();
+
+        // Assert
+        Assert.Equal(4, animals.Length);
+        Assert.Equal([AnimalVariant.Deer, AnimalVariant.Stag], animals.Select(animal => animal.Variant).Distinct().Order());
+        Assert.Empty(overlapping);
+        Assert.All(animals, animal => Assert.True(animal.HomeX is not null && animal.HomeY is not null && animal.WanderRadius > 0));
+    }
+
     // The door and 3 tiles on both sides of it, where a player stands to walk through.
-    private static Footprint GetApproach(Door door) => door.Width >= door.Depth
-        ? new Footprint(door.X, door.Y - 3, door.Width, door.Depth + 6)
-        : new Footprint(door.X - 3, door.Y, door.Width + 6, door.Depth);
+    private static GameArea GetApproach(Door door) => door.Width >= door.Depth
+        ? new GameArea(door.X, door.Y - 3, door.Width, door.Depth + 6)
+        : new GameArea(door.X - 3, door.Y, door.Width + 6, door.Depth);
 
     // Every position of a player's footprint that walking reaches from the spawn point at 0, 0 with every door passable.
     private HashSet<(int X, int Y)> FindReachablePositions()
     {
         var index = new GameWorldIndex();
-        foreach (var gameObject in _game.Objects.Values.Where(gameObject => gameObject is not Door))
+        foreach (var gameObject in _game.GetObjects().Values.Where(gameObject => gameObject is not Door))
         {
-            index.AddOrUpdate(gameObject);
+            index.AddOrUpdate(EntityFactory.Object(gameObject));
         }
 
         var reachable = new HashSet<(int X, int Y)> { (0, 0) };
@@ -102,7 +135,7 @@ public class DemoWorldTests
             foreach (var (offsetX, offsetY) in Steps)
             {
                 var next = (X: position.X + offsetX, Y: position.Y + offsetY);
-                if (IsWithinArea(next) && !index.IsBlocked(new Footprint(next.X, next.Y, GamePlayer.Size, GamePlayer.Size), ignored: null) && reachable.Add(next))
+                if (IsWithinArea(next) && !index.IsBlocked(new GameArea(next.X, next.Y, GamePlayer.Size, GamePlayer.Size), ignored: null) && reachable.Add(next))
                 {
                     queue.Enqueue(next);
                 }
@@ -114,4 +147,10 @@ public class DemoWorldTests
 
     private static bool IsWithinArea((int X, int Y) position) =>
         position.X is >= -70 and <= 120 && position.Y is >= -40 and <= 80;
+
+    private static string GetRegionKey(GameObject gameObject)
+    {
+        var (regionX, regionY) = GameRegion.GetCoordinates(gameObject.X, gameObject.Y);
+        return GameRegion.GetKey(regionX, regionY);
+    }
 }

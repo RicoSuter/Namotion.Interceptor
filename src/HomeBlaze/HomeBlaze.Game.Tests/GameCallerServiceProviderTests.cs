@@ -10,7 +10,7 @@ public class GameCallerServiceProviderTests
     {
         // Arrange
         var inner = new ServiceCollection().AddSingleton("inner service").BuildServiceProvider();
-        var caller = new GameCaller(new GamePlayer());
+        var caller = new GameCaller("tab-1");
         var provider = new GameCallerServiceProvider(inner, caller);
 
         // Act

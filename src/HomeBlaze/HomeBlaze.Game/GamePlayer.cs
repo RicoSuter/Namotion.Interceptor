@@ -1,8 +1,9 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Game.World;
+using HomeBlaze.Game.Abstractions;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Game;
 
@@ -17,7 +18,7 @@ namespace HomeBlaze.Game;
 public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
 {
     /// <summary>
-    /// The width and depth of the footprint in tiles, 50 cm.
+    /// The width and depth of the area in tiles, 50 cm.
     /// </summary>
     public const int Size = 2;
 
@@ -41,7 +42,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     public partial GameDirection Facing { get; set; }
 
     /// <summary>
-    /// The id of the client this player belongs to, which is its key in <see cref="Game.Players"/>.
+    /// The id of the client this player belongs to, which is its key in <see cref="Game.Players"/>. Like the other states
+    /// of the player, only the game sets it.
     /// </summary>
     [State(Position = 1)]
     public partial string ClientId { get; internal set; }
@@ -79,18 +81,6 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
 
     public override bool IsVisible => IsConnected;
 
-    // Not intercepted: runtime state of the movement, created by the game under its lock.
-    internal RateLimiter? StepRateLimiter { get; set; }
-
-    internal RateLimiter? TurnRateLimiter { get; set; }
-
-    internal long? LastMessageTimestamp { get; set; }
-
-    // Not intercepted: the page whose microphone counts and the pages with the speaker on, kept by the game under its lock.
-    internal int? MicrophonePageId { get; set; }
-
-    internal HashSet<int>? AudioPageIds { get; set; }
-
     public GamePlayer()
     {
         Facing = GameDirection.North;
@@ -106,7 +96,8 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     /// between two messages.
     /// </summary>
     /// <exception cref="ArgumentException">The message is empty or longer than <see cref="MaximumMessageLength"/>.</exception>
-    /// <exception cref="InvalidOperationException">The sender sent a message too recently, or the player cannot get it.</exception>
+    /// <exception cref="InvalidOperationException">The caller is not a connected player of the game, the sender sent a message
+    /// too recently, or the player cannot get it.</exception>
     [Operation(Title = "Send message", Icon = "Chat", Position = 1, Description = "Shows a message in the browser of this player.")]
     public Task SendMessageAsync(string message, [FromServices] GameCaller? caller, CancellationToken cancellationToken)
     {
@@ -117,7 +108,7 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
             throw new ArgumentException($"A message has at most {MaximumMessageLength} characters.", nameof(message));
         }
 
-        var game = ParentGame ?? throw new InvalidOperationException("The player is not part of a game.");
-        return game.SendMessageAsync(this, game.ResolveActor(caller), trimmed, cancellationToken);
+        var game = this.TryGetFirstParent<Game>() ?? throw new InvalidOperationException("The player is not part of a game.");
+        return game.SendMessageAsync(this, caller, trimmed, cancellationToken);
     }
 }

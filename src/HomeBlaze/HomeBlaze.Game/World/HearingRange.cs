@@ -1,11 +1,14 @@
+using HomeBlaze.Game.Abstractions;
+
 namespace HomeBlaze.Game.World;
 
 /// <summary>
 /// The only definition of who hears whom and how loud. Sound travels along the shortest open path between the
-/// footprint centers: the straight line while it touches no tile of an object whose
+/// area centers: the straight line while it touches no tile of an object whose
 /// <see cref="GameObject.IsSoundBlocking"/> is true, otherwise the path that <see cref="SoundPathSearch"/> finds around
 /// such objects. The volume is the distance gain of the path length times the occlusion gain of the detour, the length
-/// the path exceeds the straight distance by.
+/// the path exceeds the straight distance by. Players in different regions closed by such objects, by
+/// <see cref="SoundMap.AreSeparated"/>, get no path without a search.
 /// </summary>
 internal static class HearingRange
 {
@@ -37,12 +40,12 @@ internal static class HearingRange
     /// When the straight line is blocked, <paramref name="search"/> searches from the player with the ordinally smaller
     /// client id, so the pairs of one player computed one after the other reuse its search.
     /// </remarks>
-    public static double GetVolume(GamePlayer first, GamePlayer second, GameWorldIndex index, SoundPathSearch search)
+    public static double GetVolume(HearingPosition first, HearingPosition second, SoundMap map, SoundPathSearch search)
     {
-        var firstFootprint = first.Footprint;
-        var secondFootprint = second.Footprint;
-        var start = GetDoubledCenter(firstFootprint);
-        var end = GetDoubledCenter(secondFootprint);
+        var firstArea = first.Area;
+        var secondArea = second.Area;
+        var start = GetDoubledCenter(firstArea);
+        var end = GetDoubledCenter(secondArea);
         double deltaX = end.X - start.X;
         double deltaY = end.Y - start.Y;
         var distance = Math.Sqrt(deltaX * deltaX + deltaY * deltaY) / 2;
@@ -51,23 +54,28 @@ internal static class HearingRange
             return 0;
         }
 
-        if (!IsLineBlocked(start, end, firstFootprint, secondFootprint, index))
+        if (!IsLineBlocked(start, end, firstArea, secondArea, map))
         {
             return GetDistanceGain(distance);
         }
 
-        // From one fixed end, so both orders get the same length also where a footprint overlaps a sound blocking
-        // object, whose tiles count as open only in the source footprint.
+        if (SoundMap.AreSeparated(map.GetRegion(firstArea), map.GetRegion(secondArea)))
+        {
+            return 0;
+        }
+
+        // From one fixed end, so both orders get the same length also where an area overlaps a sound blocking
+        // object, whose tiles count as open only in the source area.
         var isFirstSource = IsSearchedFrom(first, second);
-        search.Prepare(isFirstSource ? firstFootprint : secondFootprint, index);
-        var length = search.GetLength(isFirstSource ? secondFootprint : firstFootprint);
+        search.Prepare(isFirstSource ? firstArea : secondArea, map);
+        var length = search.GetLength(isFirstSource ? secondArea : firstArea);
         if (length == SoundPathSearch.NoPath)
         {
             return 0;
         }
 
         // Against the grid length without walls, so the excess of grid lengths over straight ones cancels out.
-        var openLength = SoundPathSearch.GetOpenLength(firstFootprint, secondFootprint);
+        var openLength = SoundPathSearch.GetOpenLength(firstArea, secondArea);
         var detour = Math.Max(0, length - openLength) / (double)SoundPathSearch.Unit;
         return GetDistanceGain(distance + detour) * GetOcclusionGain(detour);
     }
@@ -95,7 +103,7 @@ internal static class HearingRange
     /// </summary>
     public static double GetOcclusionGain(double detour) => 1 / (1 + detour / HalvingDetour);
 
-    private static bool IsSearchedFrom(GamePlayer first, GamePlayer second)
+    private static bool IsSearchedFrom(HearingPosition first, HearingPosition second)
     {
         var order = string.CompareOrdinal(first.ClientId, second.ClientId);
         if (order != 0)
@@ -103,39 +111,39 @@ internal static class HearingRange
             return order < 0;
         }
 
-        var firstFootprint = first.Footprint;
-        var secondFootprint = second.Footprint;
-        return (firstFootprint.X, firstFootprint.Y, firstFootprint.Width, firstFootprint.Depth)
-            .CompareTo((secondFootprint.X, secondFootprint.Y, secondFootprint.Width, secondFootprint.Depth)) <= 0;
+        var firstArea = first.Area;
+        var secondArea = second.Area;
+        return (firstArea.X, firstArea.Y, firstArea.Width, firstArea.Depth)
+            .CompareTo((secondArea.X, secondArea.Y, secondArea.Width, secondArea.Depth)) <= 0;
     }
 
     /// <summary>
-    /// Gets the area that every footprint of a player who may hear a player with this footprint intersects.
+    /// Gets the area that every area of a player who may hear a player with this area intersects.
     /// </summary>
     /// <remarks>
-    /// The footprint must have a width and depth from 1 to <see cref="GameObject.MaximumSize"/>; the index holds no others.
+    /// The area must have a width and depth from 1 to <see cref="GameObject.MaximumSize"/>; the index holds no others.
     /// </remarks>
-    public static Footprint GetArea(Footprint footprint)
+    public static GameArea GetArea(GameArea area)
     {
-        var minimumX = Math.Max(int.MinValue, (long)footprint.X - HearingRadius);
-        var maximumX = Math.Min(int.MaxValue, footprint.Right + HearingRadius);
-        var minimumY = Math.Max(int.MinValue, (long)footprint.Y - HearingRadius);
-        var maximumY = Math.Min(int.MaxValue, footprint.Top + HearingRadius);
-        return new Footprint(
+        var minimumX = Math.Max(int.MinValue, (long)area.X - HearingRadius);
+        var maximumX = Math.Min(int.MaxValue, area.Right + HearingRadius);
+        var minimumY = Math.Max(int.MinValue, (long)area.Y - HearingRadius);
+        var maximumY = Math.Min(int.MaxValue, area.Top + HearingRadius);
+        return new GameArea(
             (int)minimumX,
             (int)minimumY,
             (int)Math.Min(int.MaxValue, maximumX - minimumX + 1),
             (int)Math.Min(int.MaxValue, maximumY - minimumY + 1));
     }
 
-    // In half tiles, so the center of every footprint is a whole number and the walk stays exact.
-    private static (long X, long Y) GetDoubledCenter(Footprint footprint) =>
-        (2L * footprint.X + footprint.Width, 2L * footprint.Y + footprint.Depth);
+    // In half tiles, so the center of every area is a whole number and the walk stays exact.
+    private static (long X, long Y) GetDoubledCenter(GameArea area) =>
+        (2L * area.X + area.Width, 2L * area.Y + area.Depth);
 
     // Walks every tile that the closed segment touches, also only at an edge or a corner, so sound slips neither
     // between two walls that touch at a corner nor along the face of a wall. Called only within the hearing radius,
     // which keeps the products in GetTouchedRows far inside the long range.
-    private static bool IsLineBlocked((long X, long Y) start, (long X, long Y) end, Footprint first, Footprint second, GameWorldIndex index)
+    private static bool IsLineBlocked((long X, long Y) start, (long X, long Y) end, GameArea first, GameArea second, SoundMap map)
     {
         var lastColumn = FloorDivide(Math.Max(start.X, end.X), 2);
         for (var column = CeilingDivide(Math.Min(start.X, end.X), 2) - 1; column <= lastColumn; column++)
@@ -143,7 +151,7 @@ internal static class HearingRange
             var (firstRow, lastRow) = GetTouchedRows(column, start, end);
             for (var row = firstRow; row <= lastRow; row++)
             {
-                if (!first.Contains(column, row) && !second.Contains(column, row) && index.IsSoundBlocked(column, row))
+                if (!first.Contains(column, row) && !second.Contains(column, row) && map.IsSoundBlocked(column, row))
                 {
                     return true;
                 }
