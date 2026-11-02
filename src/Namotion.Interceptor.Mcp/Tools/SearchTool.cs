@@ -143,7 +143,7 @@ internal class SearchTool
                 continue;
             }
 
-            if (!visibility.IsShown(registered))
+            if (!visibility.IsShownWithWrittenPath(registered))
             {
                 continue;
             }

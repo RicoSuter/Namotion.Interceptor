@@ -116,6 +116,28 @@ internal sealed class McpVisibility
         return isShown;
     }
 
+    /// <summary>
+    /// <see cref="IsShown(RegisteredSubject)"/> for a subject whose path <see cref="McpToolHelper.TryGetSubjectPath"/>
+    /// has written, which is a readable path, so only whether the subject is empty for the policy is left to check.
+    /// </summary>
+    public bool IsShownWithWrittenPath(RegisteredSubject subject)
+    {
+        if (_policy is null || subject.Subject == _rootSubject)
+        {
+            return true;
+        }
+
+        // Seeds the cache that IsShown reads, as a where filter of the same call may ask about this subject again.
+        _isShown ??= [];
+        if (!_isShown.TryGetValue(subject, out var isShown))
+        {
+            isShown = !IsEmptyForPolicy(subject, _policy);
+            _isShown[subject] = isShown;
+        }
+
+        return isShown;
+    }
+
     // A subject with several parents is shown through any of them, so hiding one link hides only that link. A subject
     // without a readable path from the root is not shown, also when no path reaches the root at all.
     private bool Evaluate(RegisteredSubject subject, IMcpAccessPolicy policy)
