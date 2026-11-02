@@ -95,12 +95,11 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     }
 
     /// <summary>
-    /// Whether a change of the property is published: it holds no subjects and has a topic, read from the topic cache
-    /// the publish uses.
+    /// Whether a change of the property is published: it holds no subjects and the current mapper gives it a topic.
     /// </summary>
     internal bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { CanContainSubjects: false } property &&
-        TryGetTopicForProperty(propertyReference, property).Topic is not null;
+        _configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null;
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)

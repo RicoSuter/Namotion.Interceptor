@@ -275,13 +275,12 @@ public class MqttMappingCacheTests
     }
 
     [Fact]
-    public async Task WhenTheServerFiltersChanges_ThenItAdmitsOnlyPropertiesWithATopicAndServesThemFromTheTopicCache()
+    public async Task WhenTheServerFiltersChanges_ThenItAdmitsOnlyScalarPropertiesWithATopic()
     {
         // Arrange
-        var mapper = new CountingMapper(CreateMapper());
         var subject = CreateRootSubject();
         subject.Child = new MqttCacheTestChild();
-        await using var server = CreateServer(subject, mapper);
+        await using var server = CreateServer(subject, CreateMapper());
         var registered = subject.TryGetRegisteredSubject()!;
         var name = registered.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
         var comment = registered.TryGetProperty(nameof(MqttCacheTestRoot.Comment))!;
@@ -289,18 +288,57 @@ public class MqttMappingCacheTests
 
         // Act
         var nameIncluded = server.IsPropertyIncluded(name.Reference);
-        var nameIncludedAgain = server.IsPropertyIncluded(name.Reference);
-        var nameTopic = server.TryGetTopicForProperty(name.Reference, name).Topic;
         var commentIncluded = server.IsPropertyIncluded(comment.Reference);
         var childIncluded = server.IsPropertyIncluded(child.Reference);
 
         // Assert
         Assert.True(nameIncluded);
-        Assert.True(nameIncludedAgain);
-        Assert.Equal("name", nameTopic);
         Assert.False(commentIncluded);
         Assert.False(childIncluded);
-        Assert.Equal(2, mapper.MappingLookupCount);
+    }
+
+    [Fact]
+    public async Task WhenProviderExcludesACachedProperty_ThenTheServerFilterRejectsItsChangesUntilIncludedAgain()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var pathProvider = new MutablePathProvider();
+        await using var server = CreateServer(subject, new MqttPathProviderMapper(pathProvider));
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+        Assert.Equal("name", server.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.True(server.IsPropertyIncluded(property.Reference));
+
+        // Act
+        pathProvider.Included = false;
+        var includedWhileExcluded = server.IsPropertyIncluded(property.Reference);
+        pathProvider.Included = true;
+        var includedAgain = server.IsPropertyIncluded(property.Reference);
+
+        // Assert
+        Assert.False(includedWhileExcluded);
+        Assert.True(includedAgain);
+    }
+
+    [Fact]
+    public async Task WhenACachedSubjectMovesUnderAnUnmappedPropertyWithoutADetach_ThenTheServerFilterRejectsItsChanges()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("child/value", server.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.True(server.IsPropertyIncluded(property.Reference));
+
+        // Act
+        subject.Hidden = child;
+        subject.Child = null;
+        var included = server.IsPropertyIncluded(property.Reference);
+
+        // Assert
+        Assert.NotNull(child.TryGetRegisteredSubject());
+        Assert.False(included);
     }
 
     [Fact]
@@ -399,6 +437,14 @@ public class MqttMappingCacheTests
         // Assert
         Assert.False(included);
         Assert.Equal(0, allocated);
+    }
+
+    private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')
+    {
+        public bool Included { get; set; } = true;
+
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+            => Included && base.IsPropertyIncluded(property);
     }
 
     private static MqttCacheTestRoot CreateRootSubject()
