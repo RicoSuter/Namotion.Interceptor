@@ -657,6 +657,29 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         Assert.Equal(["/Page"], result.GetProperty("pages").EnumerateArray().Select(match => match.GetProperty("path").GetString()));
     }
 
+    [Fact]
+    public async Task WhenARoleHidesThePropertyHoldingAPageThroughItsFirstParent_ThenItsPathGoesThroughTheParentTheRoleShows()
+    {
+        // Arrange
+        // The page got the storage first, whose children the role hides.
+        var (root, services) = await CreateGraphAsync([]);
+        var page = ((FluentStorageContainer)root.Children["Storage"]).Children["Notes.md"];
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["Page"] = page };
+        var role = new AuthorizationRole
+        {
+            Name = "NoStorageChildren",
+            Includes = [BuiltInRoles.ReaderName],
+            Deny = [new PermissionRule { Types = [nameof(FluentStorageContainer)], Members = [nameof(FluentStorageContainer.Children)], Actions = [PermissionAction.Read] }]
+        };
+        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+
+        // Act
+        var result = await CallAsync(tool, new { query = "freezer" });
+
+        // Assert
+        Assert.Equal(["/Page"], result.GetProperty("pages").EnumerateArray().Select(match => match.GetProperty("path").GetString()));
+    }
+
     private async Task<McpToolInfo> CreateToolAsync(params (string Path, string Content)[] additionalFiles)
     {
         var (root, services) = await CreateGraphAsync(additionalFiles);

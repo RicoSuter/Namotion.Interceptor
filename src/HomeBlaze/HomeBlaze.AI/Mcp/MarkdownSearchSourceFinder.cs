@@ -19,6 +19,7 @@ namespace HomeBlaze.AI.Mcp;
 internal sealed class MarkdownSearchSourceFinder
 {
     private readonly PathProviderBase _pathProvider;
+    private readonly PathProviderBase _readablePathProvider;
     private readonly string _pathPrefix;
     private readonly Type[] _excludeTypes;
     private readonly McpServerConfiguration _configuration;
@@ -30,6 +31,7 @@ internal sealed class MarkdownSearchSourceFinder
     public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes, McpServerConfiguration configuration)
     {
         _pathProvider = pathProvider;
+        _readablePathProvider = configuration.AccessPolicy is null ? pathProvider : new ReadablePathProvider(pathProvider, configuration);
         _pathPrefix = pathPrefix;
         _excludeTypes = excludeTypes;
         _configuration = configuration;
@@ -140,7 +142,8 @@ internal sealed class MarkdownSearchSourceFinder
     }
 
     // The path as browse and search show it, after the path prefix: through the first parent, in parent order, from
-    // which a path can be written; null for a subject of an excluded type or below one.
+    // which a path can be written through properties the access policy allows to read, the parent the tools choose;
+    // null for a subject of an excluded type or below one.
     private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
     {
         if (ReferenceEquals(subject.Subject, rootSubject))
@@ -156,7 +159,7 @@ internal sealed class MarkdownSearchSourceFinder
 
         foreach (var parent in parents)
         {
-            if (parent.Property.TryGetPath(_pathProvider, rootSubject, parent.Index) is { } path)
+            if (parent.Property.TryGetPath(_readablePathProvider, rootSubject, parent.Index) is { } path)
             {
                 return _pathPrefix + path;
             }
@@ -170,6 +173,27 @@ internal sealed class MarkdownSearchSourceFinder
         pathPrefix is null ||
         (path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase) &&
          (path.Length == pathPrefix.Length || path[pathPrefix.Length] == '/'));
+
+    // Includes what the path provider includes and the access policy allows to read, as the path provider of the tools
+    // does; the registry checks the property of an attribute through this too. Segments are looked up as the path
+    // provider does, so a key that a hidden property shadows is written in its explicit form, which resolves alike.
+    private sealed class ReadablePathProvider(PathProviderBase inner, McpServerConfiguration configuration) : PathProviderBase
+    {
+        public override char PathSeparator => inner.PathSeparator;
+
+        public override char IndexOpen => inner.IndexOpen;
+
+        public override char IndexClose => inner.IndexClose;
+
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
+            inner.IsPropertyIncluded(property) && configuration.IsAllowed(property, McpAccessActions.Read);
+
+        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
+            inner.TryGetPropertySegment(property);
+
+        public override RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment) =>
+            inner.TryGetPropertyFromSegment(subject, segment);
+    }
 }
 
 /// <summary>
