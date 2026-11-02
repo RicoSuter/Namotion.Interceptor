@@ -337,7 +337,10 @@ public static class PathExtensions
     /// <returns>The path, or null when paths may not pass the property or a property holding it up to the root (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
     /// A built path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> with the
-    /// same provider resolves it back to the same property when the provider resolves the segments it gives. When a
+    /// same provider resolves it back to the same property when the provider resolves the segments it gives. This does
+    /// not hold for attributes whose segment is the bare attribute name, as with <see cref="DefaultPathProvider"/>: two
+    /// attributes with the same name on one subject, or an attribute named like a property, share a segment and resolve
+    /// to the first of them. When a
     /// subject on the way has several parents and <paramref name="rootSubject"/> is given, the path is the first path,
     /// in parent order, that reaches the root through properties the provider includes; without a root it follows
     /// the first parent of each subject. Keys are formatted with their invariant text, quoted when the text is empty,

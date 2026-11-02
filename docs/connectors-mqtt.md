@@ -383,8 +383,8 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 - Cleanup happens both proactively (on detach event) and lazily (when stale entries are accessed)
 
 **Server behavior:**
-- Cache entries in `_propertyToTopic` and `_pathToProperty` are removed for detached subjects
-- Same dual cleanup strategy as client
+- Cache entries in `_pathToProperty` are removed for detached subjects, and an entry for a subject that is detached or detaching (no references left) is dropped right after it is added
+- Outbound topics are not cached: the change filter and the publish ask the configured mapper for every change, so a change is published under the topic its property has at that moment, also after its subject moved to another holding property without a detach or after the mapper's answers changed
 
 **Race condition prevention:**
 - Cache lookups validate subject attachment AFTER cache access
