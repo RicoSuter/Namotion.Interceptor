@@ -8,23 +8,33 @@ public class EmoteToolTests
 {
     private readonly GameTestContext _context = new();
 
+    public static TheoryData<Action<EmoteTool, GameCaller>, string, GameVisualAnimationMode> Emotes => new()
+    {
+        { (tool, caller) => tool.Clap(caller), "Clapping", GameVisualAnimationMode.Once },
+        { (tool, caller) => tool.Sit(caller), "Sitting", GameVisualAnimationMode.Loop },
+        { (tool, caller) => tool.Jump(caller), "Jump", GameVisualAnimationMode.Once },
+    };
+
     [Theory]
-    [InlineData(nameof(EmoteTool.Clap), "Clapping")]
-    [InlineData(nameof(EmoteTool.Sit), "Sitting")]
-    [InlineData(nameof(EmoteTool.Jump), "Jump")]
-    public void WhenAnEmoteIsInvoked_ThenThePlayerPlaysItsAnimation(string operation, string animation)
+    [MemberData(nameof(Emotes))]
+    public void WhenAnEmoteIsInvoked_ThenThePlayerPlaysItsAnimation(
+        Action<EmoteTool, GameCaller> emote, string animation, GameVisualAnimationMode mode)
     {
         // Arrange
+        var sink = new RecordingViewSink();
         var player = _context.AddConnectedPlayer("tab-1");
+        using var view = _context.OpenView("tab-1", sink);
         var tool = _context.AddTool("emotes", new EmoteTool());
-        var caller = new GameCaller("tab-1");
 
         // Act
-        typeof(EmoteTool).GetMethod(operation)!.Invoke(tool, [caller]);
-        _context.Publish();
+        emote(tool, new GameCaller("tab-1"));
+        _context.Tick();
 
         // Assert
+        var payload = sink.LastSelf().Payload;
         Assert.Equal(animation, player.Animation);
+        Assert.Equal(animation, payload.Animation);
+        Assert.Equal((int)mode, payload.AnimationMode);
     }
 
     [Fact]
