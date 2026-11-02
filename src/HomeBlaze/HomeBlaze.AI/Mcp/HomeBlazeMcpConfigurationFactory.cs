@@ -94,7 +94,7 @@ internal static class HomeBlazeMcpConfigurationFactory
                 configuration, pathProvider, rootSubjectProvider()));
         configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker, isReadOnly));
-        configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, pathProvider, PathPrefix, excludeTypes, configuration));
+        configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, configuration));
 
         var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly, configuration);
         foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())

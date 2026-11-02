@@ -8,7 +8,6 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -60,26 +59,20 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     });
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
-    private readonly string _pathPrefix;
+    private readonly McpServerConfiguration _configuration;
     private readonly MarkdownSearchSourceFinder _sourceFinder;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
-    /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
-    /// <param name="pathPrefix">The prefix of every path, <see cref="McpServerConfiguration.PathPrefix"/> of the configuration.</param>
-    /// <param name="excludeTypes">
-    /// <see cref="McpServerConfiguration.ExcludeTypes"/> of the configuration: the pages and notes of a subject of one of
-    /// these types, or below one through the first parents, are not searched.
-    /// </param>
     /// <param name="configuration">
-    /// The configuration the tool is added to, whose access policy decides which pages and notes are searched.
+    /// The configuration the tool is added to. Its path provider and path prefix write the paths of the pages, and the
+    /// pages and notes are searched only when its access policy allows to read them and they are not of a subject of one
+    /// of its excluded types or below one through the first parents.
     /// </param>
-    internal HomeBlazeMarkdownSearchToolProvider(
-        Func<IInterceptorSubject> rootSubjectProvider, PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes,
-        McpServerConfiguration configuration)
+    internal HomeBlazeMarkdownSearchToolProvider(Func<IInterceptorSubject> rootSubjectProvider, McpServerConfiguration configuration)
     {
         _rootSubjectProvider = rootSubjectProvider;
-        _pathPrefix = pathPrefix;
-        _sourceFinder = new MarkdownSearchSourceFinder(pathProvider, pathPrefix, excludeTypes, configuration);
+        _configuration = configuration;
+        _sourceFinder = new MarkdownSearchSourceFinder(configuration);
     }
 
     public IEnumerable<McpToolInfo> GetTools()
@@ -322,7 +315,7 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
     private string? NormalizePathPrefix(string? pathPrefix)
     {
         var trimmed = pathPrefix?.Trim('/');
-        return string.IsNullOrEmpty(trimmed) ? null : _pathPrefix + trimmed;
+        return string.IsNullOrEmpty(trimmed) ? null : _configuration.PathPrefix + trimmed;
     }
 
     private static bool GetBoolean(JsonElement input, string name, bool defaultValue) =>

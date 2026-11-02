@@ -9,7 +9,6 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.AI.Mcp;
 
@@ -18,20 +17,15 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 internal sealed class MarkdownSearchSourceFinder
 {
-    private readonly PathProviderBase _pathProvider;
-    private readonly string _pathPrefix;
-    private readonly Type[] _excludeTypes;
     private readonly McpServerConfiguration _configuration;
 
-    /// <param name="pathProvider">Builds the paths of the pages, as the other tools resolve them.</param>
-    /// <param name="pathPrefix">The prefix of every path.</param>
-    /// <param name="excludeTypes">The types whose subjects, and the subjects below them, are left out.</param>
-    /// <param name="configuration">The configuration of the tools, whose access policy decides which pages and notes are found.</param>
-    public MarkdownSearchSourceFinder(PathProviderBase pathProvider, string pathPrefix, Type[] excludeTypes, McpServerConfiguration configuration)
+    /// <param name="configuration">
+    /// The configuration of the tools: its path provider and path prefix write the paths of the pages, its access policy
+    /// decides which pages and notes are found, and the subjects of its excluded types, and the subjects below them, are
+    /// left out.
+    /// </param>
+    public MarkdownSearchSourceFinder(McpServerConfiguration configuration)
     {
-        _pathProvider = pathProvider;
-        _pathPrefix = pathPrefix;
-        _excludeTypes = excludeTypes;
         _configuration = configuration;
     }
 
@@ -100,7 +94,7 @@ internal sealed class MarkdownSearchSourceFinder
     // The execute check is not logged, as it runs for every page of every search rather than for a call the client made.
     private bool IsPageReadable(RegisteredSubject root, RegisteredSubject page, string path)
     {
-        var shown = path == _pathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
+        var shown = path == _configuration.PathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
         return ReferenceEquals(shown, page) &&
             page.TryGetProperty(nameof(MarkdownFile.ReadRawContent)) is { } method &&
             _configuration.IsAllowed(method, McpAccessActions.Read) &&
@@ -131,7 +125,7 @@ internal sealed class MarkdownSearchSourceFinder
             {
                 (notes ??= []).Add((null, (subject.Subject as ITitleProvider)?.Title, text));
             }
-            else if (subject.TryGetProperty(propertyName) is { } property && _pathProvider.IsPropertyIncluded(property))
+            else if (subject.TryGetProperty(propertyName) is { } property && _configuration.PathProvider.IsPropertyIncluded(property))
             {
                 (notes ??= []).Add((propertyName, property.GetDisplayName(), text));
             }
@@ -140,15 +134,16 @@ internal sealed class MarkdownSearchSourceFinder
         return notes;
     }
 
-    // The path as search lists it, null for a subject it does not show or of an excluded type or below one.
+    // The path as search lists it, null for a subject search does not list and also for one below a subject of an
+    // excluded type, which search lists but browse does not show in the tree.
     private string? TryGetPath(RegisteredSubject subject, RegisteredSubject root)
     {
         if (ReferenceEquals(subject.Subject, root.Subject))
         {
-            return _pathPrefix;
+            return _configuration.PathPrefix;
         }
 
-        return subject.Parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, root.Subject, _excludeTypes)
+        return subject.Parents.Length == 0 || AgentMetadataAccess.IsOfExcludedType(subject, root.Subject, _configuration.ExcludeTypes)
             ? null
             : _configuration.TryGetSubjectPath(root, subject);
     }
