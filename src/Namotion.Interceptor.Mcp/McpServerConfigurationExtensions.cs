@@ -48,19 +48,19 @@ public static class McpServerConfigurationExtensions
     internal static RegisteredSubject? TryGetReadableSubject(
         this McpServerConfiguration configuration, RegisteredSubject root, string path, McpVisibility visibility)
     {
-        if (configuration.AccessPolicy is not { } policy)
+        if (configuration.AccessPolicy is null)
         {
             return configuration.ToolPathProvider.TryGetSubjectFromPath(root, path);
         }
 
         var pathProvider = visibility.GetPathProvider(configuration.ToolPathProvider);
-        var subject = TryResolveReadableSubject(pathProvider, policy, root, path);
+        var subject = TryResolveReadableSubject(pathProvider, visibility, root, path);
         return subject is not null && visibility.IsShown(subject) ? subject : null;
     }
 
     // Resolves through the properties the provider includes to a subject that is not empty for the policy.
     private static RegisteredSubject? TryResolveReadableSubject(
-        PathProviderBase pathProvider, IMcpAccessPolicy policy, RegisteredSubject root, string path)
+        PathProviderBase pathProvider, McpVisibility visibility, RegisteredSubject root, string path)
     {
         if (pathProvider.TryGetPropertyFromPath(root, path) is not
             { } resolved)
@@ -81,6 +81,6 @@ public static class McpServerConfigurationExtensions
         };
 
         var registered = subject?.TryGetRegisteredSubject();
-        return registered is not null && !McpVisibility.IsEmptyForPolicy(registered, policy) ? registered : null;
+        return registered is not null && !visibility.IsEmptyForPolicy(registered) ? registered : null;
     }
 }

@@ -16,6 +16,7 @@ internal sealed class McpVisibility
 {
     private readonly IMcpAccessPolicy? _policy;
     private readonly IInterceptorSubject? _rootSubject;
+    private readonly PathProviderBase? _pathProvider;
     private readonly PathProviderBase? _toolPathProvider;
     private Dictionary<RegisteredSubject, bool>? _isShown;
     private ShownSubjectsPathProvider? _shownSubjectsPathProvider;
@@ -24,11 +25,14 @@ internal sealed class McpVisibility
     {
     }
 
-    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, PathProviderBase toolPathProvider)
+    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, McpServerConfiguration configuration)
     {
         _policy = policy;
         _rootSubject = rootSubject;
-        _toolPathProvider = toolPathProvider;
+        _toolPathProvider = configuration.ToolPathProvider;
+
+        // ToolPathProvider has checked that the configured provider extends PathProviderBase.
+        _pathProvider = (PathProviderBase)configuration.PathProvider;
     }
 
     /// <summary>
@@ -42,7 +46,7 @@ internal sealed class McpVisibility
     /// </summary>
     public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
         configuration.AccessPolicy is { } policy
-            ? new McpVisibility(policy, rootSubject, configuration.ToolPathProvider)
+            ? new McpVisibility(policy, rootSubject, configuration)
             : Unrestricted;
 
     /// <summary>
@@ -64,21 +68,27 @@ internal sealed class McpVisibility
     }
 
     /// <summary>
-    /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
-    /// policy denies read on every one of them. A subject without such properties is not empty.
+    /// Whether the subject is empty for the policy: it has at least one property other than an attribute that the
+    /// configuration's path provider effectively includes, and the policy denies read on every one of them. A subject
+    /// without such properties is not empty. Always false without a policy.
     /// </summary>
-    internal static bool IsEmptyForPolicy(RegisteredSubject subject, IMcpAccessPolicy policy)
+    internal bool IsEmptyForPolicy(RegisteredSubject subject)
     {
+        if (_policy is null)
+        {
+            return false;
+        }
+
         // Attributes are listed only on a listed property, so they make a subject neither shown nor empty.
         var hasProperty = false;
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
+            if (property.IsAttribute || !_pathProvider!.IsPropertyEffectivelyIncluded(property))
             {
                 continue;
             }
 
-            if (policy.IsAllowed(property, McpAccessActions.Read))
+            if (_policy.IsAllowed(property, McpAccessActions.Read))
             {
                 return false;
             }
@@ -109,7 +119,7 @@ internal sealed class McpVisibility
         _isShown ??= [];
         if (!_isShown.TryGetValue(subject, out var isShown))
         {
-            isShown = Evaluate(subject, _policy);
+            isShown = Evaluate(subject);
             _isShown[subject] = isShown;
         }
 
@@ -131,7 +141,7 @@ internal sealed class McpVisibility
         _isShown ??= [];
         if (!_isShown.TryGetValue(subject, out var isShown))
         {
-            isShown = !IsEmptyForPolicy(subject, _policy);
+            isShown = !IsEmptyForPolicy(subject);
             _isShown[subject] = isShown;
         }
 
@@ -140,9 +150,9 @@ internal sealed class McpVisibility
 
     // A subject with several parents is shown through any of them, so hiding one link hides only that link. A subject
     // without a readable path from the root is not shown, also when no path reaches the root at all.
-    private bool Evaluate(RegisteredSubject subject, IMcpAccessPolicy policy)
+    private bool Evaluate(RegisteredSubject subject)
     {
-        if (IsEmptyForPolicy(subject, policy))
+        if (IsEmptyForPolicy(subject))
         {
             return false;
         }
