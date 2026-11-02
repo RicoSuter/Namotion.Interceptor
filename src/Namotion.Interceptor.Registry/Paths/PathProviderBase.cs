@@ -43,23 +43,27 @@ public abstract class PathProviderBase : IPathProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// The default matches the segments of <see cref="TryGetPropertySegment"/> and, when none matches, falls back to
-    /// the [InlinePaths] property of the subject when that is included.
+    /// The default matches the segments of <see cref="TryGetPropertySegment"/> of every property other than the
+    /// [InlinePaths] property and, when none matches, falls back to the [InlinePaths] property of the subject when that
+    /// is included.
     /// </remarks>
     public virtual bool TryGetPropertyFromSegment(
         RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
     {
+        var subjectType = subject.Subject.GetType();
         foreach (var candidate in subject.Properties)
         {
-            if (TryGetPropertySegment(candidate, out var candidateSegment) && candidateSegment == segment)
+            // The [InlinePaths] property yields its own segment to every other property, so it is matched only below.
+            if (TryGetPropertySegment(candidate, out var candidateSegment) && candidateSegment == segment &&
+                !InlinePathsAttribute.IsInlinePathsProperty(subjectType, candidate.Name))
             {
                 property = candidate;
                 return true;
             }
         }
 
-        // The segment is an [InlinePaths] dictionary key; the caller uses it as the key.
-        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
+        // The segment is the [InlinePaths] property's own segment or a dictionary key; the caller tells them apart.
+        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subjectType);
         if (inlinePathsPropertyName is not null &&
             subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
             TryGetPropertySegment(inlinePathsProperty, out _))

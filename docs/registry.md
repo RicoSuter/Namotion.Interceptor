@@ -283,15 +283,15 @@ public interface IPathProvider
     // False when the property is excluded; true with its segment, never null, when it is included.
     bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment);
 
-    // The inverse: the first included property whose segment matches, or the [InlinePaths] property whose key the
-    // segment is. Never an excluded property.
+    // The inverse: the first included property other than the [InlinePaths] property whose segment matches,
+    // otherwise the included [InlinePaths] property, whose own segment or key the segment is. Never an excluded property.
     bool TryGetPropertyFromSegment(RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property);
 }
 ```
 
 Both methods may be called concurrently. `IsPropertyIncluded` and `IsPropertyEffectivelyIncluded` are extension methods on `IPathProvider` in `PathProviderExtensions`; the first returns what `TryGetPropertySegment` returns, the second is described below.
 
-A custom provider derives from `PathProviderBase` and overrides `TryGetPropertySegment`. The base class includes every property under its `BrowseName`, matches segments through `TryGetPropertySegment` so that only included properties resolve, falls back to the `[InlinePaths]` property, and has the virtual `PathSeparator`, `IndexOpen` and `IndexClose`:
+A custom provider derives from `PathProviderBase` and overrides `TryGetPropertySegment`. The base class includes every property under its `BrowseName`, matches segments through `TryGetPropertySegment` so that only included properties resolve, reaches the `[InlinePaths]` property only when no other included property has the segment, and has the virtual `PathSeparator`, `IndexOpen` and `IndexClose`:
 
 ```csharp
 public class StatePathProvider : PathProviderBase
@@ -421,7 +421,7 @@ Sensors['Kitchen [north]'].Temperature
 - An index on a property that is neither a collection nor a dictionary is not found.
 - `TryGetPropertyFromPath` returns the key of the last segment, typed as above, also when no entry exists at it yet.
 
-`[InlinePaths]` keys follow the same rules. A key is written as a bare segment only when it reads back as that key: it is not empty, contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`. The inline property's own segment (`Line.Machines`) addresses the property itself. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
+`[InlinePaths]` keys follow the same rules. A key is written as a bare segment only when it reads back as that key: it is not empty, contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`. The inline property's own segment (`Line.Machines`) addresses the property itself, unless another included property of the subject has the same segment: that property takes the segment wherever it is declared, and a key that needs the index form then has no path. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
 
 #### Creating missing subjects
 

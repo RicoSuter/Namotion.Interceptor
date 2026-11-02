@@ -144,4 +144,48 @@ public class InlinePathKeyTests
         // Assert
         Assert.Equal(expectedPath, path);
     }
+
+    [Fact]
+    public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenThatPropertyRoundTrips()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var root = new TestLateShadowedInlineContainer(context) { Name = "root", Label = "label" };
+        var registered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var path = registered.TryGetProperty(nameof(TestLateShadowedInlineContainer.Label))!.TryGetPath(pathProvider, null);
+        var resolved = pathProvider.TryGetPropertyFromPath(registered, path!);
+
+        // Assert
+        Assert.Equal("Children", path);
+        Assert.Equal(nameof(TestLateShadowedInlineContainer.Label), resolved?.Property.Name);
+        Assert.Null(resolved?.Index);
+    }
+
+    [Theory]
+    [InlineData("CNC01", "CNC01.name")]
+    [InlineData("a.b", null)]
+    public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenKeyNeedingExplicitFormHasNoPath(string key, string? expectedPath)
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestLateShadowedInlineContainer(context) { Name = "child", Label = "label" };
+        var root = new TestLateShadowedInlineContainer(context)
+        {
+            Name = "root",
+            Label = "label",
+            Children = new Dictionary<string, TestLateShadowedInlineContainer> { [key] = child }
+        };
+
+        // Act
+        var path = GetNameProperty(child).TryGetPath(pathProvider, null);
+        var resolved = path is null ? null : pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path);
+
+        // Assert
+        Assert.Equal(expectedPath, path);
+        Assert.True(path is null || resolved?.Property.Subject == child);
+    }
 }

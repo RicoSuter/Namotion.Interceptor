@@ -58,7 +58,7 @@ public class PathProviderBaseTests
                 // Assert
                 var inlinePathsProperty = GetInlinePathsProperty(subject);
                 var expected = subject.Properties.FirstOrDefault(candidate =>
-                    pathProvider.TryGetPropertySegment(candidate, out var segment) && segment == name) ??
+                    candidate != inlinePathsProperty && pathProvider.TryGetPropertySegment(candidate, out var segment) && segment == name) ??
                     (inlinePathsProperty is not null && pathProvider.IsPropertyIncluded(inlinePathsProperty) ? inlinePathsProperty : null);
                 Assert.Equal(found, property is not null);
                 Assert.Same(expected, property);
@@ -242,11 +242,13 @@ public class PathProviderBaseTests
         var context = CreateContext();
         var person = new Person(context) { FirstName = "Ann", LastName = "Smith", Father = new Person(context) };
         var container = new TestShadowedInlineContainer(context) { Label = "Label", Name = "Name" };
+        var lateShadowedContainer = new TestLateShadowedInlineContainer(context) { Label = "Label", Name = "Name" };
         var subjects = new List<RegisteredSubject>
         {
             person.TryGetRegisteredSubject()!,
             person.Father.TryGetRegisteredSubject()!,
-            container.TryGetRegisteredSubject()!
+            container.TryGetRegisteredSubject()!,
+            lateShadowedContainer.TryGetRegisteredSubject()!
         };
         return (subjects.SelectMany(subject => subject.Properties).ToList(), subjects);
     }

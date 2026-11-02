@@ -26,8 +26,9 @@ public interface IPathProvider
 
     /// <summary>
     /// Finds a property by its path segment, the inverse of <see cref="TryGetPropertySegment"/>: the first included
-    /// property, in the subject's property order, whose segment equals <paramref name="segment"/>, or the [InlinePaths]
-    /// property whose entry key the segment is. Never returns an excluded property.
+    /// property, in the subject's property order, other than the [InlinePaths] property whose segment equals
+    /// <paramref name="segment"/>, otherwise the included [InlinePaths] property, whose own segment or entry key the
+    /// segment is. Never returns an excluded property.
     /// </summary>
     /// <param name="subject">The subject to search in.</param>
     /// <param name="segment">The path segment to look up.</param>
