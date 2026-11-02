@@ -16,9 +16,8 @@ namespace HomeBlaze.Game.Components;
 public partial class GamePage
 {
     private const string InsecureMessage = "Voice needs HTTPS";
-    private const string AutoQuality = "auto";
-
-    private string _quality = AutoQuality;
+    // Taken from the browser once the view started.
+    private string _quality = "auto";
 
     private bool IsMicrophoneOn => _voice?.IsMicrophoneOn == true;
 
@@ -86,22 +85,7 @@ public partial class GamePage
         }
     }
 
-    private static string QualityLabel(string? choice) => choice switch
-    {
-        "low" => "Low",
-        "medium" => "Medium",
-        "high" => "High",
-        _ => "Auto"
-    };
-
-    private async Task SetQualityAsync(string choice)
-    {
-        _quality = choice;
-        if (_view is { } view)
-        {
-            await view.SetQualityAsync(choice);
-        }
-    }
+    private Task ApplyQualityAsync() => _view?.SetQualityAsync(_quality) ?? Task.CompletedTask;
 
     private async Task EditAsync()
     {

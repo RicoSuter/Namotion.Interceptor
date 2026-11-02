@@ -164,7 +164,7 @@ class GameView {
                 this.lastFrame = now;
                 this.lastFpsUpdate = now;
                 this.framesSinceFpsUpdate = 0;
-                this.renderer.resume(now);
+                this.renderer.resume();
                 this.engine.runRenderLoop(this.loop);
                 this.canvas.dataset.gameRendering = 'running';
             }
@@ -173,7 +173,8 @@ class GameView {
 
     async initialize() {
         const BABYLON = window.BABYLON;
-        this.engine = new BABYLON.Engine(this.canvas, true, { stencil: true, loseContextOnDispose: true }, true);
+        // The renderer sets the resolution from the device pixel ratio and the quality preset.
+        this.engine = new BABYLON.Engine(this.canvas, true, { stencil: true, loseContextOnDispose: true }, false);
         this.cameraTarget = new BABYLON.Vector3();
         this.desiredCameraTarget = new BABYLON.Vector3();
         this.hasCameraTarget = false;
@@ -199,7 +200,10 @@ class GameView {
         window.addEventListener('blur', this.onBlur);
         document.addEventListener('visibilitychange', this.onVisibilityChange);
         this.onVisibilityChange();
-        this.resizeObserver = new ResizeObserver(() => this.engine.resize());
+        this.resizeObserver = new ResizeObserver(() => {
+            this.engine.resize();
+            this.renderer.applyResolution();
+        });
         this.resizeObserver.observe(this.canvas);
     }
 
@@ -274,6 +278,7 @@ class GameView {
         this.input?.dispose();
         this.resizeObserver?.disconnect();
         this.engine?.stopRenderLoop();
+        this.renderer?.dispose();
         this.entities?.dispose();
         this.scene?.dispose();
         this.engine?.dispose();

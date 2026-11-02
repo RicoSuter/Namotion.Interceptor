@@ -174,7 +174,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     /// </summary>
     public async Task SetQualityAsync(string choice)
     {
-        if (_module is not { } module)
+        if (_isDisposed || _module is not { } module)
         {
             return;
         }

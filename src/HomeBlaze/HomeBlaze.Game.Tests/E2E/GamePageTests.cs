@@ -88,13 +88,15 @@ public class GamePageTests
     }
 
     [Fact]
-    public async Task WhenAQualityIsPicked_ThenItChangesTheRenderingAndIsKeptAcrossAReload()
+    public async Task WhenAQualityIsPicked_ThenItChangesTheRenderingKeepsTheArrowKeysAndIsKeptAcrossAReload()
     {
         // Arrange
         await using var world = await GameWorld.CreateAsync(_fixture);
         // At two device pixels per CSS pixel, each preset renders at its own resolution.
-        var (page, _) = await world.JoinAsync(new() { DeviceScaleFactor = 2 });
+        var (page, player) = await world.JoinAsync(new() { DeviceScaleFactor = 2 });
+        var (x, y) = (player.X, player.Y);
         var canvas = page.GetByTestId("game-canvas");
+        var quality = page.Locator("input[data-testid='game-quality']");
 
         // Act
         await PickQualityAsync(page, "High");
@@ -103,11 +105,15 @@ public class GamePageTests
         await PickQualityAsync(page, "Low");
         await Expect(canvas).ToHaveAttributeAsync("data-game-ambient-occlusion", "0", new() { Timeout = Timeout });
         await WaitForPixelRatioAsync(page, 1);
+        // The closed menu gives the arrow keys back to walking.
+        await page.Keyboard.PressAsync("ArrowRight");
+        await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x + 1, y, "E"), new() { Timeout = Timeout });
+        await Expect(quality).ToHaveValueAsync("Low", new() { Timeout = Timeout });
         await page.ReloadAsync();
 
         // Assert
         await Expect(canvas).ToHaveAttributeAsync("data-game-quality", "low", new() { Timeout = Timeout });
-        await Expect(page.Locator("input[data-testid='game-quality']")).ToHaveValueAsync("Low", new() { Timeout = Timeout });
+        await Expect(quality).ToHaveValueAsync("Low", new() { Timeout = Timeout });
         await WaitForPixelRatioAsync(page, 1);
     }
 
@@ -119,15 +125,32 @@ public class GamePageTests
         var (page, _) = await world.JoinAsync();
         var canvas = page.GetByTestId("game-canvas");
         await Expect(canvas).ToHaveAttributeAsync("data-game-rendering", "running", new() { Timeout = Timeout });
+        await WaitForRenderAsync(page);
 
         // Act
         await SetHiddenAsync(page, true);
         var pausedRendering = await canvas.GetAttributeAsync("data-game-rendering");
+        // The render loop runs on the animation frames, which keep coming in a page that only reports itself hidden, so
+        // a running loop would render within these.
+        var rendersWhileHidden = await page.EvaluateAsync<int>(
+            """
+            async () => {
+                const scene = BABYLON.EngineStore.LastCreatedEngine.scenes[0];
+                const before = scene.getRenderId();
+                for (let index = 0; index < 30; index++) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                }
+
+                return scene.getRenderId() - before;
+            }
+            """);
         await SetHiddenAsync(page, false);
 
         // Assert
         Assert.Equal("paused", pausedRendering);
+        Assert.Equal(0, rendersWhileHidden);
         await Expect(canvas).ToHaveAttributeAsync("data-game-rendering", "running", new() { Timeout = Timeout });
+        await WaitForRenderAsync(page);
     }
 
     [Fact]
@@ -587,6 +610,14 @@ public class GamePageTests
             "ratio => { const canvas = document.querySelector('[data-testid=\"game-canvas\"]'); return Math.abs(canvas.width / canvas.clientWidth - ratio) < 0.05; }",
             ratio,
             new() { Timeout = Timeout });
+
+    // Waits until the scene rendered again, which Babylon counts in its render id.
+    private static async Task WaitForRenderAsync(IPage page)
+    {
+        const string RenderId = "() => BABYLON.EngineStore.LastCreatedEngine.scenes[0].getRenderId()";
+        var renderId = await page.EvaluateAsync<int>(RenderId);
+        await page.WaitForFunctionAsync($"renderId => ({RenderId})() > renderId", renderId, new() { Timeout = Timeout });
+    }
 
     // Playwright cannot hide a page, so this stands in for the browser: the document reports the state and raises the
     // event a tab switch raises.

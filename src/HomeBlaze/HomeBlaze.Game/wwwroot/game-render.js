@@ -29,9 +29,11 @@ const UNFOCUSED_FRAME_CAP = 10;
 // A frame may come this much earlier than the cap's interval, so that a 60 Hz display does not skip every other frame
 // at a cap of 60 for the jitter of its timestamps.
 const FRAME_CAP_TOLERANCE_MS = 2;
-// Auto drops one level when frames stay this much slower than the cap's interval for this long.
+// Auto drops one level when the average interval between rendered frames stays this much longer than the cap's interval
+// for this long. The average smooths the alternating intervals of a refresh rate that is no multiple of the cap.
 const SLOW_FRAME_FACTOR = 1.5;
 const SLOW_DURATION_MS = 5000;
+const AVERAGE_WEIGHT = 0.1;
 
 /** The stored quality choice of this browser: a preset name or 'auto', the default. */
 export function readQuality() {
@@ -77,6 +79,51 @@ const OUTLINE_SHADER = `
         if (d <= 0.0) edge = 0.0;
         gl_FragColor = vec4(mix(color, inkColor, edge * strength), 1.0);
     }`;
+
+/**
+ * Paces animation frames to a frame cap and averages the interval between the frames it lets render; pure, so it runs
+ * without a scene.
+ */
+export function createFramePacer() {
+    let lastSlot = -Infinity;
+    let lastRendered = -Infinity;
+    let lastCap = 0;
+    const pacer = {
+        /** The average interval between rendered frames at the current cap in milliseconds, or 0 before two frames. */
+        averageInterval: 0,
+        /** Whether the animation frame at the time renders under the cap. */
+        tryRender(now, cap) {
+            const interval = 1000 / cap;
+            const elapsed = now - lastSlot;
+            if (elapsed < interval - FRAME_CAP_TOLERANCE_MS) {
+                return false;
+            }
+
+            // Carries the remainder, so that a refresh rate that is no multiple of the cap still averages the cap; after a
+            // stall the slots start over.
+            lastSlot = elapsed < 2 * interval ? lastSlot + interval : now;
+            if (cap !== lastCap) {
+                lastCap = cap;
+                pacer.averageInterval = 0;
+            } else if (lastRendered > -Infinity) {
+                const frameTime = now - lastRendered;
+                pacer.averageInterval = pacer.averageInterval === 0
+                    ? frameTime
+                    : pacer.averageInterval + (frameTime - pacer.averageInterval) * AVERAGE_WEIGHT;
+            }
+
+            lastRendered = now;
+            return true;
+        },
+        /** Lets the next frame render at once and starts the average over, as after a pause. */
+        reset() {
+            lastSlot = -Infinity;
+            lastRendered = -Infinity;
+            pacer.averageInterval = 0;
+        },
+    };
+    return pacer;
+}
 
 /** Sets up the look for the camera's scene at the quality choice, a preset name or 'auto'. */
 export function createRenderer(scene, camera, quality = AUTO) {
@@ -141,6 +188,7 @@ export function createRenderer(scene, camera, quality = AUTO) {
         }
 
         ambientOcclusionRatio = ratio;
+        // Without the argument true, which would also disable the scene's geometry buffer that the outline reads.
         ambientOcclusion?.dispose();
         pipeline?.dispose();
         ambientOcclusion = null;
@@ -187,15 +235,35 @@ export function createRenderer(scene, camera, quality = AUTO) {
         }
     });
 
-    const canvas = scene.getEngine().getRenderingCanvas();
+    const engine = scene.getEngine();
+    const canvas = engine.getRenderingCanvas();
+    const pacer = createFramePacer();
     let current = null;
-    let lastRender = 0;
     let autoLevel = matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';
     let slowSince = 0;
 
+    // The engine does not adapt to the device pixel ratio, so the resolution follows it here: on a preset change, a
+    // resize, and a change of the ratio alone, as when the window moves to another display.
+    const applyResolution = () => {
+        const level = 1 / Math.min(window.devicePixelRatio || 1, current.resolution);
+        if (engine.getHardwareScalingLevel() !== level) {
+            engine.setHardwareScalingLevel(level);
+        }
+    };
+    let pixelRatioQuery = null;
+    const onPixelRatioChange = () => {
+        pixelRatioQuery?.removeEventListener('change', onPixelRatioChange);
+        pixelRatioQuery = matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+        pixelRatioQuery.addEventListener('change', onPixelRatioChange);
+        if (current) {
+            applyResolution();
+        }
+    };
+    onPixelRatioChange();
+
     // Steps down at most to low and never back up, so a level that was too slow does not come back.
-    const trackAuto = (frameTime, cap, now) => {
-        if (frameTime <= (1000 / cap) * SLOW_FRAME_FACTOR) {
+    const trackAuto = (cap, now) => {
+        if (pacer.averageInterval <= (1000 / cap) * SLOW_FRAME_FACTOR) {
             slowSince = 0;
             return;
         }
@@ -218,7 +286,7 @@ export function createRenderer(scene, camera, quality = AUTO) {
             const preset = QUALITY_PRESETS[level];
             current = { isAuto: !isPreset, ...preset };
             slowSince = 0;
-            scene.getEngine().setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, preset.resolution));
+            applyResolution();
             buildPipelines(preset.ambientOcclusion);
             if (canvas) {
                 canvas.dataset.gameQuality = level;
@@ -228,22 +296,28 @@ export function createRenderer(scene, camera, quality = AUTO) {
         /** Whether the frame of this animation frame time renders, by the frame cap; call once per animation frame. */
         shouldRender(now, isFocused) {
             const cap = isFocused ? current.frameCap : UNFOCUSED_FRAME_CAP;
-            const frameTime = now - lastRender;
-            if (frameTime < 1000 / cap - FRAME_CAP_TOLERANCE_MS) {
+            if (!pacer.tryRender(now, cap)) {
                 return false;
             }
 
-            lastRender = now;
             if (current.isAuto && isFocused) {
-                trackAuto(frameTime, cap, now);
+                trackAuto(cap, now);
             }
 
             return true;
         },
-        /** Restarts the frame timing, so the first frame after a pause does not count as slow. */
-        resume(now) {
-            lastRender = now;
+        /** Renders the next frame at once and restarts the frame timing, so the pause does not count as slow. */
+        resume() {
+            pacer.reset();
             slowSince = 0;
+        },
+        /** Keeps the preset's resolution after the canvas resized. */
+        applyResolution() {
+            applyResolution();
+        },
+        /** Stops following the device pixel ratio. */
+        dispose() {
+            pixelRatioQuery?.removeEventListener('change', onPixelRatioChange);
         },
         /** Lets the mesh cast and receive shadows and get outlines. */
         addMesh(mesh) {
