@@ -124,6 +124,29 @@ public class HiddenSubjectAccessTests
         Assert.Empty(GetResultPaths(search));
     }
 
+    [Fact]
+    public async Task WhenASubjectIsOfAnExcludedType_ThenTheHelperWritesNoPathAndSearchDoesNotListIt()
+    {
+        // Arrange
+        var (root, house, device) = CreateHouseInGroup();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            ExcludeTypes = [typeof(TestDevice)]
+        };
+
+        // Act
+        var devicePath = configuration.TryGetSubjectPath(registeredRoot, device.TryGetRegisteredSubject()!);
+        var housePath = configuration.TryGetSubjectPath(registeredRoot, house.TryGetRegisteredSubject()!);
+        var search = await McpToolCaller.CallAsync(root, configuration, "search", new { format = "json" });
+
+        // Assert
+        Assert.Null(devicePath);
+        Assert.Equal("Items[house]", housePath);
+        Assert.Equal(["Items[house]"], GetResultPaths(search));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -146,7 +169,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData("", null)]
     [InlineData("/", "/")]
-    public void WhenTheHelperWritesThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
+    public async Task WhenTheHelperWritesThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
     {
         // Arrange
         var (root, _, _) = CreateHouseInGroup();
@@ -160,9 +183,11 @@ public class HiddenSubjectAccessTests
 
         // Act
         var path = configuration.TryGetSubjectPath(registeredRoot, registeredRoot);
+        var search = await McpToolCaller.CallAsync(root, configuration, "search", new { format = "json", types = new[] { nameof(TestMixedGroup) } });
 
         // Assert
         Assert.Equal(expectedPath, path);
+        Assert.Equal(expectedPath is null ? [] : [expectedPath], GetResultPaths(search));
     }
 
     [Fact]
