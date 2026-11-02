@@ -27,9 +27,9 @@ internal static class SubjectPaths
     /// root, in the order the parents are listed. Every subject a chain passes above the starting subject must be
     /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
     /// it. A path is its links from the root's property down to the property holding the subject, each in every
-    /// spelling the path reader resolves. A chain passes only properties
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/> admits, as the registry's paths do, so a chain through
-    /// an excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
+    /// spelling the path reader resolves. A chain passes only properties the path provider effectively includes (see
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain through an
+    /// excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
     /// subject without parents and has a path, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
     /// writes for the subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
@@ -249,7 +249,7 @@ internal static class SubjectPaths
             // The registry builds and resolves no path through such a property, nor through an attribute of an excluded property.
             foreach (var frame in frames)
             {
-                if (!_pathProvider.IsPropertyIncludedInPaths(frame.Property))
+                if (!_pathProvider.IsPropertyEffectivelyIncluded(frame.Property))
                 {
                     return null;
                 }

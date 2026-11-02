@@ -221,7 +221,7 @@ internal static class McpToolHelper
     /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty. Any other
     /// subject's path goes through the first parent, in registry order, whose holding property
     /// <see cref="McpServerConfiguration.PathProvider"/> lets paths pass (see
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>) and from which the registry writes a path; null when
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>) and from which the registry writes a path; null when
     /// there is none. The properties above the holding property are in the path whether the path provider includes them
     /// or not, as get_property and browse resolve, and with an <see cref="McpServerConfiguration.AccessPolicy"/> they
     /// are all ones the policy allows to read.
@@ -242,7 +242,7 @@ internal static class McpToolHelper
         var basePathProvider = configuration.BasePathProvider;
         foreach (var parent in subject.Parents)
         {
-            if (basePathProvider.IsPropertyIncludedInPaths(parent.Property) &&
+            if (basePathProvider.IsPropertyEffectivelyIncluded(parent.Property) &&
                 parent.Property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, parent.Index) is { } path)
             {
                 return $"{pathPrefix}{path}";

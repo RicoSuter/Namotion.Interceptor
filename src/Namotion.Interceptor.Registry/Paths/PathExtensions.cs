@@ -64,7 +64,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Tries to get a property from a path starting at the given subject. Every segment's property must be one paths may
-    /// pass, see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>, otherwise the path is not found.
+    /// pass, see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>, otherwise the path is not found.
     /// </summary>
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
@@ -83,7 +83,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Tries to get a property from a path starting at the given subject, creating missing referenced subjects on the
-    /// way. Every segment's property must be one paths may pass, see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>,
+    /// way. Every segment's property must be one paths may pass, see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>,
     /// otherwise the path is not found.
     /// </summary>
     /// <param name="pathProvider">The path provider to use.</param>
@@ -107,7 +107,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Tries to get a subject from a path starting at the given subject. Every segment's property must be one paths may
-    /// pass, see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>, otherwise the path is not found.
+    /// pass, see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>, otherwise the path is not found.
     /// Handles indices on the last segment (e.g., "Children[key]" resolves to the child subject).
     /// For paths ending in a subject reference property without an index (e.g., "Device"),
     /// the referenced subject is returned.
@@ -223,7 +223,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Resolves one segment on a subject: the property it names, which paths may pass (see
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), and, when the segment carries a key (an index, or an
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), and, when the segment carries a key (an index, or an
     /// [InlinePaths] key that is the segment itself), the typed key and, when requested, the subject stored at it.
     /// </summary>
     private static bool TryResolveSegment(
@@ -240,7 +240,7 @@ public static class PathExtensions
 
         var name = segment.GetName();
         property = pathProvider.TryGetPropertyFromSegment(subject, name);
-        if (property is null || !pathProvider.TryGetSegmentIncludedInPaths(property, out var ownSegment))
+        if (property is null || !pathProvider.TryGetEffectivelyIncludedSegment(property, out var ownSegment))
         {
             property = null;
             return false;
@@ -334,7 +334,7 @@ public static class PathExtensions
     /// <param name="propertyIndex">Optional index for the property (e.g., dictionary key or collection index).
     /// When provided, the property path includes this index, which is useful for computing
     /// the path to a child subject held at a specific index within this property.</param>
-    /// <returns>The path, or null when paths may not pass the property or a property holding it up to the root (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
+    /// <returns>The path, or null when paths may not pass the property or a property holding it up to the root (see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
     /// A built path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> with the
     /// same provider resolves it back to the same property when the provider resolves the segments it gives. This does
@@ -351,7 +351,7 @@ public static class PathExtensions
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {
-        if (!pathProvider.TryGetSegmentIncludedInPaths(property, out var leafSegment))
+        if (!pathProvider.TryGetEffectivelyIncludedSegment(property, out var leafSegment))
         {
             return null;
         }
@@ -406,9 +406,9 @@ public static class PathExtensions
 
     /// <summary>
     /// Gets whether a path from <paramref name="property"/> up to <paramref name="rootSubject"/>, or to the absolute
-    /// top when it is null, passes only properties <paramref name="pathProvider"/> includes under the rule of
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>: the property itself and every property holding it, an
-    /// [InlinePaths] dictionary included. The path is searched as
+    /// top when it is null, passes only properties <paramref name="pathProvider"/> effectively includes (see
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>): the property itself and every property holding it,
+    /// an [InlinePaths] dictionary included. The path is searched as
     /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> searches it:
     /// with a root through any parent of a subject with several parents, without one through the first parent of each
     /// subject.
@@ -427,7 +427,7 @@ public static class PathExtensions
     /// </remarks>
     public static bool HasIncludedPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
     {
-        if (!pathProvider.TryGetSegmentIncludedInPaths(property, out var leafSegment))
+        if (!pathProvider.TryGetEffectivelyIncludedSegment(property, out var leafSegment))
         {
             return false;
         }
@@ -485,7 +485,7 @@ public static class PathExtensions
     /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to
     /// <paramref name="rootSubject"/> (the topmost frame is owned by the root), or to the absolute top when
     /// <paramref name="rootSubject"/> is null, through properties <paramref name="pathProvider"/> includes (see
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), each with its segment; the leaf itself is not checked.
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), each with its segment; the leaf itself is not checked.
     /// Returns false when a root is requested but not reachable, or the chain passes an excluded property.
     /// <para>
     /// When a root is requested, the parent graph is searched across all parents so a shared subject (DAG)
@@ -535,7 +535,7 @@ public static class PathExtensions
             }
 
             var parent = parents[0];
-            if (!pathProvider.TryGetSegmentIncludedInPaths(parent.Property, out var parentSegment))
+            if (!pathProvider.TryGetEffectivelyIncludedSegment(parent.Property, out var parentSegment))
             {
                 return false;
             }
@@ -548,7 +548,7 @@ public static class PathExtensions
     /// <summary>
     /// Iterative (explicit-stack) depth-first search that fills <paramref name="frames"/> (leaf-first) with
     /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/> through properties
-    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>), each with its
+    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), each with its
     /// segment, returning false when the root is not reachable that way. Cycles are pruned per branch; unreachable
     /// owners are memoized so a shared subject in a DAG is explored once, keeping the search linear and overflow-free
     /// for arbitrarily deep graphs.
@@ -586,7 +586,7 @@ public static class PathExtensions
                 stack[topIndex] = top; // top is a copy; write the advanced cursor back
 
                 var parentProperty = parent.Property;
-                if (!pathProvider.TryGetSegmentIncludedInPaths(parentProperty, out var parentSegment))
+                if (!pathProvider.TryGetEffectivelyIncludedSegment(parentProperty, out var parentSegment))
                 {
                     continue;
                 }
