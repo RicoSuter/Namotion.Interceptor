@@ -44,7 +44,7 @@ internal class GetPropertyTool
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        var result = _configuration.UnfilteredPathProvider.TryGetPropertyFromPath(rootRegistered, path);
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
 
         if (result is null)
         {
