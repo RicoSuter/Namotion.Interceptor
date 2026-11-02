@@ -63,9 +63,12 @@ public partial class GamePage
         {
             var services = new GameCallerServiceProvider(ServiceProvider, new GameCaller(player.ClientId));
             var key = $"{owner.GetType().FullName}.{method.PropertyName}";
-            await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token,
-                initialValues: _lastParameters.GetValueOrDefault(key),
-                parametersEntered: values => _lastParameters[key] = values);
+            var result = await OperationInvoker.InvokeAsync(DialogService, services, method, _lifetime.Token,
+                initialValues: _lastParameters.GetValueOrDefault(key));
+            if (result.Parameters is { } parameters)
+            {
+                _lastParameters[key] = parameters;
+            }
         }
         finally
         {

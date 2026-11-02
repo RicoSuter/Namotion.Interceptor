@@ -76,25 +76,21 @@ public static class OperationInvoker
     /// <param name="initialValues">
     /// The values that prefill the parameter dialog, keyed by parameter name; only parameters entered in one field use them.
     /// </param>
-    /// <param name="parametersEntered">
-    /// Called with the entered parameter values keyed by name when the parameter dialog closes with Execute, before the
-    /// method starts.
-    /// </param>
-    public static async Task<OperationOutcome> InvokeAsync(
+    public static async Task<OperationInvocationResult> InvokeAsync(
         IDialogService dialogService,
         IServiceProvider serviceProvider,
         MethodMetadata method,
         CancellationToken lifetime,
         Action<bool>? isRunningChanged = null,
-        IReadOnlyDictionary<string, object?>? initialValues = null,
-        Action<IReadOnlyDictionary<string, object?>>? parametersEntered = null)
+        IReadOnlyDictionary<string, object?>? initialValues = null)
     {
         if (lifetime.IsCancellationRequested)
         {
-            return OperationOutcome.Canceled;
+            return new OperationInvocationResult(OperationOutcome.Canceled, null, null);
         }
 
         object?[]? parameters = null;
+        IReadOnlyDictionary<string, object?>? parameterValues = null;
         switch (GetPrompt(method))
         {
             case OperationPrompt.Parameters:
@@ -103,11 +99,11 @@ public static class OperationInvoker
                 var dialogResult = await dialog.Result;
                 if (dialogResult is null || dialogResult.Canceled)
                 {
-                    return OperationOutcome.Canceled;
+                    return new OperationInvocationResult(OperationOutcome.Canceled, null, null);
                 }
 
                 parameters = dialogResult.Data as object?[];
-                parametersEntered?.Invoke(GetParameterValues(method, parameters));
+                parameterValues = GetParameterValues(method, parameters);
                 break;
             }
             case OperationPrompt.Confirmation:
@@ -116,7 +112,7 @@ public static class OperationInvoker
                 var dialogResult = await dialog.Result;
                 if (dialogResult is null || dialogResult.Canceled)
                 {
-                    return OperationOutcome.Canceled;
+                    return new OperationInvocationResult(OperationOutcome.Canceled, null, null);
                 }
 
                 break;
@@ -125,7 +121,7 @@ public static class OperationInvoker
 
         if (lifetime.IsCancellationRequested)
         {
-            return OperationOutcome.Canceled;
+            return new OperationInvocationResult(OperationOutcome.Canceled, parameterValues, null);
         }
 
         object? result;
@@ -144,7 +140,7 @@ public static class OperationInvoker
                 await MethodErrorDialog.ShowAsync(dialogService, method.Title, exception);
             }
 
-            return OperationOutcome.Failed;
+            return new OperationInvocationResult(OperationOutcome.Failed, parameterValues, null);
         }
 
         isRunningChanged?.Invoke(false);
@@ -153,6 +149,6 @@ public static class OperationInvoker
             await MethodResultDialog.ShowAsync(dialogService, method.Title, result);
         }
 
-        return OperationOutcome.Succeeded;
+        return new OperationInvocationResult(OperationOutcome.Succeeded, parameterValues, result);
     }
 }

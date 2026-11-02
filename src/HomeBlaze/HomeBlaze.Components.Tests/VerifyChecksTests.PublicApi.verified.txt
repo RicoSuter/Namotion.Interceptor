@@ -1880,10 +1880,17 @@ namespace HomeBlaze.Components.Inputs
 }
 namespace HomeBlaze.Components.Operations
 {
+    public sealed class OperationInvocationResult : System.IEquatable<HomeBlaze.Components.Operations.OperationInvocationResult>
+    {
+        public OperationInvocationResult(HomeBlaze.Components.Operations.OperationOutcome Outcome, System.Collections.Generic.IReadOnlyDictionary<string, object?>? Parameters, object? Value) { }
+        public HomeBlaze.Components.Operations.OperationOutcome Outcome { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?>? Parameters { get; init; }
+        public object? Value { get; init; }
+    }
     public static class OperationInvoker
     {
         public static string GetIconName(HomeBlaze.Abstractions.Metadata.MethodMetadata method) { }
-        public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationOutcome> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime, System.Action<bool>? isRunningChanged = null, System.Collections.Generic.IReadOnlyDictionary<string, object?>? initialValues = null, System.Action<System.Collections.Generic.IReadOnlyDictionary<string, object?>>? parametersEntered = null) { }
+        public static System.Threading.Tasks.Task<HomeBlaze.Components.Operations.OperationInvocationResult> InvokeAsync(MudBlazor.IDialogService dialogService, System.IServiceProvider serviceProvider, HomeBlaze.Abstractions.Metadata.MethodMetadata method, System.Threading.CancellationToken lifetime, System.Action<bool>? isRunningChanged = null, System.Collections.Generic.IReadOnlyDictionary<string, object?>? initialValues = null) { }
     }
     public enum OperationOutcome
     {
