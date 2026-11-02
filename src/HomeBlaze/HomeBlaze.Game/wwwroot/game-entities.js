@@ -451,6 +451,8 @@ export async function createEntities(scene, options) {
         plane.material = material;
         plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
         plane.isPickable = false;
+        // A later rendering group starts with a cleared depth buffer, so walls, roofs and trees never hide a name.
+        plane.renderingGroupId = 1;
         plane.parent = parent;
         plane.position.y = view.height + 1.4;
         return material;
