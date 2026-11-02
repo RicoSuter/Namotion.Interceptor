@@ -215,7 +215,7 @@ internal static class McpToolHelper
     /// <summary>
     /// The path of the subject with the configured prefix, or null when it has none: the root's path is the prefix, and
     /// any other subject has one when paths of <paramref name="pathProvider"/> may pass the property holding it (see
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>). The properties above it are in the path whether the
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>). The properties above it are in the path whether the
     /// provider includes them or not, as get_property and browse resolve.
     /// </summary>
     internal static string? TryGetSubjectPath(
@@ -231,7 +231,7 @@ internal static class McpToolHelper
         }
 
         var parents = subject.Parents;
-        if (parents.Length > 0 && pathProvider.IsPropertyIncludedInPaths(parents[0].Property))
+        if (parents.Length > 0 && pathProvider.IsPropertyEffectivelyIncluded(parents[0].Property))
         {
             var parent = parents[0];
             var path = parent.Property.TryGetPath(configuration.UnfilteredPathProvider, rootSubject, parent.Index);
