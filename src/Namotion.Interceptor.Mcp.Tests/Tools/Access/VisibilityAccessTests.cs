@@ -95,9 +95,9 @@ public class VisibilityAccessTests
         var visibility = McpVisibility.For(configuration, room);
 
         // Act
-        var first = visibility.GetListingPathProvider(DefaultPathProvider.Instance);
-        var again = visibility.GetListingPathProvider(DefaultPathProvider.Instance);
-        var other = visibility.GetListingPathProvider(new SlashPathProvider());
+        var first = visibility.GetPathProvider(DefaultPathProvider.Instance);
+        var again = visibility.GetPathProvider(DefaultPathProvider.Instance);
+        var other = visibility.GetPathProvider(new SlashPathProvider());
 
         // Assert
         Assert.Same(first, again);

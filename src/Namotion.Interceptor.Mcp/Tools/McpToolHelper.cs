@@ -207,7 +207,7 @@ internal static class McpToolHelper
         string path,
         McpVisibility visibility)
     {
-        if (visibility.GetListingPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
+        if (visibility.GetPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;
@@ -219,12 +219,10 @@ internal static class McpToolHelper
     /// <summary>
     /// The path the tools write for the subject from <paramref name="rootSubject"/>, after the configuration's
     /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty. Any other
-    /// subject's path goes through the first parent, in registry order, whose holding property
-    /// <see cref="McpServerConfiguration.PathProvider"/> lets paths pass (see
-    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>) and from which the registry writes a path; null when
-    /// there is none. Without an <see cref="McpServerConfiguration.AccessPolicy"/> the properties above the holding
-    /// property are ones the path provider includes, and with one they are all ones the policy allows to read, as
-    /// get_property and browse resolve.
+    /// subject's path is the first, in parent order, that reaches the root only through properties
+    /// <see cref="McpServerConfiguration.ToolPathProvider"/> effectively includes (see
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), the holding property too, as get_property and
+    /// browse resolve; null when there is none.
     /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject, McpServerConfiguration configuration, IInterceptorSubject rootSubject)
@@ -235,15 +233,12 @@ internal static class McpToolHelper
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        // The resolution provider is the path provider, or with a policy it writes the path provider's segments and
-        // includes exactly what the policy allows to read, the holding property too. The registry checks inclusion in the walk
-        // that writes the text, so a subject moved on it while a call runs cannot put the name of a hidden property
-        // into the text.
-        var basePathProvider = configuration.BasePathProvider;
+        // The registry checks inclusion in the walk that writes the text, so a subject moved on it while a call runs
+        // cannot put the name of a hidden property into the text.
+        var pathProvider = configuration.ToolPathProvider;
         foreach (var parent in subject.Parents)
         {
-            if (basePathProvider.IsPropertyEffectivelyIncluded(parent.Property) &&
-                parent.Property.TryGetPath(configuration.ResolutionPathProvider, rootSubject, parent.Index) is { } path)
+            if (parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index) is { } path)
             {
                 return $"{pathPrefix}{path}";
             }

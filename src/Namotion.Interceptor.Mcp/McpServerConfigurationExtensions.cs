@@ -28,7 +28,7 @@ public static class McpServerConfigurationExtensions
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetReadableProperty(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
         => McpVisibility.For(configuration, root.Subject)
-            .GetResolutionPathProvider(configuration.ResolutionPathProvider)
+            .GetPathProvider(configuration.ToolPathProvider)
             .TryGetPropertyFromPath(root, path);
 
     /// <summary>
@@ -50,10 +50,10 @@ public static class McpServerConfigurationExtensions
     {
         if (configuration.AccessPolicy is not { } policy)
         {
-            return configuration.ResolutionPathProvider.TryGetSubjectFromPath(root, path);
+            return configuration.ToolPathProvider.TryGetSubjectFromPath(root, path);
         }
 
-        var pathProvider = visibility.GetResolutionPathProvider(configuration.ResolutionPathProvider);
+        var pathProvider = visibility.GetPathProvider(configuration.ToolPathProvider);
         var subject = TryResolveReadableSubject(pathProvider, policy, root, path);
         return subject is not null && visibility.IsShown(subject) ? subject : null;
     }

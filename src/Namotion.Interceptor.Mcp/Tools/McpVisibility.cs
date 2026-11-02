@@ -8,28 +8,27 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// <summary>
 /// Whether the tools show a subject, for one tool call. Without an access policy every subject is shown. With one, a
 /// subject is shown when it is the root, or when it is not empty for the policy and has a readable path: a path from the
-/// root, through one of its parents, that passes only properties the policy allows to read.
+/// root, through one of its parents, that passes only properties the configuration's tool path provider includes, which
+/// are ones the path provider includes and the policy allows to read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpVisibility
 {
     private readonly IMcpAccessPolicy? _policy;
     private readonly IInterceptorSubject? _rootSubject;
-    private readonly PathProviderBase? _readablePathProvider;
+    private readonly PathProviderBase? _toolPathProvider;
     private Dictionary<RegisteredSubject, bool>? _isShown;
-    private ShownSubjectsPathProvider? _listingPathProvider;
-    private ShownSubjectsPathProvider? _resolutionPathProvider;
+    private ShownSubjectsPathProvider? _shownSubjectsPathProvider;
 
     private McpVisibility()
     {
     }
 
-    // readablePathProvider includes exactly what the policy allows to read.
-    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, PathProviderBase readablePathProvider)
+    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, PathProviderBase toolPathProvider)
     {
         _policy = policy;
         _rootSubject = rootSubject;
-        _readablePathProvider = readablePathProvider;
+        _toolPathProvider = toolPathProvider;
     }
 
     /// <summary>
@@ -43,27 +42,26 @@ internal sealed class McpVisibility
     /// </summary>
     public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
         configuration.AccessPolicy is { } policy
-            ? new McpVisibility(policy, rootSubject, configuration.ResolutionPathProvider)
+            ? new McpVisibility(policy, rootSubject, configuration.ToolPathProvider)
             : Unrestricted;
 
     /// <summary>
-    /// The configuration's listing provider, <paramref name="listingPathProvider"/>, restricted with a policy to
-    /// properties whose owner is shown, so a path resolved with it passes shown subjects
-    /// only. Without a policy, <paramref name="listingPathProvider"/> itself.
+    /// The configuration's tool path provider, <paramref name="pathProvider"/>, restricted with a policy to properties
+    /// whose owner is shown, so a path resolved with it passes shown subjects only. Without a policy,
+    /// <paramref name="pathProvider"/> itself.
     /// </summary>
-    public PathProviderBase GetListingPathProvider(PathProviderBase listingPathProvider) =>
-        _policy is null ? listingPathProvider : GetShownSubjectsPathProvider(ref _listingPathProvider, listingPathProvider);
+    public PathProviderBase GetPathProvider(PathProviderBase pathProvider)
+    {
+        if (_policy is null)
+        {
+            return pathProvider;
+        }
 
-    /// <summary>
-    /// The configuration's resolution provider, <paramref name="resolutionPathProvider"/>, restricted as
-    /// <see cref="GetListingPathProvider"/> restricts the listing provider.
-    /// </summary>
-    public PathProviderBase GetResolutionPathProvider(PathProviderBase resolutionPathProvider) =>
-        _policy is null ? resolutionPathProvider : GetShownSubjectsPathProvider(ref _resolutionPathProvider, resolutionPathProvider);
-
-    // The cache is kept per inner provider, so a call with another provider never gets one wrapping the first.
-    private ShownSubjectsPathProvider GetShownSubjectsPathProvider(ref ShownSubjectsPathProvider? cached, PathProviderBase inner) =>
-        cached is not null && cached.Inner == inner ? cached : cached = new ShownSubjectsPathProvider(inner, this);
+        // The cache is kept per inner provider, so a call with another provider never gets one wrapping the first.
+        return _shownSubjectsPathProvider is not null && _shownSubjectsPathProvider.Inner == pathProvider
+            ? _shownSubjectsPathProvider
+            : _shownSubjectsPathProvider = new ShownSubjectsPathProvider(pathProvider, this);
+    }
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute, and the
@@ -129,7 +127,7 @@ internal sealed class McpVisibility
 
         foreach (var parent in subject.Parents)
         {
-            if (parent.Property.HasIncludedPath(_readablePathProvider!, _rootSubject))
+            if (parent.Property.HasIncludedPath(_toolPathProvider!, _rootSubject))
             {
                 return true;
             }
