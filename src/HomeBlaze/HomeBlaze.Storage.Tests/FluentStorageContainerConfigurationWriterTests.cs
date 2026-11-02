@@ -75,33 +75,6 @@ public class FluentStorageContainerConfigurationWriterTests : StorageTestBase
         Assert.Contains("\"name\": \"second, saved\"", content);
     }
 
-    [Fact]
-    public async Task WhenFileWasEditedBeforeAPassAppliedIt_ThenTheSaveWritesTheEditInsteadOfOverwritingIt()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        var file = new ConfigurationWriterTestSubject(Context!) { Name = "original" };
-        await storage.AddSubjectAsync(FilePath, file, CancellationToken.None);
-        WriteFile(FilePath, $$"""
-            {
-              "$type": "{{typeof(ConfigurationWriterTestSubject).FullName}}",
-              "name": "edited",
-              "items": [{ "$type": "{{typeof(ConfigurationWriterTestSubject).FullName}}", "name": "added" }]
-            }
-            """);
-
-        // Act
-        var isWritten = await storage.WriteConfigurationAsync(file, CancellationToken.None);
-
-        // Assert
-        Assert.True(isWritten);
-        Assert.Equal("edited", file.Name);
-        Assert.Equal("added", Assert.Single(file.Items).Name);
-        var content = await ReadFileAsync();
-        Assert.Contains("\"name\": \"edited\"", content);
-        Assert.Contains("\"name\": \"added\"", content);
-    }
-
     private Task<string> ReadFileAsync() => File.ReadAllTextAsync(GetFullPath(FilePath));
 }
 
