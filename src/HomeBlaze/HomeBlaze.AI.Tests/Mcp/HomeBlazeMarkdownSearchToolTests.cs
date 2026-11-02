@@ -554,7 +554,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenThePathOfASubjectResolvesToAnotherSubjectBecauseARoleHidesAProperty_ThenOnlyTheNotesOfTheOtherSubjectAreSearched()
+    public async Task WhenARoleHidesAPropertyThatShadowsADictionaryKey_ThenTheKeyIsWrittenInShortFormAndOnlyTheShownNotesAreFound()
     {
         // Arrange
         var (root, services) = await CreateGraphAsync([]);
@@ -569,23 +569,25 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
         AddNotes(hidden, "The hidden gasket.");
         AddNotes(shown, "The shown gasket.");
 
-        // The written path of the hidden subject, /House/Kitchen, resolves to the shown one once the property is hidden.
+        // Hiding the property leaves the hidden device without a readable path and the key it shadowed without a collision.
         var role = new AuthorizationRole
         {
             Name = "NoKitchenProperty",
             Includes = [BuiltInRoles.ReaderName],
             Deny = [new PermissionRule { Paths = ["/House/Kitchen"], Actions = [PermissionAction.Read] }]
         };
-        var tool = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role))[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName];
+        var tools = CreateTools(services, root, TestAccessPolicies.Create(role.Name, role));
 
         // Act
-        var result = await CallAsync(tool, new { query = "gasket" });
+        var result = await CallAsync(tools[HomeBlazeMarkdownSearchToolProvider.SearchMarkdownToolName], new { query = "gasket" });
+        var search = await CallAsync(tools["search"], new { format = "json", types = new[] { nameof(MarkdownSearchSecretDevice) } });
 
         // Assert
         var page = GetSinglePage(result);
         // As search writes it: the hidden property is treated as absent, so the key needs no explicit form.
         Assert.Equal("/House/Kitchen", page.GetProperty("path").GetString());
         Assert.Equal("The shown gasket.", page.GetProperty("matches")[0].GetProperty("snippet").GetString());
+        Assert.Equal(["/House/Kitchen"], search.GetProperty("results").EnumerateObject().Select(entry => entry.Name));
     }
 
     [Fact]
@@ -787,7 +789,8 @@ public partial class MarkdownSearchSecretDevice : IConfigurable
 }
 
 /// <summary>
-/// A folder whose property and dictionary key share the segment Kitchen, so the registry writes the key in its explicit form.
+/// A folder whose property and dictionary key share the segment Kitchen, so the key is written in its explicit form while
+/// the property is shown, and in short form when an access policy hides the property.
 /// </summary>
 [InterceptorSubject]
 public partial class SegmentCollisionFolder
