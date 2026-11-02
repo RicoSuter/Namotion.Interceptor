@@ -2,6 +2,7 @@ using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -240,6 +241,96 @@ public class HiddenSubjectAccessTests
         Assert.False(isShown);
     }
 
+    // The device is held by the house's Private, which the provider excludes, and by its Public, which the policy hides.
+    private static (TestMixedGroup Root, TestDevice Device) CreateHeldThroughExcludedAndHiddenParents()
+    {
+        var context = CreateContext();
+        var device = new TestDevice(context) { DeviceName = "Camera" };
+        var house = new TestHouse(context) { Address = "Main Street" };
+        house.Private = device;
+        house.Public = device;
+        var root = new TestMixedGroup(context);
+        root.Items = new Dictionary<string, IInterceptorSubject> { ["house"] = house };
+        return (root, device);
+    }
+
+    private static McpServerConfiguration CreateExcludingAndHidingConfiguration() => new()
+    {
+        PathProvider = new ExcludingPathProvider(nameof(TestHouse.Private)),
+        AccessPolicy = TestAccessPolicy.DenyRead(nameof(TestHouse.Public)),
+        IsReadOnly = false
+    };
+
+    // The text the answer without either restriction contains, so the case reaches the device, or for the where filter
+    // the house through it.
+    public static TheoryData<string, string, string> HeldThroughExcludedAndHiddenParentsCalls => new()
+    {
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestDevice) }, includeProperties = true }), "Camera" },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestHouse) }, where = "Public.DeviceName == \"Camera\"" }), "\"Items[house]\"" },
+        { "search", JsonSerializer.Serialize(new { format = "json", types = new[] { nameof(TestHouse) }, where = "Private.DeviceName == \"Camera\"" }), "\"Items[house]\"" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", depth = 10, includeProperties = true }), "Camera" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[house].Public", depth = 0, includeProperties = true }), "Camera" },
+        { "browse", JsonSerializer.Serialize(new { format = "json", path = "Items[house].Private", depth = 0, includeProperties = true }), "Camera" },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[house].Public.DeviceName" }), "Camera" },
+        { "get_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName" }), "Camera" },
+        { "set_property", JsonSerializer.Serialize(new { path = "Items[house].Public.DeviceName", value = "Changed" }), "Camera" },
+        { "set_property", JsonSerializer.Serialize(new { path = "Items[house].Private.DeviceName", value = "Changed" }), "Camera" }
+    };
+
+    [Theory]
+    [MemberData(nameof(HeldThroughExcludedAndHiddenParentsCalls))]
+    public async Task WhenTheProviderExcludesOneParentOfASubjectAndThePolicyHidesTheOther_ThenEveryToolReadsItAsMissing(string toolName, string input, string expectedTextWithoutRestrictions)
+    {
+        // Arrange
+        var (rootWithoutRestrictions, _) = CreateHeldThroughExcludedAndHiddenParents();
+        var (rootWithRestrictions, device) = CreateHeldThroughExcludedAndHiddenParents();
+        var request = JsonSerializer.Deserialize<JsonElement>(input);
+
+        // Act
+        var withoutRestrictions = await McpToolCaller.CallAsync(rootWithoutRestrictions, CreateConfiguration(policy: null), toolName == "set_property" ? "get_property" : toolName, request);
+        var withRestrictions = await McpToolCaller.CallAsync(rootWithRestrictions, CreateExcludingAndHidingConfiguration(), toolName, request);
+
+        // Assert
+        Assert.False(withoutRestrictions.TryGetProperty("error", out _));
+        Assert.Contains(expectedTextWithoutRestrictions, withoutRestrictions.GetRawText());
+        Assert.DoesNotContain("Camera", withRestrictions.GetRawText());
+        Assert.Equal("Camera", device.DeviceName);
+        if (request.TryGetProperty("path", out var path))
+        {
+            Assert.Equal($"Path not found: {path.GetString()}", withRestrictions.GetProperty("error").GetString());
+        }
+        else if (withRestrictions.TryGetProperty("results", out var results))
+        {
+            Assert.Empty(results.EnumerateObject());
+        }
+        else
+        {
+            Assert.DoesNotContain(nameof(TestHouse.Private), withRestrictions.GetRawText());
+            Assert.DoesNotContain(nameof(TestHouse.Public), withRestrictions.GetRawText());
+        }
+    }
+
+    [Fact]
+    public void WhenTheProviderExcludesOneParentOfASubjectAndThePolicyHidesTheOther_ThenTheHelpersAndTheVisibilityHideIt()
+    {
+        // Arrange
+        var (root, device) = CreateHeldThroughExcludedAndHiddenParents();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var configuration = CreateExcludingAndHidingConfiguration();
+
+        // Act
+        var throughPublic = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Public");
+        var throughPrivate = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Private");
+        var property = configuration.TryGetReadableProperty(registeredRoot, "Items[house].Public.DeviceName");
+        var isShown = McpVisibility.For(configuration, root).IsShown(device);
+
+        // Assert
+        Assert.Null(throughPublic);
+        Assert.Null(throughPrivate);
+        Assert.Null(property);
+        Assert.False(isShown);
+    }
+
     [Fact]
     public void WhenASubjectOtherThanTheRootHasNoParent_ThenItIsNotShown()
     {
@@ -362,5 +453,10 @@ public class HiddenSubjectAccessTests
         // Assert
         Assert.True(isMoved);
         Assert.DoesNotContain(nameof(TestNode.Secret), result.GetRawText());
+    }
+
+    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
     }
 }
