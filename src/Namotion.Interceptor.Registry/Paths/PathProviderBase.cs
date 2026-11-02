@@ -30,10 +30,8 @@ public abstract class PathProviderBase : IPathProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// The default includes every property under its BrowseName. A provider migrating from the separate
-    /// <c>IsPropertyIncluded</c> and nullable <c>TryGetPropertySegment</c> overrides merges both into this method,
-    /// returning false where <c>IsPropertyIncluded</c> returned false, and deletes its <c>IsPropertyIncluded</c>
-    /// method: an instance method of that name hides <see cref="PathProviderExtensions.IsPropertyIncluded"/>.
+    /// The default includes every property under its BrowseName. An <c>IsPropertyIncluded</c> method on a derived
+    /// provider hides <see cref="PathProviderExtensions.IsPropertyIncluded"/>; delete it and return false here instead.
     /// </remarks>
     public virtual bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
