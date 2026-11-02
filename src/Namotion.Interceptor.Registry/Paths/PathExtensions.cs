@@ -445,7 +445,7 @@ public static class PathExtensions
     /// <summary>
     /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to
     /// <paramref name="rootSubject"/> (the topmost frame is owned by the root), or to the absolute top when
-    /// <paramref name="rootSubject"/> is null, through properties <paramref name="pathProvider"/> includes (see
+    /// <paramref name="rootSubject"/> is null, through properties <paramref name="pathProvider"/> effectively includes (see
     /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), each with its segment; the leaf itself is not checked.
     /// Returns false when a root is requested but not reachable, or the chain passes an excluded property.
     /// <para>
@@ -509,7 +509,7 @@ public static class PathExtensions
     /// <summary>
     /// Iterative (explicit-stack) depth-first search that fills <paramref name="frames"/> (leaf-first) with
     /// a chain from <paramref name="property"/> up to <paramref name="rootSubject"/> through properties
-    /// <paramref name="pathProvider"/> includes (see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), each with its
+    /// <paramref name="pathProvider"/> effectively includes (see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), each with its
     /// segment, returning false when the root is not reachable that way. Cycles are pruned per branch; unreachable
     /// owners are memoized so a shared subject in a DAG is explored once, keeping the search linear and overflow-free
     /// for arbitrarily deep graphs.
