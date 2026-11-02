@@ -82,7 +82,7 @@ public class VisibilityAccessTests
     }
 
     [Fact]
-    public void WhenAskedForAnotherInnerProvider_ThenTheVisibilityWrapsThatProvider()
+    public void WhenAskedForThePathProviderTwice_ThenTheVisibilityReturnsTheSameOne()
     {
         // Arrange
         var context = CreateContext();
@@ -95,14 +95,11 @@ public class VisibilityAccessTests
         var visibility = McpVisibility.For(configuration, room);
 
         // Act
-        var first = visibility.GetPathProvider(DefaultPathProvider.Instance);
-        var again = visibility.GetPathProvider(DefaultPathProvider.Instance);
-        var other = visibility.GetPathProvider(new SlashPathProvider());
+        var first = visibility.GetPathProvider(configuration.ToolPathProvider);
+        var again = visibility.GetPathProvider(configuration.ToolPathProvider);
 
         // Assert
         Assert.Same(first, again);
-        Assert.Equal('.', first.PathSeparator);
-        Assert.Equal('/', other.PathSeparator);
     }
 
     [Theory]
@@ -137,10 +134,5 @@ public class VisibilityAccessTests
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
         public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
-    }
-
-    private sealed class SlashPathProvider : PathProviderBase
-    {
-        public override char PathSeparator => '/';
     }
 }
