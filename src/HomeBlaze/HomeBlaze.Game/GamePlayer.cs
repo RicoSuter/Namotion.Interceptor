@@ -42,6 +42,19 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     public partial GameDirection Facing { get; set; }
 
     /// <summary>
+    /// The person the player looks like, one of the people under <c>wwwroot/models/people/</c>; null or an unknown name
+    /// shows the default person of its client.
+    /// </summary>
+    [Configuration]
+    public partial string? Character { get; set; }
+
+    /// <summary>
+    /// The shirt color as <c>#rrggbb</c>; null or an invalid value shows the default color of its client.
+    /// </summary>
+    [Configuration]
+    public partial string? Color { get; set; }
+
+    /// <summary>
     /// The id of the client this player belongs to, which is its key in <see cref="Game.Players"/>. Like the other states
     /// of the player, only the game sets it.
     /// </summary>

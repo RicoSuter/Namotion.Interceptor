@@ -605,11 +605,24 @@ internal sealed class GameWorldState
         }
     }
 
+    /// <summary>
+    /// Reads the appearance of a player after an outside write; views see a change in this tick.
+    /// </summary>
+    public void RefreshAppearance(GamePlayer subject)
+    {
+        if (EntitiesBySubject.TryGetValue(subject, out var entity) && entity is PlayerEntity player && player.ReadAppearance())
+        {
+            Index.MarkChanged(player);
+            IsSaveRequested = true;
+        }
+    }
+
     // The subject gets its client id before it is published, because the id is its key in Players.
     private void AddPlayer(GamePlayer subject, string clientId)
     {
         subject.ClientId = clientId;
         var entity = new PlayerEntity(subject, clientId) { Facing = subject.Facing, Title = DefaultPlayerTitle };
+        entity.ReadAppearance();
         Players[clientId] = entity;
         EntitiesBySubject[subject] = entity;
         RequestPublish(entity);
@@ -630,6 +643,7 @@ internal sealed class GameWorldState
             Facing = subject.Facing,
             Title = DefaultPlayerTitle
         };
+        entity.ReadAppearance();
         RequestPublish(entity);
         return entity;
     }

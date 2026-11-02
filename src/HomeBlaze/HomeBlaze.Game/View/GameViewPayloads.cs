@@ -12,7 +12,6 @@ namespace HomeBlaze.Game.View;
 internal sealed class GameViewPayloads
 {
     private readonly Dictionary<GameEntity, GameViewPayload> _payloads = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<string, string> _playerColors = new();
 
     // Visuals are immutable and usually cached, so an entity that moves keeps its parts; weak keys drop the parts of a
     // visual nobody holds anymore.
@@ -61,6 +60,16 @@ internal sealed class GameViewPayloads
     /// </summary>
     public static int GetFacing(GameEntity entity) => entity is PlayerEntity player ? (int)player.Facing : 0;
 
+    /// <summary>
+    /// The person the view shows, empty for an object.
+    /// </summary>
+    public static string GetCharacter(GameEntity entity) => entity is PlayerEntity player ? player.Character : string.Empty;
+
+    /// <summary>
+    /// The shirt color the view shows, empty for an object.
+    /// </summary>
+    public static string GetColor(GameEntity entity) => entity is PlayerEntity player ? player.Color : string.Empty;
+
     public static bool IsMicrophoneOn(GameEntity entity) => entity is PlayerEntity { IsMicrophoneOn: true };
 
     public static bool IsAudioOn(GameEntity entity) => entity is PlayerEntity { IsAudioOn: true };
@@ -71,24 +80,12 @@ internal sealed class GameViewPayloads
         if (entity is PlayerEntity player)
         {
             return new GameViewPayload(GameViewPayload.PlayerKind, area.X, area.Y, area.Width, area.Depth, entity.Height,
-                (int)player.Facing, entity.Title, GetPlayerColor(player.ClientId), entity.IsMovementBlocking, player.IsMicrophoneOn,
+                (int)player.Facing, entity.Title, player.Color, player.Character, entity.IsMovementBlocking, player.IsMicrophoneOn,
                 player.IsAudioOn, []);
         }
 
         var visual = GameVisualValidator.GetValidVisual(entity.Subject, entity.Visual, _logger);
         return new GameViewPayload(GameViewPayload.ObjectKind, area.X, area.Y, area.Width, area.Depth, entity.Height, 0,
-            entity.Title, string.Empty, entity.IsMovementBlocking, false, false, _parts.GetValue(visual, CreateParts));
-    }
-
-    // Other objects take their colors from their visual.
-    private string GetPlayerColor(string clientId)
-    {
-        if (!_playerColors.TryGetValue(clientId, out var color))
-        {
-            color = GameColors.FromId(clientId);
-            _playerColors[clientId] = color;
-        }
-
-        return color;
+            entity.Title, string.Empty, string.Empty, entity.IsMovementBlocking, false, false, _parts.GetValue(visual, CreateParts));
     }
 }

@@ -26,4 +26,29 @@ public class GameColorsTests
         // Assert
         Assert.NotEqual(kitchen, office);
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("red")]
+    [InlineData("#12345")]
+    [InlineData("#1234567")]
+    [InlineData("#12345g")]
+    public void WhenTheStoredColorIsNotAHexColor_ThenTheColorOfTheIdIsUsed(string? stored)
+    {
+        // Act
+        var resolved = GameColors.Resolve(stored, "tab-1");
+
+        // Assert
+        Assert.Equal(GameColors.FromId("tab-1"), resolved);
+    }
+
+    [Fact]
+    public void WhenTheStoredColorIsAHexColor_ThenItIsUsedInLowerCase()
+    {
+        // Act
+        var resolved = GameColors.Resolve("#A1B2C3", "tab-1");
+
+        // Assert
+        Assert.Equal("#a1b2c3", resolved);
+    }
 }

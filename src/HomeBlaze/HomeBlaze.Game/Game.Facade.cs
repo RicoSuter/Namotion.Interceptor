@@ -134,6 +134,10 @@ public partial class Game
             case nameof(GamePlayer.Facing) when value is GameDirection facing:
                 _simulation.Post(() => _world.Turn(player, facing));
                 break;
+            case nameof(GamePlayer.Character):
+            case nameof(GamePlayer.Color):
+                _simulation.Post(() => _world.RefreshAppearance(player));
+                break;
         }
     }
 }

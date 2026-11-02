@@ -16,6 +16,7 @@ internal sealed record GameViewPayload(
     int Facing,
     string Title,
     string Color,
+    string Character,
     bool IsMovementBlocking,
     bool IsMicrophoneOn,
     bool IsAudioOn,

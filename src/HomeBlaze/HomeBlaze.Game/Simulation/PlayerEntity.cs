@@ -1,4 +1,6 @@
 using HomeBlaze.Game.Abstractions;
+using HomeBlaze.Game.People;
+using HomeBlaze.Game.View;
 using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game.Simulation;
@@ -27,6 +29,16 @@ internal sealed class PlayerEntity : GameEntity
 
     public GameDirection Facing { get; set; }
 
+    /// <summary>
+    /// The resolved person, one of <see cref="GamePeople.Names"/>; empty until <see cref="ReadAppearance"/> ran.
+    /// </summary>
+    public string Character { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The resolved shirt color as <c>#rrggbb</c>; empty until <see cref="ReadAppearance"/> ran.
+    /// </summary>
+    public string Color { get; set; } = string.Empty;
+
     public bool IsConnected { get; set; }
 
     public bool IsMicrophoneOn { get; set; }
@@ -47,6 +59,22 @@ internal sealed class PlayerEntity : GameEntity
     /// Whether a value the facade shows changed since the last publish.
     /// </summary>
     public bool IsPublishPending { get; set; }
+
+    /// <summary>
+    /// Reads the person and color from the subject; returns whether the resolved values changed.
+    /// </summary>
+    public bool ReadAppearance()
+    {
+        var character = GamePeople.Resolve(Subject.Character, ClientId);
+        var color = GameColors.Resolve(Subject.Color, ClientId);
+        if (character == Character && color == Color)
+        {
+            return false;
+        }
+
+        (Character, Color) = (character, color);
+        return true;
+    }
 
     /// <summary>
     /// Sets connected; a connected player blocks movement and is visible.
