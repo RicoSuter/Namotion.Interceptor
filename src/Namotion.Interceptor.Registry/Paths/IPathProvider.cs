@@ -15,7 +15,7 @@ public interface IPathProvider
     /// <returns>True if the property should be included; otherwise, false.</returns>
     /// <remarks>
     /// The path methods of <see cref="PathExtensions"/> also exclude an attribute when the property it belongs to is
-    /// excluded, see <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>.
+    /// excluded, see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>.
     /// </remarks>
     bool IsPropertyIncluded(RegisteredSubjectProperty property);
 

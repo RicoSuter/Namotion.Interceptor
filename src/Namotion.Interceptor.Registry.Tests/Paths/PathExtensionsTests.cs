@@ -1195,7 +1195,7 @@ public class PathExtensionsTests
         while (true)
         {
             if (!pathProvider.IsPropertyIncluded(property) ||
-                (property.IsAttribute && !IsAttributedPropertyIncluded(property, pathProvider)))
+                (property.IsAttribute && !IsPropertyOfAttributeIncluded(property, pathProvider)))
             {
                 return false;
             }
@@ -1209,11 +1209,11 @@ public class PathExtensionsTests
         }
     }
 
-    private static bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute, PathProviderBase pathProvider)
+    private static bool IsPropertyOfAttributeIncluded(RegisteredSubjectProperty attribute, PathProviderBase pathProvider)
     {
         var property = attribute.GetAttributedProperty();
         return pathProvider.IsPropertyIncluded(property) &&
-            (!property.IsAttribute || IsAttributedPropertyIncluded(property, pathProvider));
+            (!property.IsAttribute || IsPropertyOfAttributeIncluded(property, pathProvider));
     }
 
     [Theory]
