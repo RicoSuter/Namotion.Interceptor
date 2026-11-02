@@ -27,6 +27,11 @@ namespace HomeBlaze.Services.Clients
         public static string CreateClientToken() { }
         public static string HashClientToken(string token) { }
     }
+    public sealed class CurrentClientConnection
+    {
+        public CurrentClientConnection() { }
+        public HomeBlaze.Services.Clients.ClientConnection? Connection { get; set; }
+    }
     public interface IClientConnectionCallbacks
     {
         System.Threading.Tasks.Task ShowNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken);
