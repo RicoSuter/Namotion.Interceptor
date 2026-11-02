@@ -20,3 +20,4 @@ NI0062 | Namotion.Interceptor | Warning | Base class interception members cannot
 NI0063 | Namotion.Interceptor | Error | Member hides an inherited generated member
 NI0064 | Namotion.Interceptor | Error | Member hijacks an inherited interface implementation
 NI0065 | Namotion.Interceptor | Error | Property displaces a property an ancestor subject already exposes
+NI0066 | Namotion.Interceptor | Error | More than one property attaches the same attribute to a property

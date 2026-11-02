@@ -59,6 +59,8 @@ namespace Namotion.Interceptor.Registry.Abstractions
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddAttribute<TProperty>(string name, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue = null, params System.Attribute[] attributes) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddDerivedAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetAttributedProperty() { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetOrAddAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetOrAddDerivedAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
         public object? GetValue() { }
         public void SetValue(object? value) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetAttribute(string attributeName) { }

@@ -38,9 +38,7 @@ public class DynamicSubject : IInterceptorSubject
     {
         lock (((IInterceptorSubject)this).SyncRoot)
         {
-            _properties = _properties
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
+            _properties = ((IInterceptorSubject)this).MergeProperties(properties);
         }
     }
 }

@@ -245,7 +245,7 @@ internal static class SubjectMemberConflicts
 
         return implemented is not null &&
                implemented.Name == name &&
-               implemented.ContainingType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == KnownTypes.IInterceptorSubject;
+               SubjectAncestry.IsInterceptorSubject(implemented.ContainingType);
     }
 
     /// <summary>

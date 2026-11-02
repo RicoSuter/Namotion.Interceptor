@@ -288,8 +288,13 @@ internal static class GeneratorTestHost
             .Where(assembly => !assembly.IsDynamic && !string.IsNullOrWhiteSpace(assembly.Location))
             .Select(assembly => assembly.Location);
 
+        // PropertyAttributeAttribute is used only inside test sources, so nothing in this assembly
+        // is guaranteed to have loaded the Registry assembly before this list is built.
+        var registryAssembly = typeof(Namotion.Interceptor.Registry.Attributes.PropertyAttributeAttribute).Assembly.Location;
+
         return trustedAssemblies
             .Concat(loadedAssemblies)
+            .Append(registryAssembly)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
             .ToList();

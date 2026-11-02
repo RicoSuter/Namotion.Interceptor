@@ -19,16 +19,7 @@ internal static class SubjectPropertyConflicts
         Location location,
         List<Diagnostic> diagnostics)
     {
-        // Root subjects need no collection allocation during repeated IDE generation.
-        List<INamedTypeSymbol>? subjectAncestors = null;
-        foreach (var ancestor in SymbolExtensions.EnumerateChain(typeSymbol.BaseType))
-        {
-            if (SubjectAncestry.HasInterceptorSubjectAttribute(ancestor))
-            {
-                (subjectAncestors ??= new List<INamedTypeSymbol>()).Add(ancestor);
-            }
-        }
-
+        var subjectAncestors = SubjectAncestry.GetSubjectAncestors(typeSymbol);
         if (subjectAncestors is null)
         {
             return null;

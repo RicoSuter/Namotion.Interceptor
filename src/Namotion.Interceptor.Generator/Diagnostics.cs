@@ -175,4 +175,13 @@ internal static class Diagnostics
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "Subject properties are keyed by simple name, so only one of the two members is reachable through the metadata while both remain writable through a differently typed reference, and both raise changes under the same name.");
+
+    public static readonly DiagnosticDescriptor DuplicatePropertyAttributeTarget = new(
+        id: "NI0066",
+        title: "More than one property attaches the same attribute to a property",
+        messageFormat: "'{0}' attaches the attribute '{1}' to property '{2}' through both '{3}' and '{4}'; an attribute name is unique per property, so the registry keeps the attribute of the property whose name sorts first and registers the other as a plain property. Rename one attribute or remove one of the properties.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The registry identifies an attribute by its target property and attribute name, so only one of the two members can be found through that pair.");
 }
