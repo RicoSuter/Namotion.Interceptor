@@ -88,6 +88,49 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenAQualityIsPicked_ThenItChangesTheRenderingAndIsKeptAcrossAReload()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        // At two device pixels per CSS pixel, each preset renders at its own resolution.
+        var (page, _) = await world.JoinAsync(new() { DeviceScaleFactor = 2 });
+        var canvas = page.GetByTestId("game-canvas");
+
+        // Act
+        await PickQualityAsync(page, "High");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-ambient-occlusion", "1", new() { Timeout = Timeout });
+        await WaitForPixelRatioAsync(page, 2);
+        await PickQualityAsync(page, "Low");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-ambient-occlusion", "0", new() { Timeout = Timeout });
+        await WaitForPixelRatioAsync(page, 1);
+        await page.ReloadAsync();
+
+        // Assert
+        await Expect(canvas).ToHaveAttributeAsync("data-game-quality", "low", new() { Timeout = Timeout });
+        await Expect(page.Locator("input[data-testid='game-quality']")).ToHaveValueAsync("Low", new() { Timeout = Timeout });
+        await WaitForPixelRatioAsync(page, 1);
+    }
+
+    [Fact]
+    public async Task WhenTheTabIsHidden_ThenRenderingPausesUntilItShowsAgain()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-rendering", "running", new() { Timeout = Timeout });
+
+        // Act
+        await SetHiddenAsync(page, true);
+        var pausedRendering = await canvas.GetAttributeAsync("data-game-rendering");
+        await SetHiddenAsync(page, false);
+
+        // Assert
+        Assert.Equal("paused", pausedRendering);
+        await Expect(canvas).ToHaveAttributeAsync("data-game-rendering", "running", new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenArrowRightIsPressed_ThenThePlayerStepsEast()
     {
         // Arrange
@@ -531,6 +574,32 @@ public class GamePageTests
     }
 
     private static string FormatPosition(int x, int y, string facing) => $"X {x} · Y {y} · facing {facing}";
+
+    private static async Task PickQualityAsync(IPage page, string label)
+    {
+        await page.GetByTestId("game-quality").ClickAsync(new() { Timeout = Timeout });
+        await page.Locator(".mud-popover-open .mud-list-item").GetByText(label, new() { Exact = true }).ClickAsync(new() { Timeout = Timeout });
+    }
+
+    // The device pixels the canvas renders per CSS pixel, which the quality preset sets.
+    private static Task WaitForPixelRatioAsync(IPage page, double ratio) =>
+        page.WaitForFunctionAsync(
+            "ratio => { const canvas = document.querySelector('[data-testid=\"game-canvas\"]'); return Math.abs(canvas.width / canvas.clientWidth - ratio) < 0.05; }",
+            ratio,
+            new() { Timeout = Timeout });
+
+    // Playwright cannot hide a page, so this stands in for the browser: the document reports the state and raises the
+    // event a tab switch raises.
+    private static Task SetHiddenAsync(IPage page, bool isHidden) =>
+        page.EvaluateAsync(
+            """
+            isHidden => {
+                Object.defineProperty(document, 'hidden', { configurable: true, get: () => isHidden });
+                Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => isHidden ? 'hidden' : 'visible' });
+                document.dispatchEvent(new Event('visibilitychange'));
+            }
+            """,
+            isHidden);
 
     private static BrowserNewContextOptions CreateMicrophoneContext() => new() { Permissions = ["microphone"] };
 

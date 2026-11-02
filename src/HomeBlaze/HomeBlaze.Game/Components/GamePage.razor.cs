@@ -204,6 +204,7 @@ public partial class GamePage
 
         var game = view.Game;
         _isStarted = true;
+        _quality = result.Quality ?? AutoQuality;
         if (_subscribedGame is { } formerGame)
         {
             formerGame.VolumeTableChanged -= OnVolumeTableChanged;

@@ -83,6 +83,18 @@
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="game-voice-message" data-testid="game-voice-message">@voiceMessage</MudAlert>
         }
+        @* Stored per browser by game.js, which also applies it, so the field only mirrors the choice. *@
+        <section>
+            <MudSelect T="string" Value="_quality" ValueChanged="SetQualityAsync" ToStringFunc="@QualityLabel" Label="Quality"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@(!_isStarted)"
+                       data-testid="game-quality">
+                @* The values are the preset names of game-render.js. *@
+                <MudSelectItem T="string" Value="@AutoQuality" />
+                <MudSelectItem T="string" Value="@("low")" />
+                <MudSelectItem T="string" Value="@("medium")" />
+                <MudSelectItem T="string" Value="@("high")" />
+            </MudSelect>
+        </section>
         @* The operations of the game and its tools come first, so they keep their place while targets come and go. *@
         <section>
             <h5>Actions</h5>

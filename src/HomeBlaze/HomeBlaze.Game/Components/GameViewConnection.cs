@@ -170,6 +170,26 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     }
 
     /// <summary>
+    /// Applies the quality choice of the browser, a preset name or <c>auto</c>, and stores it there for the next start.
+    /// </summary>
+    public async Task SetQualityAsync(string choice)
+    {
+        if (_module is not { } module)
+        {
+            return;
+        }
+
+        try
+        {
+            await module.InvokeVoidAsync("setQuality", _lifetimeToken, ViewId, choice);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or JSException)
+        {
+            // The page went away, or the module dropped the view.
+        }
+    }
+
+    /// <summary>
     /// Ends the view session in the game, which then delivers nothing more; does not wait for the game or the browser.
     /// </summary>
     public void Close()
@@ -227,5 +247,8 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
         }
     }
 
-    public sealed record StartResult(bool IsStarted, string? Error);
+    /// <summary>
+    /// The outcome of a start; <c>Quality</c> is the stored quality choice of the browser once the view started.
+    /// </summary>
+    public sealed record StartResult(bool IsStarted, string? Error, string? Quality = null);
 }

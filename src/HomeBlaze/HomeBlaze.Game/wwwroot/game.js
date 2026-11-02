@@ -1,6 +1,6 @@
 import { createEntities } from './game-entities.js';
 import { createInput } from './game-input.js';
-import { createRenderer } from './game-render.js';
+import { createRenderer, readQuality, writeQuality } from './game-render.js';
 
 // The pages of a tab share this module, so each one owns its view by the id it passes.
 const views = new Map();
@@ -107,11 +107,17 @@ async function startView(handle, canvas, dotNet, options) {
     }
 
     handle.view = view;
-    return { isStarted: true, error: null };
+    return { isStarted: true, error: null, quality: readQuality() };
 }
 
 export function applyUpdate(viewId, update) {
     views.get(viewId)?.view?.applyUpdate(update);
+}
+
+/** Applies and stores the quality choice of this browser, a preset name or 'auto'. */
+export function setQuality(viewId, choice) {
+    writeQuality(choice);
+    views.get(viewId)?.view?.renderer.setQuality(choice);
 }
 
 export function dispose(viewId) {
@@ -130,8 +136,39 @@ class GameView {
         this.options = options;
         this.lastFrame = performance.now();
         this.fpsElement = canvas.parentElement?.querySelector('[data-game-fps]') ?? null;
-        this.lastFpsUpdate = 0;
+        this.lastFpsUpdate = performance.now();
+        this.framesSinceFpsUpdate = 0;
         this.shownFps = -1;
+        // Engine.runRenderLoop runs this on every animation frame; the renderer's frame cap decides which ones render.
+        this.loop = () => {
+            const now = performance.now();
+            if (this.renderer.shouldRender(now, this.isFocused)) {
+                this.render(now);
+            }
+        };
+        this.isFocused = document.hasFocus();
+        this.onFocus = () => {
+            this.isFocused = true;
+        };
+        this.onBlur = () => {
+            this.isFocused = false;
+        };
+        // Stops rendering in a hidden tab, where the browser also stops the animation frames, and starts again when it
+        // shows. View updates keep being applied meanwhile, since they come from the page, not from the frames.
+        this.onVisibilityChange = () => {
+            if (document.hidden) {
+                this.engine.stopRenderLoop();
+                this.canvas.dataset.gameRendering = 'paused';
+            } else {
+                const now = performance.now();
+                this.lastFrame = now;
+                this.lastFpsUpdate = now;
+                this.framesSinceFpsUpdate = 0;
+                this.renderer.resume(now);
+                this.engine.runRenderLoop(this.loop);
+                this.canvas.dataset.gameRendering = 'running';
+            }
+        };
     }
 
     async initialize() {
@@ -152,13 +189,16 @@ class GameView {
         this.camera.maxZ = 500;
         this.camera.setTarget(BABYLON.Vector3.Zero());
 
-        this.renderer = createRenderer(this.scene, this.camera);
+        this.renderer = createRenderer(this.scene, this.camera, readQuality());
 
         // The canvas carries the part and model counts for tests and diagnosis.
         this.entities = await createEntities(this.scene, { ...this.options, renderer: this.renderer, statsElement: this.canvas });
         this.input = createInput(this.dotNet, this.options, this.entities);
 
-        this.engine.runRenderLoop(() => this.render());
+        window.addEventListener('focus', this.onFocus);
+        window.addEventListener('blur', this.onBlur);
+        document.addEventListener('visibilitychange', this.onVisibilityChange);
+        this.onVisibilityChange();
         this.resizeObserver = new ResizeObserver(() => this.engine.resize());
         this.resizeObserver.observe(this.canvas);
     }
@@ -186,9 +226,8 @@ class GameView {
         }
     }
 
-    render() {
+    render(now) {
         const BABYLON = window.BABYLON;
-        const now = performance.now();
         const elapsedSeconds = Math.min(0.1, (now - this.lastFrame) / 1000);
         this.lastFrame = now;
 
@@ -212,13 +251,16 @@ class GameView {
         this.showFps(now);
     }
 
+    // Counts the rendered frames, since the engine's own rate also counts the animation frames the cap skips.
     showFps(now) {
+        this.framesSinceFpsUpdate++;
         if (!this.fpsElement || now - this.lastFpsUpdate < FPS_INTERVAL) {
             return;
         }
 
+        const fps = Math.round(this.framesSinceFpsUpdate * 1000 / (now - this.lastFpsUpdate));
         this.lastFpsUpdate = now;
-        const fps = Math.round(this.engine.getFps());
+        this.framesSinceFpsUpdate = 0;
         if (fps !== this.shownFps) {
             this.shownFps = fps;
             this.fpsElement.textContent = `${fps} FPS`;
@@ -226,6 +268,9 @@ class GameView {
     }
 
     dispose() {
+        window.removeEventListener('focus', this.onFocus);
+        window.removeEventListener('blur', this.onBlur);
+        document.removeEventListener('visibilitychange', this.onVisibilityChange);
         this.input?.dispose();
         this.resizeObserver?.disconnect();
         this.engine?.stopRenderLoop();
