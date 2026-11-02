@@ -583,7 +583,8 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
 
         // Assert
         var page = GetSinglePage(result);
-        Assert.Equal("/House/Children[Kitchen]", page.GetProperty("path").GetString());
+        // As search writes it: the hidden property is treated as absent, so the key needs no explicit form.
+        Assert.Equal("/House/Kitchen", page.GetProperty("path").GetString());
         Assert.Equal("The shown gasket.", page.GetProperty("matches")[0].GetProperty("snippet").GetString());
     }
 
