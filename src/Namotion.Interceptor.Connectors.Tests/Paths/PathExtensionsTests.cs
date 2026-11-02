@@ -1,4 +1,5 @@
-﻿using System.Reactive.Concurrency;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Reactive.Concurrency;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
@@ -682,6 +683,10 @@ public class PathExtensionsTests
 
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 }

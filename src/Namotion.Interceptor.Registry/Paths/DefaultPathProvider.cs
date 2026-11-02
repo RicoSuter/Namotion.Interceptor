@@ -1,6 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-using Namotion.Interceptor.Registry.Abstractions;
-
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
@@ -28,18 +25,4 @@ public class DefaultPathProvider : PathProviderBase
 
     /// <inheritdoc />
     public override char PathSeparator => _pathSeparator;
-
-    /// <inheritdoc />
-    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
-    {
-        // A derived provider may override the members this skips. Checked per call rather than cached in a field: a
-        // devirtualized call folds the check and its fallback away, so the override inlines.
-        if (GetType() != typeof(DefaultPathProvider))
-        {
-            return base.TryGetIncludedPropertySegment(property, out segment);
-        }
-
-        segment = property.BrowseName;
-        return true;
-    }
 }

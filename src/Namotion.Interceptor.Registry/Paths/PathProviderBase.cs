@@ -5,7 +5,8 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// Base implementation with configurable separators and [InlinePaths] support.
+/// Base implementation with configurable separators and [InlinePaths] support. It includes every property under its
+/// BrowseName unless <see cref="TryGetPropertySegment"/> is overridden.
 /// </summary>
 public abstract class PathProviderBase : IPathProvider
 {
@@ -28,114 +29,46 @@ public abstract class PathProviderBase : IPathProvider
     internal PathCharacters GetCharacters() => new(PathSeparator, IndexOpen, IndexClose);
 
     /// <inheritdoc />
-    public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
-
-    /// <summary>
-    /// Gets whether the property is effectively included: <see cref="IsPropertyIncluded"/> includes it and, for an
-    /// attribute, the property it belongs to, recursively up to a property that is no attribute. Attributes that belong
-    /// to each other in a cycle are not included. The properties holding its subject are not checked. Paths pass only
-    /// effectively included properties.
-    /// </summary>
-    /// <param name="property">The property to check.</param>
-    /// <returns>True when the property is effectively included; otherwise, false.</returns>
-    public bool IsPropertyEffectivelyIncluded(RegisteredSubjectProperty property)
-        => IsPropertyIncluded(property) && (!property.IsAttribute || IsPropertyOfAttributeIncluded(property));
-
-    /// <summary>
-    /// Gets whether <see cref="IsPropertyIncluded"/> includes the property and, when it does, the segment paths use
-    /// for it: <see cref="TryGetPropertySegment"/>, or the property's BrowseName when that is null.
-    /// </summary>
-    /// <param name="property">The property.</param>
-    /// <param name="segment">The segment of the included property, or null.</param>
-    /// <returns>True when the property is included; otherwise, false.</returns>
     /// <remarks>
-    /// Override it to answer both from one lookup. An override must agree with <see cref="IsPropertyIncluded"/> and
-    /// <see cref="TryGetPropertySegment"/>, which other callers use on their own. In a class that can be derived from,
-    /// it must call <c>base.TryGetIncludedPropertySegment</c> when the instance is of a derived type, which may override
-    /// either of them alone, as the built-in providers do by checking their exact type.
+    /// The default includes every property under its BrowseName. A provider migrating from the separate
+    /// <c>IsPropertyIncluded</c> and nullable <c>TryGetPropertySegment</c> overrides merges both into this method,
+    /// returning false where <c>IsPropertyIncluded</c> returned false, and deletes its <c>IsPropertyIncluded</c>
+    /// method: an instance method of that name hides <see cref="PathProviderExtensions.IsPropertyIncluded"/>.
     /// </remarks>
-    protected virtual bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    public virtual bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        if (!IsPropertyIncluded(property))
-        {
-            segment = null;
-            return false;
-        }
-
-        segment = TryGetPropertySegment(property) ?? property.BrowseName;
+        segment = property.BrowseName;
         return true;
     }
 
-    /// <summary>
-    /// Gets whether the property is effectively included (see <see cref="IsPropertyEffectivelyIncluded"/>) and, when it
-    /// is, its segment from <see cref="TryGetIncludedPropertySegment"/>.
-    /// </summary>
-    internal bool TryGetEffectivelyIncludedSegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    /// <inheritdoc />
+    /// <remarks>
+    /// The default matches the segments of <see cref="TryGetPropertySegment"/> and, when none matches, falls back to
+    /// the [InlinePaths] property of the subject when that is included.
+    /// </remarks>
+    public virtual bool TryGetPropertyFromSegment(
+        RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
     {
-        if (TryGetIncludedPropertySegment(property, out segment) &&
-            (!property.IsAttribute || IsPropertyOfAttributeIncluded(property)))
+        foreach (var candidate in subject.Properties)
         {
+            if (TryGetPropertySegment(candidate, out var candidateSegment) && candidateSegment == segment)
+            {
+                property = candidate;
+                return true;
+            }
+        }
+
+        // The segment is an [InlinePaths] dictionary key; the caller uses it as the key.
+        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
+        if (inlinePathsPropertyName is not null &&
+            subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
+            TryGetPropertySegment(inlinePathsProperty, out _))
+        {
+            property = inlinePathsProperty;
             return true;
         }
 
-        segment = null;
+        property = null;
         return false;
-    }
-
-    private bool IsPropertyOfAttributeIncluded(RegisteredSubjectProperty attribute)
-    {
-        // Attributes can name each other in a cycle; a chain longer than the subject's properties is one, and it
-        // belongs to no included property.
-        var remainingSteps = attribute.Parent.Properties.Length;
-        var property = attribute;
-        do
-        {
-            // An attribute whose property is missing belongs to no included property.
-            property = property.Parent.TryGetProperty(property.AttributeMetadata.PropertyName);
-            if (property is null || --remainingSteps < 0 || !IsPropertyIncluded(property))
-            {
-                return false;
-            }
-        }
-        while (property.IsAttribute);
-
-        return true;
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Default implementation returns the property's BrowseName.
-    /// Override to return null for no-mapping scenarios.
-    /// </remarks>
-    public virtual string? TryGetPropertySegment(RegisteredSubjectProperty property)
-        => property.BrowseName;
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Default implementation:
-    /// 1. First looks up direct properties by matching TryGetPropertySegment
-    /// 2. Falls back to [InlinePaths] dictionary lookup if no direct match found
-    /// </remarks>
-    public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(
-        RegisteredSubject subject, string segment)
-    {
-        // 1. Direct property lookup by segment name
-        foreach (var property in subject.Properties)
-        {
-            if (TryGetPropertySegment(property) == segment)
-            {
-                return property;
-            }
-        }
-
-        // 2. [InlinePaths] fallback - segment is a dictionary key
-        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
-        if (inlinePathsPropertyName is not null)
-        {
-            // Return the InlinePaths property - caller uses segment as dictionary key
-            return subject.TryGetProperty(inlinePathsPropertyName);
-        }
-
-        return null;
     }
 }

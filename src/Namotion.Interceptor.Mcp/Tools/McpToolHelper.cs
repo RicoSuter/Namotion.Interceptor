@@ -171,9 +171,9 @@ internal static class McpToolHelper
     /// attribute, a property holding subjects or one the path provider excludes.
     /// </summary>
     internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
-        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
-            ? null
-            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+        !property.IsAttribute && !property.CanContainSubjects && pathProvider.TryGetPropertySegment(property, out var segment)
+            ? segment
+            : null;
 
     /// <summary>
     /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
@@ -184,13 +184,11 @@ internal static class McpToolHelper
         PathProviderBase pathProvider,
         string segment)
     {
-        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
-        return property is null ||
-               property.IsAttribute ||
-               property.CanContainSubjects ||
-               !pathProvider.IsPropertyIncluded(property)
-            ? null
-            : property;
+        return pathProvider.TryGetPropertyFromSegment(subject, segment, out var property) &&
+               !property.IsAttribute &&
+               !property.CanContainSubjects
+            ? property
+            : null;
     }
 
     /// <summary>
@@ -215,7 +213,7 @@ internal static class McpToolHelper
     /// <summary>
     /// The path of the subject with <paramref name="pathPrefix"/>: for the root the prefix, or null when it is empty.
     /// Any other subject's path is the first, in parent order, that reaches the root only through properties
-    /// <paramref name="pathProvider"/> effectively includes (see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>),
+    /// <paramref name="pathProvider"/> effectively includes (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>),
     /// the holding property too; null when there is none.
     /// </summary>
     internal static string? TryGetSubjectPath(

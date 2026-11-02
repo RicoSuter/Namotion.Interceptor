@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -14,30 +16,147 @@ public class PathProviderBaseTests
 
     [Theory]
     [MemberData(nameof(ProviderNames))]
-    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyEffectivelyIncludedAndTryGetPropertySegment(string providerName)
+    public void WhenTheProviderIsAskedForASegment_ThenItGivesOneExactlyForTheIncludedProperties(string providerName)
     {
         // Arrange
-        var context = CreateContext();
-        var person = new Person(context) { FirstName = "Ann", LastName = "Smith", Father = new Person(context) };
-        var container = new TestShadowedInlineContainer(context) { Label = "Label", Name = "Name" };
+        var (properties, _) = CreateProperties();
         var pathProvider = CreateProvider(providerName);
-        var properties = person.TryGetRegisteredSubject()!.GetAllProperties()
-            .Concat(container.TryGetRegisteredSubject()!.GetAllProperties())
-            .ToList();
 
         // Act
         var results = properties
-            .Select(property => (Property: property, Included: pathProvider.TryGetEffectivelyIncludedSegment(property, out var segment), Segment: segment))
+            .Select(property => (Property: property, Included: pathProvider.TryGetPropertySegment(property, out var segment), Segment: segment))
             .ToList();
 
         // Assert
         Assert.Contains(results, result => result.Included);
         foreach (var (property, included, segment) in results)
         {
-            var expectedIncluded = pathProvider.IsPropertyEffectivelyIncluded(property);
-            Assert.Equal(expectedIncluded, included);
-            Assert.Equal(expectedIncluded ? pathProvider.TryGetPropertySegment(property) ?? property.BrowseName : null, segment);
+            Assert.Equal(included, segment is not null);
+            Assert.Equal(included, pathProvider.IsPropertyIncluded(property));
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public void WhenASegmentIsResolved_ThenTheResultIsTheFirstIncludedPropertyWithThatSegment(string providerName)
+    {
+        // Arrange
+        var (properties, subjects) = CreateProperties();
+        var pathProvider = CreateProvider(providerName);
+        var names = properties
+            .SelectMany(property => new[] { property.Name, property.BrowseName, property.BrowseName.ToUpperInvariant(), property.Name.ToLowerInvariant() })
+            .Distinct()
+            .ToList();
+
+        foreach (var subject in subjects)
+        {
+            foreach (var name in names)
+            {
+                // Act
+                var found = pathProvider.TryGetPropertyFromSegment(subject, name, out var property);
+
+                // Assert
+                var inlinePathsProperty = GetInlinePathsProperty(subject);
+                var expected = subject.Properties.FirstOrDefault(candidate =>
+                    pathProvider.TryGetPropertySegment(candidate, out var segment) && segment == name) ??
+                    (inlinePathsProperty is not null && pathProvider.IsPropertyIncluded(inlinePathsProperty) ? inlinePathsProperty : null);
+                Assert.Equal(found, property is not null);
+                Assert.Same(expected, property);
+                Assert.True(!found || pathProvider.IsPropertyIncluded(property!));
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public void WhenTheSegmentOfAnIncludedPropertyIsResolved_ThenItRoundTripsToAPropertyWithTheSameSegment(string providerName)
+    {
+        // Arrange
+        var (properties, _) = CreateProperties();
+        var pathProvider = CreateProvider(providerName);
+
+        foreach (var property in properties)
+        {
+            if (!pathProvider.TryGetPropertySegment(property, out var segment))
+            {
+                continue;
+            }
+
+            // Act
+            var found = pathProvider.TryGetPropertyFromSegment(property.Parent, segment, out var resolved);
+
+            // Assert
+            Assert.True(found);
+            Assert.True(pathProvider.TryGetPropertySegment(resolved!, out var resolvedSegment));
+            Assert.Equal(segment, resolvedSegment);
+        }
+    }
+
+    [Fact]
+    public void WhenTheInlinePathsPropertyIsExcluded_ThenAnUnknownSegmentResolvesToNoProperty()
+    {
+        // Arrange
+        var context = CreateContext();
+        var container = new TestMappedInlineContainer(context) { Name = "Root" };
+        var registered = container.TryGetRegisteredSubject()!;
+        var pathProvider = new ExcludingAttributePathProvider(nameof(TestMappedInlineContainer.Children));
+
+        // Act
+        var found = pathProvider.TryGetPropertyFromSegment(registered, "child", out var property);
+        var foundWhenIncluded = new AttributeBasedPathProvider("test").TryGetPropertyFromSegment(registered, "child", out var included);
+
+        // Assert
+        Assert.False(found);
+        Assert.Null(property);
+        Assert.True(foundWhenIncluded);
+        Assert.Equal(nameof(TestMappedInlineContainer.Children), included!.Name);
+    }
+
+    [Fact]
+    public void WhenADerivedDefaultProviderOverridesTheSegment_ThenPathsAreBuiltAndResolvedWithIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Ann", LastName = "Smith", Father = new Person(context) { FirstName = "Bob" } };
+        var registered = person.TryGetRegisteredSubject()!;
+        var pathProvider = new UpperCasePathProvider();
+        var fatherFirstName = person.Father.TryGetRegisteredProperty(p => p.FirstName)!;
+        var lastName = person.TryGetRegisteredProperty(p => p.LastName)!;
+
+        // Act
+        var path = fatherFirstName.TryGetPath(pathProvider, person);
+        var excludedPath = lastName.TryGetPath(pathProvider, person);
+        var resolved = pathProvider.TryGetPropertyFromPath(registered, "FATHER.FIRSTNAME");
+        var resolvedBrowseName = pathProvider.TryGetPropertyFromPath(registered, "Father.FirstName");
+
+        // Assert
+        Assert.Equal("FATHER.FIRSTNAME", path);
+        Assert.Null(excludedPath);
+        Assert.Same(fatherFirstName, resolved?.Property);
+        Assert.Null(resolvedBrowseName);
+    }
+
+    [Fact]
+    public void WhenADerivedAttributeProviderOverridesTheSegment_ThenPathsAreBuiltAndResolvedWithIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestMappedInlineContainer(context) { Name = "Child" };
+        var root = new TestMappedInlineContainer(context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestMappedInlineContainer> { ["child"] = child }
+        };
+        var pathProvider = new PrefixingAttributePathProvider();
+        var name = child.TryGetRegisteredProperty(c => c.Name)!;
+
+        // Act
+        var path = name.TryGetPath(pathProvider, root);
+        var resolved = pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, "child.x-name");
+
+        // Assert
+        Assert.Equal("child.x-name", path);
+        Assert.Same(name, resolved?.Property);
     }
 
     [Fact]
@@ -118,6 +237,23 @@ public class PathProviderBaseTests
         Assert.Null(resolved);
     }
 
+    private static (List<RegisteredSubjectProperty> Properties, List<RegisteredSubject> Subjects) CreateProperties()
+    {
+        var context = CreateContext();
+        var person = new Person(context) { FirstName = "Ann", LastName = "Smith", Father = new Person(context) };
+        var container = new TestShadowedInlineContainer(context) { Label = "Label", Name = "Name" };
+        var subjects = new List<RegisteredSubject>
+        {
+            person.TryGetRegisteredSubject()!,
+            person.Father.TryGetRegisteredSubject()!,
+            container.TryGetRegisteredSubject()!
+        };
+        return (subjects.SelectMany(subject => subject.Properties).ToList(), subjects);
+    }
+
+    private static RegisteredSubjectProperty? GetInlinePathsProperty(RegisteredSubject subject)
+        => InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType()) is { } name ? subject.TryGetProperty(name) : null;
+
     private static PathProviderBase CreateProvider(string name) => name switch
     {
         "Default" => DefaultPathProvider.Instance,
@@ -138,20 +274,49 @@ public class PathProviderBaseTests
 
     private sealed class UpperCasePathProvider() : DefaultPathProvider('.')
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != nameof(Person.LastName);
-
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) => property.BrowseName.ToUpperInvariant();
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != nameof(Person.LastName) ? property.BrowseName.ToUpperInvariant() : null;
+            return segment is not null;
+        }
     }
 
     private sealed class ExcludingAttributePathProvider(string excludedPropertyName) : AttributeBasedPathProvider("test")
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-            => property.Name != excludedPropertyName && base.IsPropertyIncluded(property);
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (property.Name == excludedPropertyName)
+            {
+                segment = null;
+                return false;
+            }
+
+            return base.TryGetPropertySegment(property, out segment);
+        }
+    }
+
+    private sealed class PrefixingAttributePathProvider() : AttributeBasedPathProvider("test")
+    {
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (!base.TryGetPropertySegment(property, out var baseSegment))
+            {
+                segment = null;
+                return false;
+            }
+
+            segment = InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name) ? baseSegment : "x-" + baseSegment;
+            return true;
+        }
     }
 
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 }
 
