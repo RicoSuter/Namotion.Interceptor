@@ -39,8 +39,8 @@ public class MqttAttributeMapper : IReversePropertyMapper<MqttPropertyMapping, M
         return mapping is not null;
     }
 
-    // Indexed rather than enumerated: the MQTT server's change filter runs this for every change of a property
-    // without a topic, and an interface enumerator would allocate per call.
+    // Indexed rather than enumerated: the MQTT server's change filter and publish run this for every change of a
+    // scalar property, and an interface enumerator would allocate per call.
     private MqttTopicAttribute? FindTopicAttribute(IReadOnlyCollection<Attribute> attributes)
     {
         if (attributes is IList<Attribute> list)
