@@ -106,17 +106,16 @@ internal static class SubjectTypeShape
     /// </summary>
     public static (bool NeedsGeneratedParameterlessConstructor, bool HasOrWillHaveParameterlessConstructor, bool ParameterlessConstructorSetsRequiredMembers) DetectConstructorState(
         INamedTypeSymbol typeSymbol,
-        TypeDeclarationSyntax[] allTypeDeclarations)
+        TypeDeclarationSyntax[] allTypeDeclarations,
+        IReadOnlyList<SubjectConstructor> constructors)
     {
-        // Static constructors cannot satisfy emitted constructor chaining.
-        var firstConstructor = allTypeDeclarations
-            .SelectMany(c => c.Members)
-            .OfType<ConstructorDeclarationSyntax>()
-            .FirstOrDefault(constructor => !constructor.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)));
-
-        // Chaining eligibility currently depends on the first declared instance constructor.
-        var needsGeneratedParameterlessConstructor = firstConstructor is null;
-        var hasOrWillHaveParameterlessConstructor = firstConstructor is null or { ParameterList.Parameters.Count: 0 };
+        // Unsupported instance signatures still suppress an implicit parameterless constructor;
+        // static constructors do not. Only eligible parameterless targets enable the context form.
+        var needsGeneratedParameterlessConstructor = !allTypeDeclarations.Any(declaration =>
+            declaration.ParameterList is not null || declaration.Members.OfType<ConstructorDeclarationSyntax>()
+                .Any(constructor => !constructor.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword))));
+        var hasOrWillHaveParameterlessConstructor = needsGeneratedParameterlessConstructor ||
+            constructors.Any(constructor => constructor.Parameters.Count == 0 && !constructor.IsObsolete);
 
         return (
             needsGeneratedParameterlessConstructor,

@@ -23,8 +23,7 @@ namespace Namotion.Interceptor.SampleBlazor
             var context = InterceptorSubjectContext
                 .Create()
                 .WithFullPropertyTracking()
-                .WithReadPropertyRecorder()
-                .WithParents();
+                .WithReadPropertyRecorder();
 
             builder.Services
                 .AddSingleton<Game>(_ => new Game(context))

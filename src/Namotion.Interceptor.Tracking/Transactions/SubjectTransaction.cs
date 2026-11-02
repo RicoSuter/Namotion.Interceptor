@@ -34,8 +34,9 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
 
-    // A mutable struct: never copy it or make this field readonly (see TransactionHandlerSet).
-    private TransactionHandlerSet _handlerSet;
+    // The handlers of the transaction's context, resolved when it begins. Every subject it writes belongs to that
+    // context, so no other handlers join later. Never mutated.
+    private readonly ITransactionHandler[] _handlers;
 
     /// <summary>
     /// One change per property (last write wins), in first-write order, which is the commit order. Guarded by
@@ -129,14 +130,14 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>Gets the interceptor of the context this transaction is bound to.</summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
 
-    /// <summary>Gets the transaction handlers, see <see cref="TransactionHandlerSet"/>.</summary>
-    internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlerSet.Handlers);
+    /// <summary>Gets the transaction handlers, in their service order.</summary>
+    internal ImmutableArray<ITransactionHandler> Handlers => ImmutableCollectionsMarshal.AsImmutableArray(_handlers);
 
     /// <summary>Gets the lock that guards the pending changes and the capture state.</summary>
     internal Lock PendingChangesLock => _pendingChangesLock;
 
     // Applies carry the commit write mark only when handlers checked the final set.
-    private SubjectTransaction? MarkingTransaction => _handlerSet.Handlers.Length == 0 ? null : this;
+    private SubjectTransaction? MarkingTransaction => _handlers.Length == 0 ? null : this;
 
     /// <summary>
     /// Gets whether writes of an unchanged value are recorded as check-only entries. Conflict detection is what
@@ -147,23 +148,10 @@ public sealed class SubjectTransaction : IDisposable
         CheckMode == TransactionCheckMode.Deferred && ConflictBehavior == TransactionConflictBehavior.FailOnConflict;
 
     // Without handlers nothing validates the entries, so the commit leaves them out, conflict detection included.
-    private int CheckedCheckOnlyCount => _handlerSet.Handlers.Length == 0 ? 0 : _checkOnlyChanges?.Count ?? 0;
+    private int CheckedCheckOnlyCount => _handlers.Length == 0 ? 0 : _checkOnlyChanges?.Count ?? 0;
 
     // Handlers checked the changes as a set, so once one fails to apply the rest no longer land as checked.
     private bool RollsBackOnApplyFailure => _failureHandling == TransactionFailureHandling.Rollback || MarkingTransaction is not null;
-
-    /// <summary>
-    /// Adds the handlers of <paramref name="subjectContext"/> before the transaction captures a write to one of its
-    /// subjects, see <see cref="TransactionHandlerSet.Include"/>, which also states when this returns false or throws.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool IncludeHandlersOf(
-        IInterceptorSubjectContext subjectContext,
-        ImmutableArray<SubjectTransactionInterceptor> subjectInterceptors,
-        bool skipWhileCommitting = false)
-    {
-        return _handlerSet.Include(subjectContext, subjectInterceptors, this, skipWhileCommitting);
-    }
 
     /// <summary>
     /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
@@ -418,7 +406,7 @@ public sealed class SubjectTransaction : IDisposable
         ConflictBehavior = conflictBehavior;
         CheckMode = checkMode;
         _commitTimeout = commitTimeout;
-        _handlerSet = new TransactionHandlerSet(handlers);
+        _handlers = ImmutableCollectionsMarshal.AsArray(handlers) ?? [];
 
         Interlocked.Increment(ref _activeTransactionCount);
     }
@@ -1083,7 +1071,7 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         var changes = checkedChanges[..changeCount];
-        ThrowIfConflicting(SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(checkedChanges.Span, Interceptor));
+        ThrowIfConflicting(SubjectPropertyChangeOperations.DetectSubjectsOutsideContext(checkedChanges.Span, Context));
         if (ConflictBehavior == TransactionConflictBehavior.Ignore)
         {
             using (EnterCommitModelAccess())
@@ -1115,7 +1103,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </exception>
     private void RunCommitCheck(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        if (_handlerSet.Handlers.Length == 0)
+        if (_handlers.Length == 0)
         {
             return;
         }
@@ -1146,7 +1134,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         using var scope = new CommitScope(this, stage, excludedProperties);
         var context = new TransactionCheckContext(this, changes, stage);
-        foreach (var handler in _handlerSet.Handlers)
+        foreach (var handler in _handlers)
         {
             handler.OnCommitting(in context);
         }
@@ -1163,7 +1151,7 @@ public sealed class SubjectTransaction : IDisposable
         ReadOnlySpan<SubjectPropertyChange> checkOnlyChanges,
         IReadOnlyList<SubjectPropertyChange> failedSource)
     {
-        if (_handlerSet.Handlers.Length == 0)
+        if (_handlers.Length == 0)
         {
             return null;
         }

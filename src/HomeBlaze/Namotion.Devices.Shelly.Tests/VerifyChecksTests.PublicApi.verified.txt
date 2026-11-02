@@ -7,6 +7,7 @@ namespace Namotion.Devices.Shelly
     public class ShellyCover : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.Covers.IPositionController, HomeBlaze.Abstractions.Devices.Covers.IPositionState, HomeBlaze.Abstractions.Devices.Covers.IRollerShutter, HomeBlaze.Abstractions.Devices.Covers.IRollerShutterController, HomeBlaze.Abstractions.Devices.Covers.IRollerShutterState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalCurrentSensor, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IElectricalVoltageSensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ShellyCover(Namotion.Devices.Shelly.ShellyDevice device, int index) { }
+        public ShellyCover(Namotion.Devices.Shelly.ShellyDevice device, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public string? ApiState { get; }
         [Namotion.Interceptor.Attributes.Derived]
         [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Close", "IsEnabled")]
@@ -89,6 +90,7 @@ namespace Namotion.Devices.Shelly
     public class ShellyDevice : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ShellyDevice(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Shelly.ShellyDevice> logger) { }
+        public ShellyDevice(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Shelly.ShellyDevice> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         public string? AvailableSoftwareUpdate { get; }
         [HomeBlaze.Abstractions.Attributes.State]
@@ -218,6 +220,7 @@ namespace Namotion.Devices.Shelly
     public class ShellyEnergyMeterPhase : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalCurrentSensor, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IElectricalVoltageSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ShellyEnergyMeterPhase(string phase) { }
+        public ShellyEnergyMeterPhase(string phase, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=312, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
         public decimal? ActivePower { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=313, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.VoltAmpere)]
@@ -253,6 +256,7 @@ namespace Namotion.Devices.Shelly
     public class ShellyInput : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ShellyInput(int index) { }
+        public ShellyInput(int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=401, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         public double? CountFrequency { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -285,6 +289,7 @@ namespace Namotion.Devices.Shelly
     public class ShellySwitch : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IPowerRelay, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalCurrentSensor, HomeBlaze.Abstractions.Sensors.IElectricalVoltageSensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Devices.SwitchEvent>
     {
         public ShellySwitch(Namotion.Devices.Shelly.ShellyDevice device, int index) { }
+        public ShellySwitch(Namotion.Devices.Shelly.ShellyDevice device, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [System.ComponentModel.Category("Energy")]
         public decimal? ElectricalCurrent { get; }
@@ -338,6 +343,7 @@ namespace Namotion.Devices.Shelly
     public class ShellyTemperatureSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public ShellyTemperatureSensor(int index) { }
+        public ShellyTemperatureSensor(int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }

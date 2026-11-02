@@ -50,6 +50,7 @@ namespace Namotion.Devices.Wallbox
     public class WallboxCharger : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState, HomeBlaze.Abstractions.Devices.Energy.IVehicleCharger, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Sensors.IPowerSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public WallboxCharger(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Wallbox.WallboxCharger> logger) { }
+        public WallboxCharger(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Wallbox.WallboxCharger> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=26)]
         public string? AvailableSoftwareUpdate { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=10, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]

@@ -41,10 +41,10 @@ public class ChangeDeliveryFilterRaceTests
 
         // Whether the flush parked inside the subject lock decides whether the transaction can commit
         // before the mark, so ask the lock rather than infer it from thread state.
-        var flushHoldsSubjectLock = !Monitor.TryEnter(subject.SyncRoot);
+        var flushHoldsSubjectLock = !Monitor.TryEnter(TerminalLock(subject));
         if (!flushHoldsSubjectLock)
         {
-            Monitor.Exit(subject.SyncRoot);
+            Monitor.Exit(TerminalLock(subject));
         }
 
         // A transaction writes to the source first, then applies locally as a confirmation.
@@ -83,7 +83,7 @@ public class ChangeDeliveryFilterRaceTests
         // Act
         // Synchronous waits only while the monitor is held: an await could resume on another thread.
         gate.Arm(lookup: 1, park: false);
-        Monitor.Enter(subject.SyncRoot);
+        Monitor.Enter(TerminalLock(subject));
         var contentionBefore = Monitor.LockContentionCount;
         try
         {
@@ -107,7 +107,7 @@ public class ChangeDeliveryFilterRaceTests
         }
         finally
         {
-            Monitor.Exit(subject.SyncRoot);
+            Monitor.Exit(TerminalLock(subject));
         }
 
         await race.DeliverTailAsync("Tail");
@@ -276,6 +276,10 @@ public class ChangeDeliveryFilterRaceTests
         }
     }
 
+    // The lock the write terminal commits under, which the first publish takes for its check and mark.
+    private static object TerminalLock(GatedSubject subject)
+        => ((InterceptorExecutor)((IInterceptorSubject)subject).Executor).SyncRoot;
+
     /// <summary>
     /// A hand-written subject, because the generated one fixes its Data dictionary's comparer.
     /// </summary>
@@ -297,14 +301,12 @@ public class ChangeDeliveryFilterRaceTests
         public GatedSubject(IInterceptorSubjectContext context, IEqualityComparer<(string? property, string key)> dataComparer)
         {
             Data = new ConcurrentDictionary<(string? property, string key), object?>(dataComparer);
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)this).AttachToContext(context);
         }
 
         public ConcurrentDictionary<(string? property, string key), object?> Data { get; }
 
-        public object SyncRoot { get; } = new();
-
-        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _executor, this);
+        IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
 
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => DefaultProperties;
 

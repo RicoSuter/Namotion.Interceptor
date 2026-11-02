@@ -54,7 +54,7 @@ public class StructuralWriteBenchmark
 
         context = Handler == StructuralWriteHandler.Registry
             ? context.WithRegistry()
-            : context.WithParents();
+            : context.WithLifecycle();
 
         _items = Enumerable.Range(0, EntryCount).Select(_ => new Car()).ToArray();
         _itemsCopy = [.. _items];

@@ -114,7 +114,7 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
         }
 
         var rootSubject = _rootSubjectProvider();
-        var registry = rootSubject.Context.TryGetService<ISubjectRegistry>();
+        var registry = rootSubject.TryGetContext()?.TryGetService<ISubjectRegistry>();
         if (registry is null)
         {
             return new { error = "Subject registry is not available." };

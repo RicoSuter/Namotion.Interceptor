@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -8,7 +9,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Handles derived property tracking and automatic recalculation using dependency recording.
-/// Requires LifecycleInterceptor to be added after this interceptor.
+/// Runs ahead of LifecycleInterceptor in the chain, pinned by its [RunsBefore] attributes rather
+/// than by registration order.
 /// </summary>
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
@@ -18,11 +20,10 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 // Outer of the change interceptor so the cascade recalculation runs after that interceptor has
-// dispatched: a triggering write is announced before the derived recalculations it causes. Only
-// load-bearing under aggregation, where instances would otherwise interleave and one context's
-// cascade could be announced before another's dispatch of the triggering write.
+// dispatched: a triggering write is announced before the derived recalculations it causes.
 [RunsBefore(typeof(PropertyChangeInterceptor))]
-public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
+public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler,
+    ISingletonContextService<DerivedPropertyChangeHandler>
 {
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
@@ -86,9 +87,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 data.LastKnownValue = EvaluateAndStabilize(data, property, callerHoldsLock: true);
                 property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
-            catch (Exception)
+            catch (Exception exception) when (exception is not LifecycleContractViolationException)
             {
-                // Getter threw. The value will be computed on the next dependency write.
+                // Getter threw. The value will be computed on the next dependency write. A contract
+                // violation is excluded: absorbing it would hide an illegal getter behind a derived
+                // value that silently never initializes.
             }
 
             return true;
@@ -168,10 +171,48 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Committed writes recalculate their dependents even when downstream processing throws.
+    /// This requires a truthful <see cref="PropertyWriteContext{TProperty}.IsWritten"/> marker.
+    /// Remaining dependents are attempted after a recalculation failure; failures are reported
+    /// after completion as one flat list in the order they were raised, with any downstream write
+    /// failure first and a nested aggregate replaced by its parts where it stood.
+    /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        next(ref context);
+        try
+        {
+            next(ref context);
+        }
+        catch (Exception writeFailure) when (context.IsWritten)
+        {
+            try
+            {
+                CompleteWrite(ref context);
+            }
+            catch (Exception completionFailure)
+            {
+                // Flattened by hand rather than through AggregateException.Flatten, which is
+                // breadth first and would move the parts of a nested write failure behind the
+                // completion failure instead of keeping the write side in front.
+                var reported = new List<Exception>();
+                AddFlattened(reported, writeFailure);
+                AddFlattened(reported, completionFailure);
+                throw new AggregateException(reported);
+            }
 
+            throw;
+        }
+
+        CompleteWrite(ref context);
+    }
+
+    // Small enough to inline into both of its call sites, which is what keeps a write on a property
+    // no derived value depends on inside the caller's frame. The recalculation body below is far
+    // too large for that and stays a call.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CompleteWrite<TProperty>(ref PropertyWriteContext<TProperty> context)
+    {
         if (!context.IsWritten)
         {
             return;
@@ -181,10 +222,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         Interlocked.Increment(ref _writeGeneration);
 
         var data = context.Property.TryGetDerivedPropertyData();
-        if (data is null)
+        if (data is not null)
         {
-            return;
+            RecalculateAfterWrite(ref context, data);
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecalculateAfterWrite<TProperty>(ref PropertyWriteContext<TProperty> context, DerivedPropertyData data)
+    {
+        List<Exception>? failures = null;
 
         // Derived-with-setter: value comes from the getter, so setter changes require recalc
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
@@ -193,7 +240,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             var rawTimestamp = context.WriteTimestampRaw;
             var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+            try
+            {
+                RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
         }
 
         var usedByProperties = data.GetUsedByProperties();
@@ -203,12 +257,42 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
             var rawTimestamp = context.WriteTimestampRaw;
             var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
-            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
+            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp, ref failures);
+        }
+
+        if (failures is not null)
+        {
+            // A lone failure keeps its own type so callers can still catch it directly; several are
+            // reported flat, because a recalculation can itself surface an aggregate.
+            if (failures.Count == 1)
+            {
+                ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            }
+
+            var reported = new List<Exception>(failures.Count);
+            foreach (var failure in failures) AddFlattened(reported, failure);
+            throw new AggregateException(reported);
         }
     }
 
+    /// <summary>
+    /// Appends a failure to the reported list, replacing an aggregate with its parts in place so
+    /// the flat list keeps the order the failures were raised in. An empty aggregate carries no
+    /// part to report, so it is kept as itself rather than disappearing.
+    /// </summary>
+    private static void AddFlattened(List<Exception> reported, Exception failure)
+    {
+        if (failure is AggregateException aggregate && aggregate.InnerExceptions.Count > 0)
+        {
+            foreach (var inner in aggregate.InnerExceptions) AddFlattened(reported, inner);
+            return;
+        }
+
+        reported.Add(failure);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp, ref List<Exception>? failures)
     {
         for (var i = 0; i < usedByProperties.Length; i++)
         {
@@ -220,7 +304,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 continue;
             }
 
-            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
+            try
+            {
+                RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
         }
     }
 
@@ -231,7 +322,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp, bool onlyWhenChanged = false)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -242,68 +333,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Outer loop handles the post-notification RecalculationNeeded check without recursion,
-        // preventing stack overflow under sustained concurrent writes.
-        // The try-finally at this level ensures IsRecalculating is always cleared on exit.
-        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged. This
-        // serializes notification delivery with recalculation, preventing a stale notification
-        // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
+        // IsRecalculating stays true during NotifyDerivedPropertyChanged. This serializes
+        // notification delivery with recalculation, preventing a stale notification from being
+        // delivered after a newer one (TOCTOU race between guard checks and delivery). Ending the
+        // recalculation is not a finally: the re-trigger can throw, and on .NET 10.0.0 and 10.0.1 an
+        // exception leaving a finally on the normal path skips the catch blocks of the callers.
         try
         {
-            for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
-            {
-                if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, out var newValue, out var sequence))
-                {
-                    return;
-                }
-
-                // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
-                // so no new recalculation (or notification) can start until delivery completes.
-                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
-
-                // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
-                lock (data)
-                {
-                    if (!data.RecalculationNeeded || !data.IsAttached)
-                    {
-                        return;
-                    }
-
-                    data.RecalculationNeeded = false;
-                    oldValue = data.LastKnownValue;
-                }
-            }
-
-            Trace.TraceWarning(
-                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
-                $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
-                "This indicates a derived getter with circular side effects.");
+            RunRecalculation(ref derivedProperty, data, oldValue, storageTimestamp, rawTimestamp, onlyWhenChanged);
         }
-        finally
+        catch (Exception recalculationFailure)
         {
-            // Atomically clear IsRecalculating. If a write set RecalculationNeeded
-            // in the gap between the outer loop's return-check and this finally,
-            // we must re-trigger so the derived property reflects the latest state.
-            // RecalculationNeeded is cleared before the re-trigger to prevent unbounded
-            // recursion when the getter consistently throws: without clearing, the flag
-            // persists (Phase 3 never runs to clear it), causing each re-trigger's
-            // finally to re-trigger again indefinitely.
-            bool needsRetrigger;
-            lock (data)
+            if (EndRecalculation(data))
             {
-                needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
-                if (needsRetrigger)
-                {
-                    data.RecalculationNeeded = false;
-                }
-
-                data.IsRecalculating = false;
+                RetriggerAfterFailure(ref derivedProperty, storageTimestamp, rawTimestamp, recalculationFailure);
             }
 
-            if (needsRetrigger)
-            {
-                RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
-            }
+            throw;
+        }
+
+        if (EndRecalculation(data))
+        {
+            RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
         }
     }
 
@@ -344,33 +395,117 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Evaluates without holding lock(data), retries stale results, and commits the value and timestamp under lock.
-    /// Requires recalculation ownership. Returns false if evaluation throws or the property is detached.
+    /// Atomically clears IsRecalculating and reports whether a write set RecalculationNeeded in the
+    /// gap after the last check, so the derived property must be recalculated again to reflect the
+    /// latest state.
+    /// </summary>
+    /// <remarks>
+    /// RecalculationNeeded is cleared before the re-trigger to prevent unbounded recursion when the
+    /// getter consistently throws: without clearing, the flag persists (the commit never runs to
+    /// clear it), and each re-trigger would re-trigger again indefinitely.
+    /// </remarks>
+    private static bool EndRecalculation(DerivedPropertyData data)
+    {
+        lock (data)
+        {
+            var needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
+            if (needsRetrigger)
+            {
+                data.RecalculationNeeded = false;
+            }
+
+            data.IsRecalculating = false;
+            return needsRetrigger;
+        }
+    }
+
+    private static void RetriggerAfterFailure(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp, Exception recalculationFailure)
+    {
+        try
+        {
+            RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+        }
+        catch (Exception retriggerFailure)
+        {
+            throw new AggregateException(recalculationFailure, retriggerFailure);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates, commits and notifies until no write arrived during delivery. Uses a loop rather than
+    /// recursion to prevent stack overflow under sustained concurrent writes. Requires recalculation
+    /// ownership.
+    /// </summary>
+    private static void RunRecalculation(
+        ref PropertyReference derivedProperty,
+        DerivedPropertyData data,
+        object? oldValue,
+        long storageTimestamp,
+        long rawTimestamp,
+        bool onlyWhenChanged)
+    {
+        for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
+        {
+            if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, oldValue, onlyWhenChanged, out var newValue, out var sequence))
+            {
+                return;
+            }
+
+            // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
+            // so no new recalculation (or notification) can start until delivery completes.
+            NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
+
+            lock (data)
+            {
+                if (!data.RecalculationNeeded || !data.IsAttached)
+                {
+                    return;
+                }
+
+                data.RecalculationNeeded = false;
+                oldValue = data.LastKnownValue;
+            }
+        }
+
+        Trace.TraceWarning(
+            $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
+            $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
+            "This indicates a derived getter with circular side effects.");
+    }
+
+    /// <summary>
+    /// Evaluates without holding lock(data), retries stale results, and commits the value and
+    /// timestamp under lock. Returns false when evaluation throws, the property is detached, or the
+    /// caller asked to publish only a changed value and it did not change.
     /// </summary>
     private static bool TryEvaluateAndCommit(
         DerivedPropertyData data,
         ref PropertyReference derivedProperty,
         long storageTimestamp,
+        object? oldValue,
+        bool onlyWhenChanged,
         out object? newValue,
         out long sequence)
     {
-        newValue = null;
         sequence = 0;
-
         while (true)
         {
-            // Getter side effects can acquire lock(_attachedSubjects) in LifecycleInterceptor,
-            // so holding lock(data) here would invert the lock order.
+            // Phase 2: Evaluate getter OUTSIDE lock(data). Getter side effects can safely enter
+            // the lifecycle's topology gate without lock ordering inversion.
             try
             {
                 newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
             }
-            catch (Exception)
+            catch (Exception exception) when (exception is not LifecycleContractViolationException)
             {
                 // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
+                // A contract violation is excluded: this path runs on every dependency write,
+                // so absorbing it here would hide the violation on the hot path.
+                newValue = null;
                 return false;
             }
 
+            // Phase 3: Commit result under lock.
             lock (data)
             {
                 if (!data.IsAttached)
@@ -386,12 +521,42 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     continue;
                 }
 
+                // The dependencies were updated by the evaluation, which is all such a caller
+                // needs when the value is the one already published. A subject is the same value
+                // only when it is the same instance, as everywhere in the graph.
+                if (onlyWhenChanged && IsPublishedValue(newValue, oldValue))
+                {
+                    return false;
+                }
+
                 data.LastKnownValue = newValue;
                 sequence = ++data.RecalculationSequence;
                 derivedProperty.SetWriteTimestamp(storageTimestamp);
                 return true;
             }
         }
+    }
+
+    private static bool IsPublishedValue(object? newValue, object? oldValue)
+    {
+        return newValue is IInterceptorSubject ? ReferenceEquals(newValue, oldValue) : Equals(newValue, oldValue);
+    }
+
+    /// <summary>
+    /// Evaluates a derived property again to refresh its dependencies, and publishes the value only
+    /// when it differs from the one last published. No-op for a property that is not an attached
+    /// derived property.
+    /// </summary>
+    internal static void RecalculateDerivedPropertyIfChanged(PropertyReference property)
+    {
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null || !Volatile.Read(ref data.IsDerived))
+        {
+            return;
+        }
+
+        var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        RecalculateDerivedProperty(ref property, timestamp, timestamp, onlyWhenChanged: true);
     }
 
     /// <summary>

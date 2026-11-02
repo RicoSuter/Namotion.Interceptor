@@ -251,7 +251,7 @@ public partial class FluentStorageContainer :
 
     private string ResolveStorageDirectory(string connectionString)
     {
-        var baseDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory
+        var baseDirectory = ((IInterceptorSubject)this).TryGetContext()?.TryGetService<IDataDirectoryProvider>()?.DataDirectory
             ?? Directory.GetCurrentDirectory();
 
         return Path.GetFullPath(connectionString, baseDirectory);
@@ -806,7 +806,7 @@ public partial class FluentStorageContainer :
         var relativePath = path.AsSpan().Trim().TrimStart('/');
         return relativePath.IsEmpty
             ? storage
-            : storage.Context.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
+            : storage.TryGetContext()?.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
     }
 
     /// <summary>

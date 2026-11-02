@@ -138,7 +138,7 @@
     protected override void OnInitialized()
     {
         IEnumerable<IInterceptorSubject> existingSubjects =
-            RootManager.Root?.Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys
+            RootManager.Root?.TryGetContext()?.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys
             ?? Enumerable.Empty<IInterceptorSubject>();
 
         _types = TypeCatalog.GetCreatableTypes(existingSubjects);

@@ -19,6 +19,7 @@ namespace Namotion.Devices.SunSpec
         public const int MaximumPollingIntervalSeconds = 3600;
         public const int MinimumPollingIntervalSeconds = 1;
         public SunSpecDevice(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.SunSpec.SunSpecDevice> logger) { }
+        public SunSpecDevice(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.SunSpec.SunSpecDevice> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? HostAddress { get; set; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -63,6 +64,7 @@ namespace Namotion.Devices.SunSpec
     public class SunSpecLogicalDevice : HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLogicalDevice(byte unitId, int index) { }
+        public SunSpecLogicalDevice(byte unitId, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public string? AvailableSoftwareUpdate { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecCommon? Common { get; }
         public string? HardwareRevision { get; }
@@ -96,6 +98,7 @@ namespace Namotion.Devices.SunSpec
     public class SunSpecUnit : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusUnitIdProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecUnit(byte unitId) { }
+        public SunSpecUnit(byte unitId, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public Namotion.Devices.SunSpec.SunSpecLogicalDevice[] Devices { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public int? MarkerAddress { get; }
@@ -116,6 +119,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecAcMeter : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecAcMeter(int modelId, int baseAddress, int length) { }
+        public SunSpecAcMeter(int modelId, int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="A_SF")]
         public decimal? A { get; }
@@ -381,6 +385,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecBasicSettings : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecBasicSettings(int baseAddress, int length) { }
+        public SunSpecBasicSettings(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="ClcTotVA")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(18, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -495,6 +500,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecBattery : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecBattery(int baseAddress, int length) { }
+        public SunSpecBattery(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Total DC Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(44, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="A_SF")]
         public decimal? A { get; }
@@ -762,6 +768,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecCommon : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecCommon(int baseAddress, int length) { }
+        public SunSpecCommon(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Device Address")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(66, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -798,6 +805,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecDerAcMeasurement : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecDerAcMeasurement(int baseAddress, int length) { }
+        public SunSpecDerAcMeasurement(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Total AC Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(14, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="A_SF")]
         public decimal? A { get; }
@@ -1100,6 +1108,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecDerCapacity : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecDerCapacity(int baseAddress, int length) { }
+        public SunSpecDerCapacity(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="AC Current Max Setting", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(41, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum, ScaleFactorProperty="A_SF")]
         public decimal? AMax { get; }
@@ -1303,6 +1312,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecDerDcMeasurement : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecDerDcMeasurement(int baseAddress, int length) { }
+        public SunSpecDerDcMeasurement(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DC Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(5, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="DCA_SF")]
@@ -1375,6 +1385,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecDerDcMeasurementPrtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecDerDcMeasurementPrtGroup(Namotion.Devices.SunSpec.Models.SunSpecDerDcMeasurement parent, int baseAddress, int index) { }
+        public SunSpecDerDcMeasurementPrtGroup(Namotion.Devices.SunSpec.Models.SunSpecDerDcMeasurement parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DC Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(10, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
@@ -1467,6 +1478,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecFloatAcMeter : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecFloatAcMeter(int modelId, int baseAddress, int length) { }
+        public SunSpecFloatAcMeter(int modelId, int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.F32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly)]
         public decimal? A { get; }
@@ -1712,6 +1724,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecFloatInverter : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecFloatInverter(int modelId, int baseAddress, int length) { }
+        public SunSpecFloatInverter(int modelId, int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.F32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly)]
         public decimal? A { get; }
@@ -1864,6 +1877,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecImmediateControls : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecImmediateControls(int baseAddress, int length) { }
+        public SunSpecImmediateControls(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Conn")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -1978,6 +1992,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecInverter : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IElectricalFrequencySensor, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecInverter(int modelId, int baseAddress, int length) { }
+        public SunSpecInverter(int modelId, int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum, ScaleFactorProperty="A_SF")]
         public decimal? A { get; }
@@ -2154,6 +2169,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecInverterStatus : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecInverterStatus(int baseAddress, int length) { }
+        public SunSpecInverterStatus(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Title="ActVAh", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.VoltAmpereHour)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(9, Namotion.Interceptor.Modbus.ModbusDataType.U64, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly)]
         public decimal? ActVAh { get; }
@@ -2292,6 +2308,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecIrradiance : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecIrradiance(int baseAddress, int length) { }
+        public SunSpecIrradiance(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Length { get; }
         public int ModelId { get; }
@@ -2311,6 +2328,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecIrradianceRepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecIrradianceRepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecIrradiance parent, int baseAddress, int index) { }
+        public SunSpecIrradianceRepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecIrradiance parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DFI", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattPerSquareMeter)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -2342,6 +2360,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecLithiumIonBank : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLithiumIonBank(int baseAddress, int length) { }
+        public SunSpecLithiumIonBank(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(24, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? A_SF { get; }
         public int BaseAddress { get; }
@@ -2433,6 +2452,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecLithiumIonBankStringGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLithiumIonBankStringGroup(Namotion.Devices.SunSpec.Models.SunSpecLithiumIonBank parent, int baseAddress, int index) { }
+        public SunSpecLithiumIonBankStringGroup(Namotion.Devices.SunSpec.Models.SunSpecLithiumIonBank parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecLithiumIonBank Parent { get; }
@@ -2626,6 +2646,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecLithiumIonModule : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLithiumIonModule(int baseAddress, int length) { }
+        public SunSpecLithiumIonModule(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Average Cell Temperature", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(20, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="Tmp_SF")]
@@ -2722,6 +2743,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecLithiumIonModuleLithiumIonModuleCellGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLithiumIonModuleLithiumIonModuleCellGroup(Namotion.Devices.SunSpec.Models.SunSpecLithiumIonModule parent, int baseAddress, int index) { }
+        public SunSpecLithiumIonModuleLithiumIonModuleCellGroup(Namotion.Devices.SunSpec.Models.SunSpecLithiumIonModule parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Cell Status")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -2747,6 +2769,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecLithiumIonString : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLithiumIonString(int baseAddress, int length) { }
+        public SunSpecLithiumIonString(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="String Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(13, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="A_SF")]
         public decimal? A { get; }
@@ -2945,6 +2968,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecLithiumIonStringLithiumIonStringModuleGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecLithiumIonStringLithiumIonStringModuleGroup(Namotion.Devices.SunSpec.Models.SunSpecLithiumIonString parent, int baseAddress, int index) { }
+        public SunSpecLithiumIonStringLithiumIonStringModuleGroup(Namotion.Devices.SunSpec.Models.SunSpecLithiumIonString parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Average Cell Temperature", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
@@ -3011,6 +3035,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel10 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel10(int baseAddress, int length) { }
+        public SunSpecModel10(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Interface Control")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -3052,6 +3077,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel11 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel11(int baseAddress, int length) { }
+        public SunSpecModel11(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Interface Status Flags")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -3115,6 +3141,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel12 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel12(int baseAddress, int length) { }
+        public SunSpecModel12(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="IP")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(11, Namotion.Interceptor.Modbus.ModbusDataType.String, Length=8)]
         public string? Addr { get; }
@@ -3178,6 +3205,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel125 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel125(int baseAddress, int length) { }
+        public SunSpecModel125(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Length { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="ModEna")]
@@ -3229,6 +3257,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel126 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel126(int baseAddress, int length) { }
+        public SunSpecModel126(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -3281,6 +3310,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel126CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel126CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel126 parent, int baseAddress, int index) { }
+        public SunSpecModel126CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel126 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -3448,6 +3478,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel127 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel127(int baseAddress, int length) { }
+        public SunSpecModel127(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="HysEna")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(5, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -3500,6 +3531,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel128 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel128(int baseAddress, int length) { }
+        public SunSpecModel128(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="ArGraMod")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel128ArGraMod? ArGraMod { get; }
@@ -3565,6 +3597,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel129 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel129(int baseAddress, int length) { }
+        public SunSpecModel129(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -3609,6 +3642,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel129CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel129CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel129 parent, int baseAddress, int index) { }
+        public SunSpecModel129CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel129 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -3799,6 +3833,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel13 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel13(int baseAddress, int length) { }
+        public SunSpecModel13(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="IP")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(11, Namotion.Interceptor.Modbus.ModbusDataType.String, Length=20)]
         public string? Addr { get; }
@@ -3862,6 +3897,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel130 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel130(int baseAddress, int length) { }
+        public SunSpecModel130(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -3906,6 +3942,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel130CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel130CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel130 parent, int baseAddress, int index) { }
+        public SunSpecModel130CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel130 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -4061,6 +4098,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel131 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel131(int baseAddress, int length) { }
+        public SunSpecModel131(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -4107,6 +4145,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel131CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel131CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel131 parent, int baseAddress, int index) { }
+        public SunSpecModel131CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel131 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -4271,6 +4310,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel132 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel132(int baseAddress, int length) { }
+        public SunSpecModel132(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -4322,6 +4362,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel132CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel132CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel132 parent, int baseAddress, int index) { }
+        public SunSpecModel132CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel132 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -4489,6 +4530,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel133 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel133(int baseAddress, int length) { }
+        public SunSpecModel133(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="ActSchd")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel133ActSchd? ActSchd { get; }
@@ -4560,6 +4602,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel133RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel133RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel133 parent, int baseAddress, int index) { }
+        public SunSpecModel133RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel133 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActIndx")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(59, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActIndx { get; }
@@ -4706,6 +4749,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel134 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel134(int baseAddress, int length) { }
+        public SunSpecModel134(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -4752,6 +4796,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel134CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel134CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel134 parent, int baseAddress, int index) { }
+        public SunSpecModel134CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel134 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -4931,6 +4976,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel135 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel135(int baseAddress, int length) { }
+        public SunSpecModel135(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -4975,6 +5021,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel135CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel135CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel135 parent, int baseAddress, int index) { }
+        public SunSpecModel135CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel135 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -5130,6 +5177,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel136 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel136(int baseAddress, int length) { }
+        public SunSpecModel136(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -5174,6 +5222,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel136CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel136CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel136 parent, int baseAddress, int index) { }
+        public SunSpecModel136CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel136 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -5329,6 +5378,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel137 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel137(int baseAddress, int length) { }
+        public SunSpecModel137(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -5373,6 +5423,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel137CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel137CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel137 parent, int baseAddress, int index) { }
+        public SunSpecModel137CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel137 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -5528,6 +5579,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel138 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel138(int baseAddress, int length) { }
+        public SunSpecModel138(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -5572,6 +5624,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel138CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel138CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel138 parent, int baseAddress, int index) { }
+        public SunSpecModel138CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel138 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -5727,6 +5780,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel139 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel139(int baseAddress, int length) { }
+        public SunSpecModel139(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -5778,6 +5832,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel139CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel139CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel139 parent, int baseAddress, int index) { }
+        public SunSpecModel139CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel139 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -5968,6 +6023,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel14 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel14(int baseAddress, int length) { }
+        public SunSpecModel14(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Address")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(9, Namotion.Interceptor.Modbus.ModbusDataType.String, Length=20)]
         public string? Addr { get; }
@@ -6010,6 +6066,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel140 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel140(int baseAddress, int length) { }
+        public SunSpecModel140(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -6061,6 +6118,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel140CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel140CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel140 parent, int baseAddress, int index) { }
+        public SunSpecModel140CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel140 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -6216,6 +6274,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel141 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel141(int baseAddress, int length) { }
+        public SunSpecModel141(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -6260,6 +6319,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel141CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel141CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel141 parent, int baseAddress, int index) { }
+        public SunSpecModel141CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel141 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -6415,6 +6475,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel142 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel142(int baseAddress, int length) { }
+        public SunSpecModel142(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -6459,6 +6520,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel142CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel142CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel142 parent, int baseAddress, int index) { }
+        public SunSpecModel142CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel142 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -6614,6 +6676,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel143 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel143(int baseAddress, int length) { }
+        public SunSpecModel143(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -6665,6 +6728,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel143CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel143CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel143 parent, int baseAddress, int index) { }
+        public SunSpecModel143CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel143 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -6820,6 +6884,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel144 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel144(int baseAddress, int length) { }
+        public SunSpecModel144(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActCrv")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActCrv { get; }
@@ -6871,6 +6936,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel144CurveGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel144CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel144 parent, int baseAddress, int index) { }
+        public SunSpecModel144CurveGroup(Namotion.Devices.SunSpec.Models.SunSpecModel144 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ActPt")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -7026,6 +7092,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel145 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel145(int baseAddress, int length) { }
+        public SunSpecModel145(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Default Ramp Rate", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum, Scale=0.01D, ScaleFactorProperty="Rmp_SF")]
         public decimal? AGra { get; }
@@ -7074,6 +7141,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel15 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel15(int baseAddress, int length) { }
+        public SunSpecModel15(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Clear")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -7128,6 +7196,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel16 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel16(int baseAddress, int length) { }
+        public SunSpecModel16(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Address")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.String, Length=8)]
         public string? Addr { get; }
@@ -7196,6 +7265,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel17 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel17(int baseAddress, int length) { }
+        public SunSpecModel17(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Bits")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -7267,6 +7337,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel18 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel18(int baseAddress, int length) { }
+        public SunSpecModel18(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="APN")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.String, Length=4)]
         public string? APN { get; }
@@ -7300,6 +7371,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel19 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel19(int baseAddress, int length) { }
+        public SunSpecModel19(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Authentication")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(12, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel19Auth? Auth { get; }
@@ -7368,6 +7440,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel2 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel2(int baseAddress, int length) { }
+        public SunSpecModel2(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="AID")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AID { get; }
@@ -7416,6 +7489,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel220 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel220(int baseAddress, int length) { }
+        public SunSpecModel220(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="A_SF")]
         public decimal? A { get; }
@@ -7549,6 +7623,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel220RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel220RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel220 parent, int baseAddress, int index) { }
+        public SunSpecModel220RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel220 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DS")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -7608,6 +7683,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel3 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel3(int baseAddress, int length) { }
+        public SunSpecModel3(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Algorithm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(58, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel3Alg? Alg { get; }
@@ -7798,6 +7874,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel303 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel303(int baseAddress, int length) { }
+        public SunSpecModel303(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Length { get; }
         public int ModelId { get; }
@@ -7817,6 +7894,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel303TempGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel303TempGroup(Namotion.Devices.SunSpec.Models.SunSpecModel303 parent, int baseAddress, int index) { }
+        public SunSpecModel303TempGroup(Namotion.Devices.SunSpec.Models.SunSpecModel303 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel303 Parent { get; }
@@ -7836,6 +7914,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel304 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel304(int baseAddress, int length) { }
+        public SunSpecModel304(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel304InclGroup[] Incl { get; }
         public int Length { get; }
@@ -7855,6 +7934,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel304InclGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel304InclGroup(Namotion.Devices.SunSpec.Models.SunSpecModel304 parent, int baseAddress, int index) { }
+        public SunSpecModel304InclGroup(Namotion.Devices.SunSpec.Models.SunSpecModel304 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="X", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Degree)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.S32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, Scale=0.01D)]
@@ -7880,6 +7960,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel305 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel305(int baseAddress, int length) { }
+        public SunSpecModel305(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Altitude", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Meter)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(36, Namotion.Interceptor.Modbus.ModbusDataType.S32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public decimal? Alt { get; }
@@ -7916,6 +7997,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel306 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel306(int baseAddress, int length) { }
+        public SunSpecModel306(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattPerSquareMeter)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public decimal? A { get; }
@@ -7946,6 +8028,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel308 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel308(int baseAddress, int length) { }
+        public SunSpecModel308(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="GHI", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattPerSquareMeter)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -7982,6 +8065,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel3RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel3RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel3 parent, int baseAddress, int index) { }
+        public SunSpecModel3RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel3 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DS")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -8001,6 +8085,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel4 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel4(int baseAddress, int length) { }
+        public SunSpecModel4(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Algorithm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(60, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel4Alg? Alg { get; }
@@ -8197,6 +8282,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel401 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel401(int baseAddress, int length) { }
+        public SunSpecModel401(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(11, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="DCA_SF")]
@@ -8269,6 +8355,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel401StringGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel401StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel401 parent, int baseAddress, int index) { }
+        public SunSpecModel401StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel401 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(5, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
@@ -8323,6 +8410,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel402 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel402(int baseAddress, int length) { }
+        public SunSpecModel402(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(13, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="DCA_SF")]
@@ -8408,6 +8496,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel402StringGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel402StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel402 parent, int baseAddress, int index) { }
+        public SunSpecModel402StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel402 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Vendor Event")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -8477,6 +8566,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel403 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel403(int baseAddress, int length) { }
+        public SunSpecModel403(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(11, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="DCA_SF")]
@@ -8553,6 +8643,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel403StringGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel403StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel403 parent, int baseAddress, int index) { }
+        public SunSpecModel403StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel403 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(5, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
@@ -8607,6 +8698,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel404 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel404(int baseAddress, int length) { }
+        public SunSpecModel404(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(13, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum, ScaleFactorProperty="DCA_SF")]
@@ -8702,6 +8794,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel404StringGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel404StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel404 parent, int baseAddress, int index) { }
+        public SunSpecModel404StringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel404 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Amps", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(5, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
@@ -8782,6 +8875,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel4RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel4RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel4 parent, int baseAddress, int index) { }
+        public SunSpecModel4RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel4 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DS")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -8808,6 +8902,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel5 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel5(int baseAddress, int length) { }
+        public SunSpecModel5(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Algorithm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(88, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel5Alg? Alg { get; }
@@ -9088,6 +9183,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel501 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel501(int baseAddress, int length) { }
+        public SunSpecModel501(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Control")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -9195,6 +9291,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel502 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel502(int baseAddress, int length) { }
+        public SunSpecModel502(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? A_SF { get; }
         public int BaseAddress { get; }
@@ -9316,6 +9413,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel5RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel5RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel5 parent, int baseAddress, int index) { }
+        public SunSpecModel5RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel5 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DS")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -9335,6 +9433,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel6 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel6(int baseAddress, int length) { }
+        public SunSpecModel6(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Algorithm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(90, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel6Alg? Alg { get; }
@@ -9618,6 +9717,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel601 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel601(int baseAddress, int length) { }
+        public SunSpecModel601(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Day")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(19, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -9695,6 +9795,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel601TrackerGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel601TrackerGroup(Namotion.Devices.SunSpec.Models.SunSpecModel601 parent, int baseAddress, int index) { }
+        public SunSpecModel601TrackerGroup(Namotion.Devices.SunSpec.Models.SunSpecModel601 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Alarm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(21, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel601TrackerAlm? Alm { get; }
@@ -9748,6 +9849,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64001 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64001(int baseAddress, int length) { }
+        public SunSpecModel64001(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Boot Count")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -9871,6 +9973,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64020 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64020(int baseAddress, int length) { }
+        public SunSpecModel64020(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Aux 0 temperature", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public decimal? Aux0Tmp { get; }
@@ -9977,6 +10080,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64020RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64020RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64020 parent, int baseAddress, int index) { }
+        public SunSpecModel64020RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64020 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Firmware version")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(9, Namotion.Interceptor.Modbus.ModbusDataType.String, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, Length=6)]
@@ -10002,6 +10106,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64101 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64101(int baseAddress, int length) { }
+        public SunSpecModel64101(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Eltek_APD_Method")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -10041,6 +10146,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64111 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64111(int baseAddress, int length) { }
+        public SunSpecModel64111(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(6, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? AH_SF { get; }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
@@ -10131,6 +10237,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64112 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64112(int baseAddress, int length) { }
+        public SunSpecModel64112(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(7, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? AH_SF { get; }
         public int BaseAddress { get; }
@@ -10397,6 +10504,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64410 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64410(int baseAddress, int length) { }
+        public SunSpecModel64410(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(63, Namotion.Interceptor.Modbus.ModbusDataType.S16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? A_SF { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Profile Adoption Request")]
@@ -10543,6 +10651,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64410ProfGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64410ProfGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64410 parent, int baseAddress, int index) { }
+        public SunSpecModel64410ProfGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64410 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -10566,6 +10675,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64410ProfPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64410ProfPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64410ProfGroup parent, int baseAddress, int index) { }
+        public SunSpecModel64410ProfPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64410ProfGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Irradiance Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum, Scale=0.01D)]
@@ -10602,6 +10712,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64411 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64411(int baseAddress, int length) { }
+        public SunSpecModel64411(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(1392, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? A_SF { get; }
         public int BaseAddress { get; }
@@ -10769,6 +10880,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64411ProfGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64411ProfGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64411 parent, int baseAddress, int index) { }
+        public SunSpecModel64411ProfGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64411 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(32, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -10792,6 +10904,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64411ProfPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64411ProfPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64411ProfGroup parent, int baseAddress, int index) { }
+        public SunSpecModel64411ProfPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64411ProfGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -10848,6 +10961,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64412 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64412(int baseAddress, int length) { }
+        public SunSpecModel64412(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Change Common Model ID")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(43, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11210,6 +11324,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64413 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64413(int baseAddress, int length) { }
+        public SunSpecModel64413(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel64413IVGroup[] IV { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="IV length")]
@@ -11237,6 +11352,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64413IVGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64413IVGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64413 parent, int baseAddress, int index) { }
+        public SunSpecModel64413IVGroup(Namotion.Devices.SunSpec.Models.SunSpecModel64413 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.F32, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly)]
@@ -11262,6 +11378,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64414 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64414(int baseAddress, int length) { }
+        public SunSpecModel64414(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="GridFrequency")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(86, Namotion.Interceptor.Modbus.ModbusDataType.F32)]
@@ -11307,6 +11424,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel64415 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel64415(int baseAddress, int length) { }
+        public SunSpecModel64415(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="COMM-004 Certificate")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11372,6 +11490,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel6RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel6RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel6 parent, int baseAddress, int index) { }
+        public SunSpecModel6RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel6 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DS")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11391,6 +11510,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel7 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel7(int baseAddress, int length) { }
+        public SunSpecModel7(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Algorithm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(10, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel7Alg? Alg { get; }
@@ -11434,6 +11554,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel703 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel703(int baseAddress, int length) { }
+        public SunSpecModel703(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Permit Enter Service")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11488,6 +11609,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel704 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel704(int baseAddress, int length) { }
+        public SunSpecModel704(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Anti-Islanding Enable")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(52, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel704AntiIslEna? AntiIslEna { get; }
@@ -11653,6 +11775,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel704PFWAbsGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel704PFWAbsGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index) { }
+        public SunSpecModel704PFWAbsGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Power Factor Excitation (W Abs)")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11680,6 +11803,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel704PFWAbsRvrtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel704PFWAbsRvrtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index) { }
+        public SunSpecModel704PFWAbsRvrtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Reversion PF Excitation (W Abs)")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11717,6 +11841,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel704PFWInjGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel704PFWInjGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index) { }
+        public SunSpecModel704PFWInjGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Power Factor Excitation (W Inj)")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11744,6 +11869,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel704PFWInjRvrtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel704PFWInjRvrtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index) { }
+        public SunSpecModel704PFWInjRvrtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel704 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Reversion PF Excitation (W Inj)")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -11820,6 +11946,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel705 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel705(int baseAddress, int length) { }
+        public SunSpecModel705(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Adopt Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -11882,6 +12009,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel705CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel705CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel705 parent, int baseAddress, int index) { }
+        public SunSpecModel705CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel705 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -11932,6 +12060,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel705CrvPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel705CrvPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel705CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel705CrvPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel705CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel705CrvGroup Parent { get; }
@@ -11969,6 +12098,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel706 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel706(int baseAddress, int length) { }
+        public SunSpecModel706(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Adopt Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -12029,6 +12159,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel706CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel706CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel706 parent, int baseAddress, int index) { }
+        public SunSpecModel706CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel706 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12058,6 +12189,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel706CrvPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel706CrvPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel706CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel706CrvPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel706CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel706CrvGroup Parent { get; }
@@ -12090,6 +12222,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707(int baseAddress, int length) { }
+        public SunSpecModel707(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Adopt Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -12134,6 +12267,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707 parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMayTripGroup? MayTrip { get; }
@@ -12156,6 +12290,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvMayTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12176,6 +12311,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvMayTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMayTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMayTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMayTripGroup Parent { get; }
@@ -12198,6 +12334,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvMomCessGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12218,6 +12355,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvMomCessPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMomCessGroup parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMomCessGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMomCessGroup Parent { get; }
@@ -12240,6 +12378,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvMustTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12260,6 +12399,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel707CrvMustTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel707CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMustTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel707CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMustTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel707CrvMustTripGroup Parent { get; }
@@ -12292,6 +12432,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708(int baseAddress, int length) { }
+        public SunSpecModel708(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Adopt Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -12336,6 +12477,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708 parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMayTripGroup? MayTrip { get; }
@@ -12358,6 +12500,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvMayTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12378,6 +12521,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvMayTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMayTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMayTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMayTripGroup Parent { get; }
@@ -12400,6 +12544,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvMomCessGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12420,6 +12565,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvMomCessPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMomCessGroup parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMomCessGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMomCessGroup Parent { get; }
@@ -12442,6 +12588,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvMustTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12462,6 +12609,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel708CrvMustTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel708CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMustTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel708CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMustTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel708CrvMustTripGroup Parent { get; }
@@ -12494,6 +12642,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709(int baseAddress, int length) { }
+        public SunSpecModel709(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Adopt Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -12538,6 +12687,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709 parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMayTripGroup? MayTrip { get; }
@@ -12560,6 +12710,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvMayTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12580,6 +12731,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvMayTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMayTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMayTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12602,6 +12754,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvMomCessGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12622,6 +12775,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvMomCessPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMomCessGroup parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMomCessGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12644,6 +12798,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvMustTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12664,6 +12819,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel709CrvMustTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel709CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMustTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel709CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel709CrvMustTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12696,6 +12852,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710(int baseAddress, int length) { }
+        public SunSpecModel710(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Adopt Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -12740,6 +12897,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710 parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMayTripGroup? MayTrip { get; }
@@ -12762,6 +12920,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvMayTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvMayTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12782,6 +12941,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvMayTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMayTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvMayTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMayTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12804,6 +12964,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvMomCessGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvMomCessGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12824,6 +12985,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvMomCessPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMomCessGroup parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvMomCessPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMomCessGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12846,6 +13008,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvMustTripGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvMustTripGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Number Of Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -12866,6 +13029,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel710CrvMustTripPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel710CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMustTripGroup parent, int baseAddress, int index) { }
+        public SunSpecModel710CrvMustTripPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel710CrvMustTripGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Frequency Point", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12898,6 +13062,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel711 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel711(int baseAddress, int length) { }
+        public SunSpecModel711(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Set Active Control Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCtlReq { get; }
@@ -12950,6 +13115,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel711CtlGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel711CtlGroup(Namotion.Devices.SunSpec.Models.SunSpecModel711 parent, int baseAddress, int index) { }
+        public SunSpecModel711CtlGroup(Namotion.Devices.SunSpec.Models.SunSpecModel711 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Over-Frequency Deadband", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hertz)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U32, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -12997,6 +13163,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel712 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel712(int baseAddress, int length) { }
+        public SunSpecModel712(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Set Active Curve Request")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AdptCrvReq { get; }
@@ -13057,6 +13224,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel712CrvGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel712CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel712 parent, int baseAddress, int index) { }
+        public SunSpecModel712CrvGroup(Namotion.Devices.SunSpec.Models.SunSpecModel712 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Active Points")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? ActPt { get; }
@@ -13091,6 +13259,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel712CrvPtGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel712CrvPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel712CrvGroup parent, int baseAddress, int index) { }
+        public SunSpecModel712CrvPtGroup(Namotion.Devices.SunSpec.Models.SunSpecModel712CrvGroup parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel712CrvGroup Parent { get; }
@@ -13123,6 +13292,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel715 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel715(int baseAddress, int length) { }
+        public SunSpecModel715(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="Alarm Reset")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(7, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? AlarmReset { get; }
@@ -13179,6 +13349,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel7RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel7RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel7 parent, int baseAddress, int index) { }
+        public SunSpecModel7RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel7 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DS")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13206,6 +13377,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel8 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel8(int baseAddress, int length) { }
+        public SunSpecModel8(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Format")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13231,6 +13403,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel801 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel801(int baseAddress, int length) { }
+        public SunSpecModel801(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Deprecated Model")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13252,6 +13425,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel806 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel806(int baseAddress, int length) { }
+        public SunSpecModel806(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Battery Points To Be Determined")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13274,6 +13448,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel806BatteryStringGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel806BatteryStringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel806 parent, int baseAddress, int index) { }
+        public SunSpecModel806BatteryStringGroup(Namotion.Devices.SunSpec.Models.SunSpecModel806 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Battery String Points To Be Determined")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13293,6 +13468,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel807 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel807(int baseAddress, int length) { }
+        public SunSpecModel807(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Average Cell Voltage", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Volt)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(16, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum, ScaleFactorProperty="CellV_SF")]
@@ -13438,6 +13614,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel807ModuleGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel807ModuleGroup(Namotion.Devices.SunSpec.Models.SunSpecModel807 parent, int baseAddress, int index) { }
+        public SunSpecModel807ModuleGroup(Namotion.Devices.SunSpec.Models.SunSpecModel807 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Anolyte Temperature", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
@@ -13629,6 +13806,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel808 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel808(int baseAddress, int length) { }
+        public SunSpecModel808(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Length { get; }
         public int ModelId { get; }
@@ -13651,6 +13829,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel808StackGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel808StackGroup(Namotion.Devices.SunSpec.Models.SunSpecModel808 parent, int baseAddress, int index) { }
+        public SunSpecModel808StackGroup(Namotion.Devices.SunSpec.Models.SunSpecModel808 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Index { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel808 Parent { get; }
@@ -13670,6 +13849,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel809 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel809(int baseAddress, int length) { }
+        public SunSpecModel809(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public Namotion.Devices.SunSpec.Models.SunSpecModel809CellGroup[] Cell { get; }
         public int Length { get; }
@@ -13692,6 +13872,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel809CellGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel809CellGroup(Namotion.Devices.SunSpec.Models.SunSpecModel809 parent, int baseAddress, int index) { }
+        public SunSpecModel809CellGroup(Namotion.Devices.SunSpec.Models.SunSpecModel809 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Cell Points To Be Determined")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13717,6 +13898,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel8RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel8RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel8 parent, int baseAddress, int index) { }
+        public SunSpecModel8RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel8 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Cert")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -13736,6 +13918,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel9 : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel9(int baseAddress, int length) { }
+        public SunSpecModel9(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Algorithm")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(92, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public Namotion.Devices.SunSpec.Models.SunSpecModel9Alg? Alg { get; }
@@ -14040,6 +14223,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecModel9RepeatingGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecModel9RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel9 parent, int baseAddress, int index) { }
+        public SunSpecModel9RepeatingGroup(Namotion.Devices.SunSpec.Models.SunSpecModel9 parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Cert")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -14067,6 +14251,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecMppt : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecMppt(int baseAddress, int length) { }
+        public SunSpecMppt(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]
         public short? DCA_SF { get; }
@@ -14170,6 +14355,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecMpptModuleGroup : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, Namotion.Interceptor.Modbus.IModbusScaleFactorProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecMpptModuleGroup(Namotion.Devices.SunSpec.Models.SunSpecMppt parent, int baseAddress, int index) { }
+        public SunSpecMpptModuleGroup(Namotion.Devices.SunSpec.Models.SunSpecMppt parent, int baseAddress, int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="DC Current", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(9, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -14216,6 +14402,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecNameplate : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecNameplate(int baseAddress, int length) { }
+        public SunSpecNameplate(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Title="ARtg", Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(12, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum, ScaleFactorProperty="ARtg_SF")]
         public decimal? ARtg { get; }
@@ -14305,6 +14492,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecStorageCapacity : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecStorageCapacity(int baseAddress, int length) { }
+        public SunSpecStorageCapacity(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public decimal? BatteryLevel { get; }
@@ -14350,6 +14538,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecStorageControls : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecStorageControls(int baseAddress, int length) { }
+        public SunSpecStorageControls(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="ChaGriSet")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(17, Namotion.Interceptor.Modbus.ModbusDataType.U16, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -14453,6 +14642,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecUnknownModel : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecUnknownModel(int modelId, int baseAddress, int length) { }
+        public SunSpecUnknownModel(int modelId, int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         public int Length { get; }
         public int ModelId { get; }
@@ -14471,6 +14661,7 @@ namespace Namotion.Devices.SunSpec.Models
     public class SunSpecWeatherStation : HomeBlaze.Abstractions.ITitleProvider, Namotion.Devices.SunSpec.ISunSpecModel, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public SunSpecWeatherStation(int baseAddress, int length) { }
+        public SunSpecWeatherStation(int baseAddress, int length, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Title="Electric Field [Vm]")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(10, Namotion.Interceptor.Modbus.ModbusDataType.S16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.SignedMinimum)]

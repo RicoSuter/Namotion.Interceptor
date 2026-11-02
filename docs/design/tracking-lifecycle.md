@@ -1,245 +1,170 @@
 # Lifecycle Interceptor: Internal Design
 
-This document describes the internal concurrency model and data structures of `LifecycleInterceptor`. For user-facing documentation, see the [Tracking](../tracking.md) documentation.
+This document describes the internal ownership model, concurrency model and data structures of `LifecycleInterceptor` and its collaborators. For user-facing documentation, see [Tracking](../tracking.md).
 
 ## Overview
 
-`LifecycleInterceptor` tracks which subjects are part of the object graph. When a structural property (ObjectRef, Collection, Dictionary) is written, the interceptor diffs the old and new values to determine which child subjects were added or removed, then fires attach/detach lifecycle events. These events drive downstream systems like the `SubjectRegistry` (which maintains a flat index of all subjects) and change tracking.
+The lifecycle owns structural graph membership for one context: which subjects the context holds, through which occurrence-aware edges, and when a subject that lost its last support leaves. When a structural property (a subject reference, collection or dictionary) is written, the lifecycle diffs the old and new values, claims newly reachable subjects for the context, releases subjects that became unreachable, and fires attach and detach events that drive downstream systems such as `SubjectRegistry`.
 
-The fundamental challenge is **concurrency**: multiple threads can write structural properties simultaneously, and the interceptor must maintain consistent state without losing track of subjects (memory leak) or double-attaching them.
+A subject is attached to exactly one context, read lock-free through `subject.TryGetContext()`. It is held either by a root anchor or by a path of committed structural edges from an anchored root. There is no reference counting as an ownership predicate: ownership is reachability.
+
+## Anchors
+
+An anchor marks a subject as a root of its context. There are two kinds:
+
+- **Explicit**: created by `AttachToContext(subject, context)`. Never cleared automatically; `DetachFromContext` is how a caller gives it up.
+- **Provisional**: created by a context-taking constructor, `new Person(context)`. Consumed by the first inherited edge that provides *independent support*, meaning the edge's parent has an anchored ancestor other than the subject itself.
+
+The independent-support rule is what makes ordinary graph building safe. Clearing on the first edge of any kind is unsound: `child.Parent = root` would consume the root's own anchor and the next removal anywhere would release the whole graph. In a mutually referencing pair the first-constructed subject keeps its anchor; that is the same outcome as any root the caller constructed and never removed.
+
+Consuming a provisional anchor queues a recalculation of the subject's derived properties behind the handlers of the consuming edge. The constructor attached the subject and computed those values while it had no parent, and a getter that reads the parents records no dependency on them, so without it the subject would keep values an unanchored subject never computes. Only the subject itself is recalculated (see [Parent-Child Relationship Tracking](../tracking.md#parent-child-relationship-tracking)).
+
+The anchor lives on the executor (`IInterceptorExecutor.AttachmentAnchor`), never mirrored into graph state, so it cannot drift from the attachment it belongs to.
+
+### Registering the lifecycle behind an attach
+
+`AttachToContext` on a context with no lifecycle takes a root-only path: it writes the anchor onto the executor so the context's services resolve from the subject, but there is no ownership graph to enter. A lifecycle registered after that point never learns the root exists. Structural writes can validate and provisionally claim their proposed values, but the unowned root supplies no committed edges, so those values never become graph members through that root. Registry entries and lifecycle callbacks are therefore missing. Public service registration rejects this order, including `WithLifecycle`, `AddService` and `TryAddService`: the lifecycle-free attach path records a flag on the context, and registering a lifecycle behind it throws.
+
+The flag records that an attach has landed, so it does not order against one still in flight. A thread calling `AttachToContext` concurrently with a thread calling `WithLifecycle` can still resolve no lifecycle, write the anchor, and land behind a registration that already read the flag as false. Configuring a context concurrently with attaching subjects to it is unsupported for the same reason the sequential order is, and is not detected.
+
+## Decomposition
+
+| Class | Owns |
+|---|---|
+| `LifecycleInterceptor` | the write protocol shell, the topology gate, attach and detach entry points, events, handler fan-out |
+| `OwnershipGraph` | the owned-subject map, property baselines, claim and release primitives |
+| `SubjectOwnership` | one subject's record: occurrence-aware incoming edges with inline-to-list promotion, the published parent snapshot |
+| `StructuralReconciler` | the write-time diff and reconcile for scalar, collection and dictionary properties |
+| `StructuralValueScanner` | captures subject occurrences during discovery and new-value reconciliation or seeding |
+| `PropertyBaseline` | a committed value and stable desired occurrence snapshot |
+| `PropertyEdgeJournal` | occurrences installed while a property publication is incomplete |
+| `ReachabilityWalk` | the single `IsAnchorReachable(start, excluded)` backward search |
+| `AttachTraversal` | edge recording and attach publication, including provisional-anchor consumption |
+| `ReleaseTraversal` | deterministic first-visit release from a removed edge, cycle drain |
+| `PropertyAdmission` | atomic admission of dynamically added properties |
+| `LifecycleNotifier` | ordered lifecycle notifications, property publication groups and deferred claim release |
+| `LifecycleScratch` | pooled scratch buffers for discovery, release and reconcile |
 
 ## Data Structures
 
-```
-_attachedSubjects: Dictionary<IInterceptorSubject, HashSet<PropertyReference>>
-```
+**The owned-subject map** (`OwnershipGraph._owned`): a `ConcurrentDictionary<IInterceptorSubject, SubjectOwnership>` keyed by reference equality. Concurrent so that gate-free readers (`GetParents()`, `GetReferenceCount()`) can find a record without the topology gate; only the gate holder mutates it. Releasing records remain as identity tokens until their queued cleanup, but ownership queries filter them through a volatile release flag. Reattachment replaces the record, so an older queued cleanup cannot release a newer ownership lifetime.
 
-Tracks which subjects are currently in the graph and via which property references they are attached. A subject can be referenced by multiple parents (e.g., the same child in two collections). The `HashSet<PropertyReference>` tracks all references; when the last reference is removed (`isLastDetach`), the subject's children are recursively detached.
+**Which properties carry edges** (`OwnershipGraph.IsStructural`): intercepted, of a declared type that can contain subjects, and not a derived projection. Generated interception exists only for partial properties, and the generator gives every one of them a backing field, so on a generated property `IsIntercepted` already means the property is the store. Every computed generated shape (an expression-bodied getter, an interface default) is excluded before the derived test runs, while a `[Derived]` partial property carries an edge because its backing field is the only thing holding the value. A dynamic property registered through `AddProperty` is intercepted unconditionally, so there the setter stands in for that meaning instead, its accessors being consumer delegates over state the graph cannot see: a getter-only dynamic derived property is a projection and creates no ownership edge, while one with a setter can hold a subject nothing else reaches. That setter test is a proxy rather than a proof, exact only for "the caller supplied a setter", so any non-null setter carries an edge whatever it does with the value, including a no-op setter over a projecting getter or one that assigns through to another subject's property; both double-count. A third producer builds metadata by reflection through the public `SubjectPropertyMetadata` constructor, as `DynamicSubjectFactory` does for the properties the generator did not cover, and marks neither kind of store: a derived property there carries an edge whenever it is intercepted, and a getter-only one double-counts. Both over-count an edge rather than miss one. A computed projection may return a detached subject or one owned by another context without acquiring or transferring ownership. Store a subject in an intercepted structural property or attach it explicitly when this context should track its lifetime.
 
-```
-_lastProcessedValues: Dictionary<PropertyReference, object?>
-```
+**Property baselines describe the desired outgoing edges.** A subject commits an edge to a child when that child occurs in the snapshot captured at the last structural commit. Null and direct subject values are inline; collection occurrences are retained in a private immutable array. Reachability, release and old-side reconciliation read those snapshots without re-enumerating consumer collections. This both avoids repeated scanning/boxing work and keeps user code out of ownership decisions. Arrays remain GC-owned so nested overwrites cannot recycle storage still referenced by an enclosing frame. During reconciliation or seeding, a `PropertyEdgeJournal` separately records the incoming occurrences actually installed. A nested operation diffs against those installed occurrences, and release drains them, even if an earlier descent has not reached every desired child. After successful reconciliation or seeding, the desired and installed occurrences agree. Complete journals return to the scratch pool; incomplete journals remain available for retry or release. Single journals and single occurrences use inline storage; dictionaries and occurrence buffers are allocated only for larger active sets.
 
-The lifecycle's **private ledger** of what it has actually processed for each structural property. This is the key data structure that enables correct concurrent behavior. It is decoupled from the backing store, which can be mutated at any time by concurrent `next()` calls outside the lock.
+**Incoming edges** live on `SubjectOwnership`, occurrence-aware: each edge carries the property and the occurrence index or dictionary key, so `[a, a, b]` records two distinct edges for `a` and `GetReferenceCount()` answers 2. A single incoming edge is stored inline; a list is allocated only from the second edge. Removal takes the last occurrence for the child and property, without invoking a dictionary key's equality method under the record lock. Reconciliation retains the leading occurrences and refreshes their indices afterward.
 
-Both dictionaries are accessed exclusively under `lock (_attachedSubjects)`.
+**Parent snapshots activate lazily.** The first `GetParents()` on a subject takes that subject's `SubjectOwnership` monitor to set the activation bit and materialize the initial snapshot; from then on the subject publishes an immutable snapshot eagerly on every edge change and every later read is a lock-free snapshot read. A consumer that never asks pays nothing.
 
-## The Concurrency Model
+Collection membership is the captured result of a structural assignment. Editing a collection in place without an intercepted setter does not trigger reconciliation. Side effects or exceptions in a committed collection's enumerator are not repeated merely because the graph later releases or checks an edge. Discovery and capture of a newly assigned value can still run that enumerator more than once; consumers must not rely on an exact enumeration count. Property callbacks receive the recorded value and can evaluate consumer code during notification delivery.
 
-### The constraint
+## The Reconcile Order Invariant
 
-`WriteProperty` implements the `IWriteInterceptor` interface. It must call `next(ref context)` to propagate the write through the interceptor chain to the backing store. This call **cannot** be inside the lock because downstream interceptors may perform arbitrary work (I/O, notifications, other locks). The lock is acquired only after `next()` returns.
+`Reconcile` commits outgoing edges (baselines) before updating incoming records. Incoming and outgoing state therefore legitimately disagree in three windows: reconcile commit, attach-time seeding, and cycle drain. **Any algorithm reading incoming edges must validate candidates against committed outgoing edges** (`OwnershipGraph.CommitsEdgeTo`). This is the single most load-bearing invariant in the area; the reachability walk validates every candidate parent against it and does not mark a rejected parent as visited.
 
-This creates a race window:
+## Reachability and Release
 
-```
-Thread A: next() writes to backing store ──────── [WINDOW] ──────── acquires lock
-Thread B:           next() writes to backing store ── acquires lock ── releases lock
-```
+Release does not scan the context and does not maintain a forward mark. When an edge or an anchor is removed, `IsAnchorReachable(start, excluded)` walks **backward** from the questioned subject up its committed incoming edges to the nearest anchored ancestor. Release passes no exclusion; provisional-anchor consumption passes `(parent, excluded: subject)` so the subject's own anchor does not count as support for itself.
 
-During this window, Thread B can complete an entire `WriteProperty` cycle, changing what's in `_attachedSubjects` and `_lastProcessedValues`. Thread A must handle this gracefully.
+Release order is observable and deterministic: the traversal starts at the removed edge, collects committed children before dropping baselines, visits only subjects that are no longer anchor-reachable, in first-visit order, and drains closed cycles. Detach callbacks therefore arrive top-down. The owned-subject map is never enumerated for release.
 
-### Why the backing store is unreliable as a baseline
+An independently written forward-mark oracle lives in the test assembly (`OwnershipOracleTests`), cross-checking reachability, reference counts and occurrence-aware parents over seeded random mutation sequences.
 
-After `next()` writes value X to the backing store and before the lock is acquired, another thread can call `next()` and overwrite X with Y. When Thread A reads the backing store inside the lock, it sees Y (not X). If the lifecycle used the backing store as its "old value" baseline, it would diff the wrong pair of values, potentially missing detach operations or double-attaching subjects.
+## The Write Protocol
 
-### The solution: `_lastProcessedValues`
+Structural writes are routed inside the public `SetPropertyValue` entry using the declared property's metadata and the same structural classification as ownership. A narrower generic argument cannot bypass the structural protocol, and a boxed scalar does not enter it merely because `TProperty` is `object`. The classification is a pure function of the declared property type and the property shape, so `SubjectPropertyMetadata` computes it once at construction and routing reads a field. Without registered metadata, routing falls back to the generic type classification. Generated setters take a second entry, `SetDeclaredPropertyValue`, where `TProperty` is the declared property type by construction: routing there reads the generic classification directly, a JIT constant, and never looks the metadata up. Anything that can narrow or box, dynamic property setters among them, keeps using `SetPropertyValue`. Hand-written setters receive the same protocol as generated setters. Registry dynamic setters and the dynamic proxy cache a typed delegate per property to keep scalar values unboxed; values the declared type cannot represent fall back to an object-typed write passed unchanged to the stored setter.
 
-`_lastProcessedValues` records what the lifecycle **last processed** for each structural property. It is only updated inside the lock, so it always reflects the lifecycle's actual state. `WriteProperty` uses it as the diff baseline:
+An attached structural write follows this sequence in the private structural branch of `InterceptorExecutor.SetPropertyValue`:
 
-- **Old value** = `_lastProcessedValues[property]` (what we last processed, stable and under our control)
-- **New value** = re-read from backing store (what is actually there now, which may reflect another thread's write)
+1. Read the exact attached context, pin its context state with one volatile read, and resolve the lifecycle from that pinned state.
+2. Enter the lifecycle gate (`ILifecycleInterceptor.EnterStructuralWriteGate`).
+3. Enter the subject's attachment monitor.
+4. Revalidate the attached context under both locks; release and retry if it moved.
+5. Resolve the ordinary cached write chain from the routing's pinned state, not a fresh read, and execute it through the terminal. A chain resolved from a fresh read could contain a lifecycle the routing did not see, whose `WriteProperty` would take the gate inside the attachment monitor and invert the lock order; a lifecycle registered after the pin is invisible to this write as a whole and is seen by the next write.
 
-This asymmetry is the key insight: the old value comes from our private ledger, the new value comes from the shared backing store.
+A transient race with attach or detach therefore **orders** rather than throws; only a persistent conflict (the subject genuinely owned by another context) throws, before the backing field is written. An unattached subject enters only the attachment monitor, rechecks it is still unattached, and writes directly.
 
-## Entry Lifecycle of `_lastProcessedValues`
+When the attachment moves between the routing read and the lock acquisitions, the structural write retries rather than orders. The loop is livelock-free: every retry is caused by another thread completing an attachment transition, and each transition requires the lifecycle gate, so a retry is evidence of progress elsewhere rather than of mutual blocking. It is not starvation-free, and no attempt bound is enforced: sustained attach and detach churn on one subject, concurrent with structural writes to that same subject, could in principle starve a writer. That is a pathological workload rather than a plausible one, and the lock-order tests drive the loop at 3,000 iterations without observing it. If it is ever observed, the mitigation is to order rather than retry, which is a rework of the write protocol and not a tuning change.
 
-### 1. Seeded on attach
+Inside the chain, `LifecycleInterceptor.WriteProperty` validates and claims the proposed new component before calling `next`, calls `next` exactly once, rereads the authoritative getter (which also serves normalizing setters), claims that stored component too when it is not the value that was proposed, then reconciles committed edges: removals publish before additions, old occurrences in reverse order, new ones forward. Claiming the stored value is what puts the foreign-subject refusal ahead of every graph mutation, so a rejected write commits no baseline, records no ownership and publishes no attach. A terminal that stores what it was given skips it: by reference identity for a reference-typed property, and by the type's own equality for a value-typed one, whose authoritative getter boxes it afresh on every call and therefore has no identity to compare. `ReleaseUnusedClaims` compensates for a suppressed or throwing terminal and for normalizing setters that store a subset of the validated graph.
 
-When a subject enters the graph via `AttachSubjectToContext`, `FindSubjectsInProperties` runs with `LastProcessedValuesMode.Seed`. It reads each structural property's current backing store value and stores it:
+A terminal may normalize its input or store a newly created subject. The authoritative stored value is claimed and validated after the terminal returns when it differs from the proposal. If that stored graph cannot be claimed, for example because it contains a foreign-context subject, reconciliation rejects it and leaves the graph untouched. The backing field still holds whatever the terminal stored: an arbitrary terminal cannot safely be replayed to restore the prior value, and invoking `metadata.SetValue` would reenter the same write chain. `TerminalStoreContractTests` asserts both sides of this failure boundary: unchanged ownership and no promise of backing-field rollback.
 
-```
-_lastProcessedValues[(subject, "Collection")] = current collection reference
-_lastProcessedValues[(subject, "ObjectRef")]   = current child subject
-```
+If the downstream write chain throws after the terminal reports a committed write through `IsWritten`, lifecycle reconciliation still reads and publishes the stored value before rethrowing the original exception. This keeps ownership consistent for an ordinary generated setter followed by a throwing interceptor. The mutable `IsWritten` marker must remain truthful, and interceptors must forward the same context by reference as required by `IWriteInterceptor.WriteProperty`; clearing or losing the marker after a commit forfeits this recovery. A failure before that commit marker only releases provisional claims. If reconciliation also throws, an `AggregateException` preserves the write failure first and the reconciliation failure second. Queued callback failures are post-commit notification errors: remaining notifications and claim cleanup still drain before errors are propagated. Property-change publication and derived recalculation also complete after a downstream failure with a truthful commit marker. Each stage runs once; remaining derived dependents are attempted after an earlier recalculation fails, and failures are reported after completion with the original write failure first. A synchronous observer failure still skips later observers or channels inside that property publication group. A hand-written terminal that changes storage and throws before reporting a commit, an invalid stored graph, or a failing authoritative getter remains outside this guarantee.
 
-This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `null` (meaning "nothing was ever processed"), which triggers a full diff against the backing store. That is correct but slightly more work than diffing against a known baseline.
+A rejected explicit attach removes its root anchor only if its attachment revision still belongs to that operation, then releases only the component that loses support. A newer explicit attachment created by nested work is preserved. If nested work has independently attached that root through another anchored path, its installed edges remain intact. Consumed provisional anchors are restored before evaluating reachability. An interrupted structural property can then be retried by reassigning it, or the surviving support can be removed to release the incomplete component.
 
-### 2. Updated on every structural write
+## Structural Getters
 
-Inside `WriteProperty`, after diffing and performing attach/detach operations:
+The lifecycle reads a structural property's getter itself and may read it more than once per operation. `OwnershipGraph.DiscoverComponent` reads every structural getter of every unattached subject it walks, to validate and claim the arriving component before anything is published; `CollectStructuralChildren(seed: true)` reads them again to commit the baselines; and `WriteProperty` rereads the written property's authoritative getter after `next`. Discovery and seeding can therefore read a getter repeatedly, and a structural write can read it again during reconciliation. Reentry, retained claims, resurrection, and retry change which reads occur, so the protocol guarantees no exact getter invocation count.
 
-```csharp
-_lastProcessedValues[context.Property] = newValue;
-```
+Repeated reads are why a self-initialising structural getter has to cache. Where a lazy getter is possible, it must retain a stable answer, for example with `??=`: a getter that answers with a fresh graph on each call is outside this contract. A generated partial property cannot be lazy, because the generator writes the getter, and a computed generated shape is not intercepted and carries no edge, so no pass ever reads it. The two producers that can supply a lazy getter are a hand-written `IInterceptorSubject` building its own `SubjectPropertyMetadata`, and a dynamic property registered through `AddProperty`.
 
-This records: "I just processed this value. Next time, diff against this."
+Caching from a structural getter is supported. Discovery of an unattached subject runs before `TryClaimDiscovered`, so a store the getter performs there takes the unattached write path and is invisible to interception. Retained claims, resurrection, and retry can instead reach seeding while attached. A setter invoked from its own active seeding getter stores the value but defers that property's reconciliation until the getter returns, as described in the [callback contract](#callback-contract).
 
-### 3. Read as the diff baseline
+Unused discovery claims are released when seeding does not consume them, using the same compensation as `ReleaseUnusedClaims` on the write path. A value discarded between discovery and seeding is therefore left unattached and reusable. This cleanup also handles legal nested writes during discovery, so a difference between the two reads is not itself reported as a getter violation. It does not guarantee consistency for an unstable getter: the graph records the captured value, while a later fresh return can be unowned. Stable authoritative getters remain a caller obligation.
 
-On the next `WriteProperty` for the same property:
+A throwing structural getter or enumerator is an operation failure, not a callback veto. An interrupted child seed retains its installed-edge journal and marks that ownership lifetime incomplete. A later reconciliation that retains or adds that child resumes captured properties and then missing getters without replaying the original attach history. Completed siblings are not attached again. The original operation queues the remaining notification sequence for transitions already committed; children it has not reached are not published. Queued detach cleanup retains the executor claim through delivery. This is recovery after a reported failure, not automatic retry or rollback of arbitrary user code: until retry or detach, an unread property may remain unseeded. A failing authoritative getter or a hand-written terminal that changes storage without reporting a commit remains outside the normal write recovery guarantee.
 
-```csharp
-if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
-    lastProcessed = null;  // nothing was ever processed for this property
-```
-
-The fallback to `null` handles the rare case where no entry exists (e.g., a write to a property whose entry was concurrently removed by a parent detach). Using `null` rather than `context.CurrentValue` is important: `context.CurrentValue` reflects what is *in the backing store*, not what the lifecycle *actually processed*. If the property already contains children that were never attached, `context.CurrentValue` would make them look "already processed", causing `ReferenceEquals` to skip re-discovery. `null` honestly represents "nothing was processed" and ensures the diff discovers all children in the backing store.
-
-### 4. Read during detach (instead of backing store)
-
-When detaching a subject, we need to find its children to recursively detach them. `DetachSubjectFromContext` and `DetachFromProperty` read from `_lastProcessedValues` instead of the backing store:
-
-```csharp
-// DetachFromProperty (isLastDetach path)
-if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-{
-    FindSubjectsInProperty(subjectProperty, lastProcessed, ...);
-}
-```
-
-This is critical because a concurrent `next()` may have written an unattached child to the backing store. `_lastProcessedValues` tells us what was *actually attached*, which is exactly what we need to *detach*.
-
-### 5. Removed on detach
-
-Entries are cleaned up in three places:
-
-| Location | When |
-|----------|------|
-| `DetachFromProperty` (isLastDetach) | Last reference to subject removed: all structural property entries cleaned |
-| `DetachFromContext` | Root subject removed: all structural property entries cleaned |
-| Parent-dead check in `WriteProperty` | Undo after attaching to a dead parent: single entry cleaned |
-
-## The Parent-Dead Check
-
-After `WriteProperty` attaches new children and stores the `_lastProcessedValues` entry, it checks whether the parent is still in the graph:
-
-```csharp
-if (!_attachedSubjects.ContainsKey(context.Property.Subject))
-{
-    _lastProcessedValues.Remove(context.Property);
-    // detach children we just attached
-}
-```
-
-This catches the following race:
-
-1. Thread A: `DetachFromProperty` removes parent from `_attachedSubjects`
-2. Thread B: `next()` already wrote a new child to backing store (before Thread A's lock)
-3. Thread A: reads `_lastProcessedValues` (the old child), detaches it, releases lock
-4. Thread B: acquires lock, diffs, attaches new child, writes `_lastProcessedValues`
-5. Thread B: **parent-dead check** finds the parent is not in `_attachedSubjects` → undo
-
-Without this check, the child would be attached to a dead parent and never cleaned up, which is a memory leak.
-
-## Concurrency Scenarios
-
-### Two threads write the same property
-
-1. Thread X: `next()` writes X to backing store
-2. Thread Y: `next()` writes Y (overwrites X)
-3. Thread X acquires lock: old = `_lastProcessedValues`, new = re-read backing store = Y
-   - X effectively processes Y's write. `_lastProcessedValues = Y`
-4. Thread Y acquires lock: old = Y, new = Y → `ReferenceEquals` → early return (no-op)
-
-Thread X processes Thread Y's write; Thread Y becomes a no-op. Correct and efficient.
-
-### Write races with parent detach
-
-1. Thread A: detaching parent → `_attachedSubjects.Remove(parent)`
-2. Thread B: `next()` wrote new child to backing store (before lock)
-3. Thread A: reads `_lastProcessedValues` → detaches old children → removes entries → releases lock
-4. Thread B: acquires lock → no `_lastProcessedValues` entry → falls back to `null`
-   - Diffs `null` vs backing store, attaches new child, writes `_lastProcessedValues`
-   - Parent-dead check fires → undo (removes entry, detaches child)
-
-No leak.
-
-### DetachSubjectFromContext races with child property write
-
-1. Thread A: `DetachSubjectFromContext` → `FindSubjectsInProperties` with `LastProcessedValuesMode.Use`
-   - Reads `_lastProcessedValues` (the actually-attached children), detaches them
-2. Thread B: waiting for lock (already ran `next()` on a child's property)
-3. Thread A: finishes, releases lock
-4. Thread B: acquires lock → parent-dead check fires → undo
-
-No leak.
+The resume runs from the edge itself, which covers every route that can reach an incomplete seed with one call site: the attach descent, a reconcile of an attached parent, and an explicit attach. That placement is what removes the orphan a half seeded subject would otherwise keep, and it widens the blast radius of a getter that never recovers. The failing subject is no longer contained to the operation that first hit it. Any later operation whose graph reaches it resumes it, fails on the same getter, and rolls back in full, so a brand new root that merely references that subject does not attach and the rest of its arriving component is handed back with it. Nothing bounds that except healing the getter or detaching the subject.
 
 ## Lock Ordering
 
-Two locks serialize the lifecycle and the registry:
+The total order is **lifecycle gate → attachment monitor → SyncRoot**, with the per-subject `SubjectOwnership` monitor as a leaf below all three.
 
-1. `_attachedSubjects` in `LifecycleInterceptor`
-2. `_knownSubjects` in `SubjectRegistry`
+- The **lifecycle gate** is one private reentrant monitor per lifecycle, the outermost lock. Every topology change holds it. Reentrancy is required because same-lifecycle `TryAddProperties` re-enters from inside callbacks.
+- The **attachment monitor** is the executor's private lock serializing transitions of the attachment triple (context, anchor, revision). Transitions are leaf acquisitions or taken under the gate. Attachment reads are lock-free, because consumers read them from inside their own locks and a locking read deadlocks against a held commit: the triple is one immutable object published by a single volatile store, so a reader sees the new state or the previous one and never a mixture. Anything deciding on more than one of the three reads them through `TryGetAttachment`, since the individual getters pair values from whichever states happened to be current.
+- **SyncRoot** is the executor's internal per-subject terminal lock, serializing backing writes with revision increment and write-state publication. The intercepted read terminal shares it, but the zero-interceptor read chain and generated setter snapshots take no lock. See the [consumer synchronization boundary](../tracking.md#thread-safety); terminal locking does not synchronize the entire generated property accessor.
+- The **`SubjectOwnership` monitor** is a per-subject leaf lock guarding the incoming-edge record and the parent snapshot. The lifecycle takes it under the gate for every edge mutation; the first `GetParents()` on a subject takes it without the gate, from any thread, to activate parent publication. Nothing foreign runs while it is held and the type never leaves the assembly, so it cannot participate in an ordering cycle.
 
-Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`. No deadlock is possible.
+Taking the attachment monitor before the gate deadlocks: a structural write holding a child's monitor would wait for the gate while a parent removal holding the gate reaches `ReleaseClaim(child)` and waits for that monitor. The lock-order tests drive both directions concurrently under bounded joins, so an inversion reaching production fails a join instead of hanging the suite. They exercise the correct order rather than injecting the inverted one, so they catch a regression in the production order, not a hypothetical one.
 
-Below those two sit the registry's per-object locks: `_children` on each `RegisteredSubjectProperty` and `_lock` on each `RegisteredSubject`. Every change to children and parent entries takes them inside `_knownSubjects`, on attach and detach and when a write moved a kept subject (`IChildIndexHandler`, implemented by `SubjectRegistry`). A `_lock` may be taken while `_children` is held, never the reverse. Readers take each of these locks on its own and never nest them.
+Below the gate sit the registry's locks: `_knownSubjects` on `SubjectRegistry`, `_children` on each `RegisteredSubjectProperty` and `_lock` on each `RegisteredSubject`. The registry changes children and parent entries only from lifecycle callbacks, which run under the gate. On attach and detach it takes `_knownSubjects` first. When a write moved a kept subject (`IChildIndexHandler`, implemented by `SubjectRegistry`), it takes `_children` first and reaches `_knownSubjects` and the parent entries from there. The gate serializes the two paths, so the inverted order cannot deadlock. A `_lock` may be taken while `_children` is held, never the reverse. Readers take each of these locks on its own and never nest them.
 
-The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
+One deadlock the order cannot rule out: code running inside the gate, an interceptor, a lifecycle callback or a user getter the lifecycle invokes, may dispatch structural work to another thread and wait for that thread. The gate holder cannot release until the dispatched work finishes, and that work cannot start until the gate is released. It is not preventable here, because the dispatch goes through a thread, the pool or a queue and nothing distinguishes the worker it started from an unrelated concurrent write, which must serialize. Five entry points reach the gate and each is covered by its own test in `SameContextGateDeadlockTests`: a downstream `IWriteInterceptor`, an `ILifecycleHandler`, an `IPropertyLifecycleHandler`, a `SubjectAttached` handler, and a structural getter read during an explicit attach. The gate cannot prevent this deadlock; it reports it, as the next paragraphs describe.
 
-## Handler Order Around the Descent
+A waiting thread samples the holder's blocked state. Seeing it running resets the blocked window; changing the holder or its outer transaction revision also resets it, even if the same thread released and reacquired the gate between samples. Continuous blocked observations beyond the configured threshold cause `LifecycleContractViolationException`. This is a timeout heuristic, not proof of a deadlock: the runtime does not identify what the holder is waiting for. The window uses elapsed time rather than a sample count, and the separate total wait bound still applies to a running holder.
 
-`ContextInheritanceHandler` is the handler that walks down into a newly attached subtree. Where a handler sits relative to it decides both the order it sees subjects in and what it can look up.
+A separate total wait bound ends the waiting operation after 300 seconds, even when the holder keeps running or the holder and transaction change between samples. It covers contention the blocked-state heuristic cannot diagnose, including a holder that spins or waits inside unmanaged code, but can also reject legitimate long-running work. Neither timeout aborts the holder or rolls back its operation. Both thresholds are settable internally per lifecycle instance so tests can exercise them without waiting for the production durations.
 
-Take a subtree built first and attached in one assignment:
+The rule binds structural work and cross-thread waits only. A scalar write never takes the gate, so dispatching one to another thread and waiting for it is fine. The gate is reentrant, so a thread re-entering the gate it already holds, from inside a callback, is legal and load-bearing. Fetching in parallel and then assigning on the thread already inside the operation is unaffected and is the shape callers want; parallelising the assignments themselves never bought anything, because they serialize on the gate whichever thread runs them.
 
-```csharp
-var child = new Node();
-var middle = new Node { Child = child };
-var top = new Node { Child = middle };
+`GetParents()` and `GetReferenceCount()` never take the lifecycle gate: `GetReferenceCount()` is a plain volatile read, and `GetParents()` is a lock-free snapshot read except for the first call on a subject, which takes that subject's `SubjectOwnership` monitor to activate publication. `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()` and is also called from inside the gate, so a gate-taking read would deadlock.
 
-root.Child = top;   // attaches top, middle and child in one go
-```
+## Callback Contract
 
-Measured callback order for that one assignment, which depends on the handler's position:
+Same-context structural writes, explicit attach and detach, and dynamic property admission are supported from lifecycle and property lifecycle callbacks. Notifications are queued in operation order under the context's reentrant topology gate. Replacing a child delivers the old child's detach callbacks before the new child's attach callbacks, including changes initiated by another callback. A nested setter normally settles ownership before returning; its callbacks and Registry maintenance wait for the pending notification drain. Code inside the original callback must not assume the nested setter has already updated callback-maintained projections.
 
-| Handler position | Order it sees |
-|---|---|
-| Ahead of the descent (`[RunsBefore(typeof(ContextInheritanceHandler))]`) | `top`, `middle`, `child` |
-| Behind the descent | `child`, `middle`, `top` |
-| The subject's own `ILifecycleHandler` implementation | `child`, `middle`, `top` |
+Reentry has to terminate on its own: nothing bounds its depth. A handler that attaches from inside `SubjectAttached`, or writes a structural property from inside a property callback, can recurse as deep as it likes, and every frame runs under the same held topology gate, so other threads wait out the full gate timeout instead of getting a diagnostic. Termination is the handler author's responsibility.
 
-A handler ahead of the descent runs for a subject before that subject's children are visited, so it goes top down. Everything else runs only once the subtree underneath has finished attaching, so it goes deepest first.
+Adding metadata to a subject that is claimed but not yet owned, or already releasing, publishes no ownership edges. If that subject subsequently enters the graph, its seed discovers the new properties. A discarded discovery claim therefore cannot leave children owned through an unpublished parent.
 
-`SubjectRegistry` sits ahead of the descent, so it has registered a subject before the descent reaches that subject's children. That holds at every level, which gives a guarantee independent of how the context was composed: **by the time any handler at or behind the registry runs for a subject, every one of its ancestors is already registered.** A handler ordered ahead of the registry is outside that guarantee, for the obvious reason that the registry has not run yet.
+Lifecycle notifications and property-change publication groups have separate FIFO queues. Pending lifecycle work drains before each property group. There is no additional lifecycle boundary between individual observers within one group: an observer can mutate the graph and a later observer in that group can see the new ownership before the corresponding Registry notifications have run. A property's captured change values and a lifecycle event's edge/count describe a historical transition, while current graph queries can observe later writes or a new ownership lifetime.
 
-```csharp
-public void HandleLifecycleChange(SubjectLifecycleChange change)
-{
-    if (!change.IsContextAttach) return;
+A callback exception does not veto or roll back the committed mutation. Remaining lifecycle handlers, event subscribers, queued property groups and identity-scoped claim cleanup are attempted. A failure within one property publication group can still suppress the rest of that group's ordinary observer chain. One error is rethrown with its identity preserved; multiple errors are aggregated, with the primary operation failure first. Callbacks should remain fast and must not dispatch structural work to another thread and synchronously wait for it while holding the topology gate.
 
-    // Called for "child": middle, top and root all resolve here.
-    foreach (var parent in change.Subject.GetParents())
-    {
-        var registered = parent.Property.Subject.TryGetRegisteredSubject();
-    }
-}
-```
+A thread may hold only one context's topology gate. Nested cross-context structural work and cross-context property admission throw `LifecycleContractViolationException` before taking the other gate. This restriction is independent of contention. The gate contention thresholds are unchanged; blocked-holder observation windows are scoped to the holder and its outer transaction revision.
 
-(`GetParents()` needs `WithParents()` on the context. Without it the same walk goes over `RegisteredSubject.Parents`, the registry's own parent edges.)
+`DerivedPropertyChangeHandler` absorbs ordinary exceptions from derived getters, keeping the last known value and recomputing on the next dependency write. It preserves `LifecycleContractViolationException` from actual forbidden operations, such as nested cross-context topology changes. The returned value itself creates no ownership requirement: computed projections can return detached, releasing or foreign-context subjects, and stabilization publishes their computed value without claiming them. A stored `[Derived]` partial property still creates normal structural edges.
 
-Were the registry behind the descent, `child` would see only part of that chain and `TryGetRegisteredSubject()` would return null for the rest, so a walk would compute a wrong answer rather than fail. Derived getters are exposed to this too, because `DerivedPropertyChangeHandler` evaluates them while the property attaches.
+User getters, custom enumerators and downstream write interceptors can also reenter the same-context protocol. Ownership identity and baseline revisions invalidate an enclosing continuation when nested work replaces its owner or property. The property journal supplies the installed occurrences for that nested work, so it does not mistake the outer operation's desired baseline for already completed publication. A setter invoked from its own active seeding getter stores its value but defers that property's reconciliation until the getter returns; active getter frames include ownership identity so a new attachment lifetime is not mistaken for the old frame.
 
-A handler that records something other handlers read during attach therefore has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Registration order alone is not enough, because an unrelated handler's ordering constraint can move it. `[RunsAfter(typeof(SubjectRegistry))]` is not a substitute: it constrains the handler only against the registry, leaving its position relative to the descent dependent on where it was registered.
+## Handler Order
 
-`SubjectRegistry` and `ParentTrackingHandler` both carry it, and the registry is additionally ordered ahead of parent tracking. Neither reads the other, so that direction only fixes what a handler placed between them sees; without it, which of the two had already run would depend on how the context was composed. The pre-descent segment therefore resolves the same way for every composition: registry, then parent tracking, then the descent. A handler asking for the slot between the two, with `[RunsAfter(typeof(ParentTrackingHandler))]` and `[RunsBefore(typeof(SubjectRegistry))]` together, now closes a cycle and is rejected when the chain resolves.
+`LifecycleInterceptor` implements `ILifecycleHandler` and occupies the former context-inheritance descent slot, so it is the public ordering seam: `[RunsBefore(typeof(LifecycleInterceptor))]` places a handler ahead of the descent, `[RunsAfter]` behind it. `SubjectRegistry` runs before it (every ancestor is registry-visible during attach); `SourceMonitor` and `HostedServiceHandler` run after it. Ordering attributes bind only between services that both implement the interface being resolved, and `ServiceOrderResolver` keys on the exact runtime type, which is one reason `LifecycleInterceptor` is sealed.
 
-There is a second boundary inside attach that the handler ordering cannot cross. A subject's `ILifecycleHandler` chain runs to completion first, and only then do its properties attach, which is where `SubjectRegistry` invokes every `ISubjectPropertyInitializer`. So a lifecycle handler never sees properties an initializer adds to the same subject, at any ordering position. A handler that needs initializer output has to observe `IPropertyLifecycleHandler` instead, ordered with `[RunsAfter(typeof(SubjectRegistry))]` so it resolves behind the registry.
-
-Detach is not the mirror of attach. Below the root of the detached subtree, each ancestor is deregistered further up the descent before the callback reaches a descendant, so the walk stops at the first one and nothing above it is resolvable through the registry either, including ancestors outside the subtree that are still registered. `GetParents()` is not a substitute, because it yields at most the immediate parent there, and only for the subject's own handler or one ordered ahead of `ParentTrackingHandler`. A handler that needs ancestor state on detach has to capture it at attach.
-
-Pinned by `RegistryHandlerOrderTests`, and for the derived-getter path by `RegistryAncestorResolutionTests`. The initializer phase boundary above is measured but not pinned by a test.
+For a three-level chain, attach handlers ahead of the descent receive `top, mid, leaf`; handlers behind it receive `leaf, mid, top`; detach uses `top, mid, leaf` in both positions. This also applies to an explicit root: handlers before the descent receive the root before descendants. The graph mutation precedes queued callback delivery, so a handler can observe later graph state than its transition payload.
 
 ## Invariants
 
-After all concurrent `WriteProperty` / `DetachFromProperty` / `AttachSubjectToContext` / `DetachSubjectFromContext` operations complete:
-
-1. **Reachable → Registered**: Every subject reachable from the root through intercepted properties is in `_attachedSubjects`. Properties that are not intercepted, such as non-partial `[Derived]` getters, never attach the subjects they return, so they do not make a subject reachable.
-2. **Not reachable → Not registered**: Every subject NOT reachable from the root through intercepted properties is NOT in `_attachedSubjects`
-3. **`_lastProcessedValues` matches attachment state**: For every attached subject, `_lastProcessedValues` entries exist for all structural properties that have been written or seeded
-4. **No dangling entries**: No `_lastProcessedValues` entries exist for detached subjects
-
-### Transient inconsistency
-
-Between `next()` and lock acquisition, the backing store and `_attachedSubjects` can temporarily disagree (a new child is in the backing store but not yet attached, or an old child is detached but still in the backing store). This window is invisible through the lifecycle's API (which requires the lock) and resolves when `WriteProperty` completes its locked section.
+- A subject is unattached or owned by exactly one exact context, with at most one anchor.
+- The lifecycle is registered before anything attaches to its context; the reverse order is rejected, not repaired.
+- Ownership is anchor-reachability over committed occurrence-aware edges; reference count is a projection, never a predicate.
+- Baselines describe desired outgoing edges; active journals describe installed occurrences until publication completes.
+- A structural getter is read more than once per operation and should answer stably; a lazy one caches, and unused discovery claims are handed back.
+- A derived property carries an edge only where its metadata marks it a store: a generated partial property, whose backing field holds the value, or a dynamic one whose caller supplied a setter. A computed generated getter is not intercepted and carries none. Metadata built by reflection marks neither, so a derived property there carries an edge whenever it is intercepted.
+- Algorithms reading incoming edges validate against committed outgoing edges.
+- Release is deterministic first-visit from the removed edge; the owned map is never enumerated.
+- Reference-count reads are lock-free; parent reads are lock-free snapshot reads once the first call activates publication under the subject's leaf monitor; the lifecycle is the sole writer of parent state.
+- The lock order is gate, then attachment monitor, then SyncRoot, with no path acquiring in any other order and the `SubjectOwnership` monitor as a leaf below all three.

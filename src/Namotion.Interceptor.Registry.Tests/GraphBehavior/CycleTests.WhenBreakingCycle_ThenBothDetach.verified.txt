@@ -1,4 +1,0 @@
-﻿[
-  - Bob.Mother -> Alice (refs: 0, detached),
-  - Alice.Mother -> Bob (refs: 0, detached)
-]

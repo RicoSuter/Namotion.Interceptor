@@ -222,7 +222,7 @@ public class DagTests
     }
 
     [Fact]
-    public void WhenSubjectListedTwiceInCollectionIsKept_ThenItsIndexIsItsFirstPosition()
+    public void WhenSubjectListedTwiceInCollectionIsKept_ThenItHasAParentPerPosition()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -241,7 +241,7 @@ public class DagTests
         root.Children = [shared, shared, other];
 
         // Assert: the same result as attaching the new collection from scratch.
-        Assert.Equal(0, Assert.Single(shared.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal([0, 1], shared.TryGetRegisteredSubject()!.Parents.Select(p => (int)p.Index!).Order());
         Assert.Equal(2, Assert.Single(other.TryGetRegisteredSubject()!.Parents).Index);
     }
 }

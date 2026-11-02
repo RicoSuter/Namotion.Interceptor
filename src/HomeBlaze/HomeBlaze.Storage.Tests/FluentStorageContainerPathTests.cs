@@ -98,7 +98,7 @@ public class FluentStorageContainerPathTests : IDisposable
         {
             var context = InterceptorSubjectContext.Create();
             context.AddService<IDataDirectoryProvider>(new TestDataDirectoryProvider(_dataDirectory.FullName));
-            ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+            ((IInterceptorSubject)storage).AttachToContext(context);
         }
 
         return storage;

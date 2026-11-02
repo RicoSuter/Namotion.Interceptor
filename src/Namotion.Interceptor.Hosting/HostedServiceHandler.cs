@@ -7,8 +7,9 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
-[RunsAfter(typeof(ContextInheritanceHandler))]
-internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDisposable
+[RunsAfter(typeof(LifecycleInterceptor))]
+internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDisposable,
+    ISingletonContextService<HostedServiceHandler>
 {
     private ILogger? _logger;
 
@@ -38,12 +39,12 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (change.Subject is IHostedService hostedService)
             {
-                AttachHostedService(hostedService, change.Subject.Context);
+                AttachHostedService(hostedService, change.Subject.GetContext());
             }
 
             foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
             {
-                AttachHostedService(hostedService2, change.Subject.Context);
+                AttachHostedService(hostedService2, change.Subject.GetContext());
             }
         }
         else if (change.IsContextDetach)
@@ -55,9 +56,8 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
             foreach (var attachedHostedService in change.Subject.GetAttachedHostedServices())
             {
-                // Stopped by this handler rather than one looked up through the subject's context:
-                // ContextInheritanceHandler runs first and may already have removed the fallback
-                // contexts that lookup goes through.
+                // Stopped by this handler rather than one looked up through the subject's context, so
+                // stopping does not depend on what the subject still resolves during its own detach.
                 if (InterceptorHostingExtensions.RemoveAttachedHostedService(change.Subject, attachedHostedService))
                 {
                     DetachHostedService(attachedHostedService);

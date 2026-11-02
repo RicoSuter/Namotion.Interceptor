@@ -231,7 +231,7 @@ public class FritzBoxLoopTests
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
         var router = CreateRouter(fake);
-        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Router = router };
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithLifecycle()) { Router = router };
 
         // Act
         await using var running = await RunAsync(router);
@@ -259,7 +259,7 @@ public class FritzBoxLoopTests
             message: "The router should connect with the unsaved key warning.");
 
         // Act
-        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Router = router };
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithLifecycle()) { Router = router };
         await router.ApplyConfigurationAsync(CancellationToken.None);
 
         // Assert
@@ -433,8 +433,8 @@ public class FritzBoxLoopTests
         var device = new TestNetworkDevice(Snapshots.Laptop);
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         context.AddService<ISubjectPathResolver>(new ThrowingPathResolver());
-        ((IInterceptorSubject)router).Context.AddFallbackContext(context);
-        ((IInterceptorSubject)device).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)router).AttachToContext(context);
+        ((IInterceptorSubject)device).AttachToContext(context);
 
         // Act
         await using var running = await RunAsync(router);

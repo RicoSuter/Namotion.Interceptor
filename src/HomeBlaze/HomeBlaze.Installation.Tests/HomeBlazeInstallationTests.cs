@@ -26,6 +26,13 @@ public class HomeBlazeInstallationTests
         ClientConnectionService? clientConnections = null) =>
         new(build, "Production", createHttpClient ?? CreateNoReleaseClient, developerMode ?? new DeveloperModeService(), clientConnections ?? new ClientConnectionService(TimeProvider.System, NullLogger<ClientConnectionService>.Instance), timeProvider ?? TimeProvider.System, NullLogger.Instance, requestTimeout);
 
+    private static void AttachWithDataDirectory(HomeBlazeInstallation installation, IDataDirectoryProvider dataDirectoryProvider)
+    {
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(dataDirectoryProvider);
+        ((IInterceptorSubject)installation).AttachToContext(context);
+    }
+
     private static HttpClient CreateNoReleaseClient() =>
         new(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
 
@@ -89,7 +96,7 @@ public class HomeBlazeInstallationTests
     {
         // Arrange
         var installation = CreateInstallation(CreateBuild());
-        ((IInterceptorSubject)installation).Context.AddService<IDataDirectoryProvider>(new DataDirectoryProvider(Path.GetTempPath()));
+        AttachWithDataDirectory(installation, new DataDirectoryProvider(Path.GetTempPath()));
 
         // Act
         installation.Poll();
@@ -133,7 +140,7 @@ public class HomeBlazeInstallationTests
         // Arrange
         var dataDirectoryProvider = new FailingOnceDataDirectoryProvider(Path.GetTempPath());
         var installation = CreateInstallation(CreateBuild());
-        ((IInterceptorSubject)installation).Context.AddService<IDataDirectoryProvider>(dataDirectoryProvider);
+        AttachWithDataDirectory(installation, dataDirectoryProvider);
         installation.PollingInterval = TimeSpan.FromSeconds(1);
 
         // Act

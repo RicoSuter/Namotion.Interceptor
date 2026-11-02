@@ -525,6 +525,7 @@ namespace Namotion.Devices.Sonos
         public const int MaximumIntervalSeconds = 3600;
         public const int MinimumIntervalSeconds = 5;
         public SonosSystem(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Sonos.SonosSystem> logger) { }
+        public SonosSystem(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Sonos.SonosSystem> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=5)]
         public string? ActiveEventCallbackHost { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=4)]

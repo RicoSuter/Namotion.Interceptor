@@ -7,11 +7,12 @@ namespace Namotion.Interceptor.Generator.Tests;
 public class SubjectInterfaceSlotTests
 {
     [Fact]
-    public void WhenDerivedSubjectDeclaresAPublicSyncRoot_ThenNI0064IsReported()
+    public void WhenDerivedSubjectDeclaresAPublicData_ThenNI0064IsReported()
     {
-        // Arrange: this compiles clean today, because the derived class emits its own explicit
-        // implementation which wins. After the split it takes the interface slot.
+        // Arrange: the derived class re-lists the interface, so its public member takes the Data
+        // slot from the root's explicit implementation.
         const string source = """
+            using System.Collections.Concurrent;
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
 
@@ -28,7 +29,7 @@ public class SubjectInterfaceSlotTests
                 {
                     public partial string LeafName { get; set; }
 
-                    public object SyncRoot { get; } = new object();
+                    public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
                 }
             }
             """;
@@ -100,29 +101,30 @@ public class SubjectInterfaceSlotTests
     }
 
     [Fact]
-    public void WhenDerivedSubjectDeclaresAPublicSyncRoot_ThenTheInterfaceSlotIsReallyTaken()
+    public void WhenDerivedSubjectDeclaresAPublicData_ThenTheInterfaceSlotIsReallyTaken()
     {
-        // Arrange: the counterpart of the false positive cases. object SyncRoot { get; } matches the
-        // interface member exactly, so it is an implicit implementation and NI0064 is justified.
-        var source = LeafDeclaring("public object SyncRoot { get; } = new object();");
+        // Arrange: the counterpart of the false positive cases. The property matches the interface
+        // member exactly, so it is an implicit implementation and NI0064 is justified.
+        var source = LeafDeclaring(
+            "public System.Collections.Concurrent.ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();");
 
         // Act
         var result = GeneratorTestHost.RunForExecution(source);
         var instance = result.CreateInstance("Repro.LeafSubject");
-        var ownSyncRoot = instance.GetType().GetProperty("SyncRoot")!.GetValue(instance);
+        var ownData = instance.GetType().GetProperty("Data")!.GetValue(instance);
 
         // Assert
-        Assert.Same(ownSyncRoot, ((IInterceptorSubject)instance).SyncRoot);
+        Assert.Same(ownData, ((IInterceptorSubject)instance).Data);
         Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0064");
     }
 
     [Fact]
-    public void WhenDerivedSubjectHandWritesTheContextImplementation_ThenNI0064IsReported()
+    public void WhenDerivedSubjectHandWritesTheExecutorImplementation_ThenNI0064IsReported()
     {
         // Arrange: this compiles with no diagnostic and kills interception entirely, not only on
         // base declared properties, because writes still land in the backing fields.
         var source = LeafDeclaring(
-            "IInterceptorSubjectContext IInterceptorSubject.Context { get; } = InterceptorSubjectContext.Create();");
+            "Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor => null!;");
 
         // Act
         var result = GeneratorTestHost.RunForExecution(source);
@@ -132,12 +134,12 @@ public class SubjectInterfaceSlotTests
     }
 
     [Fact]
-    public void WhenAnIntermediateOverridesAPublicContext_ThenNoDiagnosticIsReportedAndWritesAreIntercepted()
+    public void WhenAnIntermediateOverridesAPublicExecutor_ThenNoDiagnosticIsReportedAndWritesAreIntercepted()
     {
         // Arrange: an override occupies the slot the overridden member already had, so it displaces
         // nothing, and virtual dispatch makes it the implementation rather than a replacement for
         // one. Reporting it was an NI0064, an error, on a hierarchy that builds and intercepts.
-        var source = VirtualContextBase + OverridingIntermediateDerived;
+        var source = VirtualExecutorBase + OverridingIntermediateDerived;
 
         var writeInterceptor = new RecordingWriteInterceptor();
         var context = InterceptorSubjectContext
@@ -160,12 +162,13 @@ public class SubjectInterfaceSlotTests
     }
 
     [Fact]
-    public void WhenAReferencedSubjectIsSubclassedByHandWithAPublicContext_ThenNI0064IsReportedAndWritesAreNotIntercepted()
+    public void WhenAReferencedSubjectIsSubclassedByHandWithAPublicExecutor_ThenNI0064IsReportedAndWritesAreNotIntercepted()
     {
         // Arrange: the hand-written class satisfies the contract by inheriting the referenced
         // subject's interception members, so it declares no explicit implementation of its own and its public
-        // Context wins the slot for every generated subclass. That is the silent interception loss
-        // in the shape the rule exists to prevent, and it produces no compiler diagnostic at all.
+        // Executor wins the slot for every generated subclass. The root's helpers keep reading the
+        // root's own field, which nothing populates through the hijacked slot, so interception is
+        // silently lost, and it produces no compiler diagnostic at all.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -188,7 +191,9 @@ public class SubjectInterfaceSlotTests
             {
                 public class Hand : Lib.LibRoot, IInterceptorSubject
                 {
-                    public IInterceptorSubjectContext Context { get; } = InterceptorSubjectContext.Create();
+                    private Namotion.Interceptor.Interceptors.IInterceptorExecutor? _own;
+                    public Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor
+                        => Namotion.Interceptor.Interceptors.InterceptorExecutor.GetOrCreate(ref _own, this);
                 }
 
                 [InterceptorSubject]
@@ -278,9 +283,10 @@ public class SubjectInterfaceSlotTests
             {
                 public class Hand : Lib.LibRoot, IInterceptorSubject
                 {
-                    private readonly IInterceptorSubjectContext _own = InterceptorSubjectContext.Create();
+                    private Namotion.Interceptor.Interceptors.IInterceptorExecutor? _own;
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => _own;
+                    Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor
+                        => Namotion.Interceptor.Interceptors.InterceptorExecutor.GetOrCreate(ref _own, this);
                 }
 
                 [InterceptorSubject]
@@ -317,8 +323,8 @@ public class SubjectInterfaceSlotTests
     public void WhenAHijackerSitsAboveTheContractProvider_ThenNI0064IsReportedAndWritesAreNotIntercepted()
     {
         // Arrange: Hand satisfies the contract by inheritance and declares nothing, so it is the
-        // contract provider and the scan used to stop there. The public Context that really takes the
-        // slot sits one class further up, where nothing ever looked.
+        // contract provider and the scan used to stop there. The public Executor that really takes
+        // the slot sits one class further up, where nothing ever looked.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -341,9 +347,10 @@ public class SubjectInterfaceSlotTests
             {
                 public class Middle : Lib.LibRoot, IInterceptorSubject
                 {
-                    private readonly IInterceptorSubjectContext _own = InterceptorSubjectContext.Create();
+                    private Namotion.Interceptor.Interceptors.IInterceptorExecutor? _own;
 
-                    public IInterceptorSubjectContext Context => _own;
+                    public Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor
+                        => Namotion.Interceptor.Interceptors.InterceptorExecutor.GetOrCreate(ref _own, this);
                 }
 
                 public class Hand : Middle, IInterceptorSubject
@@ -381,12 +388,12 @@ public class SubjectInterfaceSlotTests
     }
 
     /// <summary>
-    /// <see cref="PublicMemberBase"/> with a virtual Context, which is what an intermediate class
+    /// <see cref="PublicMemberBase"/> with a virtual Executor, which is what an intermediate class
     /// needs in order to override it rather than hide it.
     /// </summary>
-    private static readonly string VirtualContextBase = PublicMemberBase.Replace(
-        "public IInterceptorSubjectContext Context",
-        "public virtual IInterceptorSubjectContext Context");
+    private static readonly string VirtualExecutorBase = PublicMemberBase.Replace(
+        "public IInterceptorExecutor Executor",
+        "public virtual IInterceptorExecutor Executor");
 
     private const string OverridingIntermediateDerived = """
 
@@ -394,7 +401,7 @@ public class SubjectInterfaceSlotTests
         {
             public class Middle : HandBase
             {
-                public override IInterceptorSubjectContext Context => base.Context;
+                public override IInterceptorExecutor Executor => base.Executor;
             }
 
             [Namotion.Interceptor.Attributes.InterceptorSubject]

@@ -278,7 +278,7 @@ public class ControlWidgetTests
         var motor = GetMotor();
         var originalSpeed = motor.TargetSpeed;
         var writes = 0;
-        using var subscription = ((IInterceptorSubject)motor).Context.GetPropertyChangeObservable()
+        using var subscription = ((IInterceptorSubject)motor).GetContext().GetPropertyChangeObservable()
             .Where(change => ReferenceEquals(change.Property.Subject, motor) && change.Property.Name == nameof(Motor.TargetSpeed))
             .Subscribe(_ => Interlocked.Increment(ref writes));
 

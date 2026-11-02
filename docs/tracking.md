@@ -123,7 +123,7 @@ using var scheduledReferenceSubscription = property.Subscribe(
 
 The observer can be an `IPropertyChangeObserver` implementation or a `PropertyChangeCallback` delegate; both receive the change by `in` reference. The typed overloads accept only a direct property access on the lambda parameter (`x => x.FirstName`). Chained (`x => x.Child.Foo`), captured-variable, static, field, and method selectors throw `ArgumentException`. The property must be intercepted or derived so that its changes enter the interception chain.
 
-**Inline delivery**: `SubscribeInline(...)` and `SubscribeToPropertyInline(...)` invoke the observer on the writing thread, outside the subject lock. Concurrent writers can invoke the observer concurrently. The observer must be fast, non-blocking, thread-safe, and exception-free. An exception propagates from the setter after the value has committed and can suppress later notifications for that write.
+**Inline delivery**: `SubscribeInline(...)` and `SubscribeToPropertyInline(...)` invoke the observer on the writing thread, outside the subject lock. Concurrent writers can invoke the observer concurrently. The observer must be fast, non-blocking, thread-safe, and exception-free. An exception propagates from the setter after the value has committed and can suppress later observers or channels for that property change. Derived recalculation still runs, and additional failures are aggregated after the original error.
 
 **Scheduled delivery**: `Subscribe(..., scheduler, onError)` and `SubscribeToProperty(..., scheduler, onError)` queue accepted changes and invoke the observer serially on the scheduler. Serialization belongs to one subscription. An observer or callback shared by several subscriptions can still be invoked concurrently. Observer failures invoke `onError` on the scheduler execution thread. A synchronous `IScheduler.Schedule` failure invokes `onError` immediately on the thread calling the scheduler. When scheduling occurs while accepting a change, this is the writing thread and the handler completes before the setter returns, so a slow handler delays the setter. Error handlers shared by subscriptions may therefore be invoked concurrently and must be thread-safe. Observer and scheduler exceptions never escape to the writer, and exceptions thrown by `onError` are swallowed. A synchronous scheduling failure faults the subscription only if it wins the terminal transition. Concurrent or reentrant disposal may win instead, while the failure is still reported and `IsFaulted` remains false.
 
@@ -139,7 +139,7 @@ When the scheduler defers delivery, the captured old and new values can be stale
 
 Dispatch starts on the writing thread, outside the subject lock. The pull queue and inline per-property subscriptions accept changes there. `GetPropertyChangeObservable()` also receives changes there but reschedules its subscribers by default. Scheduled per-property subscriptions invoke observers through their selected schedulers, which may run asynchronously or inline.
 
-- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended. One consequence for custom handlers: an `ILifecycleHandler` that writes properties while attaching emits those changes before the structural change that introduced the subject.
+- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): subject-typed writes reconcile ownership and drain pending lifecycle notifications before each property-change publication group. Nested same-context writes from lifecycle callbacks are supported and settle ownership before returning, while their callbacks and Registry maintenance wait for the notification drain. Property publication groups remain FIFO, so a change made during an attach callback does not necessarily publish before the structural change that introduced the subject. Within a single property group, one observer can write the graph and a later observer can see that new ownership before its queued Registry updates. Delivered values describe the recorded change; read current state when freshness matters.
 - **Synchronous channel order**: each `PropertyChangeInterceptor` enqueues to its pull queues first, publishes to its Rx observable second, and dispatches to its resolved per-property subscriptions last. A scheduled per-property subscription accepts the change in that last phase, although its callback may run later or inline according to its scheduler. With aggregated contexts, the innermost interceptor resolves the per-property subscriptions, so they may accept or invoke a change before an outer context's pull queue and Rx channels. A throwing synchronous observer propagates out of the write and suppresses later deliveries in this order; queue items already enqueued remain available.
 - **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value: `change.GetCurrentValue<TValue>()` does this for you, reading the property now instead of returning the value captured when the change was created, without needing to keep a separately typed reference to the subject. `GetOldValue<TValue>()` is the value the setter observed when it started, including when the subscription raced the write. It is not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain.
 - **A derived recalculation publishes the stabilized value**: the change carries the value the recalculation committed rather than a fresh read of the getter. The getter therefore runs once per recalculation instead of twice, a throwing getter does not suppress the notification, and an interceptor that rewrites `NewValue` on that path now changes what is published.
@@ -159,7 +159,7 @@ The revision exists because arrival order can differ from commit order. Dispatch
 | Pull queue | conditional (a) | arrival | consumer thread |
 | `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread |
 
-(a) A throwing lifecycle handler or an earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, suppresses delivery for the rest of that write's consumers. Delivery is exactly-once only while those no-throw contracts hold.
+(a) An earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, can suppress delivery for the rest of its property publication group. Queued lifecycle handlers and property groups continue after a lifecycle callback failure; such failures propagate after the drain and do not roll back the committed write.
 
 (b) Per property, a flush collapses to the newest commit in that batch, and collapsing also applies **across** flushes: a change whose revision the property has already moved past is dropped rather than emitted. Which commits count as having moved the property past it depends on the connector, via `ChangeDeliveryRule`; see [Change Batching and Merging](connectors.md#change-batching-and-merging). A consumer that needs the current value still re-reads the property rather than assuming arrival order matches commit order.
 
@@ -261,6 +261,8 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+Computed derived properties are projections and create no ownership edges. They may return subjects that are detached or belong to another context; reading or publishing the projection does not attach them or extend their lifetime. Use an intercepted stored property or an explicit attachment when the returned subject should be tracked. A `[Derived]` partial property with a backing field remains a stored structural property.
+
 ### Manual Recalculation
 
 When a derived property's getter depends on data outside the interceptor system (external APIs, services, static state, etc.), automatic dependency tracking cannot detect changes. Use `RecalculateDerivedProperty()` to manually trigger recalculation:
@@ -287,26 +289,28 @@ This goes through the same pipeline as automatic recalculation: the getter is re
 
 ## Context Inheritance
 
-Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:
+Attaching a subject into a graph attaches it to that graph's context, so it participates in the same tracking and interception pipeline. This is intrinsic to the lifecycle:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithContextInheritance();
+    .WithLifecycle();
 
 var car = new Car(context);
 var tire = new Tire(); // No context assigned yet
 
-car.Tire = tire; // tire.Context is automatically set to context
+car.Tire = tire; // tire is now attached to the same context; tire.TryGetContext() returns it
 ```
 
 This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
 
-A subject that several parents hold inherits the context of the parent that attached it first. When that parent releases it while another parent still holds it, the subject inherits the context of a remaining parent instead, so it keeps the services of the graph after the first parent leaves it. A remaining parent is skipped when its context falls back on the subject's own, such as a child of the subject that holds it as well, or reaches other lifecycle interceptors, such as a parent constructed with the context of another graph. A subject that only such parents still hold keeps the context of the parent that released it, and loses the services of the graph once that parent leaves it.
+Configure the context fully before attaching anything to it. A subject attached to a context that has no lifecycle yet is anchored but never enters the ownership graph a later `WithLifecycle()` brings, so registering one behind an attach throws. `WithRegistry()`, `WithFullPropertyTracking()` and `WithDerivedPropertyChangeDetection()` register the lifecycle themselves and are rejected the same way.
 
-Pass a context only to the root subject and construct every other subject without one. A subject constructed with a context is a root of that context: the context keeps it reachable, and with lifecycle tracking keeps it attached, until `subject.Context.RemoveFallbackContext(context)` removes it. Dropping the last reference to a root is not enough. Once a property of a subject in the graph references it, it is a child instead, and stays one: when its last reference is removed, it leaves the graph like any other child and does not become a root again.
-
-When the last parent reference to a subject is removed, counted over every graph that holds it, inheritance removes the context of the parent that released it and every other fallback context that reaches only the releasing graph's lifecycle interceptor, such as the context the subject was constructed with. A context that also reaches another lifecycle interceptor stays, so a root of one graph that another graph releases stays in its own graph. When the subject is assigned into a graph again, it inherits the context of its new parent.
+```csharp
+var context = InterceptorSubjectContext.Create();
+var car = new Car(context); // anchors car on a context with no lifecycle
+context.WithRegistry();     // throws: the lifecycle would never see car
+```
 
 ## Subject Lifecycle Tracking
 
@@ -353,10 +357,10 @@ The `HandleLifecycleChange` method receives a `SubjectLifecycleChange` with flag
 
 | Flag | Description |
 |------|-------------|
-| `IsContextAttach` | Subject **first entered** the graph (first property reference) |
+| `IsContextAttach` | Subject entered the graph, through a root anchor or an incoming edge |
 | `IsPropertyReferenceAdded` | A property reference to the subject was added |
 | `IsPropertyReferenceRemoved` | A property reference to the subject was removed |
-| `IsContextDetach` | Subject is **leaving** the graph (last reference removed) |
+| `IsContextDetach` | Subject left the graph after losing anchor reachability |
 
 Flags can be combined. For example, when a child is first assigned to a property:
 - `IsContextAttach = true` and `IsPropertyReferenceAdded = true`
@@ -394,14 +398,15 @@ lifecycleInterceptor.SubjectDetaching += change =>
 
 **Important distinction:**
 - `ILifecycleHandler.HandleLifecycleChange`: Called for **every** lifecycle change (context attach, property add, property remove, context detach)
-- `SubjectAttached` event: Fires **once** when subject first enters the graph
-- `SubjectDetaching` event: Fires **once** when subject is about to leave the graph
+- `SubjectAttached` event: Reports entry into the graph once per ownership lifetime
+- `SubjectDetaching` event: Reports departure from the graph once per ownership lifetime
 
-**Event timing (symmetry):**
-- `SubjectAttached` fires **after** `ILifecycleHandler.HandleLifecycleChange(attach)` - all handlers have initialized
-- `SubjectDetaching` fires **before** `ILifecycleHandler.HandleLifecycleChange(detach)` - handlers can still access full graph
+**Event timing:**
 
-This symmetry ensures that both events fire when the full object graph is accessible, which is useful for handlers that need to traverse relationships or access child subjects during cleanup.
+- `SubjectAttached` fires after the subject's attach lifecycle handlers have been attempted.
+- `SubjectDetaching` fires before the subject's detach lifecycle handlers.
+
+These queued events describe historical transitions. Current ownership queries may already reflect removal, a later write, or reattachment; the full historical graph is not preserved. The subject retains its context through queued teardown. A handler that threw may not have completed its initialization.
 
 Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
@@ -427,17 +432,19 @@ public class MyChildIndexHandler : IChildIndexHandler
 
 These rules hold for every index the library keeps, in the registry (`Children`, `Parents`) and in parent tracking (`GetParents()`):
 
-- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
-- The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing, unless it holds a subject under several keys and the first of them changes.
-- An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation. A subject removed in place and then assigned again counts as still attached, so it is neither attached again nor reported, and keeps its old index.
-- Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so the stored index keeps the old instance. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification and derived properties, miss that write, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
+- The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry per occurrence, each with its own position or key.
+- The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject one of whose kept occurrences changed its index, and not at all when none did. A subject is reported once, with the first of its positions or keys in enumeration order, so a handler that keeps every occurrence reads them from the property's value. A subject the write attached already carries its index and is not reported.
+- An index is compared with the one the edge got when the property was last reconciled, not with the old value as it is now, so a collection or dictionary mutated in place does not change what is compared. Assigning the same instance again is not a structural change, so after an in-place mutation, assign a new instance.
+- The lifecycle compares keys by reference, and keys of framework primitive types such as `string`, numbers and enums by value, so it runs no user `Equals`. A key that is equal to the old one but another instance counts as changed: the subject is reported and the stored index takes the new instance.
 - The same requirements apply as to `ILifecycleHandler` (below). The handler must not write the property that was written, and the span is only valid during the call.
-- Apart from the cases above, once concurrent writes settle, every index matches the stored value. While a write runs, a reader on another thread can see the value and the indices updated at different times.
-- On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with one of its positions or keys, and after an in-place mutation with a position or key read from the mutated value, neither of which needs to be the stored one.
+- Once concurrent writes settle, every index matches the stored value. While a write runs, a reader on another thread can see the value and the indices updated at different times.
+- On detach, `SubjectLifecycleChange.Index` is the position or key the removed occurrence had in the previous value. The occurrences a subject keeps get their new indices after the detach callbacks.
 
 ### Thread Safety
 
 The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property. Reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
+
+These guarantees protect the framework's ownership graph, Registry projections, notification queues and commit bookkeeping; they do not make all subject code or property access thread-safe. Consumers must coordinate concurrent access to non-atomic value types, compound operations and custom hooks. Generated setters copy the old backing value before entering the write pipeline and copy changed-hook arguments after it returns. Those copies, and ordinary reads with no read interceptors, are not synchronized with concurrent writes and can tear for non-atomic types. An old-value snapshot can also be stale even when its copy is atomic. Application-level serialization must cover every relevant reader and writer, including background connector activity; a private application lock does not coordinate with writers that do not acquire it.
 
 > **Internal design:** For details on the concurrency model and correctness guarantees, see [Lifecycle Interceptor Design](design/tracking-lifecycle.md).
 
@@ -445,11 +452,11 @@ The lifecycle interceptor is fully thread-safe. Multiple threads can concurrentl
 
 > **Important**: Both `ILifecycleHandler` methods and lifecycle events are invoked **synchronously inside a lock**. Handlers must follow these requirements:
 
-1. **Must be exception-free**: Throwing exceptions will break the lifecycle pipeline for other handlers. Wrap any potentially failing operations in try-catch internally.
+1. **Failures are post-commit errors**: Callback failures do not roll back committed changes. Remaining queued notifications and cleanup are attempted. One failure is rethrown; multiple failures are aggregated with the primary operation failure first. See the [callback contract](design/tracking-lifecycle.md#callback-contract) for property observer boundaries and error grouping.
 
 2. **Must be fast**: The lock is held during invocation, so blocking operations will degrade performance across the entire system. Keep handlers to prompt in-memory bookkeeping such as dictionary operations.
 
-3. **Dispatch long-running work**: If you need to perform I/O, network calls, or other slow operations, dispatch to an external queue and process asynchronously:
+3. **Dispatch long-running work, and never wait for it**: If you need I/O, network calls or other slow operations, hand them to an external queue and return. Waiting for the dispatched work is what turns a slow handler into a deadlock, see [Never Wait for Topology Work on Another Thread](#never-wait-for-topology-work-on-another-thread) below.
 
 ```csharp
 // Good: Fast dispatch to queue
@@ -458,10 +465,12 @@ lifecycleInterceptor.SubjectDetaching += change =>
     _cleanupQueue.Enqueue(change.Subject); // Returns immediately
 };
 
-// Bad: Blocking I/O in handler
+// Bad: the event is an Action, so this is an async void lambda. It returns at the first await
+// and the rest runs later on a pool thread, outside the lifecycle's ordering, where a thrown
+// exception has nobody to observe it.
 lifecycleInterceptor.SubjectDetaching += async change =>
 {
-    await database.DeleteAsync(change.Subject); // Blocks the lock!
+    await database.DeleteAsync(change.Subject);
 };
 ```
 
@@ -469,21 +478,108 @@ lifecycleInterceptor.SubjectDetaching += async change =>
 
 > **Tip**: Multiple handlers can be ordered using `[RunsBefore]`, `[RunsAfter]`, `[RunsFirst]`, and `[RunsLast]` attributes. See [Service Ordering](interceptor.md#service-ordering) for details.
 
+### Never Wait for Topology Work on Another Thread
+
+Topology changes on one context are serialized behind a single gate, and that gate is held across the whole write chain, every lifecycle callback and every structural getter the lifecycle reads. Code running inside one of those must not hand **structural** work to another thread and then block waiting for that thread: the worker cannot take the gate until the enclosing operation finishes, and the operation cannot finish until the worker returns.
+
+Five places run inside the gate and can do it:
+
+- a downstream `IWriteInterceptor`
+- an `ILifecycleHandler`
+- an `IPropertyLifecycleHandler`
+- a `SubjectAttached` or `SubjectDetaching` handler
+- a structural property's getter, which the lifecycle reads while attaching the subject
+
+Four of the five deadlock on older versions as well; only the downstream write interceptor is new. This is a long-standing rule being written down, not a new restriction.
+
+What the rule does not cover:
+
+- **Scalar writes.** Only structural properties, the ones whose declared type can hold subjects, take the gate. Dispatching a scalar write to another thread and waiting for it is fine.
+- **Same-thread re-entry.** The gate is reentrant, so re-entering the same context on the same thread stays legal.
+- **Fetching in parallel.** Fetch on as many threads as you like, then assign on the thread already inside the operation, or after it returns. Parallelising the assignments themselves never bought anything anyway: they serialize on the gate whichever thread runs them.
+
+A waiter throws `LifecycleContractViolationException` after observing the same gate holder continuously blocked for 30 seconds. This is a timeout heuristic, not proof of a deadlock: the runtime cannot identify what the holder is waiting for. Observing the holder running, or observing a different holder or outer transaction, resets that blocked window. A separate 300-second total wait bound applies regardless of holder activity or changes. Either threshold ends the waiting operation before it enters the gate; it does not abort the holder or roll back that holder's work. Older versions can wait indefinitely.
+
+```csharp
+// Wrong: the assignment inside Task.Run needs the gate this interceptor is holding, so the
+// worker waits for the interceptor and the interceptor waits for the worker.
+public class LoadAxesInterceptor : IWriteInterceptor
+{
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        next(ref context);
+
+        if (context.Property.Name == nameof(Machine.Controller) &&
+            context.Property.Subject is Machine machine)
+        {
+            // The worker throws LifecycleContractViolationException once the holder is seen
+            // blocked throughout, and Wait() rethrows it here wrapped in an AggregateException.
+            Task.Run(() => machine.Axes = BrowseAxes(machine)).Wait();
+        }
+    }
+}
+```
+
+```csharp
+// Right: hand the work off and let the write finish. The worker browses and assigns once the
+// gate is free, which is also the only place the browse itself may block.
+public class LoadAxesInterceptor : IWriteInterceptor
+{
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        next(ref context);
+
+        if (context.Property.Name == nameof(Machine.Controller) &&
+            context.Property.Subject is Machine machine)
+        {
+            _pendingBrowses.Enqueue(machine); // returns immediately
+        }
+    }
+}
+```
+
+A structural getter is the same trap in a shape that does not look like a handler at all, because the lifecycle reads it while holding the gate. This is the [dynamic property](registry.md#add-properties) form, the other being a hand-written subject supplying its own metadata:
+
+```csharp
+// Wrong: the lifecycle reads this getter while attaching the subject. If LoadAxesAsync writes
+// structural properties on a worker this deadlocks; if it merely blocks, it breaks the same
+// "fast, waits on nothing" contract and a concurrent write reports it.
+registered.AddProperty("Axes", typeof(Axis[]),
+    getValue: _ => _axes ??= LoadAxesAsync().Result,
+    setValue: (_, value) => _axes = (Axis[])value!);
+
+// Right: load first, register second. The getter only hands back what is already there.
+_axes = await LoadAxesAsync();
+registered.AddProperty("Axes", typeof(Axis[]),
+    getValue: _ => _axes,
+    setValue: (_, value) => _axes = (Axis[])value!);
+```
+
+Fetching in parallel and assigning afterwards is fine and is what most callers want, as long as neither half runs inside a lifecycle operation:
+
+```csharp
+var axes = await Task.WhenAll(controllers.Select(BrowseAxesAsync));
+machine.Axes = [.. axes.SelectMany(a => a)];
+```
+
+> **Internal design:** For why this cannot be rejected up front and how the report is decided, see [Lock Ordering](design/tracking-lifecycle.md#lock-ordering).
+
 ### Reference Counting
 
-Each subject tracks how many property references point to it via `GetReferenceCount()`:
+Each subject tracks how many structural edge occurrences point to it via `GetReferenceCount()`:
 
 ```csharp
 var referenceCount = subject.GetReferenceCount();
-// Returns the number of properties referencing this subject
+// Returns the number of structural edge occurrences pointing at this subject
 // Returns 0 if not attached or lifecycle tracking is disabled
 ```
 
 **Important notes:**
-- Subjects created directly with context (root subjects) have `refs: 0` - they have no property references pointing to them
-- Subjects attached via properties have their reference count incremented/decremented on add/remove
-- `GetReferenceCount()` returns property reference count, not total attachment count
-- Only intercepted properties count: a non-partial `[Derived]` getter that returns a subject adds no reference, because it stores nothing. Dynamic and registry-added properties are intercepted and do count.
+- The count is per occurrence, not per property: a subject listed twice in one collection counts 2
+- Subjects created directly with context (root subjects) have `refs: 0` - no edge points at an anchored root
+- Subjects attached via properties have their reference count incremented/decremented per occurrence added or removed
+- `GetReferenceCount()` is never an attachment predicate: an anchored root reports 0 while attached, so use `TryGetContext()` to test attachment and a non-None `Executor.AttachmentAnchor` to test root-ness. An empty `GetParents()` is not a root test either: it answers the same for a root, an unattached subject, and a subject inside its own release
+- Only intercepted properties count: a non-partial `[Derived]` getter that returns a subject adds no reference, because it stores nothing. Dynamic and registry-added properties count when they carry an edge, as described in [Registry](registry.md)
 
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
@@ -528,44 +624,95 @@ Root
   └── B ──┴── Shared (refs: 2)
 ```
 
-Removing A reduces Shared's refs to 1 - it stays attached via B.
-Removing B after A detaches Shared (refs: 0).
+Removing A reduces Shared's refs to 1 - it stays attached via B. Removing B after A detaches Shared (refs: 0), in either removal order, and a detached subject stops resolving the graph's services.
 
-**Cycles (Limitation)**
+**Cycles**
 
-Nodes that only reference each other stay attached due to reference counting:
+Nodes that only reference each other are released together once nothing outside the cycle reaches them:
 
 ```
 Root → A → B ↔ C (internal cycle)
 ```
 
 If `Root.A = null`:
-- A detaches (lost reference from Root)
-- B and C **stay attached** (they keep each other alive with refs: 1 each)
+- A detaches (lost its reference from Root)
+- B and C detach as well, because the only thing keeping them attached is each other
 
-This is the classic reference counting limitation. **Workarounds:**
-1. Call `DetachSubjectFromContext(subject)` explicitly
-2. Break all cycle references before removing the parent
+Attachment follows reachability from a root rather than a reference count, so a closed cycle with no way in is released like any other unreachable subgraph. A subject that was explicitly attached stays until it is explicitly detached.
 
-A reference back to the root closes a cycle through it and makes the root a child, so the graph then has no root. It stays attached only through that cycle:
+### Structural Properties and Lazy Getters
 
+A property contributes to the object graph only when it is **intercepted** and its declared type can hold subjects. Interception exists only for `partial` properties and for dynamic properties added through the registry, so this tracks nothing at all:
+
+```csharp
+[InterceptorSubject]
+public partial class Car
+{
+    private Tire[]? _tires;
+
+    // Not partial, so not intercepted, so no ownership edge. The tires are never attached, never
+    // registered and never given a lifecycle callback, the getter is not even called during
+    // attach, and nothing warns.
+    public Tire[] Tires => _tires ??= [new Tire()];
+}
 ```
-Root → A → Root (back-reference)
+
+This computed property is valid, but it establishes no ownership for the tires it returns. To attach and track those tires automatically, declare the property `partial` and fill it in the constructor instead:
+
+```csharp
+[InterceptorSubject]
+public partial class Car
+{
+    public partial Tire[] Tires { get; set; }
+
+    public Car()
+    {
+        Tires = [new Tire()];
+    }
+}
 ```
 
-If `A.Root = null`, or `Root.A = null` (detaching A releases the references A holds), the root loses its last reference: the root and everything below it leave the graph, and the root also loses the context it was constructed with. Do not hold the root in a property of its own graph. To navigate upward, use [parent tracking](#parent-child-relationship-tracking), which records parents without referencing them.
+A generated `partial` property cannot be lazy in the first place, because the generator writes the getter. Two shapes do supply a getter of their own and can therefore be lazy: a hand-written `IInterceptorSubject` that builds its own `SubjectPropertyMetadata` (see [hand-written base classes](generator.md#hand-written-base-classes-and-subclasses)) and a dynamic property registered through [`AddProperty`](registry.md#add-properties).
+
+**A lazy structural getter must cache a stable answer, for example with `??=`.** Discovery, seeding, and reconciliation can read structural getters repeatedly. Reentry, retained claims, resurrection, and retry can change which reads occur; callers must not depend on an exact count. A getter that answers with a fresh graph each call is a contract violation.
+
+```csharp
+// Correct: the same instance on every read.
+registered.AddProperty("Tires", typeof(Tire[]),
+    getValue: _ => _tires ??= [new Tire()],
+    setValue: (_, value) => _tires = (Tire[])value!);
+
+// Wrong: a new graph on every read.
+registered.AddProperty("Tires", typeof(Tire[]),
+    getValue: _ => new[] { new Tire() },
+    setValue: (_, value) => _tires = (Tire[])value!);
+```
+
+Caching from inside the getter is supported, including when it writes its value back through the property's own intercepted setter. Discovery of an unattached subject reads before claiming it, so a store at that point is invisible to interception. Retained claims, resurrection, and retry can instead reach seeding while attached. A setter invoked from its own active seeding getter stores the value and defers that property's reconciliation until the getter returns.
+
+A getter that returns a fresh graph on each read is outside this stable-getter contract. Unused discovery claims are released, so discarded values remain unattached and reusable. This cleanup does not make an unstable getter safe: ownership reflects the captured value, and a later read can return a different, unowned graph without an exception.
+
+A same-context lifecycle callback may initialize a child through an intercepted structural setter. Replacing a child delivers detach callbacks before attach callbacks. The nested setter settles ownership, while its callbacks and Registry updates wait for the queued drain. A callback exception is a post-commit notification failure, not a veto of the assignment. Nested structural work in a different context remains prohibited. See the [callback contract](design/tracking-lifecycle.md#callback-contract) for notification ordering and error behavior.
+
+Collection edges are captured when a structural value is reconciled. Release and reachability reuse that capture; they do not repeat side effects or exceptions from the old collection's enumerator. Change topology through intercepted property assignments; mutating a collection in place does not initiate reconciliation.
+
+Dictionary key/value entries retain their keys even when the dictionary also implements non-generic `ICollection`. Enumerators that yield subjects directly instead use positional indices. Collections must enumerate successfully: initialize `ImmutableArray<T>` and `ArraySegment<T>` with `.Empty` instead of `default`, whose BCL enumerators throw. A rejected assignment of either default value preserves the previous property value and ownership.
+
+> **Internal design:** For the exact read points and why the discard is cleaned up rather than reported, see [Structural Getters](design/tracking-lifecycle.md#structural-getters).
+
+A reference back to a root from its own subtree, such as `Root → A → Root`, does not consume the root's anchor: only an edge from an independently anchored parent does. The root therefore stays a root, and removing the back-reference, or removing `A`, leaves it attached.
 
 ## Parent-Child Relationship Tracking
 
-Tracks parent-child relationships in the subject graph, enabling upward navigation:
+Parent relationships come from the lifecycle itself, so any context with `WithLifecycle()` (included in `WithFullPropertyTracking()` and `WithRegistry()`) answers them:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithParents();
+    .WithFullPropertyTracking();
 
 var car = new Car(context);
-var tire = new Tire(context);
+var tire = new Tire();
 
 car.Tires = [tire];
 
@@ -575,9 +722,13 @@ var owner = tire.TryGetFirstParent<Car>();      // The nearest parent that is a 
 var same = car.TryGetFirstParentOrSelf<Car>();  // The car itself, because it is a Car
 ```
 
+Entries are per occurrence: a subject listed twice in one collection has two, one per index. Nothing is materialised for a subject until `GetParents()` is first called on it, so a consumer that never asks pays nothing. The order of the entries is unspecified; only the set of occurrences is meaningful.
+
 Both searches go breadth first over all parents, so the nearest match wins, and neither throws when there is none. `TryGetFirstParent` never returns the subject itself.
 
-Every parent carries an `Index`, and a subject has one parent per property that holds it. The index follows the assigned value as described in [Child Index Changes](#child-index-changes).
+Every parent carries an `Index`, which follows the assigned value as described in [Child Index Changes](#child-index-changes).
+
+The parents are not a tracked property, so a derived property that reads them records no dependency on them. Its value is computed when its subject enters the graph, which for a subject created with a context is construction, before it has a parent. Such a subject's derived properties are therefore computed again when the first edge from an anchored parent consumes its constructor's anchor, and a value that changed is published then. Any other change of the parents, such as moving a subject or reaching a subject through an ancestor that gained a parent of its own, is not noticed: call `RecalculateDerivedProperty()` on the property for that.
 
 This enables scenarios like:
 - Finding the root object of a subject graph

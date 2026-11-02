@@ -77,6 +77,6 @@ Both arms, full job, `-LaunchCount 3`, from one machine, for scoping only:
 
 `SubjectSourceBenchmark` measures in milliseconds per operation and dominates a full run.
 
-A benchmark that constructs subjects must not pass a context from `[GlobalSetup]` to their constructors: the fallback it registers keeps every subject ever constructed alive, and the row then measures garbage collection over a growing heap. Construct without a context, as a subject that inherits its context on attach is, or detach what the benchmark attached.
+A benchmark that constructs subjects must not pass a context from `[GlobalSetup]` to their constructors: each such subject becomes a root of that context, which keeps every subject ever constructed alive, and the row then measures garbage collection over a growing heap. Construct without a context and attach by assignment, or detach what the benchmark attached.
 
 A class present on only one branch has nothing to compare against, so exclude it unless you are deliberately measuring it. To compare a new benchmark properly, put it on the base branch first.

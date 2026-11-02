@@ -15,45 +15,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 
 public class SubjectTransactionWriterTests
 {
-    [Theory]
-    [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.Rollback)]
-    [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.BestEffort)]
-    [InlineData(TransactionLocking.Optimistic, TransactionFailureHandling.Rollback)]
-    [InlineData(TransactionLocking.Optimistic, TransactionFailureHandling.BestEffort)]
-    public async Task WhenWriterResolutionFails_ThenCommitCanBeRetriedAfterCorrectingRegistration(
-        TransactionLocking locking, TransactionFailureHandling failureHandling)
-    {
-        // Arrange
-        var context = CreateContext();
-        var writer = new CountingTransactionWriter();
-        var conflictingWriter = new CountingTransactionWriter();
-        var fallback = InterceptorSubjectContext.Create();
-        context.AddService<ITransactionWriter>(writer);
-        fallback.AddService<ITransactionWriter>(conflictingWriter);
-        context.AddFallbackContext(fallback);
-        var person = new Person(context) { FirstName = "original" };
-        using var transaction = await context.BeginTransactionAsync(failureHandling, locking);
-        person.FirstName = "pending";
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        Assert.Equal(0, writer.WriteCalls);
-        Assert.Equal(0, conflictingWriter.WriteCalls);
-        var pending = Assert.Single(transaction.GetPendingChanges());
-        Assert.Equal("original", pending.GetOldValue<string>());
-        Assert.Equal("pending", pending.GetNewValue<string>());
-
-        context.RemoveFallbackContext(fallback);
-        person.FirstName = "updated";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        Assert.Equal("updated", person.FirstName);
-        Assert.Equal(1, writer.WriteCalls);
-        Assert.Equal(0, conflictingWriter.WriteCalls);
-        Assert.Empty(transaction.GetPendingChanges());
-    }
-
     [Fact]
     public async Task WhenSourceValueIsTransformedBeforeCapture_ThenTheCapturedOriginIsLocal()
     {

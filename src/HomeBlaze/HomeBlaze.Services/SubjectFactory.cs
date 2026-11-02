@@ -51,7 +51,7 @@ public class SubjectFactory
     {
         if (_serviceProvider.GetService<IInterceptorSubjectContext>() is { } rootContext)
         {
-            subject.Context.RemoveFallbackContext(rootContext);
+            subject.DetachIfProvisionallyAnchored(rootContext);
         }
     }
 }

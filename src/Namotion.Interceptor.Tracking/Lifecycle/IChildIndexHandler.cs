@@ -9,13 +9,15 @@ public interface IChildIndexHandler
 {
     /// <summary>
     /// Called after a structural write that kept subjects in the property, while the lifecycle
-    /// interceptor holds its lock, with each kept subject whose key or position changed.
+    /// interceptor holds its lock, with each kept subject one of whose keys or positions changed.
     /// Not called when there is none. A subject the write attached is not reported, since its
     /// attach carries its index.
     /// </summary>
     /// <remarks>
-    /// The handler must not block, must not throw, and must not write the property that was written:
-    /// a throwing handler skips the handlers after it. The span is only valid during the call.
+    /// A subject the value holds more than once is reported when any of its kept occurrences moved,
+    /// and a key that is equal to the old one but another instance may count as moved, so a handler
+    /// that keeps every occurrence reads them from the property's value. The handler must not block
+    /// and must not write the property that was written. The span is only valid during the call.
     /// </remarks>
     /// <param name="property">The property that was written.</param>
     /// <param name="children">The kept subjects with their key or position in the new value, each once.</param>

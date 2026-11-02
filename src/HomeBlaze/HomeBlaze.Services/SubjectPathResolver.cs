@@ -258,7 +258,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         if (string.IsNullOrEmpty(path))
             return baseSubject;
 
-        var registry = baseSubject.Context.TryGetService<ISubjectRegistry>();
+        var registry = baseSubject.TryGetContext()?.TryGetService<ISubjectRegistry>();
         if (registry == null)
             return null;
 
@@ -357,7 +357,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         if (subject == root)
             return ["/"];
 
-        var registry = subject.Context.TryGetService<ISubjectRegistry>();
+        var registry = subject.TryGetContext()?.TryGetService<ISubjectRegistry>();
         if (registry == null)
             return Array.Empty<string>();
 

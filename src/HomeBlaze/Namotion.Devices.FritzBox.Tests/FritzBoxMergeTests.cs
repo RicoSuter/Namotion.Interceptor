@@ -140,7 +140,7 @@ public class FritzBoxMergeTests
         var laptop = router.Clients[Snapshots.Laptop];
         var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
         var changes = new List<(bool? IsPresent, bool IsAttached)>();
-        using var subscription = ((IInterceptorSubject)router).Context
+        using var subscription = ((IInterceptorSubject)router).GetContext()
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change =>
             {
@@ -315,7 +315,7 @@ public class FritzBoxMergeTests
         var clients = router.Clients;
         var hosts = Snapshots.Hosts().Select(host => host.MacAddress == Snapshots.Phone ? host with { IsActive = true } : host).ToList();
         var changes = new List<SubjectPropertyChange>();
-        using var subscription = ((IInterceptorSubject)router).Context
+        using var subscription = ((IInterceptorSubject)router).GetContext()
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(changes.Add);
 
@@ -400,7 +400,7 @@ public class FritzBoxMergeTests
     private static FritzBox CreateRouter()
     {
         var router = new FritzBox(NullLogger<FritzBox>.Instance);
-        ((IInterceptorSubject)router).Context.AddFallbackContext(InterceptorSubjectContext
+        ((IInterceptorSubject)router).AttachToContext(InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry());

@@ -1044,6 +1044,7 @@ namespace HomeBlaze.Components
     public class Widget : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public Widget(HomeBlaze.Services.SubjectPathResolver pathResolver) { }
+        public Widget(HomeBlaze.Services.SubjectPathResolver pathResolver, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(Namotion.Interceptor.IInterceptorSubject))]
         public string Path { get; set; }

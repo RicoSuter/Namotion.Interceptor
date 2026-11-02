@@ -21,7 +21,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 // announces a child that is still dormant.
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
 [RunsBefore(typeof(LifecycleInterceptor))]
-public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor
+public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor,
+    ISingletonContextService<PropertyChangeInterceptor>
 {
     private readonly Lock _modificationLock = new();
 
@@ -149,30 +150,52 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// A downstream failure after a truthful <see cref="PropertyWriteContext{TProperty}.IsWritten"/>
+    /// marker still publishes the committed change. Publication failure is aggregated after the
+    /// original failure. A failure before commit publishes nothing.
+    /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         // Pre-commit gate only selects the dispatch path; listener RESOLUTION is post-commit
         // (see ResolveListeners), so an install racing this write is never missed.
-        if (_dispatchState is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
+        var useLateDispatch = _dispatchState is null && PropertyChangeSubscriptions.ReadSubscriptionCount() == 0;
+        try
         {
             next(ref context);
+        }
+        catch (Exception writeFailure) when (context.IsWritten)
+        {
+            try
+            {
+                DispatchLateConsumers(ref context);
+            }
+            catch (Exception publicationFailure)
+            {
+                throw new AggregateException(writeFailure, publicationFailure);
+            }
+
+            throw;
+        }
+
+        if (useLateDispatch)
+        {
             DispatchLateConsumers(ref context);
             return;
         }
-
-        next(ref context);
 
         if (!context.IsWritten)
         {
             return; // vetoed by an inner interceptor: nothing was stored, publish nothing
         }
 
-        // Resolved during unwind; the innermost aggregated instance resolves first and marks
-        // the shared write context so outer instances skip.
+        // Resolved during unwind, once per write: the singleton contract guarantees one instance
+        // of this interceptor per chain.
         var listeners = ResolveListeners(ref context);
 
         // Re-read post-commit so a subscription installed mid-write is delivered; a full fence
-        // already ran on this thread (ResolveListeners here or in an inner aggregated instance).
+        // already ran on this thread (inside ResolveListeners).
         var state = _dispatchState;
         var subscriptions = state?.QueueSubscriptions ?? [];
         var syncSubject = state?.SyncSubject;
@@ -191,26 +214,37 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.GetFinalValue(),
             context.Revision);
 
-        DispatchChange(subscriptions, syncSubject, listeners, in change);
+        Publish(new Publication(change, subscriptions, syncSubject, listeners));
     }
 
-    private static void DispatchChange(
-        PropertyChangeQueueSubscription[] subscriptions,
-        ISubject<SubjectPropertyChange>? syncSubject,
-        PropertyChangeSubscription[]? listeners,
-        in SubjectPropertyChange change)
+    internal readonly record struct Publication(
+        SubjectPropertyChange Change,
+        PropertyChangeQueueSubscription[] QueueSubscriptions,
+        ISubject<SubjectPropertyChange>? SyncSubject,
+        PropertyChangeSubscription[]? Listeners)
     {
-        for (var i = 0; i < subscriptions.Length; i++)
+        public void Dispatch()
         {
-            subscriptions[i].Enqueue(in change);
+            var change = Change;
+            foreach (var subscription in QueueSubscriptions) subscription.Enqueue(in change);
+            SyncSubject?.OnNext(change);
+            if (Listeners is not null)
+            {
+                PropertyChangeSubscription.Dispatch(Listeners, in change);
+            }
+        }
+    }
+
+    // By reference throughout the queueing seam: the publication carries a whole property change and
+    // is large enough that passing it by value copies it once per hop between here and the queue.
+    private static void Publish(in Publication publication)
+    {
+        if (publication.Change.Property.Subject.TryGetContext()?.TryGetLifecycleInterceptor()?.TryQueuePropertyChange(in publication) == true)
+        {
+            return;
         }
 
-        syncSubject?.OnNext(change);
-
-        if (listeners is not null)
-        {
-            PropertyChangeSubscription.Dispatch(listeners, in change);
-        }
+        publication.Dispatch();
     }
 
     /// <summary>
@@ -227,8 +261,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
         var listeners = ResolveListeners(ref context);
 
-        // Channel state re-read behind the fence (ResolveListeners fenced on this thread, or an
-        // inner aggregated instance did): pairs with the fence after the channel install.
+        // Channel state re-read behind the fence (ResolveListeners fenced on this thread): pairs
+        // with the fence after the channel install.
         var state = _dispatchState;
         if (state is null && listeners is null)
         {
@@ -245,40 +279,17 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             finalValue,
             context.Revision);
 
-        if (state is not null)
-        {
-            var subscriptions = state.QueueSubscriptions;
-            for (var i = 0; i < subscriptions.Length; i++)
-            {
-                subscriptions[i].Enqueue(in change);
-            }
-
-            state.SyncSubject?.OnNext(change);
-        }
-
-        if (listeners is not null)
-        {
-            PropertyChangeSubscription.Dispatch(listeners, in change);
-        }
+        Publish(new Publication(change, state?.QueueSubscriptions ?? [], state?.SyncSubject, listeners));
     }
 
-    // Post-commit listener resolution, shared by both entry paths and performed once per write:
-    // the innermost aggregated instance resolves (whether or not listeners exist) and marks the
-    // per-write context so outer instances skip. A listener installed after this resolution is
-    // not owed the write (it committed before the install; the post-subscribe read observes it).
-    // The flag needs no fence (by-ref context on the writing thread) and the instance that sets
-    // it always executes the fence, which the channel state re-reads rely on; the count read
-    // must stay BEHIND the fence (Dekker read side pairing with subscription install).
+    // Post-commit listener resolution, shared by the two mutually exclusive entry paths and
+    // therefore performed once per write. A listener installed after this resolution is not owed
+    // the write (it committed before the install; the post-subscribe read observes it). The fence
+    // is what the channel state re-reads rely on, and the count read must stay BEHIND it (Dekker
+    // read side pairing with subscription install).
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static PropertyChangeSubscription[]? ResolveListeners<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        if (context.ArePropertyObserversResolved)
-        {
-            return null;
-        }
-
-        context.ArePropertyObserversResolved = true;
-
         Interlocked.MemoryBarrier();
         if (PropertyChangeSubscriptions.ReadSubscriptionCount() == 0)
         {

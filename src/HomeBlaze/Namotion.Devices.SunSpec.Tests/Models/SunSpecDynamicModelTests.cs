@@ -125,7 +125,7 @@ public class SunSpecDynamicModelTests
         var model = CreateAttachedModel();
         var power = GetProperty(model, "W");
         var changes = new List<SubjectPropertyChange>();
-        using var subscription = ((IInterceptorSubject)model).Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        using var subscription = ((IInterceptorSubject)model).GetContext().GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change => changes.Add(change));
 
         // Act

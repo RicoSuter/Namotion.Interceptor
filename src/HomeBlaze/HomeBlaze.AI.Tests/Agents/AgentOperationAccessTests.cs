@@ -259,7 +259,7 @@ public class AgentOperationAccessTests
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithParents()
+            .WithLifecycle()
             .WithLifecycle()
             .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),

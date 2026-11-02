@@ -28,7 +28,7 @@ public class SubscriptionTransactionOrderingTests
         var configuration = CreateConfiguration();
         await using var source = CreateClientSource(configuration: configuration);
         var root = (TestRoot)source.RootSubject;
-        var context = source.RootSubject.Context.WithTransactions();
+        var context = source.RootSubject.GetContext().WithTransactions();
         var writer = new AcceptingWriter(source);
         context.AddService<ITransactionWriter>(writer);
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);

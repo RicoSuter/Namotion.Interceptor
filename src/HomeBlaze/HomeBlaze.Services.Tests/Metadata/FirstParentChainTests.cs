@@ -44,17 +44,16 @@ public class FirstParentChainTests
     [InlineData(40)]
     public void WhenFirstParentsFormACycle_ThenTheChainEndsBeforeASubjectComesAgain(int length)
     {
-        // Arrange: subjects that only reference each other keep their first parents in a cycle once the root lets go.
-        var root = new TestContainer(CreateContext());
+        // Arrange: subjects that only reference each other, held in the graph by an anchor on one of them, have
+        // each other as their only parents, so their first parents form a cycle.
         var nodes = Enumerable.Range(0, length).Select(index => new TestContainer { Name = $"Node {index}" }).ToArray();
-        root.Child = nodes[0];
         for (var index = 0; index < length - 1; index++)
         {
             nodes[index].Child = nodes[index + 1];
         }
 
         nodes[^1].Child = nodes[0];
-        root.Child = null;
+        ((IInterceptorSubject)nodes[0]).AttachToContext(CreateContext());
 
         // Act
         var chain = Enumerate(nodes[^1]);

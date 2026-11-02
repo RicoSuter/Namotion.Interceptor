@@ -76,7 +76,7 @@ public class FritzBoxDevicePathTests
     {
         foreach (var subject in subjects)
         {
-            subject.Context.AddFallbackContext(context);
+            subject.AttachToContext(context);
         }
 
         Assert.All(subjects, subject => Assert.NotNull(subject.TryGetRegisteredSubject()));

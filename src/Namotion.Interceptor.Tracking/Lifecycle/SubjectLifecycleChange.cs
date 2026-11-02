@@ -18,7 +18,7 @@ public readonly struct SubjectLifecycleChange
     /// </remarks>
     public object? Index { get; init; }
 
-    /// <summary>Gets the number of properties pointing to the referenced subject.</summary>
+    /// <summary>Gets the number of structural edge occurrences pointing to the referenced subject.</summary>
     public required int ReferenceCount { get; init; }
 
     /// <summary>True when the subject first entered the graph.</summary>
@@ -33,6 +33,4 @@ public readonly struct SubjectLifecycleChange
     /// <summary>True when the subject is leaving the graph.</summary>
     public bool IsContextDetach { get; init; }
 
-    /// <summary>The interceptor that dispatches the removal of a property reference.</summary>
-    internal LifecycleInterceptor? Interceptor { get; init; }
 }

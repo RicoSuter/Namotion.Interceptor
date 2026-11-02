@@ -120,6 +120,7 @@ namespace Namotion.Devices.Luxtronik
         public const int MaximumPollingIntervalSeconds = 3600;
         public const int MinimumPollingIntervalSeconds = 10;
         public LuxtronikHeatPump(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Luxtronik.LuxtronikHeatPump> logger) { }
+        public LuxtronikHeatPump(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Luxtronik.LuxtronikHeatPump> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public string? AvailableSoftwareUpdate { get; }
@@ -242,6 +243,7 @@ namespace Namotion.Devices.Luxtronik.Model
     public class LuxtronikCoolingSmartHomeControl : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public LuxtronikCoolingSmartHomeControl(int baseAddress, Namotion.Devices.Luxtronik.Enums.LuxtronikFunction function) { }
+        public LuxtronikCoolingSmartHomeControl(int baseAddress, Namotion.Devices.Luxtronik.Enums.LuxtronikFunction function, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
         [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
@@ -477,6 +479,7 @@ namespace Namotion.Devices.Luxtronik.Model
     public class LuxtronikMixingCircuit : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public LuxtronikMixingCircuit(int index) { }
+        public LuxtronikMixingCircuit(int index, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=23)]
         public Namotion.Devices.Luxtronik.Model.LuxtronikCoolingSmartHomeControl CoolingSmartHomeControl { get; }
@@ -622,6 +625,7 @@ namespace Namotion.Devices.Luxtronik.Model
     public class LuxtronikPump : HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public LuxtronikPump(int address, string title) { }
+        public LuxtronikPump(int address, string title, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
         [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
@@ -680,6 +684,7 @@ namespace Namotion.Devices.Luxtronik.Model
     public class LuxtronikSmartHomeControl : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public LuxtronikSmartHomeControl(int baseAddress, Namotion.Devices.Luxtronik.Enums.LuxtronikFunction function) { }
+        public LuxtronikSmartHomeControl(int baseAddress, Namotion.Devices.Luxtronik.Enums.LuxtronikFunction function, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
         [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, MinimumFirmware="3.92.0")]
@@ -721,6 +726,7 @@ namespace Namotion.Devices.Luxtronik.Model
     public class LuxtronikTemperatureSensor : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
     {
         public LuxtronikTemperatureSensor(int address, string title, System.Version? minimumFirmwareVersion = null) { }
+        public LuxtronikTemperatureSensor(int address, string title, System.Version minimumFirmwareVersion, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public int BaseAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]

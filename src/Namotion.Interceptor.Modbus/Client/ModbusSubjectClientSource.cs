@@ -25,7 +25,7 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
     private int _disposed;
 
     internal ModbusSubjectClientSource(IInterceptorSubject subject, ModbusClientConfiguration configuration, ILogger logger)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime)
+        : base(subject.GetContext(), logger, configuration.BufferTime, configuration.RetryTime)
     {
         configuration.Validate();
 

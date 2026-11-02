@@ -19,7 +19,7 @@ public class SubjectTableRowsTests
         .Create()
         .WithFullPropertyTracking()
         .WithRegistry()
-        .WithParents()
+        .WithLifecycle()
         .WithLifecycle()
         .WithService<IPropertyLifecycleHandler>(
             () => new PropertyAttributeInitializer(),

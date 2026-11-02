@@ -24,6 +24,7 @@ namespace Namotion.Devices.FritzBox
         public const int MaximumIntervalSeconds = 3600;
         public const int MinimumIntervalSeconds = 5;
         public FritzBox(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.FritzBox.FritzBox> logger) { }
+        public FritzBox(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.FritzBox.FritzBox> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=960)]
         public System.Collections.Generic.Dictionary<string, Namotion.Devices.FritzBox.FritzBoxAccessPoint> AccessPoints { get; }
         public string? AvailableSoftwareUpdate { get; }
@@ -117,6 +118,7 @@ namespace Namotion.Devices.FritzBox
     public class FritzBoxAccessPoint : HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public FritzBoxAccessPoint(string macAddress) { }
+        public FritzBoxAccessPoint(string macAddress, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public string? AvailableSoftwareUpdate { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=404)]
         [Namotion.Interceptor.Attributes.Derived]
@@ -165,6 +167,7 @@ namespace Namotion.Devices.FritzBox
     public class FritzBoxClient : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Sensors.IPresenceSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public FritzBoxClient(string macAddress) { }
+        public FritzBoxClient(string macAddress, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=404)]
         [System.ComponentModel.Category("Network")]
         public string? AccessPointMacAddress { get; }
@@ -250,6 +253,7 @@ namespace Namotion.Devices.FritzBox
     public class FritzBoxGuestWlan : Namotion.Devices.FritzBox.FritzBoxWlan, HomeBlaze.Abstractions.Devices.ISwitchController, Namotion.Interceptor.IInterceptorSubject
     {
         public FritzBoxGuestWlan(Namotion.Devices.FritzBox.FritzBox router, string serviceType) { }
+        public FritzBoxGuestWlan(Namotion.Devices.FritzBox.FritzBox router, string serviceType, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
         public System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -278,6 +282,7 @@ namespace Namotion.Devices.FritzBox
     public class FritzBoxWlan : HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public FritzBoxWlan(string role, string serviceType) { }
+        public FritzBoxWlan(string role, string serviceType, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=402)]
         public string? Band { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=403)]

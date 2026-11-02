@@ -88,7 +88,7 @@ dept.Employees = [person1, person2];  // person1, person2 attached to graph
 dept.Employees = [person3];           // person1, person2 detached; person3 attached
 ```
 
-With `WithContextInheritance()`, attached subjects inherit the parent's context.
+Attached subjects inherit the graph's context. This is intrinsic to the lifecycle rather than a separate opt-in.
 
 ## ⚠️ Initialize All Properties in Constructors
 
@@ -144,6 +144,31 @@ public partial class Entity : INamed
 ```
 
 A **non-partial** explicit implementation is supported and does appear in the subject's property metadata, keyed by the member's simple name, but it is not intercepted. Use it for values that are fixed or computed rather than tracked, and put attributes on the interface member rather than on the implementation. See [Interface Default Properties](generator.md#interface-default-properties) in the generator reference for that shape and the diagnostics around it.
+
+### Lazily Self-Initialising Properties Holding Subjects
+
+A property that is not `partial` is not intercepted, so it carries no ownership edge even when its type holds subjects.
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    // ❌ Compiles and reads fine, tracks nothing. Not partial, so not intercepted, so no
+    // ownership edge: the axes are never attached, never registered and never given a lifecycle
+    // callback, the getter is not even called during attach, and nothing warns.
+    // public Axis[] Axes => _axes ??= [new Axis()];
+
+    // ✅ Declare it partial and fill it in the constructor
+    public partial Axis[] Axes { get; set; }
+
+    public Machine()
+    {
+        Axes = [new Axis()];
+    }
+}
+```
+
+A generated `partial` property cannot be lazy either, because the generator writes the getter. See [Structural Properties and Lazy Getters](tracking.md#structural-properties-and-lazy-getters) for the two shapes where a lazy getter is supported, and why `??=` is required there rather than merely allowed.
 
 ### Abstract Properties
 
@@ -440,7 +465,7 @@ Most other C# patterns (nullable, required, init, virtual, override, data annota
 
 ## Constructor Dependency Injection
 
-Subjects can receive DI-injected services via constructor parameters alongside `IInterceptorSubjectContext`. When you define a constructor that accepts additional parameters, the source generator detects the user-defined constructor and does not generate an additional one.
+Subjects can receive DI-injected services via constructor parameters alongside `IInterceptorSubjectContext`. The generator mirrors every constructor you declare with a second one that appends an `IInterceptorSubjectContext` parameter and attaches the subject, so a type whose only constructor takes dependencies still has a context-taking constructor for dependency injection to select. A constructor you declare yourself always wins over its mirror. Some shapes cannot be mirrored and are skipped silently, so a subject built through one of them is never attached: see [the generator reference](generator.md) for which.
 
 ### Pattern
 

@@ -172,7 +172,7 @@ public class SubscriptionNotificationOrderingTests
     {
         // Arrange
         await using var harness = await Harness.CreateAsync();
-        ((IInterceptorSubject)harness.Root).Context.AddService<IWriteInterceptor>(new ThrowAfterStoreInterceptor("Stored"));
+        ((IInterceptorSubject)harness.Root).GetContext().AddService<IWriteInterceptor>(new ThrowAfterStoreInterceptor("Stored"));
         var name = harness.Track(nameof(TestRoot.Name));
         harness.Notify(sequenceNumber: 5, (name, "Old"));
 

@@ -2,7 +2,7 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Validation
 {
-    public class DataAnnotationsValidator : Namotion.Interceptor.Validation.IPropertyValidator
+    public class DataAnnotationsValidator : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Validation.DataAnnotationsValidator>, Namotion.Interceptor.Validation.IPropertyValidator
     {
         public DataAnnotationsValidator() { }
         public System.Collections.Generic.IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> Validate<TProperty>(in Namotion.Interceptor.Validation.PropertyValidationContext<TProperty> context) { }
@@ -39,11 +39,9 @@ namespace Namotion.Interceptor.Validation
             typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler),
             typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor),
             typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
-    public sealed class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
+    public sealed class ValidationInterceptor : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Validation.ValidationInterceptor>, Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
     {
         public ValidationInterceptor() { }
-        public override bool Equals(object? obj) { }
-        public override int GetHashCode() { }
         public void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context) { }
         public void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }

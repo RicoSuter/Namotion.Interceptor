@@ -294,11 +294,11 @@ public class ConfigurableSubjectSerializer
             return;
         }
 
-        // The context the constructor got from the service provider is a fallback context of the subject.
-        // Removing it is what detaches a subject that no property holds.
+        // The constructor got the context from the service provider and anchored the subject to it
+        // provisionally. Clearing that anchor is what detaches a subject that no property holds.
         if (_serviceProvider.GetService<IInterceptorSubjectContext>() is { } context)
         {
-            subject.Context.RemoveFallbackContext(context);
+            subject.DetachIfProvisionallyAnchored(context);
         }
     }
 

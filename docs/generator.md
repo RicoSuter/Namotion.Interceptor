@@ -44,11 +44,28 @@ public Person() { }
 
 public Person(IInterceptorSubjectContext context) : this()
 {
-    ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+    InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);
 }
 ```
 
-If the first instance constructor the class declares is parameterless, only the context constructor is generated. If it has parameters, no constructor is generated at all, even when a parameterless constructor is declared after it; declare the parameterless constructor first to get the context constructor.
+If a non-obsolete parameterless constructor already exists, only the context constructor is generated. Selection is independent of declaration order, including across partial declarations. The context-only overload is public even when the parameterless constructor is private.
+
+A declared constructor the context alone can call takes precedence and no context-only overload is generated. That covers the exact `Person(IInterceptorSubjectContext)` signature and any constructor whose later parameters are all optional or `params`, such as `Person(IInterceptorSubjectContext context, bool initialize = true)`. Accessibility does not change it. The generated overload would win the call at every site that sees both, so an `internal`, `protected`, `private protected` or `private` declaration is displaced from inside the declaring class or a derived one exactly as a public declaration is from outside. Suppressing the overload is what keeps the hand-written body reachable.
+
+The constructor that takes precedence therefore owns the attach. It has to call `InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional)` itself, or chain to a constructor that does. There is no diagnostic for a body that does not, because the generator cannot tell an intentional detached construction from a forgotten attach, so a subject built through it is silently left detached and reports nothing. This is the same failure as a skipped mirror, described below.
+
+Primary constructors follow the same rules as ordinary constructors, including a parameterless primary constructor and a primary constructor in another partial declaration. Every other declared constructor is mirrored by one that appends an `IInterceptorSubjectContext` parameter, chains to the original and attaches the subject provisionally:
+
+```csharp
+public Person(string name, IInterceptorSubjectContext context) : this(name)
+{
+    InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);
+}
+```
+
+Without it, a subject whose only constructor takes dependencies has no context-taking constructor at all, and dependency injection hands back a permanently detached subject that reports nothing and does nothing.
+
+A constructor you declare yourself always wins: the mirror is skipped when its exact signature already exists. It is also skipped for a constructor that is `static`, carries `[Obsolete]`, already ends in a context parameter, or takes a pointer or a `ref`, `out`, `in`, `params` or `scoped` parameter. For primary constructors, constructor attributes use the `method:` target; `[method: Obsolete]` suppresses its mirror and `[method: SetsRequiredMembers]` is copied to its mirror. The mirror carries parameter types and names only, so optional defaults, parameter attributes and nullable reference annotations are not reproduced on it. In every skipped case there is no diagnostic, so a subject built through that constructor stays detached.
 
 ### Property Implementations
 
@@ -115,6 +132,8 @@ public partial class Person
 }
 ```
 
+Generated property accessors do not provide whole-accessor synchronization. See [Thread Safety](tracking.md#thread-safety) for consumer responsibilities when accessing non-atomic values or implementing hooks.
+
 ### Derived Properties
 
 Properties marked with `[Derived]` are included in the metadata as calculated properties (can be read-only or writable):
@@ -132,6 +151,23 @@ public partial class Rectangle
 ```
 
 When `Width` or `Height` changes, `Area` automatically raises a change notification (requires `WithDerivedPropertyChangeDetection()` on the context).
+
+A derived property establishes an ownership edge only when it is the store of record. The generator gives every partial property a backing field, so a `[Derived]` partial property is the only thing holding whatever is assigned to it and it tracks that subject like any other stored property. A derived property written any other way computes its value from state that lives elsewhere and establishes no edge, so a subject it returns must be stored by some other property, or attached explicitly, or it is never tracked, registered or released:
+
+```csharp
+[Derived]
+public Room? Current => Rooms.FirstOrDefault();  // fine: Rooms owns the room
+
+[Derived]
+public Room Current => _room ??= new Room();     // untracked: nothing owns the room
+
+[Derived]
+public partial Room? Current { get; set; }       // fine: the backing field is the store
+```
+
+The lazily constructing shape is not rejected, it is simply outside the graph: a computed projection acquires no ownership, so the room is never attached, registered or released. With `WithDerivedPropertyChangeDetection()` enabled the getter is evaluated during attach and constructs the room anyway; without it nothing evaluates the getter at all. Scalar derived properties are unaffected either way.
+
+The same lazily constructing shape without `[Derived]` is quieter still: a non-partial property is not intercepted at all, so nothing ever evaluates it. See [Structural Properties and Lazy Getters](tracking.md#structural-properties-and-lazy-getters) for where a lazy getter is supported and why it has to cache.
 
 ### Interface Default Properties
 
@@ -517,7 +553,7 @@ Suppressing NI0020 accepts the attribute placement as declared. It only silences
 
 | ID | Severity | Cause | Fix |
 |----|----------|-------|-----|
-| NI0040 | Warning | A member the author plausibly offered as a subject property could not be supported. **A `*WithoutInterceptor` method** is skipped when it has no name before the suffix, is static or generic, takes a plain `ref` or an `out` parameter, has a by-reference return type, is itself an explicit interface implementation, or when its stripped name is one the generated half occupies (`GetPropertyValue`, `SetPropertyValue`, `InvokeMethod`, `GetInstanceProperties`, `PropertyChanged`, `RaisePropertyChanged`, `DefaultProperties`, `Context`, `Data`, `SyncRoot` or `AddProperties`), which is matched on the name alone at any arity. **An explicit interface implementation declared in the subject class** is skipped when the implemented member has no accessor reachable from generated code, or when the reachable accessors narrow to `init` alone, which leaves nothing the generated lambdas can call: an `init` accessor is reachable but can only be called from an object initializer, never from the emitted getter or setter. **Never reported:** a static member, an indexer (class-declared or an interface default), any other interface default member that is unreachable from generated code, and an explicit implementation declared in an interface are never candidates for a subject property and stay silent | Rename the `*WithoutInterceptor` method so the stripped name is free, remove it, adjust its signature, widen the implemented member's accessibility, give the implemented member a reachable `get` or `set` accessor, or drop the explicit implementation |
+| NI0040 | Warning | A member the author plausibly offered as a subject property could not be supported. **A `*WithoutInterceptor` method** is skipped when it has no name before the suffix, is static or generic, takes a plain `ref` or an `out` parameter, has a by-reference return type, is itself an explicit interface implementation, or when its stripped name is one the generated half occupies (`GetPropertyValue`, `SetPropertyValue`, `InvokeMethod`, `GetInstanceProperties`, `PropertyChanged`, `RaisePropertyChanged`, `DefaultProperties`, `Executor`, `Data` or `AddProperties`), which is matched on the name alone at any arity. **An explicit interface implementation declared in the subject class** is skipped when the implemented member has no accessor reachable from generated code, or when the reachable accessors narrow to `init` alone, which leaves nothing the generated lambdas can call: an `init` accessor is reachable but can only be called from an object initializer, never from the emitted getter or setter. **Never reported:** a static member, an indexer (class-declared or an interface default), any other interface default member that is unreachable from generated code, and an explicit implementation declared in an interface are never candidates for a subject property and stay silent | Rename the `*WithoutInterceptor` method so the stripped name is free, remove it, adjust its signature, widen the implemented member's accessibility, give the implemented member a reachable `get` or `set` accessor, or drop the explicit implementation |
 
 Suppressing NI0040 leaves the member skipped: no wrapper or metadata entry is emitted for it. Rename or reshape the member to make it supported.
 
@@ -529,7 +565,7 @@ Suppressing NI0040 leaves the member skipped: no wrapper or metadata entry is em
 | NI0061 | Error | More than one member provides the same simple property name. A class-declared property always takes the name; between colliding interface members, the first one the generator reaches takes it. Explicit overrides of the same interface slot are one member for this purpose, so they do not collide. One error is reported per interface member that ends up unreachable when two or more interface members compete for one name, naming both the member that took the name and the member that was dropped. A class-declared property beating a single explicit implementation, or an interface default of the same name, is resolved silently. The interface scan re-runs at every level of a hierarchy that inherits the colliding interfaces, so one modelling mistake is reported once per subject in the chain, not once overall | Rename one of the colliding members, or suppress the rule to accept the resolution |
 | NI0062 | Warning | The base class is recognized as a subject but does not expose the shared interception members, either because it was built by an older version of the generator or because it is a hand-written class that provides only `DefaultProperties`. The message lists the members that are missing, which is what separates a stale base from one that lacks a single clause. The subject falls back to emitting its own interception members, so it compiles, and properties declared on that base class stay unintercepted | Rebuild the base assembly against the current package version, or make the base class satisfy the contract. Suppressing the rule accepts the fallback and the unintercepted base properties with it. Note that under `TreatWarningsAsErrors` this warning fails the build |
 | NI0063 | Error | The subject, or a class between the subject and its base subject, declares a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties`. The generated bodies call those by simple name, so the declared member can capture the call. The rule matches on the name alone, for any member kind and any signature, because a `new` annotated member of the same shape captures the call with no compiler warning at all | Rename the member. On a class between the two subjects, a `private` member of that name is not reported, because it neither hides nor binds |
-| NI0064 | Error | A class anywhere in the subject's base chain declares a public member that implements `IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties`, or implements one of those explicitly. Every subject re-lists `IInterceptorSubject`, which recomputes the interface map, so that member takes the slot from the base class implementation. Below the subject's base subject the report is unconditional; at that class and above it, the member is only reported when a class further up already implements the same member, which is what keeps a hand-written subject root deriving from `object` quiet. A same-named member that does not match the interface member's type and signature is not reported, and neither is an `override`, which occupies the slot it already had | Rename the member, or remove the explicit implementation and let the inherited one stand. See [Hierarchy Hazards](#hierarchy-hazards) |
+| NI0064 | Error | A class anywhere in the subject's base chain declares a public member that implements `IInterceptorSubject.Executor`, `Data` or `AddProperties`, or implements one of those explicitly. Every subject re-lists `IInterceptorSubject`, which recomputes the interface map, so that member takes the slot from the base class implementation. Below the subject's base subject the report is unconditional; at that class and above it, the member is only reported when a class further up already implements the same member, which is what keeps a hand-written subject root deriving from `object` quiet. A same-named member that does not match the interface member's type and signature is not reported, and neither is an `override`, which occupies the slot it already had | Rename the member, or remove the explicit implementation and let the inherited one stand. See [Hierarchy Hazards](#hierarchy-hazards) |
 | NI0065 | Error | A subject declares a property, or an explicit interface implementation, whose name an ancestor subject already exposes. Two members then share one key: the metadata can read only one, both stay writable through a differently typed reference, and both raise changes under that name. Not reported for an `override`, which shares one slot, nor when the hidden member is on a class that does not carry `[InterceptorSubject]`, including a hand-written base that satisfies the subject base contract and does contribute a property set. A declaration that also fails to take an interface slot reports NI0065 alone; NI0060 stands down on that property name, including when NI0065 is suppressed | Rename one of the two, or, where the declaration can carry `override`, make the ancestor property `virtual` and `override` it instead. Several shapes cannot, an explicit interface implementation among them, and renaming is then the only remedy |
 
 All rules in this group except NI0062 are errors, and none stops generation. Suppression leaves the semantic problem in place: an unreachable member (NI0060, NI0061, NI0065), a captured generated call (NI0063), or a hijacked interface slot (NI0064). Suppressing NI0062 accepts the fallback in which base-declared properties are not intercepted. When NI0061 concerns colliding members in interfaces you do not own, suppression can be the intended resolution because renaming those members is unavailable.
@@ -616,13 +652,11 @@ Emitting the interception members once per hierarchy means a derived subject inh
 
 ### A member in a derived class can take an interface slot
 
-C# only allows an explicit interface implementation in a class that lists the interface itself (CS0540), and each subject has to keep its own `IInterceptorSubject.Properties`, so every subject re-lists `IInterceptorSubject`. Re-listing recomputes the interface map for that class. A public member in a derived class, or in a plain class between two subjects, that matches `Context`, `Data`, `SyncRoot` or `AddProperties` therefore takes the slot away from the base class implementation. So does one in the base subject itself, or in any class above it, whenever a class further up already implements that member: the explicit implementation that would beat a public member only beats one in its own class, so it never protects a hijacker below it.
+C# only allows an explicit interface implementation in a class that lists the interface itself (CS0540), and each subject has to keep its own `IInterceptorSubject.Properties`, so every subject re-lists `IInterceptorSubject`. Re-listing recomputes the interface map for that class. A public member in a derived class, or in a plain class between two subjects, that matches `Executor`, `Data` or `AddProperties` therefore takes the slot away from the base class implementation. So does one in the base subject itself, or in any class above it, whenever a class further up already implements that member: the explicit implementation that would beat a public member only beats one in its own class, so it never protects a hijacker below it.
 
-The explicit form counts too, and the check does not treat it as safer. Because CS0540 forces the class to list `IInterceptorSubject` itself, and listing it is exactly what makes that class the subject's base subject, an explicit `IInterceptorSubject.Context` on a hand-written class in the chain is the normal way this goes wrong rather than an exception to it.
+The explicit form counts too, and the check does not treat it as safer. Because CS0540 forces the class to list `IInterceptorSubject` itself, and listing it is exactly what makes that class the subject's base subject, an explicit `IInterceptorSubject.Executor` on a hand-written class in the chain is the normal way this goes wrong rather than an exception to it.
 
-Taking `Context` is the severe case: the inherited helpers keep reading the root's field, which nothing populates any more, so interception stops without an error and the property values still look correct. NI0064 turns the whole shape into a build error, so this is caught at compile time.
-
-A derived subject declaring `public object SyncRoot { get; }` is therefore NI0064, even though the member it takes over is one it never declared.
+Taking `Executor` is the severe case: the inherited helpers keep reading the root's field, which nothing populates any more, so interception stops without an error and the property values still look correct. NI0064 turns the whole shape into a build error, so this is caught at compile time.
 
 ### A base class can hijack a slot later, without the consuming assembly being rebuilt
 
@@ -728,6 +762,8 @@ The generator is optimized for performance:
    var person = new Person(context);  // Not: new Person()
    ```
 
+4. If the class declares its own constructor that the context alone can call, check that its body attaches the context. No overload is generated for that call, so nothing else does it. See [Constructors](#constructors).
+
 ## Hand-written base classes and subclasses
 
 Everything above this point is handled by the generator. This section covers the two hand-written directions: a base class you write yourself that hosts generated subclasses, and a subclass you write yourself under a generated base class. Both are advanced and demand a lot of ceremony, so reach for them only when a generated class on both sides is not an option. [Subject Design Guidelines](subject-guidelines.md) covers the ordinary cases.
@@ -741,7 +777,7 @@ A class can host generated subclasses when it exposes all of the following. A ge
 | implements `IInterceptorSubject` | everything else |
 | implements `IRaisePropertyChanged`, on the base class or on the subject | the subject not re-declaring `PropertyChanged` and `RaisePropertyChanged` |
 | `protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)` | generated getters |
-| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters |
+| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters, which always infer `TProperty` as the declared property type |
 | `protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)` | generated method wrappers |
 | `protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()` | the subject's own `IInterceptorSubject.Properties` |
 | `public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties` | merging the subject's properties with the base class ones |
@@ -771,7 +807,7 @@ using Namotion.Interceptor.Interceptors;
 
 public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
 {
-    private IInterceptorExecutor? _context;
+    private IInterceptorExecutor? _executor;
     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -779,20 +815,19 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-    IInterceptorSubjectContext IInterceptorSubject.Context
-        => InterceptorExecutor.GetOrCreate(ref _context, this);
+    IInterceptorExecutor IInterceptorSubject.Executor
+        => InterceptorExecutor.GetOrCreate(ref _executor, this);
 
     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-
-    object IInterceptorSubject.SyncRoot { get; } = new object();
 
     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
         => GetInstanceProperties() ?? DefaultProperties;
 
     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
-        => _properties = ((IInterceptorSubject)this).Properties
-            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-            .ToFrozenDictionary();
+    {
+        ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistration(
+            this, properties, published => _properties = published));
+    }
 
     public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
         = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
@@ -800,23 +835,26 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
     protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
     protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-        => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+        => _executor is not null ? _executor.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
     protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue,
         Action<IInterceptorSubject, TProperty> setValue)
     {
-        if (_context is null)
+        if (_executor is null)
         {
             setValue(this, newValue);
             return true;
         }
 
-        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+        // Declared-type entry: TProperty is the declared property type here, because every
+        // generated setter infers it from the property. A hand-written caller must do the same,
+        // or route through IInterceptorExecutor.SetPropertyValue instead.
+        return _executor.SetDeclaredPropertyValue(propertyName, newValue, currentValue, setValue);
     }
 
     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod,
         params object?[] parameters)
-        => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+        => _executor is not null ? _executor.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
 }
 
 [InterceptorSubject]
@@ -830,9 +868,9 @@ public partial class Machine : TrackedEntityBase
 
 The list above is checked by looking at member signatures, which cannot see what the members do. Three requirements are behavioural, and a base class that gets one of them wrong passes every check and then misbehaves at runtime.
 
-1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its own `DefaultProperties` and not from its own backing field, and it must store the result in the field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's `DefaultProperties` on the first call, so the subject loses its own generated properties.
-2. **The three helpers must route through the same executor that `IInterceptorSubject.Context` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and then writes look fine while no interceptor ever sees them.
-3. **`IInterceptorSubject.Context` must return an `IInterceptorExecutor` built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, and other parts of the library cast `Context` to `IInterceptorExecutor` without checking, so a borrowed or shared context misroutes every property reference.
+1. **`AddProperties` must hand the batch to `((IInterceptorSubject)this).Executor.AddProperties`**, passing a `SubjectPropertyRegistration` whose publish callback stores into the field that `GetInstanceProperties()` returns. Merging the dictionary directly still compiles and still makes the properties visible, but it bypasses the lifecycle: no ownership edges, no `IPropertyLifecycleHandler.AttachProperty`, no registry entry, and a duplicate name silently overwrites instead of throwing. Nothing reports it. The registration performs the merge itself, starting from `((IInterceptorSubject)this).Properties` so it picks up the most derived `DefaultProperties` rather than this class's own.
+2. **The three helpers that reach the executor must route through the same one `IInterceptorSubject.Executor` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy interception members were introduced to fix: writes look fine and no interceptor ever sees them.
+3. **`IInterceptorSubject.Executor` must return an executor built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, so a borrowed or shared executor misroutes every property reference.
 
 ### Writing a subclass by hand
 
@@ -881,6 +919,6 @@ public class CustomDevice : Device
 }
 ```
 
-One thing to avoid anywhere below a subject: do not declare a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties` for something else, and do not implement `IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties` yourself. Either one takes over what the base class provides. Where a generated subject declares such a member, or sits below a class that does, the generator reports NI0063 or NI0064.
+One thing to avoid anywhere below a subject: do not declare a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties` for something else, and do not implement `IInterceptorSubject.Executor`, `Data` or `AddProperties` yourself. Either one takes over what the base class provides. Where a generated subject declares such a member, or sits below a class that does, the generator reports NI0063 or NI0064.
 
 A hand-written class with no subject below it is not scanned by the generator at all, so no NI0063 reaches it. The compiler covers that case instead. The four helpers are `protected`, so a member that genuinely hides one of them is CS0108, and `TreatWarningsAsErrors` turns that into a build error: a method with the same signature as one of the four, or a field, property or event named `InvokeMethod` or `GetInstanceProperties`, the two helpers that are not generic. Add `new` where the hiding is intended, or rename the member. An overload that differs in signature stays silent, and there it is also harmless, because the generated calls sit in the subject's own file above such a class. See [Hierarchy Hazards](generator.md#hierarchy-hazards) for why it matters.

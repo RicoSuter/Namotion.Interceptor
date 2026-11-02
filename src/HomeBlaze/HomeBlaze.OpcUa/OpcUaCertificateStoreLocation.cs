@@ -14,7 +14,7 @@ internal static class OpcUaCertificateStoreLocation
     /// </summary>
     public static string? Resolve(IInterceptorSubject subject, string role)
     {
-        var dataDirectory = subject.Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
+        var dataDirectory = subject.TryGetContext()?.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
         return dataDirectory is null ? null : Path.Combine(dataDirectory, "OpcUa", role, "Pki");
     }
 }

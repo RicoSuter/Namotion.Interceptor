@@ -146,7 +146,7 @@ else
         {
             // The filter runs inside the write, where it still meets _isSaving for what the editor sets and sets
             // back itself. What passes is handled off the write, which every other writer of the context waits for.
-            _changeSubscription = Subject.Context
+            _changeSubscription = Subject.GetContext()
                 .GetPropertyChangeObservable(ImmediateScheduler.Instance)
                 .Where(change => change.Property.Subject == Subject && !_isSaving)
                 .ObserveOn(Scheduler.Default)

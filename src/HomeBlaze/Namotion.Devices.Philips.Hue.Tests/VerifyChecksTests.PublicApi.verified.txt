@@ -15,6 +15,7 @@ namespace Namotion.Devices.Philips.Hue
         public const int MaximumIntervalSeconds = 3600;
         public const int MinimumIntervalSeconds = 5;
         public HueBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Philips.Hue.HueBridge> logger) { }
+        public HueBridge(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Philips.Hue.HueBridge> logger, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
         public string? AppKey { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -72,6 +73,7 @@ namespace Namotion.Devices.Philips.Hue
     public class HueButton : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Inputs.IButtonDevice, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>
     {
         public HueButton(string name, HueApi.Models.ButtonResource buttonResource, Namotion.Devices.Philips.Hue.HueButtonDevice buttonDevice, bool initialization) { }
+        public HueButton(string name, HueApi.Models.ButtonResource buttonResource, Namotion.Devices.Philips.Hue.HueButtonDevice buttonDevice, bool initialization, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public System.DateTimeOffset? ButtonChangeDate { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public HomeBlaze.Abstractions.Inputs.ButtonState? ButtonState { get; }
@@ -100,6 +102,7 @@ namespace Namotion.Devices.Philips.Hue
     public class HueButtonDevice : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, Namotion.Interceptor.IInterceptorSubject, System.IDisposable
     {
         public HueButtonDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, HueApi.Models.DevicePower? devicePower, HueApi.Models.ButtonResource[] buttons, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public HueButtonDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity zigbeeConnectivity, HueApi.Models.DevicePower devicePower, HueApi.Models.ButtonResource[] buttons, Namotion.Devices.Philips.Hue.HueBridge bridge, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public decimal? BatteryLevel { get; }
@@ -116,6 +119,7 @@ namespace Namotion.Devices.Philips.Hue
     public class HueDevice : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.IUnknownDevice, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public HueDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public HueDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity zigbeeConnectivity, Namotion.Devices.Philips.Hue.HueBridge bridge, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public Namotion.Devices.Philips.Hue.HueBridge Bridge { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
@@ -175,6 +179,7 @@ namespace Namotion.Devices.Philips.Hue
     public class HueGroup : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.Devices.Light.IBrightnessController, HomeBlaze.Abstractions.Devices.Light.IBrightnessState, HomeBlaze.Abstractions.Devices.Light.IColorController, HomeBlaze.Abstractions.Devices.Light.IColorState, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureController, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureState, HomeBlaze.Abstractions.Devices.Light.ILightbulb, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.IVirtualSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public HueGroup(HueApi.Models.HueResource group, HueApi.Models.GroupedLight? groupedLight, Namotion.Devices.Philips.Hue.HueLightbulb[] lights, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public HueGroup(HueApi.Models.HueResource group, HueApi.Models.GroupedLight groupedLight, Namotion.Devices.Philips.Hue.HueLightbulb[] lights, Namotion.Devices.Philips.Hue.HueBridge bridge, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public Namotion.Devices.Philips.Hue.HueBridge Bridge { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
@@ -224,6 +229,7 @@ namespace Namotion.Devices.Philips.Hue
     public class HueLightbulb : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.Devices.Light.IBrightnessController, HomeBlaze.Abstractions.Devices.Light.IBrightnessState, HomeBlaze.Abstractions.Devices.Light.IColorController, HomeBlaze.Abstractions.Devices.Light.IColorState, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureController, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureState, HomeBlaze.Abstractions.Devices.Light.ILightbulb, HomeBlaze.Abstractions.Sensors.IPowerSensor, Namotion.Interceptor.IInterceptorSubject
     {
         public HueLightbulb(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, HueApi.Models.Light light, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public HueLightbulb(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity zigbeeConnectivity, HueApi.Models.Light light, Namotion.Devices.Philips.Hue.HueBridge bridge, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public decimal? Brightness { get; }
@@ -273,6 +279,7 @@ namespace Namotion.Devices.Philips.Hue
     public class HueMotionDevice : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Sensors.ILightSensor, HomeBlaze.Abstractions.Sensors.IPresenceSensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject
     {
         public HueMotionDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity? zigbeeConnectivity, HueApi.Models.DevicePower? devicePower, HueApi.Models.Sensors.TemperatureResource? temperature, HueApi.Models.Sensors.LightLevelResource? lightLevel, HueApi.Models.Sensors.MotionResource motion, Namotion.Devices.Philips.Hue.HueBridge bridge) { }
+        public HueMotionDevice(HueApi.Models.Device device, HueApi.Models.ZigbeeConnectivity zigbeeConnectivity, HueApi.Models.DevicePower devicePower, HueApi.Models.Sensors.TemperatureResource temperature, HueApi.Models.Sensors.LightLevelResource lightLevel, HueApi.Models.Sensors.MotionResource motion, Namotion.Devices.Philips.Hue.HueBridge bridge, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public decimal? BatteryLevel { get; }

@@ -155,7 +155,7 @@ public class EcowittGatewaySensorsTests
 
         // Assert
         Assert.Null(removed.TryGetRegisteredSubject());
-        Assert.Null(((IInterceptorSubject)removed).Context.TryGetService<ILifecycleInterceptor>());
+        Assert.Null(((IInterceptorSubject)removed).TryGetContext()?.TryGetService<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -174,10 +174,10 @@ public class EcowittGatewaySensorsTests
         var added = gateway.Sensors["0x51C"];
         Assert.False(gateway.Sensors.ContainsKey(OnlineWh68));
         Assert.Null(removed.TryGetRegisteredSubject());
-        Assert.Null(((IInterceptorSubject)removed).Context.TryGetService<ILifecycleInterceptor>());
+        Assert.Null(((IInterceptorSubject)removed).TryGetContext()?.TryGetService<ILifecycleInterceptor>());
         Assert.Same(added, gateway.OutdoorSensor!.Sources["0x51C"]);
         Assert.Equal(2, added.TryGetRegisteredSubject()!.Parents.Length);
-        Assert.NotNull(((IInterceptorSubject)added).Context.TryGetService<ILifecycleInterceptor>());
+        Assert.NotNull(((IInterceptorSubject)added).TryGetContext()?.TryGetService<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -354,7 +354,7 @@ public class EcowittGatewaySensorsTests
         Assert.Empty(gateway.Sensors);
         Assert.Null(gateway.OutdoorSensor);
         Assert.Null(sensor.TryGetRegisteredSubject());
-        Assert.Null(((IInterceptorSubject)sensor).Context.TryGetService<ILifecycleInterceptor>());
+        Assert.Null(((IInterceptorSubject)sensor).TryGetContext()?.TryGetService<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -465,7 +465,7 @@ public class EcowittGatewaySensorsTests
             "\"id\":\"51B\",\"batt\":\"5\",\"rssi\":\"-75\",\"signal\":\"4\"",
             "\"id\":\"51B\",\"batt\":\"9\",\"rssi\":\"--\",\"signal\":\"--\"");
         var changes = new List<string?>();
-        using var subscription = ((IInterceptorSubject)gateway).Context
+        using var subscription = ((IInterceptorSubject)gateway).GetContext()
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change =>
             {
@@ -489,7 +489,7 @@ public class EcowittGatewaySensorsTests
         {
             Clock = clock ?? TimeProvider.System
         };
-        ((IInterceptorSubject)gateway).Context.AddFallbackContext(InterceptorSubjectContext
+        ((IInterceptorSubject)gateway).AttachToContext(InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry());

@@ -148,7 +148,6 @@ public class CommitFailureClassifierTests
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithParents()
             .WithLifecycle()
             .WithSourceTransactions();
 

@@ -71,23 +71,23 @@ public class SubjectFactoryTests
     }
 
     [Fact]
-    public void WhenTypeHasOnlyADependencyInjectionConstructor_ThenTheCreatedSubjectIsDetachedAndDiscardingItDoesNothing()
+    public void WhenTypeHasOnlyADependencyInjectionConstructor_ThenTheMirroredConstructorAttachesItAndDiscardingDetachesIt()
     {
-        // Arrange
+        // Arrange: the generator mirrors the dependency constructor with a trailing context parameter, which
+        // dependency injection picks, so the subject is created anchored provisionally like a context subject.
         using var serviceProvider = CreateServices();
         var factory = serviceProvider.GetRequiredService<SubjectFactory>();
         var registry = GetRegistry(serviceProvider);
         var keptSubject = factory.CreateSubject(typeof(FactoryContextSubject));
         var subject = factory.CreateSubject(typeof(FactoryDependencySubject));
-        var knownSubjects = registry.KnownSubjects.Keys.ToArray();
+        Assert.Contains(subject, registry.KnownSubjects.Keys);
 
         // Act
         factory.DiscardSubject(subject);
 
         // Assert
-        Assert.DoesNotContain(subject, knownSubjects);
-        Assert.Contains(keptSubject, knownSubjects);
-        Assert.Equal(knownSubjects, registry.KnownSubjects.Keys.ToArray());
+        Assert.DoesNotContain(subject, registry.KnownSubjects.Keys);
+        Assert.Contains(keptSubject, registry.KnownSubjects.Keys);
     }
 
     [Fact]

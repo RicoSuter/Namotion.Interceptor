@@ -105,69 +105,6 @@ public class TransactionValidationTests
     }
 
     [Fact]
-    public async Task WhenSubjectContextAndFallbackBothRegisterValidation_ThenCommitIsValidatedOnce()
-    {
-        // Arrange
-        var validator = new RecordingValidator(new MotorSpeedValidator());
-        var transactionContext = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithTransactions()
-            .WithPropertyValidation();
-        var subjectContext = InterceptorSubjectContext
-            .Create()
-            .WithPropertyValidation()
-            .WithService<IPropertyValidator>(() => validator);
-        subjectContext.AddFallbackContext(transactionContext);
-        var motor = new Motor(subjectContext);
-        validator.Calls.Clear();
-
-        // Act
-        using var transaction = await transactionContext.BeginTransactionAsync(
-            TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        motor.MotorSpeed = 150;
-        motor.MaxAllowedSpeed = 200;
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(150, motor.MotorSpeed);
-        Assert.Equal(200, motor.MaxAllowedSpeed);
-        Assert.Equal([nameof(Motor.MotorSpeed), nameof(Motor.MaxAllowedSpeed)], validator.Calls.Select(call => call.Property));
-    }
-
-    [Fact]
-    public async Task WhenValidationIsRegisteredOnTransactionContextAfterBegin_ThenSubjectContextValidationStillChecksTheSet()
-    {
-        // Arrange
-        var transactionContext = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-        var subjectContext = InterceptorSubjectContext
-            .Create()
-            .WithPropertyValidation()
-            .WithService<IPropertyValidator>(() => new MotorSpeedValidator());
-        subjectContext.AddFallbackContext(transactionContext);
-        var good = new Motor(subjectContext);
-        var bad = new Motor(subjectContext);
-        using var transaction = await transactionContext.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort, checkMode: TransactionCheckMode.Deferred);
-        transactionContext.WithPropertyValidation();
-        good.MotorSpeed = 10;
-        bad.MotorSpeed = 150;
-
-        // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionValidationException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
-        transaction.Dispose();
-
-        // Assert
-        Assert.Same(bad, Assert.Single(exception.FailedChanges).Property.Subject);
-        Assert.Equal(0, good.MotorSpeed);
-        Assert.Equal(0, bad.MotorSpeed);
-    }
-
-    [Fact]
     public async Task WhenImmediateAndLimitIsLoweredLater_ThenCommitRejectsFinalSet()
     {
         // Arrange
@@ -386,8 +323,8 @@ public class TransactionValidationTests
         // Act
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        new PropertyReference(motor, nameof(Motor.MotorSpeed)).SetPropertyValueWithInterception(
-            value, motor.MotorSpeed, static (_, _) => { });
+        ((IInterceptorSubject)motor).Executor.SetPropertyValue<object?>(
+            nameof(Motor.MotorSpeed), value, motor.MotorSpeed, static (_, _) => { });
         // Applying null or a value of another type to the int property fails; only the commit check's call matters here.
         await Record.ExceptionAsync(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
@@ -412,8 +349,8 @@ public class TransactionValidationTests
         // Act
         using var transaction = await context.BeginTransactionAsync(
             TransactionFailureHandling.Rollback, checkMode: TransactionCheckMode.Deferred);
-        new PropertyReference(gearbox, nameof(Gearbox.SerialNumber)).SetPropertyValueWithInterception(
-            serialNumber, gearbox.SerialNumber, static (_, _) => { });
+        ((IInterceptorSubject)gearbox).Executor.SetPropertyValue<object?>(
+            nameof(Gearbox.SerialNumber), serialNumber, gearbox.SerialNumber, static (_, _) => { });
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert

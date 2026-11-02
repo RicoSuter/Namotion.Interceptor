@@ -300,12 +300,18 @@ public class SonosHomeTheaterTests
         Assert.False(homeTheater.NightMode);
     }
 
-    private static T Track<T>(T subject) where T : IInterceptorSubject
+    // One context per test: the tracked subjects reference each other, and a subject belongs to one context.
+    private readonly IInterceptorSubjectContext _context = InterceptorSubjectContext
+        .Create()
+        .WithFullPropertyTracking()
+        .WithRegistry();
+
+    private T Track<T>(T subject) where T : IInterceptorSubject
     {
-        subject.Context.AddFallbackContext(InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry());
+        if (subject.TryGetContext() is null)
+        {
+            subject.AttachToContext(_context);
+        }
 
         return subject;
     }

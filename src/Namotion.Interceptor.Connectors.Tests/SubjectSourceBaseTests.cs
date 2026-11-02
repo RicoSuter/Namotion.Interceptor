@@ -43,9 +43,13 @@ public class SubjectSourceBaseTests
             .Returns(ImmutableArray<SourceMonitor>.Empty);
 
         var subjectMock = new Mock<IInterceptorSubject>();
-        subjectMock
-            .Setup(s => s.Context)
+        var executorMock = new Mock<IInterceptorExecutor>();
+        executorMock
+            .Setup(e => e.AttachedContext)
             .Returns(subjectContextMock.Object);
+        subjectMock
+            .Setup(s => s.Executor)
+            .Returns(executorMock.Object);
 
         var updates = new List<string>();
         var source = new TestSubjectSource(subjectMock.Object, subjectContextMock.Object, NullLogger.Instance)
@@ -2152,7 +2156,7 @@ public class SubjectSourceBaseTests
 
         var hold = monitor.DeferWaitCompletion();
         monitor.CompleteSourceRegistration();
-        var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(cancellationToken);
+        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(), cancellationToken);
         Assert.False(poisonWait.IsCompleted);
         Assert.Throws<InvalidOperationException>(() => hold.Dispose());
         return poisonWait;
@@ -2182,9 +2186,13 @@ public class SubjectSourceBaseTests
             .Returns(ImmutableArray<SourceMonitor>.Empty);
 
         var subjectMock = new Mock<IInterceptorSubject>();
-        subjectMock
-            .Setup(s => s.Context)
+        var executorMock = new Mock<IInterceptorExecutor>();
+        executorMock
+            .Setup(e => e.AttachedContext)
             .Returns(subjectContextMock.Object);
+        subjectMock
+            .Setup(s => s.Executor)
+            .Returns(executorMock.Object);
 
         var spawnCount = 0;
         var spawnedTaskCancelled = false;

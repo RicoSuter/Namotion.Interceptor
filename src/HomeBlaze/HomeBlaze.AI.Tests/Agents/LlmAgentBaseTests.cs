@@ -343,7 +343,7 @@ public class LlmAgentBaseTests
         // Arrange
         await using var test = await StartAsync();
         var iconColors = new ConcurrentQueue<string?>();
-        using var subscription = ((IInterceptorSubject)test.Agent).Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        using var subscription = ((IInterceptorSubject)test.Agent).GetContext().GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(change => ReferenceEquals(change.Property.Subject, test.Agent) &&
                              change.Property.Name == nameof(LlmAgentBase.IconColor))
             .Subscribe(change => iconColors.Enqueue(change.GetNewValue<string?>()));
@@ -736,7 +736,7 @@ public class LlmAgentBaseTests
         // Arrange
         await using var test = await StartAsync();
         var busyWhenIdle = new ConcurrentQueue<bool>();
-        using var subscription = ((IInterceptorSubject)test.Agent).Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        using var subscription = ((IInterceptorSubject)test.Agent).GetContext().GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(change => ReferenceEquals(change.Property.Subject, test.Agent) &&
                              change.Property.Name == nameof(LlmAgentBase.StatusMessage) &&
                              change.GetNewValue<string?>() == "Idle")

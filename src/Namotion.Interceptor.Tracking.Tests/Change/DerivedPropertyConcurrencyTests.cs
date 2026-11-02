@@ -59,8 +59,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             car.Tires[0].Pressure = 30;
@@ -103,8 +102,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             var targetTire = car.Tires[0];
@@ -147,8 +145,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
 
@@ -183,8 +180,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         // Act
         var weakTire = CreateCarAndReplaceFirstTire(context);
@@ -395,8 +391,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             car.Tires[0].Pressure = 10;
@@ -483,8 +478,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         var car = new Car(context);
         var pressureCounter = 0;
@@ -537,8 +531,7 @@ public class DerivedPropertyConcurrencyTests
         const int batchSize = 8;
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         var cars = new Car[carCount];
 
@@ -583,8 +576,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         const int subjectPoolSize = 10;
         const int threadCount = 4;
@@ -795,12 +787,15 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenDerivedGetterWritesToSubjectTypedProperty_ThenNoDeadlockAndCorrectValue()
+    public async Task WhenDerivedGetterWritesToSubjectTypedPropertyOnRecalculation_ThenNoDeadlockAndCorrectValue()
     {
         // Regression test: reproduces deadlock between lock(data) and lock(_attachedSubjects).
         //
         // SideEffectPerson.Greeting getter writes to Companion (subject-typed property),
-        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects).
+        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects). The write
+        // The write happens on the recalculation path. Attach-time evaluation runs inside the
+        // derived handler's attach callback, and the model absorbs whatever that write throws, so
+        // attach and re-attach complete and the toggling below keeps producing lock contention.
         //
         // The deadlock (fixed by evaluating getter outside lock(data)):
         //   Thread A: RecalculateDerivedProperty(Greeting) → lock(data_Greeting) → getter
@@ -814,13 +809,13 @@ public class DerivedPropertyConcurrencyTests
         // so setting holder.Person = null triggers detach of all SideEffectPerson properties
         // (including Greeting) under lock(_attachedSubjects).
 
+        var totalSuccessfulWrites = 0;
         for (var i = 0; i < DefaultIterations; i++)
         {
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var holder = new SideEffectHolder(context);
             var person = new SideEffectPerson(context)
@@ -829,6 +824,10 @@ public class DerivedPropertyConcurrencyTests
                 Companion = new Person(context) { FirstName = "Friend" }
             };
             holder.Person = person;
+
+            // The Arrange writes above already recalculate Greeting, so only writes landed during
+            // the concurrent phase count towards proving that phase alive.
+            var successfulWritesBeforeAct = person.SuccessfulCompanionWriteCount;
 
             var barrier = new Barrier(2);
 
@@ -880,8 +879,17 @@ public class DerivedPropertyConcurrencyTests
             Assert.True(completed == work, "Test timed out — possible deadlock");
             await work;
 
+            // Captured before the Greeting read below, which invokes the getter itself and would
+            // otherwise count a write the concurrent phase never produced.
+            totalSuccessfulWrites += person.SuccessfulCompanionWriteCount - successfulWritesBeforeAct;
+
             Assert.Equal($"Hello, {person.Name}", person.Greeting);
         }
+
+        // The getter swallows whatever the nested write throws, so a recalculation path that
+        // stopped landing writes would leave this test green while pinning nothing. At least one
+        // landed write proves the path stayed alive.
+        Assert.True(totalSuccessfulWrites > 0, "No Companion write ever landed; the getter absorbed all of them and the test went vacuous.");
     }
 
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;

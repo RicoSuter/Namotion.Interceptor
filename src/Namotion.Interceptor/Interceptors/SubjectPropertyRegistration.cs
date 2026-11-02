@@ -1,0 +1,129 @@
+using System.Collections.Frozen;
+
+namespace Namotion.Interceptor.Interceptors;
+
+/// <summary>
+/// One <see cref="IInterceptorSubject.AddProperties"/> call in flight: the subject, the caller's
+/// metadata sequence, and the continuation that publishes the complete property lookup. Core owns
+/// the input contract (the sequence is materialized exactly once and duplicate names reject the
+/// outer batch before its publication); the admitting side decides when to force
+/// materialization and when to publish, so it can reject the batch before any state escapes.
+/// </summary>
+/// <remarks>
+/// The input sequence must be synchronous and stable. It is enumerated exactly once, after callback
+/// admission. Same-context topology changes and nested metadata additions from the iterator are
+/// supported; ownership is checked again afterward, and iterator side effects receive no rollback.
+/// The publication continuation is invoked zero times (the
+/// batch was rejected) or exactly once, synchronously, with the complete merged lookup; it must
+/// be exception-free and only assign the lookup. A continuation that mutates other state and then
+/// throws violates the publication contract and no rollback is attempted.
+/// </remarks>
+public sealed class SubjectPropertyRegistration
+{
+    private readonly IEnumerable<SubjectPropertyMetadata> _properties;
+    private readonly Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> _publishProperties;
+    private SubjectPropertyMetadata[]? _materialized;
+    private bool _published;
+
+    /// <summary>
+    /// Creates the registration for one <see cref="IInterceptorSubject.AddProperties"/> call.
+    /// </summary>
+    /// <param name="subject">The subject receiving the properties.</param>
+    /// <param name="properties">The caller's metadata sequence; see the class remarks for its contract.</param>
+    /// <param name="publishProperties">The continuation that assigns the complete merged lookup;
+    /// see the class remarks for its contract.</param>
+    public SubjectPropertyRegistration(
+        IInterceptorSubject subject,
+        IEnumerable<SubjectPropertyMetadata> properties,
+        Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> publishProperties)
+    {
+        Subject = subject;
+        _properties = properties;
+        _publishProperties = publishProperties;
+    }
+
+    /// <summary>Gets the subject receiving the properties.</summary>
+    public IInterceptorSubject Subject { get; }
+
+    /// <summary>
+    /// Materializes the input sequence, on the first call only, and validates that no name in the
+    /// batch collides with an existing property or with another batch entry. A duplicate rejects
+    /// the outer batch before its structural getters run or its lookup is published. Side effects
+    /// performed by the input iterator are not rolled back.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A property name is already defined on the
+    /// subject or appears twice in the batch.</exception>
+    public IReadOnlyList<SubjectPropertyMetadata> GetProperties()
+    {
+        if (_materialized is not null)
+        {
+            return _materialized;
+        }
+
+        var materialized = _properties as SubjectPropertyMetadata[] ?? _properties.ToArray();
+
+        var existingProperties = Subject.Properties;
+        HashSet<string>? batchNames = null;
+        foreach (var metadata in materialized)
+        {
+            if (existingProperties.ContainsKey(metadata.Name) || !(batchNames ??= []).Add(metadata.Name))
+            {
+                throw new InvalidOperationException(
+                    $"A property named '{metadata.Name}' is already defined on the subject " +
+                    $"'{Subject.GetType().Name}' or appears twice in the batch. The whole batch " +
+                    "was rejected and its lookup was not published.");
+            }
+        }
+
+        _materialized = materialized;
+        return materialized;
+    }
+
+    /// <summary>
+    /// Builds the complete merged lookup from the subject's current properties and the materialized
+    /// batch and invokes the publication continuation with it, exactly once. An empty batch
+    /// publishes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The batch is invalid (see
+    /// <see cref="GetProperties"/>) or was already published.</exception>
+    public void Publish()
+    {
+        var batch = GetProperties();
+        if (batch.Count == 0)
+        {
+            return;
+        }
+
+        if (_published)
+        {
+            throw new InvalidOperationException(
+                "The property batch was already published; the publication continuation is invoked at most once.");
+        }
+
+        var existingProperties = Subject.Properties;
+        var merged = new Dictionary<string, SubjectPropertyMetadata>(existingProperties.Count + batch.Count);
+        foreach (var pair in existingProperties)
+        {
+            merged.Add(pair.Key, pair.Value);
+        }
+
+        // Another admission may have published since materialization; reject a collision instead
+        // of replacing metadata that the subject has already exposed.
+        for (var index = 0; index < batch.Count; index++)
+        {
+            var metadata = batch[index];
+            if (merged.ContainsKey(metadata.Name))
+            {
+                throw new InvalidOperationException(
+                    $"A property named '{metadata.Name}' was added to the subject " +
+                    $"'{Subject.GetType().Name}' while this batch was being admitted. " +
+                    "The batch was not published.");
+            }
+
+            merged.Add(metadata.Name, metadata);
+        }
+
+        _published = true;
+        _publishProperties(merged.ToFrozenDictionary());
+    }
+}

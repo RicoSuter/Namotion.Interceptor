@@ -11,7 +11,8 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 /// A target set for the current thread with <see cref="RecordOnCurrentThread"/> takes precedence: while it is set,
 /// reads on that thread go to the target and not to the async scopes.
 /// </summary>
-public class ReadPropertyRecorder : IReadInterceptor
+public class ReadPropertyRecorder : IReadInterceptor,
+    ISingletonContextService<ReadPropertyRecorder>
 {
     private static readonly AsyncLocal<List<ReadPropertyRecorderScope>?> _activeScopes = new();
 

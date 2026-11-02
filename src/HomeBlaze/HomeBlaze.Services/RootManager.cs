@@ -125,9 +125,20 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         using var startup = _context.DeferHostedServiceStarts();
         var root = _serializer.Deserialize(json);
 
-        // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+        // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute).
         Root = root as IInterceptorSubject ?? throw new InvalidOperationException("Failed to deserialize root configuration");
-        Root.Context.AddFallbackContext(_context);
+
+        // The deserializer builds subjects through dependency injection, but a type whose only
+        // constructor takes dependencies gets no generated context-taking constructor, so the root
+        // can arrive here detached. Attach explicitly either way: the application root must survive
+        // every reachability decision, and an explicit anchor also promotes a constructor-attached
+        // root without repeating its attach callbacks. A root that is already explicitly anchored
+        // here is left alone, because re-attaching it throws.
+        Root.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+        if (!ReferenceEquals(attachedContext, _context) || anchor != SubjectAttachmentAnchorKind.Explicit)
+        {
+            Root.AttachToContext(_context);
+        }
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
         _context.AddService(Root);

@@ -83,7 +83,7 @@ public sealed class DocumentationFolderFixture : IDisposable
             EnableFileWatching = false,
             ReconcileIntervalSeconds = 0
         };
-        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)storage).AttachToContext(context);
 
         // Completes when the first pass has created the subject of every file.
         await storage.ConnectAsync(CancellationToken.None);

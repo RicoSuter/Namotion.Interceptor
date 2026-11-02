@@ -173,8 +173,7 @@ public class SubjectInheritanceShapeTests
                     public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
                         new Dictionary<string, SubjectPropertyMetadata>();
 
-                    public object SyncRoot { get; } = new object();
-                    public IInterceptorSubjectContext Context => throw new System.NotSupportedException();
+                    public Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor => throw new System.NotSupportedException();
                     public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
                     public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => DefaultProperties;
                     public void AddProperties(IEnumerable<SubjectPropertyMetadata> properties) { }
@@ -250,7 +249,7 @@ public class SubjectInheritanceShapeTests
         // mode only, unlike the Properties line, which both modes emit identically.
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
-        Assert.DoesNotContain("private IInterceptorExecutor? _context;", generated);
+        Assert.DoesNotContain("private IInterceptorExecutor? _executor;", generated);
         Assert.DoesNotContain("void IInterceptorSubject.AddProperties", generated);
     }
 
@@ -346,6 +345,6 @@ public class SubjectInheritanceShapeTests
         // Assert: the private protected leaf reaches the internal root's protected helpers, so it
         // still takes derived mode through two re-declared containing types.
         Assert.Contains("private protected partial class NestedLeaf : IInterceptorSubject", leaf);
-        Assert.DoesNotContain("private IInterceptorExecutor? _context;", leaf);
+        Assert.DoesNotContain("private IInterceptorExecutor? _executor;", leaf);
     }
 }

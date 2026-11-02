@@ -175,7 +175,7 @@ public class DictionaryIndexTests
     }
 
     [Fact]
-    public void WhenSubjectSitsUnderTwoDictionaryKeys_ThenItIsRegisteredOnceUnderTheFirstKey()
+    public void WhenSubjectSitsUnderTwoDictionaryKeys_ThenItIsRegisteredUnderBothKeys()
     {
         // Arrange
         var child = new TestItem();
@@ -187,9 +187,8 @@ public class DictionaryIndexTests
         };
 
         // Assert
-        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
-        Assert.Equal("Motor", registeredChild.Index);
-        Assert.Equal("Motor", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(["Engine", "Motor"], GetProperty(container, nameof(TestContainer.Items)).Children.Select(c => (string)c.Index!).Order());
+        Assert.Equal(["Engine", "Motor"], child.TryGetRegisteredSubject()!.Parents.Select(p => (string)p.Index!).Order());
     }
 
     [Fact]
@@ -212,7 +211,7 @@ public class DictionaryIndexTests
     }
 
     [Fact]
-    public void WhenSecondKeyIsAddedForSubject_ThenIndexIsTheFirstKeyOfTheNewDictionary()
+    public void WhenSecondKeyIsAddedForSubject_ThenItIsRegisteredUnderBothKeys()
     {
         // Arrange
         var child = new TestItem();
@@ -225,9 +224,8 @@ public class DictionaryIndexTests
         container.Items = new Dictionary<string, TestItem> { ["Motor"] = child, ["Engine"] = child };
 
         // Assert: the same result as attaching the new dictionary from scratch.
-        var registeredChild = Assert.Single(GetProperty(container, nameof(TestContainer.Items)).Children);
-        Assert.Equal("Motor", registeredChild.Index);
-        Assert.Equal("Motor", Assert.Single(child.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(["Engine", "Motor"], GetProperty(container, nameof(TestContainer.Items)).Children.Select(c => (string)c.Index!).Order());
+        Assert.Equal(["Engine", "Motor"], child.TryGetRegisteredSubject()!.Parents.Select(p => (string)p.Index!).Order());
     }
 
     [Fact]
@@ -336,7 +334,7 @@ public class DictionaryIndexTests
     }
 
     [Fact]
-    public void WhenReorderedDictionaryRepeatsASubject_ThenItIsListedOnceAtItsFirstKey()
+    public void WhenReorderedDictionaryRepeatsASubject_ThenItIsListedUnderEachKey()
     {
         // Arrange
         var first = new TestItem();
@@ -351,10 +349,10 @@ public class DictionaryIndexTests
 
         // Assert
         var children = GetProperty(container, nameof(TestContainer.Items)).Children;
-        Assert.Equal(2, children.Length);
-        Assert.Equal("Second", children.Single(c => c.Subject == second).Index);
+        Assert.Equal(3, children.Length);
+        Assert.Equal(["Alias", "Second"], children.Where(c => c.Subject == second).Select(c => (string)c.Index!).Order());
         Assert.Equal("First", children.Single(c => c.Subject == first).Index);
-        Assert.Equal("Second", Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(["Alias", "Second"], second.TryGetRegisteredSubject()!.Parents.Select(p => (string)p.Index!).Order());
     }
 
     [Fact]

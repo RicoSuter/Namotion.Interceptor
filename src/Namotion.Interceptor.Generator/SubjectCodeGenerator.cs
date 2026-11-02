@@ -187,11 +187,15 @@ internal static class SubjectCodeGenerator
             return;
         }
 
-        builder.AppendLine("        private IInterceptorExecutor? _context;");
+        builder.AppendLine("        private IInterceptorExecutor? _executor;");
         builder.AppendLine("        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;");
         builder.AppendLine();
+        // Explicit implementation for the same reason GetInstanceProperties is a method rather
+        // than a property (see EmitHelperMethods): DynamicSubjectFactory turns every reflected
+        // public or protected instance property into an intercepted subject property, so a
+        // non-explicit Executor would become a phantom property on every Castle-proxied subject.
         EmitJsonIgnore(builder, isJsonIgnoreAvailable);
-        builder.AppendLine("        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);");
+        builder.AppendLine("        IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);");
         builder.AppendLine();
         EmitJsonIgnore(builder, isJsonIgnoreAvailable);
         builder.AppendLine("        ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();");
@@ -199,18 +203,15 @@ internal static class SubjectCodeGenerator
         EmitJsonIgnore(builder, isJsonIgnoreAvailable);
         builder.AppendLine("        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;");
         builder.AppendLine();
-        EmitJsonIgnore(builder, isJsonIgnoreAvailable);
-        builder.AppendLine("        object IInterceptorSubject.SyncRoot { get; } = new object();");
-        builder.AppendLine();
         builder.AppendLine("        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)");
         builder.AppendLine("        {");
-        builder.AppendLine("            lock (((IInterceptorSubject)this).SyncRoot)");
-        builder.AppendLine("            {");
-        // Interface dispatch starts the merge from the most-derived property set.
-        builder.AppendLine("                _properties = ((IInterceptorSubject)this).Properties");
-        builder.AppendLine("                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))");
-        builder.AppendLine("                    .ToFrozenDictionary();");
-        builder.AppendLine("            }");
+        // Routed through the executor so an attached subject's lifecycle can admit metadata,
+        // ownership edges and property callbacks as one atomic publication. The registration
+        // context merges from the interface's Properties, which is what lets this method live in
+        // the root: the merge starts from the most derived DefaultProperties instead of this
+        // class's own.
+        builder.AppendLine("            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistration(");
+        builder.AppendLine("                this, properties, published => _properties = published));");
         builder.AppendLine("        }");
         builder.AppendLine();
     }
@@ -337,15 +338,130 @@ internal static class SubjectCodeGenerator
             builder.AppendLine();
         }
 
-        if (metadata.HasOrWillHaveParameterlessConstructor)
+        // A declared constructor that already takes the context alone wins, just like every other
+        // handwritten mirror.
+        if (metadata.HasOrWillHaveParameterlessConstructor && !metadata.HasDeclaredContextConstructor)
         {
             EmitSetsRequiredMembersAttribute(builder, metadata);
             builder.AppendLine($"        public {metadata.ClassName}(IInterceptorSubjectContext context) : this()");
             builder.AppendLine("        {");
-            builder.AppendLine("            ((IInterceptorSubject)this).Context.AddFallbackContext(context);");
+            // A provisional root anchor, not an explicit one: dependency injection selects this
+            // constructor for every subject it builds, and an explicit anchor would make each of
+            // them an unreleasable root. See SubjectAttachmentAnchorKind.
+            builder.AppendLine("            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);");
             builder.AppendLine("        }");
             builder.AppendLine();
         }
+
+        // Mirror every declared constructor with a trailing context parameter. Without the mirror,
+        // a subject whose only constructor takes dependencies has no context-taking constructor,
+        // so dependency injection returns a permanently detached subject with no diagnostic.
+        foreach (var constructor in metadata.Constructors)
+        {
+            if (!ShouldMirror(metadata, constructor))
+            {
+                continue;
+            }
+
+            var contextParameterName = UnusedParameterName("context", constructor);
+            var parameters = string.Join(", ", constructor.Parameters.Select(p => $"{p.FullyQualifiedTypeName} {p.Name}"));
+            var declaredParameters = parameters.Length > 0 ? parameters + ", " : "";
+            var arguments = string.Join(", ", constructor.Parameters.Select(p => p.Name));
+
+            EmitSetsRequiredMembers(builder, constructor);
+            builder.AppendLine($"        {constructor.Accessibility} {metadata.ClassName}({declaredParameters}IInterceptorSubjectContext {contextParameterName}) : this({arguments})");
+            builder.AppendLine("        {");
+            // Provisional, matching the parameterless form above: dependency injection selects
+            // this constructor for every subject it builds, and an explicit anchor would make each
+            // an unreleasable root.
+            builder.AppendLine($"            InterceptorSubjectExtensions.AttachToContext(this, {contextParameterName}, SubjectAttachmentAnchorKind.Provisional);");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+        }
+    }
+
+    /// <summary>
+    /// Repeats [SetsRequiredMembers] on a generated constructor whose ": this(...)" chain targets
+    /// <paramref name="chainedConstructor"/>, which C# requires (CS9039). Emitting it
+    /// unconditionally would instead tell callers the required members are already initialised.
+    /// </summary>
+    private static void EmitSetsRequiredMembers(StringBuilder builder, SubjectConstructor? chainedConstructor)
+    {
+        if (chainedConstructor?.SetsRequiredMembers == true)
+        {
+            builder.AppendLine("        [global::System.Diagnostics.CodeAnalysis.SetsRequiredMembers]");
+        }
+    }
+
+    private const string ContextParameterTypeName = "global::Namotion.Interceptor.IInterceptorSubjectContext";
+
+    private static bool ShouldMirror(SubjectMetadata metadata, SubjectConstructor constructor)
+    {
+        // The context form of the parameterless constructor is already emitted by the block above
+        // whenever the detection saw that constructor; mirroring it again would be a duplicate.
+        if (constructor.Parameters.Count == 0 && metadata.HasOrWillHaveParameterlessConstructor)
+        {
+            return false;
+        }
+
+        // An obsolete constructor is collected only so the collision check below can see its
+        // signature; chaining a mirror to it would raise CS0618 in the generated file.
+        if (constructor.IsObsolete)
+        {
+            return false;
+        }
+
+        // A constructor that already ends in a context parameter would mirror into a two-context
+        // signature that helps nobody.
+        if (constructor.Parameters.Count > 0 &&
+            constructor.Parameters[constructor.Parameters.Count - 1].FullyQualifiedTypeName == ContextParameterTypeName)
+        {
+            return false;
+        }
+
+        // A hand-written constructor with the mirrored signature always wins.
+        return !metadata.Constructors.Any(other => MirrorsSignatureOf(other, constructor));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="other"/> has exactly <paramref name="constructor"/>'s parameter
+    /// types followed by one trailing context parameter.
+    /// </summary>
+    private static bool MirrorsSignatureOf(SubjectConstructor other, SubjectConstructor constructor)
+    {
+        if (other.Parameters.Count != constructor.Parameters.Count + 1 ||
+            other.Parameters[other.Parameters.Count - 1].FullyQualifiedTypeName != ContextParameterTypeName)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < constructor.Parameters.Count; i++)
+        {
+            if (other.Parameters[i].FullyQualifiedTypeName != constructor.Parameters[i].FullyQualifiedTypeName)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A declared parameter may itself be named "context", and a mirror repeating that name would
+    /// not compile.
+    /// </summary>
+    private static string UnusedParameterName(string baseName, SubjectConstructor constructor)
+    {
+        var name = baseName;
+        var suffixLength = 0;
+        // Parameter names keep their escape, and "@context" names the same parameter as "context".
+        while (constructor.Parameters.Any(p => p.Name.TrimStart('@') == name))
+        {
+            suffixLength++;
+            name = baseName + new string('_', suffixLength);
+        }
+
+        return name;
     }
 
     private static void EmitProperties(StringBuilder builder, SubjectMetadata metadata)
@@ -511,27 +627,29 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.GetPropertyValue)}{modifier} TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)");
         builder.AppendLine("        {");
-        builder.AppendLine("            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;");
+        builder.AppendLine("            return _executor is not null ? _executor.GetPropertyValue(propertyName, readValue)! : readValue(this)!;");
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.SetPropertyValue)}{modifier} bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)");
         builder.AppendLine("        {");
-        builder.AppendLine("            if (_context is null)");
+        builder.AppendLine("            if (_executor is null)");
         builder.AppendLine("            {");
         builder.AppendLine("                setValue(this, newValue);");
         builder.AppendLine("                return true;");
         builder.AppendLine("            }");
         builder.AppendLine("            else");
         builder.AppendLine("            {");
-        builder.AppendLine("                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
+        // The declared-type entry, valid because every generated setter infers TProperty as the
+        // declared property type. A hand-written caller of this helper must do the same.
+        builder.AppendLine("                return _executor.SetDeclaredPropertyValue(propertyName, newValue, currentValue, setValue);");
         builder.AppendLine("            }");
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.InvokeMethod)}{modifier} object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)");
         builder.AppendLine("        {");
-        builder.AppendLine("            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);");
+        builder.AppendLine("            return _executor is not null ? _executor.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);");
         builder.AppendLine("        }");
     }
 }

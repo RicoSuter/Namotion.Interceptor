@@ -5,29 +5,45 @@ namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
 public interface ITraversalMarker;
 
-[InterceptorSubject]
-public partial class TraversalNode
+/// <summary>
+/// A subject that can be made a parent of any number of subjects, each link one occurrence.
+/// </summary>
+public interface ITraversalParent : IInterceptorSubject
 {
-    public partial IInterceptorSubject? Child { get; set; }
-
-    public partial IInterceptorSubject? SecondChild { get; set; }
-
-    public partial IInterceptorSubject? ThirdChild { get; set; }
+    IReadOnlyList<IInterceptorSubject> Children { get; set; }
 }
 
 [InterceptorSubject]
-public partial class MarkedTraversalNode : ITraversalMarker
+public partial class TraversalNode : ITraversalParent
 {
-    public partial IInterceptorSubject? Child { get; set; }
+    public TraversalNode()
+    {
+        Children = [];
+    }
 
-    public partial IInterceptorSubject? SecondChild { get; set; }
+    public partial IReadOnlyList<IInterceptorSubject> Children { get; set; }
+}
 
-    public partial IInterceptorSubject? ThirdChild { get; set; }
+[InterceptorSubject]
+public partial class MarkedTraversalNode : ITraversalMarker, ITraversalParent
+{
+    public MarkedTraversalNode()
+    {
+        Children = [];
+    }
+
+    public partial IReadOnlyList<IInterceptorSubject> Children { get; set; }
 }
 
 internal static class ParentTraversalGraph
 {
     private static readonly TimeSpan SearchTimeout = TimeSpan.FromSeconds(10);
+
+    // Parents come from the lifecycle, so every linked subject is attached. Explicit anchors keep a
+    // cycle attached that no root reaches.
+    private static readonly IInterceptorSubjectContext Context = InterceptorSubjectContext
+        .Create()
+        .WithLifecycle();
 
     public static IInterceptorSubject CreateNode(bool isMarked)
     {
@@ -35,12 +51,16 @@ internal static class ParentTraversalGraph
     }
 
     /// <summary>
-    /// Makes <paramref name="parent"/> a parent of <paramref name="child"/>. Two links between the same
-    /// subjects are two parent entries only when their property differs.
+    /// Makes <paramref name="parent"/> a parent of <paramref name="child"/>. Every link is its own parent
+    /// entry, so linking the same two subjects twice gives the child two entries for that parent.
     /// </summary>
-    public static void Link(IInterceptorSubject child, IInterceptorSubject parent, string propertyName = nameof(TraversalNode.Child))
+    public static void Link(IInterceptorSubject child, IInterceptorSubject parent)
     {
-        child.AddParent(new PropertyReference(parent, propertyName), null);
+        Attach(parent);
+        Attach(child);
+
+        var traversalParent = (ITraversalParent)parent;
+        traversalParent.Children = [.. traversalParent.Children, child];
     }
 
     /// <summary>
@@ -61,11 +81,33 @@ internal static class ParentTraversalGraph
     }
 
     /// <summary>
+    /// Detaches the subjects again, so that the shared context does not keep every generated graph.
+    /// </summary>
+    public static void Release(IEnumerable<IInterceptorSubject> subjects)
+    {
+        foreach (var subject in subjects)
+        {
+            if (subject.TryGetContext() is not null)
+            {
+                subject.DetachFromContext(Context);
+            }
+        }
+    }
+
+    /// <summary>
     /// Runs the search off the test thread, so that a search that never ends fails the test instead of
     /// blocking the run.
     /// </summary>
     public static Task<ITraversalMarker?> FindMarkerWithinTimeoutAsync(IInterceptorSubject subject)
     {
         return Task.Run(() => subject.TryGetFirstParent<ITraversalMarker>()).WaitAsync(SearchTimeout);
+    }
+
+    private static void Attach(IInterceptorSubject subject)
+    {
+        if (subject.TryGetContext() is null)
+        {
+            subject.AttachToContext(Context);
+        }
     }
 }

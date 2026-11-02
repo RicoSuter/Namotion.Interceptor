@@ -251,13 +251,13 @@ public class SubjectMemberCollisionTests
     }
 
     [Fact]
-    public void WhenAWrapperWouldBeNamedContextOnABaseWithPublicMembers_ThenNI0040IsReportedAndNothingIsHidden()
+    public void WhenAWrapperWouldBeNamedExecutorOnABaseWithPublicMembers_ThenNI0040IsReportedAndNothingIsHidden()
     {
         // Arrange: the half of the exemption that was not merely unnecessary but unsound. This base
         // satisfies the contract with public members, which is the shape generator.md
-        // documents, so a "Context" wrapper hides the inherited public property. CS0108 lands in a
+        // documents, so an "Executor" wrapper hides the inherited public property. CS0108 lands in a
         // generated file the consumer cannot edit and fails any build with TreatWarningsAsErrors.
-        var source = PublicMemberBase + ContextWrapperDerived;
+        var source = PublicMemberBase + ExecutorWrapperDerived;
 
         // Act
         var result = GeneratorTestHost.Run(source);
@@ -268,7 +268,7 @@ public class SubjectMemberCollisionTests
         Assert.Empty(result.CompilationWarnings);
     }
 
-    private const string ContextWrapperDerived = """
+    private const string ExecutorWrapperDerived = """
 
         namespace Repro
         {
@@ -277,7 +277,7 @@ public class SubjectMemberCollisionTests
             {
                 public partial string Name { get; set; }
 
-                public string ContextWithoutInterceptor(string tag) => tag;
+                public string ExecutorWithoutInterceptor(string tag) => tag;
             }
         }
         """;

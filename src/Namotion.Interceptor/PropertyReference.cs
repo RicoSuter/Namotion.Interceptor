@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor;
 
@@ -188,6 +189,33 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     public void MarkAsPublishedToSource()
     {
         GetOrAddWriteState().PublishedToAnySource = true;
+    }
+
+    /// <summary>
+    /// Marks the property as published, as <see cref="MarkAsPublishedToSource"/> does, unless it has already
+    /// committed something newer than <paramref name="revision"/>. The check and the mark run under the lock
+    /// the write terminal commits under, so a commit either lands first and supersedes the change, or lands
+    /// after the mark and sees it.
+    /// </summary>
+    /// <param name="revision">The commit revision of the change being published. Zero is never superseded.</param>
+    /// <param name="includeSourceCommitsInRevision">Whether commits applied from a source count, as for
+    /// <see cref="TryGetWriteState(bool, out long, out bool)"/>.</param>
+    /// <returns>False when a newer commit superseded the change and nothing was marked.</returns>
+    public bool TryMarkAsPublishedToSource(long revision, bool includeSourceCommitsInRevision)
+    {
+        // Hard cast: the terminal lock lives on the built-in executor, see SetPropertyValueWithInterception.
+        lock (((InterceptorExecutor)Subject.Executor).SyncRoot)
+        {
+            if (revision != 0 &&
+                TryGetWriteState(includeSourceCommitsInRevision, out var commitRevision, out _) &&
+                revision < commitRevision)
+            {
+                return false;
+            }
+
+            MarkAsPublishedToSource();
+            return true;
+        }
     }
 
     /// <summary>
