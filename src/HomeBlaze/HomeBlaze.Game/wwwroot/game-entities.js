@@ -17,12 +17,15 @@ const FADE_HOLD_MS = 300;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
 const IDLE_DELAY_STEPS = 0.75;
-// Lets the feet of the walk cycle keep pace with one tile per step interval, about 1.4 m/s.
-const WALKING_SPEED_RATIO = 1.05;
-// The names in the model file; the shirt takes the player's color.
-const IDLE_ANIMATION = 'Idle_Neutral';
+// Lets the planted foot of the 1.04 s walk cycle, which covers about 5.3 tiles at a person's height, keep pace with one
+// tile per step interval, about 1.4 m/s.
+const WALKING_SPEED_RATIO = 1.1;
+// The names in the people models; the shirt takes the player's color. A person whose visible top is another material
+// names it here.
+const IDLE_ANIMATION = 'Idle';
 const WALKING_ANIMATION = 'Walk';
-const SHIRT_MATERIAL = 'LightBrown';
+const SHIRT_MATERIAL = 'Shirt';
+const SHIRT_MATERIALS = { 'female-alternative': 'Jacket' };
 // A part glides this long to a new offset or rotation, such as a door leaf that swings open.
 const GLIDE_MS = 300;
 const RADIANS_PER_DEGREE = Math.PI / 180;
@@ -108,10 +111,12 @@ export async function createEntities(scene, options) {
     const models = new Map();
     const windMaterials = new Map();
     const fadeMaterials = new Map();
+    // One container per person, loaded on first use and kept for the view's lifetime.
+    const people = new Map();
     // The model URL and animation name of each missing animation that was logged, so it is logged once.
     const missingAnimations = new Set();
     // Written to the canvas for tests and diagnosis.
-    const stats = { parts: 0, models: 0, failures: 0, faded: 0, animationsOnce: 0 };
+    const stats = { parts: 0, models: 0, failures: 0, faded: 0, animationsOnce: 0, emotes: 0 };
     // Reused by every frame, so the render loop does not allocate.
     const selfPosition = { x: 0, z: 0 };
     const segment = { enter: 0, exit: 1 };
@@ -141,8 +146,6 @@ export async function createEntities(scene, options) {
     blobMaterial.specularColor = BABYLON.Color3.Black();
     blobMaterial.alpha = 0.28;
 
-    // Not added to the scene; every player instantiates its own copy.
-    const character = await BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/Casual_2.glb`, scene);
     updateStats();
 
     function createGroundMaterial() {
@@ -165,6 +168,7 @@ export async function createEntities(scene, options) {
             element.dataset.gameModelFailures = String(stats.failures);
             element.dataset.gameFaded = String(stats.faded);
             element.dataset.gameAnimationsOnce = String(stats.animationsOnce);
+            element.dataset.gameEmotes = String(stats.emotes);
         }
     }
 
@@ -229,6 +233,20 @@ export async function createEntities(scene, options) {
                 return null;
             });
             models.set(url, loading);
+        }
+
+        return loading;
+    }
+
+    function loadPerson(name) {
+        let loading = people.get(name);
+        if (!loading) {
+            // Logged once per person, because the failed load stays cached.
+            loading = BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/people/${name}.glb`, scene).catch(error => {
+                console.warn(`The person ${name} could not be loaded: ${error?.message ?? error}`);
+                return null;
+            });
+            people.set(name, loading);
         }
 
         return loading;
@@ -445,23 +463,56 @@ export async function createEntities(scene, options) {
         return material;
     }
 
+    // The label and the blob show at once; the person follows when its model is loaded.
     function createPlayer(entity) {
         const view = entity.view;
         const holder = new BABYLON.TransformNode(view.id, scene);
+        const blob = BABYLON.MeshBuilder.CreateDisc(`${view.id}-blob`, { radius: view.width * 0.55, tessellation: 24 }, scene);
+        blob.material = blobMaterial;
+        blob.rotation.x = Math.PI / 2;
+        blob.position.y = 0.02;
+        blob.parent = holder;
+        blob.isPickable = false;
+
+        // Every player owns its label material and the materials cloned for its person; the blob material is shared.
+        entity.materials.push(createLabel(view, holder));
+        entity.root = holder;
+        entity.animations = { idle: null, walking: null, isWalking: false, emote: null, emoteSequence: null };
+        addPerson(entity).catch(error => console.warn(`The person ${view.character} could not be shown: ${error?.message ?? error}`));
+    }
+
+    async function addPerson(entity) {
+        const container = await loadPerson(entity.view.character);
+        if (entity.isDisposed || isViewDisposed) {
+            return;
+        }
+
+        if (container) {
+            showPerson(entity, container);
+        } else {
+            showPersonFallback(entity);
+        }
+
+        updateStats();
+    }
+
+    function showPerson(entity, container) {
+        const view = entity.view;
         const prefix = `${view.id}-`;
-        const instance = character.instantiateModelsToScene(name => prefix + name, true);
-        // The root keeps the loader's handedness conversion, which leaves the character looking north (+z).
+        const instance = container.instantiateModelsToScene(name => prefix + name, true);
+        // The root keeps the loader's handedness conversion, which leaves the person looking north (+z); its bounds are
+        // measured before it gets a parent or a scale.
         const model = instance.rootNodes[0];
-        model.parent = holder;
         const { min, max } = model.getHierarchyBoundingVectors(true);
         const scale = view.height / (max.y - min.y);
         model.scaling.scaleInPlace(scale);
         model.position.y = -min.y * scale;
+        model.parent = entity.root;
 
         const meshes = model.getChildMeshes(false);
-        // Every player owns the materials cloned for it; the blob material is shared.
         const materials = [...new Set(meshes.map(mesh => mesh.material).filter(Boolean))];
-        const shirt = materials.find(material => material.name === prefix + SHIRT_MATERIAL);
+        const shirtName = prefix + (SHIRT_MATERIALS[view.character] ?? SHIRT_MATERIAL);
+        const shirt = materials.find(material => material.name === shirtName);
         if (shirt) {
             const color = BABYLON.Color3.FromHexString(view.color);
             if ('albedoColor' in shirt) {
@@ -475,34 +526,115 @@ export async function createEntities(scene, options) {
             mesh.isPickable = false;
         }
 
-        const blob = BABYLON.MeshBuilder.CreateDisc(`${view.id}-blob`, { radius: view.width * 0.55, tessellation: 24 }, scene);
-        blob.material = blobMaterial;
-        blob.rotation.x = Math.PI / 2;
-        blob.position.y = 0.02;
-        blob.parent = holder;
-        blob.isPickable = false;
-
-        materials.push(createLabel(view, holder));
-
         const find = name => instance.animationGroups.find(group => group.name === prefix + name);
-        const idle = find(IDLE_ANIMATION);
-        const walking = find(WALKING_ANIMATION);
         for (const group of instance.animationGroups) {
             group.stop();
         }
 
-        idle?.start(true);
-        entity.root = holder;
-        entity.animations = { idle, walking, isWalking: false };
+        const animations = entity.animations;
+        animations.idle = find(IDLE_ANIMATION);
+        animations.walking = find(WALKING_ANIMATION);
+        if (animations.isWalking) {
+            animations.walking?.start(true, WALKING_SPEED_RATIO);
+        } else {
+            animations.idle?.start(true);
+        }
+
         entity.instance = instance;
         entity.meshes = meshes;
-        entity.materials = materials;
+        entity.materials.push(...materials);
+        applyAnimation(entity, entity.view);
+    }
+
+    function showPersonFallback(entity) {
+        const view = entity.view;
+        const box = createBox(`${view.id}-fallback`, { w: view.width, h: view.height, d: view.depth, c: FALLBACK_COLOR });
+        box.parent = entity.root;
+        box.position.y = view.height / 2;
+        box.isPickable = false;
+        entity.meshes = [box];
+        entity.isFallback = true;
+        stats.failures++;
+    }
+
+    // Plays the animation the server reports: once animations play to their end and return to idle, loop animations hold
+    // until the server clears them, and a step ends either. Each run has its own sequence, so a run is started at most once
+    // and the same animation twice in a row plays twice.
+    function applyAnimation(entity, view) {
+        const animations = entity.animations;
+        if (!animations || !entity.instance) {
+            return;
+        }
+
+        if (!view.animation) {
+            animations.emoteSequence = view.animationSequence;
+            stopEmote(animations);
+            return;
+        }
+
+        if (animations.emoteSequence === view.animationSequence) {
+            return;
+        }
+
+        animations.emoteSequence = view.animationSequence;
+        const group = entity.instance.animationGroups.find(candidate => candidate.name === `${view.id}-${view.animation}`);
+        if (!group) {
+            warnMissingAnimation(`${options.baseUrl}models/people/${view.character}.glb`, view.animation);
+            return;
+        }
+
+        // Cleared before the groups stop, because stopping a group that plays once runs its end handler below.
+        const previous = animations.emote;
+        animations.emote = null;
+        stopGroup(previous);
+        stopGroup(animations.idle);
+        stopGroup(animations.walking);
+        const isOnce = view.animationMode === ONCE_ANIMATION_MODE;
+        group.start(!isOnce);
+        animations.emote = group;
+        stats.emotes++;
+        updateStats();
+        if (isOnce) {
+            group.onAnimationGroupEndObservable.addOnce(() => {
+                if (animations.emote === group && !entity.isDisposed) {
+                    animations.emote = null;
+                    resumeMovement(animations);
+                }
+            });
+        }
+    }
+
+    function stopEmote(animations) {
+        const emote = animations.emote;
+        if (emote) {
+            animations.emote = null;
+            stopGroup(emote);
+            resumeMovement(animations);
+        }
+    }
+
+    function resumeMovement(animations) {
+        if (animations.isWalking) {
+            animations.walking?.start(true, WALKING_SPEED_RATIO);
+        } else {
+            animations.idle?.start(true);
+        }
+    }
+
+    // Reset before it stops, because stopping leaves the bones where they are, such as the lowered pelvis of a sitting
+    // person, and the next group may not move all of them. Only a playing group is reset: resetting a stopped one plays
+    // its first frame.
+    function stopGroup(group) {
+        if (group?.isStarted) {
+            group.reset();
+            group.stop();
+        }
     }
 
     function createEntity(view) {
         const entity = {
             view, root: null, tween: null, idleAt: 0, isFaded: false, lastHitAt: -Infinity, visibility: 1, changedAtFrame: 0,
-            isDisposed: false,
+            isDisposed: false, isFallback: false,
             meshes: [], materials: [], partNodes: [], animations: null, instance: null,
         };
         if (view.kind === 'player') {
@@ -550,6 +682,10 @@ export async function createEntities(scene, options) {
             disposeInstance(entity.instance, entity.meshes);
         }
 
+        if (entity.isFallback) {
+            stats.failures--;
+        }
+
         for (const material of entity.materials) {
             material.dispose(true, true);
         }
@@ -592,10 +728,14 @@ export async function createEntities(scene, options) {
 
         animations.isWalking = isWalking;
         if (isWalking) {
-            animations.idle?.stop();
+            // A step ends a running emote; the server clears it on the same step.
+            const emote = animations.emote;
+            animations.emote = null;
+            stopGroup(emote);
+            stopGroup(animations.idle);
             animations.walking?.start(true, WALKING_SPEED_RATIO);
-        } else {
-            animations.walking?.stop();
+        } else if (!animations.emote) {
+            stopGroup(animations.walking);
             animations.idle?.start(true);
         }
     }
@@ -657,7 +797,8 @@ export async function createEntities(scene, options) {
         }
 
         return previous.width !== view.width || previous.depth !== view.depth || previous.height !== view.height
-            || previous.color !== view.color || previous.title !== view.title || previous.isSelf !== view.isSelf;
+            || previous.color !== view.color || previous.character !== view.character || previous.title !== view.title
+            || previous.isSelf !== view.isSelf;
     }
 
     function updateParts(entity, parts) {
@@ -814,6 +955,7 @@ export async function createEntities(scene, options) {
                 entities.set(view.id, entity);
                 place(entity, shown.x, shown.y);
                 setFacing(entity, shown.facing);
+                applyAnimation(entity, view);
                 return isSelfLost;
             }
 
@@ -833,6 +975,7 @@ export async function createEntities(scene, options) {
                 setFacing(entity, view.facing);
             }
 
+            applyAnimation(entity, view);
             return isSelfLost;
         },
 
@@ -855,8 +998,7 @@ export async function createEntities(scene, options) {
         /** Releases what the scene does not own; call before disposing the scene. */
         dispose() {
             isViewDisposed = true;
-            character.dispose();
-            for (const loading of models.values()) {
+            for (const loading of [...models.values(), ...people.values()]) {
                 loading.then(container => container?.dispose());
             }
         },
