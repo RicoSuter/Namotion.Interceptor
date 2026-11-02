@@ -129,7 +129,7 @@ A command that throws fails only its own task. A throwing action, schedule, tick
 Each tick, in order:
 
 1. The due schedules (`GameSchedules`, a priority queue by due time), then the queued commands in queue order: steps and turns, world commands, objects written from outside, take-overs, teleports, voice switches and reconciles of the players.
-2. Publish the object set: read the objects written so far in the tick again, write the changed regions and the region set (see [Facade](#facade)), so placed objects are attached when their command completes, and call `OnAddedToWorld` for the objects that publish attached and that entered the world by a place, a replacement or a take-over.
+2. Publish the object set: read the objects written so far in the tick again, write the changed regions and the region set (see [Facade](#facade)), unless a save paused publishing, so placed objects are attached when their command completes, and call `OnAddedToWorld` for the objects that publish attached and that entered the world by a place, a replacement or a take-over.
 3. Read again what those `OnAddedToWorld` calls wrote.
 4. Publish the snapshots for other threads: the `OccupancySnapshot` that `IsFree` reads (immutable chunks, only the changed ones replaced, swapped in with a volatile write) and the players' positions that `GetSpotInFront` and `GetActor` read.
 5. Let the voice loop run or pause.
@@ -167,7 +167,7 @@ The write interceptor (`GameWriteInterceptor`, registered once per context with 
 - A property of a `GameObject` of a running game marks the object changed, directly on the simulation thread (a schedule or `OnAddedToWorld` writing any object) and through the queue from other threads, so a command queued after the write sees it. The simulation reads every changed object again before the views update.
 - `Game.Players` or `Game.Regions` queues a take-over carrying the new value, so a publish in between cannot overwrite it. The simulation takes over the world without overlap checks, cancels the schedules of removed objects and calls `OnAddedToWorld` for new ones once the publish that follows attached them, since a publish between the write and the take-over may have detached them. A take-over of the regions moves an object listed in another region than that of its position into its region, removes regions listed under a key that names no region, gives an object a new name when an earlier region listed its name, and writes the region set again.
 - `GameRegion.Objects` queues a take-over of that region: objects it leaves out leave the world, new ones enter it, under a new name when another object has theirs, kept ones are read again, and the next publish writes the region again. Last writer wins.
-- `GamePlayer.X`, `Y` or `Facing` from outside the simulation thread queues a teleport, without checks, or a turn; this rule comes before the general object rule.
+- A write to `GamePlayer.X`, `Y` or `Facing` other than the publisher's own queues a teleport (without checks) or a turn; this rule comes before the general object rule.
 - Writes to `GamePlayer.ClientId`, `ClientTitle`, `IsConnected`, `IsMicrophoneOn` and `IsAudioOn` from outside the simulation are refused before they land with `InvalidOperationException`, also through the registry; their setters stay internal. The game's own `OnPlayersChanging` hook assigns the client ids from the keys of `Players` on any thread.
 
 The interceptor runs before the transaction interceptor, so a refused write fails where it is made. It never waits for the simulation, so a write from a synchronous change observer cannot deadlock with the simulation's own writes. It ignores exactly the publisher's own writes, by subject, property and written instance; an observer that writes another set during a publish is not ignored.
@@ -345,9 +345,8 @@ Browser (`game-voice.js`, per view id like `game.js`):
 
 ## Threading
 
-- The world state, the index, the regions, the schedules, the view sessions' trackers and the publisher are touched only on the simulation thread. Nothing there takes a lock.
-- Other threads read only immutable snapshots that the simulation swaps in with volatile writes: the `OccupancySnapshot` (`IsFree`), the players' positions (`GetSpotInFront`, `GetActor`), the `SoundSnapshot` and the `GameVolumeTable`. A reader captures a snapshot once per use.
-- The subjects are written by the simulation (publishes) and by anyone else (outside writes); the write interceptor reports outside writes through the queue and never waits, and the take-over commands carry the written value, so the order of a publish and an outside write never loses the outside write.
+The rules of the simulation thread, the snapshots other threads read and the write interceptor are in [Simulation](#simulation) and [Facade](#facade). Beyond them:
+
 - Property change observers, the game's own and the page's, run synchronously inside the write on the writer's thread, also on the simulation thread during a publish. They never block: the game only signals a reconcile, the page only schedules a flush.
 - The volume table build runs on the thread pool and owns `GameVolumeTableBuilder`; the simulation starts a build only after it saw the previous one complete.
 - The mixer's own lock guards its talker queues, microphone pages and sinks. Sinks run on the voice loop outside that lock, and `VolumeTableChanged` handlers run on the simulation thread; neither may block, so the page only hands frames to its dispatcher and schedules a flush.
@@ -428,7 +427,7 @@ The E2E tests need Playwright's Chromium (`playwright.ps1 install chromium` from
 
 | Helper | Purpose |
 |---|---|
-| `GameTestContext` | A game in a `TestRoot` with a `FakeTimeProvider` and fake clients, whose ticks run on the test thread: `Tick`, `RunAsync` for world commands, `Publish`, `SaveAsync`, `HoldSave`, `BuildVolumeTable`, `Reconcile`, `StepAsync`, `OpenView`; adds connected players, walls, doors, other objects and tools |
+| `GameTestContext` | A game in a `TestRoot` with a `FakeTimeProvider` and fake clients, whose ticks run on the test thread; its members are listed in the [author guide](../HomeBlaze.Game.Abstractions/README.md#testing) |
 | `TestRoot` | A root subject that holds the game, and optionally an installation, and counts configuration writes; `FailsToWrite` simulates failures |
 | `FakeClientDirectory` | Thread-safe clients, renames and recorded notifications; `RemoveInstallation` simulates a missing installation |
 | `GameObjectSets` | Builds and reads the regions of a game from plain objects |

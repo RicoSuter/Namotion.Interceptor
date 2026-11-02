@@ -6,7 +6,7 @@ The walls, doors and trees of the game are built on this contract alone: `HomeBl
 
 ## Game objects and tools
 
-A game object is an `[InterceptorSubject]` that derives from `GameObject`. It stands on a grid of 25 cm tiles, north is +Y and east is +X, and covers the tiles from `X` to `X + Width - 1` and from `Y` to `Y + Depth - 1`. The game keeps it in the region of its south-west corner and saves it with its `$type`, so the full name of the class is part of every saved world: renaming the class or its namespace breaks the worlds that hold it.
+A game object is an `[InterceptorSubject]` that derives from `GameObject`. It stands on a grid of 25 cm tiles, north is +Y and east is +X, and covers the tiles from `X` to `X + Width - 1` and from `Y` to `Y + Depth - 1`. The game keeps it in the region of its south-west corner, one of the 64 by 64 tile groups that `Game.Regions` holds the objects in (see the [core README](../HomeBlaze.Game/README.md#model)), and saves it with its `$type`, so the full name of the class is part of every saved world: renaming the class or its namespace breaks the worlds that hold it.
 
 | Member of `GameObject` | Contract |
 |---|---|
@@ -39,7 +39,7 @@ What follows from them:
 - The game never refuses a write, so it never checks one either. A door that an automation closes while a player stands in it closes; the player stays inside and can always step out, because a step is only checked against the blocking objects that do not already overlap the player.
 - `IsFree` is callable from any thread. On the game's thread it includes what earlier work of the tick wrote; elsewhere it answers from the state of the last tick, so a player may step into the area between the check and the write.
 - `OnAddedToWorld` can run again for the same instance, after a restart, an outside replacement of the objects or when the object is removed and placed again, and nothing is called on removal. Set up only schedules there, which removal and a stop cancel, or keep it idempotent.
-- A placed object's `OnAddedToWorld` runs once the game added it to its objects, in the tick that placed it. Awaiting `PlaceAsync` or `ReplaceAsync` from another thread, as an operation does, returns with the object attached, so its `World` resolves, and its `OnAddedToWorld` ran unless the game stopped meanwhile. Called on the game's thread, from a scheduled action or `OnAddedToWorld`, the command runs at once and the object joins later in that tick or in the next.
+- A placed object's `OnAddedToWorld` runs once the game added it to its objects: in the tick that placed it, or once a save in progress completed. Awaiting `PlaceAsync` or `ReplaceAsync` from another thread, as an operation does, returns with the object attached, so its `World` resolves, and its `OnAddedToWorld` ran unless the game stopped meanwhile. Called on the game's thread, from a scheduled action or `OnAddedToWorld`, the command runs at once and the object joins later in that tick or in the next.
 - `Schedule(gameObject, delay, action)` runs a synchronous action on the game's thread at the first tick at or after the delay. Disposing the returned handle cancels it, from any thread, and removing the object cancels all its schedules. Pass a synchronous action, not an async lambda, whose continuations would leave the game's thread. An exception it throws is logged and the game goes on.
 - Property change hooks (`partial void OnIsOpenChanged`) run inside the write, on the writer's thread, which can be any thread, also while the object is loaded and not yet part of a game. Keep them short and thread-safe, and reach the game with `TryGetWorld`, not `World`, which would throw during a load.
 - Placing and replacing name new objects after their type, in lowercase, a dash and 8 random hex digits, such as `door-1a2b3c4d`. Canceling the token before the game processed the command drops it; after that the change stays applied.
@@ -53,7 +53,7 @@ What follows from them:
 | `ReplaceAsync(gameObject, replacements, cancellationToken)` | Removes the object and adds the replacements in one step, so no player sees an intermediate state; refused, changing nothing, when a movement blocking replacement overlaps a movement blocking object other than the replaced one or another replacement |
 | `Schedule(gameObject, delay, action)` | See above |
 
-Every member refuses an object of another game with "The object is not part of this game." The XML docs of `IGameWorld` hold the full contract.
+`RemoveAsync`, `ReplaceAsync` (for the replaced object) and `Schedule` refuse an object that is not part of this game with "The object is not part of this game."; `IsFree` ignores an `except` that is not part of it, and `PlaceAsync` refuses an object that already is with `ArgumentException`. The XML docs of `IGameWorld` hold the full contract.
 
 ## A complete door
 
@@ -324,7 +324,7 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
 - **Offset and size**: `GameVisualVector`s in tiles relative to the south-west corner of the object's area at ground level; X grows to the east, Y upward and Z to the north. As a size, X is the width, Y the height and Z the depth. A part may reach beyond the area, as the head of a deer does; only the area blocks.
 - **Pivot and rotation**: `Rotation` turns the part around the vertical axis through `Pivot` (a `GameVisualPoint` of X and Z in tiles), in degrees clockwise seen from above. The door leaf has its pivot at the hinge, and `GameDirection.GetRotation()` turns a facing into degrees.
 - **Textures and tints**: a box takes a `Texture` URL, repeated every `TextureScale` tiles horizontally and vertically, so a texture keeps its size on every wall length, and a `Color` as `#rrggbb`, which tints the texture or colors a box without one.
-- **Wind**: `Effect = GameVisualEffect.Wind` bends the part sideways in proportion to its height above the object's base, as wind moves a tree.
+- **Wind**: `Effect = GameVisualEffect.Wind` bends the part sideways in proportion to the square of its height above the object's base, so the top sways and the base stays put, as wind moves a tree.
 - **Animations**: `Animation` names an animation of the model. `AnimationMode = GameVisualAnimationMode.Loop` (the default) plays it in a loop; `Once` plays it once whenever the part's animation changes and holds its last frame. `Animal` loops `Walk` or `Idle` and plays `Eating` once.
 - **Glides**: a change of a part's offset or rotation glides over 300 ms in the browser, which swings a door leaf or turns an animal; any other change of a part, or of the number of parts, rebuilds the object.
 
@@ -344,7 +344,7 @@ Every external asset needs a free license that allows redistribution, CC0 prefer
 
 ## Packaging as a plugin
 
-An object library is a Razor class library that references `HomeBlaze.Abstractions` and `HomeBlaze.Game.Abstractions`, plus the Namotion.Interceptor source generator as an analyzer, and `Namotion.Interceptor.Registry` when it uses `[PropertyAttribute]`. It never references `HomeBlaze.Game`. The project file of `HomeBlaze.Game.Buildings`:
+An object library is a Razor class library that references `HomeBlaze.Abstractions` and `HomeBlaze.Game.Abstractions`, plus the Namotion.Interceptor source generator as an analyzer, and `Namotion.Interceptor.Registry` when it uses `[PropertyAttribute]`. It never references `HomeBlaze.Game`. The project file of `HomeBlaze.Game.Buildings`, trimmed to its references:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk.Razor">
@@ -360,7 +360,7 @@ An object library is a Razor class library that references `HomeBlaze.Abstractio
 </Project>
 ```
 
-The host registers the assembly, so its types show in the subject browser and load from saved worlds: a library the app references at build time with `typeProvider.AddAssembly(typeof(MyObject).Assembly)` in `Program.cs`, a plugin loaded at runtime through the plugin loader, which registers the plugin's assemblies itself. The host references `HomeBlaze.Game.Abstractions` like `HomeBlaze.Abstractions`, so the plugin loader shares it with plugins and their objects bind to the same `GameObject` and `IGameWorld` types as the game.
+The host registers the assembly, so its types show in the subject browser and load from saved worlds: a library the app references at build time with `typeProvider.AddAssembly(typeof(MyObject).Assembly)` in `Program.cs`, a plugin loaded at runtime by the host itself, which registers the assemblies that the plugin loader loaded (`Program.cs` calls `typeProvider.AddAssembly` for each after `LoadPluginsAsync`). The host references `HomeBlaze.Game.Abstractions` like `HomeBlaze.Abstractions`, so the plugin loader shares it with plugins and their objects bind to the same `GameObject` and `IGameWorld` types as the game.
 
 The static web assets of a plugin loaded at runtime are not served yet, so its textures and models do not load and a model part shows as a gray box; serving them is a separate change to the host.
 
@@ -369,6 +369,8 @@ The static web assets of a plugin loaded at runtime are not served yet, so its t
 Test an object against a real game rather than a mock: the rules above, such as a hook that schedules or a check with `IsFree`, only show their effect in a running simulation. The tests of `HomeBlaze.Game.Buildings` and `HomeBlaze.Game.Nature` do it with `GameTestContext`, a game in a root subject with a fake clock (`FakeTimeProvider`) and fake clients, whose simulation ticks on the test thread, so a test advances the clock and runs ticks instead of waiting:
 
 ```csharp
+private readonly GameTestContext _context = new();
+
 [Fact]
 public void WhenAnOpenDoorWithAutoCloseIsLoaded_ThenItClosesAfterTheDelay()
 {
@@ -394,5 +396,10 @@ public void WhenAnOpenDoorWithAutoCloseIsLoaded_ThenItClosesAfterTheDelay()
 | `AddConnectedPlayer(clientId, x, y)` | Adds a connected player, whose client id an operation receives as `new GameCaller(clientId)` |
 | `StepAsync(clientId, direction)` | Moves a player one step |
 | `SaveAsync()` | Runs ticks until a requested save was written |
+| `HoldSave()`, `ReleaseSaveAsync(blocker)` | Holds a requested save, which pauses publishing, and lets it write |
+| `BuildVolumeTable()` | Runs ticks until a change is in the volume table |
+| `Reconcile()` | Reconciles the players with the clients and publishes the result |
+| `OpenView(clientId, sink)` | Opens a view session and runs the tick that delivers its first update |
+| `AddWall(...)`, `AddDoor(...)` | Adds a wall or a door of `HomeBlaze.Game.Buildings` |
 
 A test project references `HomeBlaze.Game` besides the object library, links the helpers it uses from `HomeBlaze.Game.Tests/Testing/`, and needs an `InternalsVisibleTo` entry in `HomeBlaze.Game`, because the helpers use its internals; see `HomeBlaze.Game.Nature.Tests.csproj`. This works only inside this repository. A public `HomeBlaze.Game.Testing` library with a public `GameTestContext`, which replaces the linked files and the `InternalsVisibleTo` entries, is a planned follow-up.

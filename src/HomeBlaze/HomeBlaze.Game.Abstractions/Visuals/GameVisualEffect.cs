@@ -11,7 +11,7 @@ public enum GameVisualEffect
     None,
 
     /// <summary>
-    /// Bends the part sideways in proportion to the height above the object's base, as wind moves a tree.
+    /// Bends the part sideways in proportion to the square of the height above the object's base, as wind moves a tree.
     /// </summary>
     Wind
 }
