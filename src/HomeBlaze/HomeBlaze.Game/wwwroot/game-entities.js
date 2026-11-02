@@ -52,11 +52,20 @@ const WIND_SHADER = `
 #endif
 `;
 
+const WIND_UNIFORMS = '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\n#endif\n';
+// Where the wind goes into the vertex shader of the geometry buffer, which draws the outlines and the corner shading:
+// its declarations, the world position and the clip position, which that shader computes without the world position.
+const GEOMETRY_DEFINITIONS = '#define CUSTOM_VERTEX_DEFINITIONS';
+const GEOMETRY_WORLD_POSITION = 'vec4 worldPos=vec4(finalWorld*vec4(positionUpdated,1.0));';
+const GEOMETRY_CLIP_POSITION = 'gl_Position=viewProjection*finalWorld*vec4(positionUpdated,1.0);';
+
 // The phases of the sway and the gust in radians, which the wind shader reads; the views of a tab share them. They wrap
 // on the CPU, because a 32-bit float of the raw clock loses precision after hours.
 let windSwayPhase = 0;
 let windGustPhase = 0;
 let WindPlugin = null;
+// Null until the first wind effect of the geometry buffer, then whether its shader took the wind.
+let isGeometryShaderPatched = null;
 
 function toGlsl(value) {
     return value.toFixed(6);
@@ -85,7 +94,7 @@ function getWindPlugin() {
                     { name: 'gameWindSwayPhase', size: 1, type: 'float' },
                     { name: 'gameWindGustPhase', size: 1, type: 'float' },
                 ],
-                vertex: '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\n#endif\n',
+                vertex: WIND_UNIFORMS,
             };
         }
 
@@ -99,6 +108,73 @@ function getWindPlugin() {
         }
     };
     return WindPlugin;
+}
+
+// Adds the wind to the shader source of the geometry buffer behind the GAME_WIND define; returns whether the source had
+// every place the wind goes into, which a Babylon update may change.
+function patchGeometryShader() {
+    if (isGeometryShaderPatched !== null) {
+        return isGeometryShaderPatched;
+    }
+
+    const store = window.BABYLON.Effect.ShadersStore;
+    const source = store.geometryVertexShader;
+    const places = [GEOMETRY_DEFINITIONS, GEOMETRY_WORLD_POSITION, GEOMETRY_CLIP_POSITION];
+    if (!source || places.some(place => source.split(place).length !== 2)) {
+        console.warn('The geometry buffer shader of this Babylon version has no place for the wind, so outlines do not sway.');
+        isGeometryShaderPatched = false;
+        return false;
+    }
+
+    store.geometryVertexShader = source
+        .replace(GEOMETRY_DEFINITIONS, WIND_UNIFORMS + GEOMETRY_DEFINITIONS)
+        .replace(GEOMETRY_WORLD_POSITION, GEOMETRY_WORLD_POSITION + WIND_SHADER)
+        .replace(GEOMETRY_CLIP_POSITION, `#ifdef GAME_WIND\ngl_Position=viewProjection*worldPos;\n#else\n${GEOMETRY_CLIP_POSITION}\n#endif\n`);
+    isGeometryShaderPatched = true;
+    return true;
+}
+
+// The geometry buffer draws with a shader of its own, which the wind plugin does not reach, so the outline and the corner
+// shading of a swaying tree would stay where it stands still. While the buffer prepares a submesh of a wind material, the
+// effect it creates gets the GAME_WIND define and the phases; the define is not in the defines the buffer compares, so it
+// keeps the effect.
+function addWindToGeometryBuffer(geometry, engine) {
+    let isPreparingWind = false;
+    const isReady = geometry.isReady;
+    geometry.isReady = function (subMesh, useInstances) {
+        isPreparingWind = Boolean(subMesh.getMaterial()?.gameWind);
+        try {
+            return isReady.call(this, subMesh, useInstances);
+        } finally {
+            isPreparingWind = false;
+        }
+    };
+
+    const createEffect = engine.createEffect;
+    engine.createEffect = function (baseName, options, ...rest) {
+        if (!isPreparingWind || baseName !== 'geometry' || typeof options?.defines !== 'string' || !patchGeometryShader()) {
+            return createEffect.call(this, baseName, options, ...rest);
+        }
+
+        const windOptions = {
+            ...options,
+            defines: `${options.defines}\n#define GAME_WIND`,
+            uniformsNames: [...options.uniformsNames, 'gameWindSwayPhase', 'gameWindGustPhase'],
+        };
+        // The engine returns its cached effect for the same defines, so each effect gets the phases bound once.
+        const effect = createEffect.call(this, baseName, windOptions, ...rest);
+        if (!effect.gameWind) {
+            effect.gameWind = true;
+            effect.onBindObservable.add(bindWind);
+        }
+
+        return effect;
+    };
+}
+
+function bindWind(effect) {
+    effect.setFloat('gameWindSwayPhase', windSwayPhase);
+    effect.setFloat('gameWindGustPhase', windGustPhase);
 }
 
 export async function createEntities(scene, options) {
@@ -131,20 +207,17 @@ export async function createEntities(scene, options) {
     // Counts the renders; a mesh's world matrix and bounds are computed when the scene renders.
     let frame = 0;
     const sightline = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, 1), 1);
+    addWindToGeometryBuffer(options.renderer.geometryBuffer, scene.getEngine());
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
     ground.material = createGroundMaterial();
     ground.isPickable = false;
+    options.renderer.addGround(ground);
 
     const targetMaterial = new BABYLON.StandardMaterial('target', scene);
     targetMaterial.emissiveColor = new BABYLON.Color3(1, 0.88, 0.4);
     targetMaterial.disableLighting = true;
     targetMaterial.alpha = 0.4;
-
-    const blobMaterial = new BABYLON.StandardMaterial('blob', scene);
-    blobMaterial.diffuseColor = BABYLON.Color3.Black();
-    blobMaterial.specularColor = BABYLON.Color3.Black();
-    blobMaterial.alpha = 0.28;
 
     updateStats();
 
@@ -256,13 +329,19 @@ export async function createEntities(scene, options) {
         let windMaterial = windMaterials.get(material);
         if (!windMaterial) {
             windMaterial = material.clone(`${material.name}-wind`);
-            const Plugin = getWindPlugin();
-            windMaterial.gameWind = new Plugin(windMaterial);
+            addWind(windMaterial);
             windMaterial.gameWindSource = material;
             windMaterials.set(material, windMaterial);
         }
 
         return windMaterial;
+    }
+
+    // The shadow map draws with the material's own shader, so that the shadow sways with the wind.
+    function addWind(material) {
+        const Plugin = getWindPlugin();
+        material.gameWind = new Plugin(material);
+        material.shadowDepthWrapper = new BABYLON.ShadowDepthWrapper(material, scene);
     }
 
     // A glTF material has a fixed transparency mode, with which Babylon ignores the mesh visibility for blending, so a faded
@@ -274,8 +353,7 @@ export async function createEntities(scene, options) {
             const source = material.gameWindSource ?? material;
             fadeMaterial = source.clone(`${material.name}-fade`);
             if (material.gameWindSource) {
-                const Plugin = getWindPlugin();
-                fadeMaterial.gameWind = new Plugin(fadeMaterial);
+                addWind(fadeMaterial);
             }
 
             fadeMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
@@ -286,13 +364,15 @@ export async function createEntities(scene, options) {
         return fadeMaterial;
     }
 
-    // The shared materials stay untouched, so fading one object never changes another.
+    // The shared materials stay untouched, so fading one object never changes another. A see-through mesh has no outline.
     function showMesh(mesh, visibility) {
         mesh.visibility = visibility;
         const material = visibility < 1 && mesh.gameMaterial ? getFadeMaterial(mesh.gameMaterial) : mesh.gameMaterial;
         if (mesh.material !== material) {
             mesh.material = material;
         }
+
+        options.renderer.setOutlined(mesh, visibility === 1);
     }
 
     function addMeshes(entity, meshes) {
@@ -300,6 +380,7 @@ export async function createEntities(scene, options) {
         for (const mesh of meshes) {
             mesh.isPickable = false;
             mesh.gameMaterial = mesh.material;
+            options.renderer.addMesh(mesh);
             showMesh(mesh, entity.visibility);
             entity.meshes.push(mesh);
         }
@@ -462,18 +543,11 @@ export async function createEntities(scene, options) {
         return material;
     }
 
-    // The label and the blob show at once; the person follows when its model is loaded.
+    // The label shows at once; the person follows when its model is loaded.
     function createPlayer(entity) {
         const view = entity.view;
         const holder = new BABYLON.TransformNode(view.id, scene);
-        const blob = BABYLON.MeshBuilder.CreateDisc(`${view.id}-blob`, { radius: view.width * 0.55, tessellation: 24 }, scene);
-        blob.material = blobMaterial;
-        blob.rotation.x = Math.PI / 2;
-        blob.position.y = 0.02;
-        blob.parent = holder;
-        blob.isPickable = false;
-
-        // Every player owns its label material and the materials cloned for its person; the blob material is shared.
+        // Every player owns its label material and the materials cloned for its person.
         entity.materials.push(createLabel(view, holder));
         entity.root = holder;
         entity.animations = { idle: null, walking: null, isWalking: false, emote: null, emoteSequence: null };
@@ -530,6 +604,7 @@ export async function createEntities(scene, options) {
 
         for (const mesh of meshes) {
             mesh.isPickable = false;
+            options.renderer.addMesh(mesh);
         }
 
         const find = name => instance.animationGroups.find(group => group.name === prefix + name);
@@ -576,6 +651,7 @@ export async function createEntities(scene, options) {
         box.parent = entity.root;
         box.position.y = view.height / 2;
         box.isPickable = false;
+        options.renderer.addMesh(box);
         entity.meshes = [box];
         entity.isFallback = true;
         stats.failures++;

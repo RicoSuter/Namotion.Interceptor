@@ -1,5 +1,6 @@
 import { createEntities } from './game-entities.js';
 import { createInput } from './game-input.js';
+import { createRenderer } from './game-render.js';
 
 // The pages of a tab share this module, so each one owns its view by the id it passes.
 const views = new Map();
@@ -140,10 +141,7 @@ class GameView {
         this.desiredCameraTarget = new BABYLON.Vector3();
         this.hasCameraTarget = false;
         this.scene = new BABYLON.Scene(this.engine);
-        const sky = new BABYLON.Color3(0.78, 0.86, 0.93);
-        this.scene.clearColor = new BABYLON.Color4(sky.r, sky.g, sky.b, 1);
         this.scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
-        this.scene.fogColor = sky;
         this.scene.fogStart = 110;
         this.scene.fogEnd = 230;
 
@@ -154,14 +152,11 @@ class GameView {
         this.camera.maxZ = 500;
         this.camera.setTarget(BABYLON.Vector3.Zero());
 
-        const skyLight = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0.2, 1, -0.3), this.scene);
-        skyLight.intensity = 0.65;
-        skyLight.groundColor = new BABYLON.Color3(0.35, 0.4, 0.3);
-        const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.5, -1, 0.7), this.scene);
-        sun.intensity = 0.75;
+        // Sets the sky and fog colors, the lights and the post-processing.
+        this.renderer = createRenderer(this.scene, this.camera);
 
         // The canvas carries the part and model counts for tests and diagnosis.
-        this.entities = await createEntities(this.scene, { ...this.options, statsElement: this.canvas });
+        this.entities = await createEntities(this.scene, { ...this.options, renderer: this.renderer, statsElement: this.canvas });
         this.input = createInput(this.dotNet, this.options, this.entities);
 
         this.engine.runRenderLoop(() => this.render());
@@ -211,6 +206,7 @@ class GameView {
             this.camera.position.copyFromFloats(this.cameraTarget.x, this.cameraTarget.y + CAMERA_HEIGHT, this.cameraTarget.z - CAMERA_DISTANCE);
             this.camera.setTarget(this.cameraTarget);
             this.entities.afterCameraMoved(this.camera, now);
+            this.renderer.follow(this.cameraTarget);
         }
 
         this.scene.render();
