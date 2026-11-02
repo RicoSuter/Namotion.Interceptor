@@ -17,8 +17,8 @@ const FADE_HOLD_MS = 300;
 const HEAD_HEIGHT = 0.8;
 // Keeps a player walking for this part of a step after its move ended, so the next step does not flicker to idle.
 const IDLE_DELAY_STEPS = 0.75;
-// Lets the planted foot of the 1.04 s walk cycle, which covers about 5.3 tiles at a person's height, keep pace with one
-// tile per step interval, about 1.4 m/s.
+// Lets the planted foot of the 1.04 s walk cycle, which covers about 5.3 tiles scaled to a player's height of 7 tiles,
+// keep pace with one tile per step interval, about 1.4 m/s.
 const WALKING_SPEED_RATIO = 1.1;
 // The names in the people models; the shirt takes the player's color. A person whose visible top is another material
 // names it here.
@@ -381,8 +381,7 @@ export async function createEntities(scene, options) {
     }
 
     // Plays the part's animation from the start: looping, or once, after which it holds its last frame, because a group that
-    // does not loop leaves its targets at the end. The previous group is reset before it stops, because stopping leaves
-    // its targets where they are, and a bone the next group does not animate, such as a leg of a walk, would stay frozen.
+    // does not loop leaves its targets at the end. The previous group is reset before it stops, for the reason at stopGroup.
     function playAnimation(node) {
         node.animationGroup?.reset();
         node.animationGroup?.stop();
@@ -488,7 +487,13 @@ export async function createEntities(scene, options) {
         }
 
         if (container) {
-            showPerson(entity, container);
+            try {
+                showPerson(entity, container);
+            } catch (error) {
+                console.warn(`The person ${entity.view.character} could not be shown: ${error?.message ?? error}`);
+                discardPerson(entity);
+                showPersonFallback(entity);
+            }
         } else {
             showPersonFallback(entity);
         }
@@ -500,6 +505,7 @@ export async function createEntities(scene, options) {
         const view = entity.view;
         const prefix = `${view.id}-`;
         const instance = container.instantiateModelsToScene(name => prefix + name, true);
+        entity.instance = instance;
         // The root keeps the loader's handedness conversion, which leaves the person looking north (+z); its bounds are
         // measured before it gets a parent or a scale.
         const model = instance.rootNodes[0];
@@ -540,10 +546,28 @@ export async function createEntities(scene, options) {
             animations.idle?.start(true);
         }
 
-        entity.instance = instance;
         entity.meshes = meshes;
         entity.materials.push(...materials);
         applyAnimation(entity, entity.view);
+    }
+
+    // Releases what a failed showPerson created; its cloned materials are not in the entity's list yet.
+    function discardPerson(entity) {
+        const instance = entity.instance;
+        if (instance) {
+            const meshes = instance.rootNodes.flatMap(node => node.getChildMeshes(false));
+            disposeInstance(instance, meshes);
+            for (const node of instance.rootNodes) {
+                node.dispose(false, true);
+            }
+        }
+
+        entity.instance = null;
+        entity.meshes = [];
+        const animations = entity.animations;
+        animations.idle = null;
+        animations.walking = null;
+        animations.emote = null;
     }
 
     function showPersonFallback(entity) {
@@ -583,12 +607,11 @@ export async function createEntities(scene, options) {
             return;
         }
 
-        // Cleared before the groups stop, because stopping a group that plays once runs its end handler below.
-        const previous = animations.emote;
-        animations.emote = null;
-        stopGroup(previous);
+        clearEmote(animations);
         stopGroup(animations.idle);
         stopGroup(animations.walking);
+        // The emote takes over a walk that is still showing, so that the next step stops it and walks again.
+        animations.isWalking = false;
         const isOnce = view.animationMode === ONCE_ANIMATION_MODE;
         group.start(!isOnce);
         animations.emote = group;
@@ -605,12 +628,18 @@ export async function createEntities(scene, options) {
     }
 
     function stopEmote(animations) {
-        const emote = animations.emote;
-        if (emote) {
-            animations.emote = null;
-            stopGroup(emote);
+        if (animations.emote) {
+            clearEmote(animations);
             resumeMovement(animations);
         }
+    }
+
+    // Cleared before the group stops, because stopping a group that plays once runs its end handler, which resumes the
+    // movement only while it is still the emote.
+    function clearEmote(animations) {
+        const emote = animations.emote;
+        animations.emote = null;
+        stopGroup(emote);
     }
 
     function resumeMovement(animations) {
@@ -729,9 +758,7 @@ export async function createEntities(scene, options) {
         animations.isWalking = isWalking;
         if (isWalking) {
             // A step ends a running emote; the server clears it on the same step.
-            const emote = animations.emote;
-            animations.emote = null;
-            stopGroup(emote);
+            clearEmote(animations);
             stopGroup(animations.idle);
             animations.walking?.start(true, WALKING_SPEED_RATIO);
         } else if (!animations.emote) {
@@ -953,9 +980,9 @@ export async function createEntities(scene, options) {
                 const shown = view.isSelf && previous?.isSelf ? { ...view, x: previous.x, y: previous.y, facing: previous.facing } : view;
                 entity = createEntity(shown);
                 entities.set(view.id, entity);
+                // The person loads asynchronously and plays the latest view's animation once it is shown.
                 place(entity, shown.x, shown.y);
                 setFacing(entity, shown.facing);
-                applyAnimation(entity, view);
                 return isSelfLost;
             }
 
