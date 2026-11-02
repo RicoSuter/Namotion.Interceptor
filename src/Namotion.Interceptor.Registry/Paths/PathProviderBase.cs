@@ -31,14 +31,15 @@ public abstract class PathProviderBase : IPathProvider
     public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
 
     /// <summary>
-    /// Gets whether paths may pass the property: <see cref="IsPropertyIncluded"/> includes it and, for an attribute,
-    /// the property it belongs to, recursively up to a property that is no attribute. Attributes that belong to each
-    /// other in a cycle are not included. The properties holding its subject are not checked.
+    /// Gets whether the property is effectively included: <see cref="IsPropertyIncluded"/> includes it and, for an
+    /// attribute, the property it belongs to, recursively up to a property that is no attribute. Attributes that belong
+    /// to each other in a cycle are not included. The properties holding its subject are not checked. Paths pass only
+    /// effectively included properties.
     /// </summary>
     /// <param name="property">The property to check.</param>
-    /// <returns>True when paths may pass the property; otherwise, false.</returns>
-    public bool IsPropertyIncludedInPaths(RegisteredSubjectProperty property)
-        => IsPropertyIncluded(property) && (!property.IsAttribute || IsAttributedPropertyIncluded(property));
+    /// <returns>True when the property is effectively included; otherwise, false.</returns>
+    public bool IsPropertyEffectivelyIncluded(RegisteredSubjectProperty property)
+        => IsPropertyIncluded(property) && (!property.IsAttribute || IsPropertyOfAttributeIncluded(property));
 
     /// <summary>
     /// Gets whether <see cref="IsPropertyIncluded"/> includes the property and, when it does, the segment paths use
@@ -66,12 +67,13 @@ public abstract class PathProviderBase : IPathProvider
     }
 
     /// <summary>
-    /// <see cref="TryGetIncludedPropertySegment"/> under the rule of <see cref="IsPropertyIncludedInPaths"/>.
+    /// Gets whether the property is effectively included (see <see cref="IsPropertyEffectivelyIncluded"/>) and, when it
+    /// is, its segment from <see cref="TryGetIncludedPropertySegment"/>.
     /// </summary>
-    internal bool TryGetSegmentIncludedInPaths(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    internal bool TryGetEffectivelyIncludedSegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
         if (TryGetIncludedPropertySegment(property, out segment) &&
-            (!property.IsAttribute || IsAttributedPropertyIncluded(property)))
+            (!property.IsAttribute || IsPropertyOfAttributeIncluded(property)))
         {
             return true;
         }
@@ -80,7 +82,7 @@ public abstract class PathProviderBase : IPathProvider
         return false;
     }
 
-    private bool IsAttributedPropertyIncluded(RegisteredSubjectProperty attribute)
+    private bool IsPropertyOfAttributeIncluded(RegisteredSubjectProperty attribute)
     {
         // Attributes can name each other in a cycle; a chain longer than the subject's properties is one, and it
         // belongs to no included property.

@@ -14,7 +14,7 @@ public class PathProviderBaseTests
 
     [Theory]
     [MemberData(nameof(ProviderNames))]
-    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyIncludedInPathsAndTryGetPropertySegment(string providerName)
+    public void WhenInclusionAndSegmentAreAskedInOneCall_ThenTheyAgreeWithIsPropertyEffectivelyIncludedAndTryGetPropertySegment(string providerName)
     {
         // Arrange
         var context = CreateContext();
@@ -27,14 +27,14 @@ public class PathProviderBaseTests
 
         // Act
         var results = properties
-            .Select(property => (Property: property, Included: pathProvider.TryGetSegmentIncludedInPaths(property, out var segment), Segment: segment))
+            .Select(property => (Property: property, Included: pathProvider.TryGetEffectivelyIncludedSegment(property, out var segment), Segment: segment))
             .ToList();
 
         // Assert
         Assert.Contains(results, result => result.Included);
         foreach (var (property, included, segment) in results)
         {
-            var expectedIncluded = pathProvider.IsPropertyIncludedInPaths(property);
+            var expectedIncluded = pathProvider.IsPropertyEffectivelyIncluded(property);
             Assert.Equal(expectedIncluded, included);
             Assert.Equal(expectedIncluded ? pathProvider.TryGetPropertySegment(property) ?? property.BrowseName : null, segment);
         }
@@ -81,9 +81,9 @@ public class PathProviderBaseTests
         var unit = maxLength.TryGetAttribute("Unit")!;
 
         // Act
-        var firstNameResult = pathProvider.IsPropertyIncludedInPaths(firstName);
-        var maxLengthResult = pathProvider.IsPropertyIncludedInPaths(maxLength);
-        var unitResult = pathProvider.IsPropertyIncludedInPaths(unit);
+        var firstNameResult = pathProvider.IsPropertyEffectivelyIncluded(firstName);
+        var maxLengthResult = pathProvider.IsPropertyEffectivelyIncluded(maxLength);
+        var unitResult = pathProvider.IsPropertyEffectivelyIncluded(unit);
 
         // Assert
         Assert.Equal(firstNameIncluded, firstNameResult);
@@ -104,8 +104,8 @@ public class PathProviderBaseTests
         var pathProvider = DefaultPathProvider.Instance;
 
         // Act
-        var firstIncluded = pathProvider.IsPropertyIncludedInPaths(first);
-        var secondIncluded = pathProvider.IsPropertyIncludedInPaths(second);
+        var firstIncluded = pathProvider.IsPropertyEffectivelyIncluded(first);
+        var secondIncluded = pathProvider.IsPropertyEffectivelyIncluded(second);
         var firstPath = first.TryGetPath(pathProvider, subject);
         var resolved = pathProvider.TryGetPropertyFromPath(registered, first.BrowseName);
 
