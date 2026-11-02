@@ -7,7 +7,7 @@ namespace HomeBlaze.Game.World;
 /// area centers: the straight line while it touches no tile of an object whose
 /// <see cref="GameObject.IsSoundBlocking"/> is true, otherwise the path that <see cref="SoundPathSearch"/> finds around
 /// such objects. The volume is the distance gain of the path length times the occlusion gain of the detour, the length
-/// the path exceeds the straight distance by. Players in different areas closed by such objects, by
+/// the path exceeds the straight distance by. Players in different regions closed by such objects, by
 /// <see cref="SoundMap.AreSeparated"/>, get no path without a search.
 /// </summary>
 internal static class HearingRange
@@ -59,7 +59,7 @@ internal static class HearingRange
             return GetDistanceGain(distance);
         }
 
-        if (SoundMap.AreSeparated(map.GetArea(firstArea), map.GetArea(secondArea)))
+        if (SoundMap.AreSeparated(map.GetRegion(firstArea), map.GetRegion(secondArea)))
         {
             return 0;
         }

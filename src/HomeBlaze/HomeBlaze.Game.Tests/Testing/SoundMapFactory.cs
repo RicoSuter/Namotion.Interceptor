@@ -15,7 +15,7 @@ internal static class SoundMapFactory
     public static SoundMap Create(GameWorldIndex index)
     {
         var map = new SoundMap();
-        map.Update(SoundSnapshot.Empty.With(index));
+        map.Update(SoundSnapshot.Empty.TakeChanges(index));
         return map;
     }
 

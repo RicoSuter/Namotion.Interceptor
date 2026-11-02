@@ -5,7 +5,7 @@ using HomeBlaze.Game.World;
 namespace HomeBlaze.Game.Voice;
 
 /// <summary>
-/// Builds volume tables from immutable inputs, keeping the closed area labels and the sound paths of a
+/// Builds volume tables from immutable inputs, keeping the region labels and the sound paths of a
 /// <see cref="SoundSnapshot"/> version from build to build. Not thread-safe: one build at a time, and only the builds
 /// touch it.
 /// </summary>

@@ -13,7 +13,7 @@ public class GameVolumeTableBuilderTests
 
     private GameVolumeTable Build(params HearingPosition[] players)
     {
-        _snapshot = _snapshot.With(_index);
+        _snapshot = _snapshot.TakeChanges(_index);
         return _builder.Build(players, _snapshot);
     }
 

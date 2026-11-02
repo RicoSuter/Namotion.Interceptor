@@ -245,9 +245,9 @@ public class GameWorldIndexTests
 
         // Assert
         var blockedInFirst = new List<(int X, int Y)>();
-        for (var y = 0; y < SoundChunk.Size; y++)
+        for (var y = 0; y < GameWorldIndex.ChunkSize; y++)
         {
-            for (var x = 0; x < SoundChunk.Size; x++)
+            for (var x = 0; x < GameWorldIndex.ChunkSize; x++)
             {
                 if (first.IsBlocked(x, y))
                 {

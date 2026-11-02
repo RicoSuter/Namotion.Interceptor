@@ -30,7 +30,7 @@ public class GameVoiceMixerTests
             row.Add(new GameVolumeEntry(talker, volume));
         }
 
-        return GameVolumeTable.Create(rows);
+        return VolumeTableFactory.Create(rows);
     }
 
     private void Speak(string playerId, short sample, int pageId = 1)

@@ -347,19 +347,20 @@ internal sealed class SoundPathSearch
         Array.Clear(_openTiles, 0, _columns * _rows);
         var area = new GameArea(
             (int)(_originX + Padding), (int)(_originY + Padding), _columns - 2 * Padding, _rows - 2 * Padding);
-        var lastChunkX = area.Right >> 4;
+        var lastChunkX = area.Right >> GameWorldIndex.ChunkShift;
         for (var y = (long)area.Y; y <= area.Top; y++)
         {
-            var chunkY = y >> 4;
-            var row = (int)(y & 15);
-            for (var chunkX = (long)area.X >> 4; chunkX <= lastChunkX; chunkX++)
+            var chunkY = y >> GameWorldIndex.ChunkShift;
+            var row = (int)(y & GameWorldIndex.ChunkMask);
+            for (var chunkX = (long)area.X >> GameWorldIndex.ChunkShift; chunkX <= lastChunkX; chunkX++)
             {
                 var blocked = map.GetChunk((chunkX, chunkY)).GetRow(row);
-                var lastX = Math.Min(area.Right, (chunkX << 4) + 15);
-                var tile = GetTile(Math.Max(area.X, chunkX << 4), y);
-                for (var x = Math.Max(area.X, chunkX << 4); x <= lastX; x++, tile++)
+                var originX = chunkX << GameWorldIndex.ChunkShift;
+                var lastX = Math.Min(area.Right, originX + GameWorldIndex.ChunkMask);
+                var tile = GetTile(Math.Max(area.X, originX), y);
+                for (var x = Math.Max(area.X, originX); x <= lastX; x++, tile++)
                 {
-                    _openTiles[tile] = ((blocked >> (int)(x & 15)) & 1) == 0;
+                    _openTiles[tile] = ((blocked >> (int)(x & GameWorldIndex.ChunkMask)) & 1) == 0;
                 }
             }
         }

@@ -186,15 +186,15 @@ public partial class Game
     // waits for a build, so a slow one only delays the table.
     private void UpdateVolumeTable()
     {
-        _soundSnapshot = _soundSnapshot.With(_world.Index);
-        var isPublished = TryCompleteVolumeTableBuild();
+        _soundSnapshot = _soundSnapshot.TakeChanges(_world.Index);
+        var isChanged = TryCompleteVolumeTableBuild();
         try
         {
-            StartVolumeTableBuildWhenDue();
+            isChanged |= StartVolumeTableBuildWhenDue();
         }
         finally
         {
-            if (isPublished)
+            if (isChanged)
             {
                 VolumeTableChanged?.Invoke();
             }
@@ -233,40 +233,52 @@ public partial class Game
         return false;
     }
 
-    // Starts at most every VolumeTableInterval, and only when the players, the sound blocked tiles or a voice switch
-    // changed: the rows ignore the switches, but VolumeTableChanged tells the pages about them.
-    private void StartVolumeTableBuildWhenDue()
+    // Starts at most every VolumeTableInterval, and only when the players or the sound blocked tiles changed. A voice
+    // switch alone changes no row, so it builds nothing; returns true then, since VolumeTableChanged tells the pages.
+    private bool StartVolumeTableBuildWhenDue()
     {
         var now = _timeProvider.GetTimestamp();
         if (_volumeTableBuild is not null
             || (_hasVolumeTableBuildStarted && _timeProvider.GetElapsedTime(_lastVolumeTableBuildStart, now) < GameVoiceSettings.VolumeTableInterval))
         {
-            return;
+            return false;
         }
 
-        // The players' areas and connections are in the index, so its version tells whether to compare them.
         var sound = _soundSnapshot;
-        var indexVersion = _world.Index.Version;
-        var isChanged = _world.IsVoiceChanged || sound.Version != _volumeTableSoundVersion;
-        if (!isChanged && indexVersion == _volumeTableIndexVersion)
+        var arePositionsChanged = ArePositionsChanged();
+        if (!arePositionsChanged && sound.Version == _volumeTableSoundVersion)
         {
-            return;
+            var isVoiceChanged = _world.IsVoiceChanged;
+            _world.IsVoiceChanged = false;
+            return isVoiceChanged;
         }
 
-        _volumeTableIndexVersion = indexVersion;
-        CollectHearingPositions();
-        if (!isChanged && CollectionsMarshal.AsSpan(_hearingPositions).SequenceEqual(_builtHearingPositions))
+        if (arePositionsChanged)
         {
-            return;
+            _builtHearingPositions = _hearingPositions.ToArray();
         }
 
-        var positions = _hearingPositions.ToArray();
-        _builtHearingPositions = positions;
         _volumeTableSoundVersion = sound.Version;
         _world.IsVoiceChanged = false;
         _lastVolumeTableBuildStart = now;
         _hasVolumeTableBuildStarted = true;
-        _volumeTableBuild = StartVolumeTableBuild(positions, sound);
+        _volumeTableBuild = StartVolumeTableBuild(_builtHearingPositions, sound);
+        return false;
+    }
+
+    // The players' areas and connections are in the index, so they are collected and compared only when its version
+    // changed; otherwise they equal the positions of the last build.
+    private bool ArePositionsChanged()
+    {
+        var indexVersion = _world.Index.Version;
+        if (indexVersion == _volumeTableIndexVersion)
+        {
+            return false;
+        }
+
+        _volumeTableIndexVersion = indexVersion;
+        CollectHearingPositions();
+        return !CollectionsMarshal.AsSpan(_hearingPositions).SequenceEqual(_builtHearingPositions);
     }
 
     // Its own method, so the closure is allocated only when a build starts.
@@ -305,11 +317,13 @@ public partial class Game
         }
     }
 
-    // A build that the stop left running or unpublished is dropped once it completes, and the next one starts afresh;
-    // until it completes, none starts, so the builder stays with one build.
+    // A build that the stop left running or unpublished is dropped once it completes, and the next one starts afresh
+    // from an empty table; until it completes, none starts, so the builder stays with one build.
     private void ResetVolumeTableBuild()
     {
         _isVolumeTableBuildAbandoned = _volumeTableBuild is not null;
+        _volumeTable = GameVolumeTable.Empty;
+        _hearingPositions.Clear();
         _builtHearingPositions = [];
         _volumeTableIndexVersion = -1;
         _volumeTableSoundVersion = -1;

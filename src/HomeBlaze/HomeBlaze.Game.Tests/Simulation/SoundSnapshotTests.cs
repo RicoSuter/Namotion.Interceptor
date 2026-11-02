@@ -12,14 +12,14 @@ public class SoundSnapshotTests
         // Arrange
         var index = new GameWorldIndex();
         index.AddOrUpdate(EntityFactory.Object(new Wall { X = 0, Y = 4, Width = 8, Depth = 1 }));
-        var snapshot = SoundSnapshot.Empty.With(index);
+        var snapshot = SoundSnapshot.Empty.TakeChanges(index);
         var player = EntityFactory.Player("tab-1", 0, 0);
         index.AddOrUpdate(player);
         player.Area = player.Area with { X = 40 };
         index.AddOrUpdate(player);
 
         // Act
-        var next = snapshot.With(index);
+        var next = snapshot.TakeChanges(index);
 
         // Assert
         Assert.Same(snapshot, next);
@@ -33,13 +33,13 @@ public class SoundSnapshotTests
         var index = new GameWorldIndex();
         var door = EntityFactory.Object(new Door { X = 18, Y = 4, Width = 4, Depth = 1, IsOpen = true });
         index.AddOrUpdate(door);
-        var open = SoundSnapshot.Empty.With(index);
+        var open = SoundSnapshot.Empty.TakeChanges(index);
 
         // Act
         ((Door)door.Subject).IsOpen = false;
         door.ReadFromSubject();
         index.AddOrUpdate(door);
-        var closed = open.With(index);
+        var closed = open.TakeChanges(index);
 
         // Assert
         Assert.NotSame(open, closed);
@@ -58,11 +58,11 @@ public class SoundSnapshotTests
         var index = new GameWorldIndex();
         var wall = EntityFactory.Object(new Wall { X = 0, Y = 4, Width = 8, Depth = 1 });
         index.AddOrUpdate(wall);
-        var snapshot = SoundSnapshot.Empty.With(index);
+        var snapshot = SoundSnapshot.Empty.TakeChanges(index);
 
         // Act
         index.Remove(wall);
-        var next = snapshot.With(index);
+        var next = snapshot.TakeChanges(index);
 
         // Assert
         Assert.False(snapshot.GetChunk((0, 0)).IsEmpty);

@@ -10,7 +10,20 @@ namespace HomeBlaze.Game.World;
 /// </summary>
 internal sealed class GameWorldIndex
 {
-    private const int ChunkShift = 4;
+    /// <summary>
+    /// The power of two of the width and depth of a chunk, 16 tiles; a tile's chunk is its position shifted right by it.
+    /// </summary>
+    public const int ChunkShift = 4;
+
+    /// <summary>
+    /// The width and depth of a chunk in tiles.
+    /// </summary>
+    public const int ChunkSize = 1 << ChunkShift;
+
+    /// <summary>
+    /// The mask that gives a tile's position inside its chunk.
+    /// </summary>
+    public const int ChunkMask = ChunkSize - 1;
     private const int MaximumPooledLists = 256;
 
     private readonly Dictionary<(long X, long Y), List<Slot>> _chunks = new();
@@ -269,27 +282,6 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Whether a sound blocking entity covers the tile, whether visible or not.
-    /// </summary>
-    public bool IsSoundBlocked(long x, long y)
-    {
-        if (!_chunks.TryGetValue(GetChunk(x, y), out var slots))
-        {
-            return false;
-        }
-
-        foreach (var slot in slots)
-        {
-            if (slot.Entry.IsSoundBlocking && slot.Entry.Area.Contains(x, y))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Gets the tiles of the chunk that a sound blocking entity covers, whether visible or not.
     /// </summary>
     public SoundChunk GetSoundChunk((long X, long Y) chunk)
@@ -299,7 +291,7 @@ internal sealed class GameWorldIndex
             return default;
         }
 
-        Span<ushort> rows = stackalloc ushort[SoundChunk.Size];
+        Span<ushort> rows = stackalloc ushort[ChunkSize];
         var originX = chunk.X << ChunkShift;
         var originY = chunk.Y << ChunkShift;
         foreach (var slot in slots)

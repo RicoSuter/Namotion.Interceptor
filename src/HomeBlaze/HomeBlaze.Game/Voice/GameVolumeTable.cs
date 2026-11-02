@@ -29,20 +29,6 @@ internal sealed class GameVolumeTable
         _rows.TryGetValue(playerId, out var row) ? row : ReadOnlySpan<GameVolumeEntry>.Empty;
 
     /// <summary>
-    /// Creates a table from the given rows, copying them.
-    /// </summary>
-    internal static GameVolumeTable Create(Dictionary<string, List<GameVolumeEntry>> rows)
-    {
-        var arrays = new Dictionary<string, GameVolumeEntry[]>(rows.Count);
-        foreach (var (playerId, row) in rows)
-        {
-            arrays[playerId] = [.. row];
-        }
-
-        return new GameVolumeTable(arrays);
-    }
-
-    /// <summary>
     /// Creates a table that takes over the rows, which nobody may change afterwards.
     /// </summary>
     internal static GameVolumeTable Wrap(Dictionary<string, GameVolumeEntry[]> rows) => new(rows);

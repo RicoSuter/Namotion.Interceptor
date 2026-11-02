@@ -141,7 +141,7 @@ public class SimulationTickBenchmark
     public object VolumeTableBuildWithAllPlayersMovedClustered() => BuildVolumeTableAfterMoves(isDoorToggled: false);
 
     /// <summary>
-    /// A volume table build after every player moved and a door opened or closed, which drops the closed areas and paths
+    /// A volume table build after every player moved and a door opened or closed, which drops the regions and paths
     /// the builds keep, including the sound snapshot of the door.
     /// </summary>
     [Benchmark]
@@ -236,7 +236,7 @@ public class SimulationTickBenchmark
         }
 
         index.Changes.Clear();
-        _soundSnapshot = _soundSnapshot.With(index);
+        _soundSnapshot = _soundSnapshot.TakeChanges(index);
         var positions = new HearingPosition[_world.Players.Length];
         for (var i = 0; i < positions.Length; i++)
         {

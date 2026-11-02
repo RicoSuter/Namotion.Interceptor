@@ -455,4 +455,25 @@ public class GameVolumeTableTests
         // Assert
         Assert.False(isRebuilt);
     }
+
+    [Fact]
+    public async Task WhenOnlyAVoiceSwitchChanges_ThenVolumeTableChangedIsRaisedWithoutABuild()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        Rebuild();
+        var table = _context.Game.VolumeTable;
+        var lastBuild = _context.Game.VolumeTableBuildTask;
+        var before = _rebuilds;
+
+        // Act
+        Assert.True(await _context.RunAsync(_context.Game.SetAudioAsync("tab-1", pageId: 1, isOn: true)));
+        Rebuild();
+
+        // Assert
+        Assert.Equal(before + 1, _rebuilds);
+        Assert.Same(table, _context.Game.VolumeTable);
+        Assert.Same(lastBuild, _context.Game.VolumeTableBuildTask);
+    }
 }

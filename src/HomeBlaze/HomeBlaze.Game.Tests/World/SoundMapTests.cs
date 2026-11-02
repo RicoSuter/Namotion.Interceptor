@@ -28,7 +28,7 @@ public class SoundMapTests
 
     private void UpdateMap()
     {
-        _snapshot = _snapshot.With(_index);
+        _snapshot = _snapshot.TakeChanges(_index);
         _map.Update(_snapshot);
     }
 
@@ -42,12 +42,12 @@ public class SoundMapTests
         UpdateMap();
 
         // Act
-        var inside = _map.GetArea(Footprint(0, 10));
-        var outside = _map.GetArea(Footprint(8, 0));
+        var inside = _map.GetRegion(Footprint(0, 10));
+        var outside = _map.GetRegion(Footprint(8, 0));
 
         // Assert
-        Assert.True(inside > SoundMap.OpenArea);
-        Assert.Equal(SoundMap.OpenArea, outside);
+        Assert.True(inside > SoundMap.OpenRegion);
+        Assert.Equal(SoundMap.OpenRegion, outside);
         Assert.True(SoundMap.AreSeparated(inside, outside));
     }
 
@@ -59,11 +59,11 @@ public class SoundMapTests
         UpdateMap();
 
         // Act
-        var first = _map.GetArea(Footprint(-2, 8));
-        var second = _map.GetArea(Footprint(2, 12));
+        var first = _map.GetRegion(Footprint(-2, 8));
+        var second = _map.GetRegion(Footprint(2, 12));
 
         // Assert
-        Assert.True(first > SoundMap.OpenArea);
+        Assert.True(first > SoundMap.OpenRegion);
         Assert.Equal(first, second);
         Assert.False(SoundMap.AreSeparated(first, second));
     }
@@ -80,12 +80,12 @@ public class SoundMapTests
         UpdateMap();
 
         // Act
-        var first = _map.GetArea(Footprint(0, 10));
-        var second = _map.GetArea(Footprint(12, 2));
+        var first = _map.GetRegion(Footprint(0, 10));
+        var second = _map.GetRegion(Footprint(12, 2));
 
         // Assert
-        Assert.True(first > SoundMap.OpenArea);
-        Assert.True(second > SoundMap.OpenArea);
+        Assert.True(first > SoundMap.OpenRegion);
+        Assert.True(second > SoundMap.OpenRegion);
         Assert.True(SoundMap.AreSeparated(first, second));
     }
 
@@ -97,12 +97,12 @@ public class SoundMapTests
         UpdateMap();
 
         // Act
-        var inside = _map.GetArea(Footprint(0, 10));
-        var outside = _map.GetArea(Footprint(8, 0));
+        var inside = _map.GetRegion(Footprint(0, 10));
+        var outside = _map.GetRegion(Footprint(8, 0));
 
         // Assert
-        Assert.Equal(SoundMap.OpenArea, inside);
-        Assert.Equal(SoundMap.OpenArea, outside);
+        Assert.Equal(SoundMap.OpenRegion, inside);
+        Assert.Equal(SoundMap.OpenRegion, outside);
         Assert.False(SoundMap.AreSeparated(inside, outside));
     }
 
@@ -112,7 +112,7 @@ public class SoundMapTests
         // Arrange
         var door = AddRoom(isDoorOpen: true);
         UpdateMap();
-        var openArea = _map.GetArea(Footprint(0, 10));
+        var openArea = _map.GetRegion(Footprint(0, 10));
         var openVersion = _map.Version;
 
         // Act
@@ -120,11 +120,11 @@ public class SoundMapTests
         door.ReadFromSubject();
         _index.AddOrUpdate(door);
         UpdateMap();
-        var closedArea = _map.GetArea(Footprint(0, 10));
+        var closedArea = _map.GetRegion(Footprint(0, 10));
 
         // Assert
-        Assert.Equal(SoundMap.OpenArea, openArea);
-        Assert.True(closedArea > SoundMap.OpenArea);
+        Assert.Equal(SoundMap.OpenRegion, openArea);
+        Assert.True(closedArea > SoundMap.OpenRegion);
         Assert.True(_map.Version > openVersion);
     }
 
@@ -136,11 +136,11 @@ public class SoundMapTests
         UpdateMap();
 
         // Act
-        var inWall = _map.GetArea(Footprint(-4, 10));
-        var inside = _map.GetArea(Footprint(0, 10));
+        var inWall = _map.GetRegion(Footprint(-4, 10));
+        var inside = _map.GetRegion(Footprint(0, 10));
 
         // Assert
-        Assert.Equal(SoundMap.UnknownArea, inWall);
+        Assert.Equal(SoundMap.UnknownRegion, inWall);
         Assert.False(SoundMap.AreSeparated(inWall, inside));
     }
 
@@ -148,7 +148,7 @@ public class SoundMapTests
     public void WhenAnAreaIsClosedButLargerThanTheMaximum_ThenItCountsAsOpen()
     {
         // Arrange
-        // A closed square whose inside holds more tiles than a closed area may have.
+        // A closed square whose inside holds more tiles than a closed region may have.
         var side = (int)Math.Sqrt(SoundMap.MaximumClosedTiles) + 2;
         AddWall(-1, -1, side + 2, 1);
         AddWall(-1, side, side + 2, 1);
@@ -157,10 +157,10 @@ public class SoundMapTests
         UpdateMap();
 
         // Act
-        var area = _map.GetArea(Footprint(0, 0));
+        var area = _map.GetRegion(Footprint(0, 0));
 
         // Assert
-        Assert.Equal(SoundMap.OpenArea, area);
+        Assert.Equal(SoundMap.OpenRegion, area);
     }
 
     [Fact]
@@ -210,7 +210,7 @@ public class SoundMapTests
         var reached = 0;
         foreach (var target in targets)
         {
-            if (SoundMap.AreSeparated(_map.GetArea(source), _map.GetArea(target)))
+            if (SoundMap.AreSeparated(_map.GetRegion(source), _map.GetRegion(target)))
             {
                 separated++;
                 reached += search.GetLength(target) != SoundPathSearch.NoPath ? 1 : 0;

@@ -19,7 +19,7 @@ public class HearingRangeTests
     // Takes in the index's changes first, as the volume table build gets them.
     private double GetVolume(PlayerEntity first, PlayerEntity second, SoundPathSearch search)
     {
-        _snapshot = _snapshot.With(_index);
+        _snapshot = _snapshot.TakeChanges(_index);
         _map.Update(_snapshot);
         return HearingRange.GetVolume(first.ToPosition(), second.ToPosition(), _map, search);
     }

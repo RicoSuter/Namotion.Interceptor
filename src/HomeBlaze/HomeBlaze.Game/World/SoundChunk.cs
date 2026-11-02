@@ -3,16 +3,16 @@ using HomeBlaze.Game.Abstractions;
 namespace HomeBlaze.Game.World;
 
 /// <summary>
-/// The tiles of one chunk of 16 by 16 tiles that a sound blocking object covers, one bit per tile. Immutable.
+/// The tiles of one chunk of the <see cref="GameWorldIndex"/> that a sound blocking object covers, one bit per tile.
+/// Immutable.
 /// </summary>
 internal readonly struct SoundChunk : IEquatable<SoundChunk>
 {
-    /// <summary>
-    /// The width and depth of a chunk in tiles.
-    /// </summary>
-    public const int Size = 16;
+    private const int Size = GameWorldIndex.ChunkSize;
+    private const int RowsPerWord = 64 / Size;
 
-    // Four rows of 16 bits each, row 0 in the lowest bits of _rows0; bit x of a row is the tile at x.
+    // The 256 tiles of a chunk of 16 by 16, which this layout requires: four rows of 16 bits in each word, row 0 in the
+    // lowest bits of _rows0; bit x of a row is the tile at x.
     private readonly ulong _rows0;
     private readonly ulong _rows1;
     private readonly ulong _rows2;
@@ -32,21 +32,23 @@ internal readonly struct SoundChunk : IEquatable<SoundChunk>
     public bool IsEmpty => (_rows0 | _rows1 | _rows2 | _rows3) == 0;
 
     /// <summary>
-    /// Creates a chunk from 16 rows, whose bit x is the tile at x of that row.
+    /// Creates a chunk from its rows, one per tile of its depth, whose bit x is the tile at x of that row.
     /// </summary>
-    /// <exception cref="ArgumentException">The span does not hold 16 rows.</exception>
+    /// <exception cref="ArgumentException">The span does not hold one row per tile of the depth.</exception>
     public static SoundChunk Create(ReadOnlySpan<ushort> rows)
     {
         if (rows.Length != Size)
         {
-            throw new ArgumentException("A chunk has 16 rows.", nameof(rows));
+            throw new ArgumentException("A chunk has one row per tile of its depth.", nameof(rows));
         }
 
-        return new SoundChunk(Pack(rows[..4]), Pack(rows[4..8]), Pack(rows[8..12]), Pack(rows[12..]));
+        return new SoundChunk(
+            Pack(rows[..RowsPerWord]), Pack(rows[RowsPerWord..(2 * RowsPerWord)]),
+            Pack(rows[(2 * RowsPerWord)..(3 * RowsPerWord)]), Pack(rows[(3 * RowsPerWord)..]));
     }
 
     /// <summary>
-    /// Sets the bits of the area's tiles in the 16 rows of the chunk whose south-west tile is at the origin.
+    /// Sets the bits of the area's tiles in the rows of the chunk whose south-west tile is at the origin.
     /// </summary>
     public static void AddArea(Span<ushort> rows, long originX, long originY, GameArea area)
     {
@@ -72,7 +74,7 @@ internal readonly struct SoundChunk : IEquatable<SoundChunk>
     /// </summary>
     public int GetRow(int y)
     {
-        var rows = (y >> 2) switch
+        var rows = (y / RowsPerWord) switch
         {
             0 => _rows0,
             1 => _rows1,
@@ -80,11 +82,11 @@ internal readonly struct SoundChunk : IEquatable<SoundChunk>
             _ => _rows3
         };
 
-        return (int)(rows >> ((y & 3) * Size)) & 0xFFFF;
+        return (int)(rows >> (y % RowsPerWord * Size)) & ((1 << Size) - 1);
     }
 
     /// <summary>
-    /// Whether the tile at the position inside the chunk, each from 0 to 15, is blocked.
+    /// Whether the tile at the position inside the chunk, each from 0 to <see cref="GameWorldIndex.ChunkMask"/>, is blocked.
     /// </summary>
     public bool IsBlocked(int x, int y) => ((GetRow(y) >> x) & 1) != 0;
 

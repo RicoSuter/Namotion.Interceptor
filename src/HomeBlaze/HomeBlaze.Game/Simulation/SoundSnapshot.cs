@@ -34,7 +34,7 @@ internal sealed class SoundSnapshot
     /// Returns a snapshot with the chunks of <see cref="GameWorldIndex.SoundChanges"/> copied from the index, and clears
     /// those changes; returns this snapshot when no tile differs. This snapshot stays unchanged.
     /// </summary>
-    public SoundSnapshot With(GameWorldIndex index)
+    public SoundSnapshot TakeChanges(GameWorldIndex index)
     {
         var changes = index.SoundChanges;
         if (changes.Count == 0)
