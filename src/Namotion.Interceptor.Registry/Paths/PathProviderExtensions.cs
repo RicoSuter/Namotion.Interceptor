@@ -35,9 +35,21 @@ public static class PathProviderExtensions
     /// </summary>
     internal static bool TryGetEffectivelyIncludedSegment(
         this IPathProvider pathProvider, RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        => TryGetEffectivelyIncludedSegment(new InterfaceSegments(pathProvider), property, out segment);
+
+    /// <inheritdoc cref="TryGetEffectivelyIncludedSegment(IPathProvider, RegisteredSubjectProperty, out string?)"/>
+    internal static bool TryGetEffectivelyIncludedSegment(
+        this PathProviderBase pathProvider, RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        => TryGetEffectivelyIncludedSegment(new BaseSegments(pathProvider), property, out segment);
+
+    // Generic over a struct so the path walk, which holds a PathProviderBase, calls the segment method virtually
+    // rather than through the interface.
+    private static bool TryGetEffectivelyIncludedSegment<TSegments>(
+        TSegments segments, RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        where TSegments : struct, ISegments
     {
-        if (pathProvider.TryGetPropertySegment(property, out segment) &&
-            (!property.IsAttribute || IsPropertyOfAttributeIncluded(pathProvider, property)))
+        if (segments.TryGetPropertySegment(property, out segment) &&
+            (!property.IsAttribute || IsPropertyOfAttributeIncluded(segments, property)))
         {
             return true;
         }
@@ -46,7 +58,8 @@ public static class PathProviderExtensions
         return false;
     }
 
-    private static bool IsPropertyOfAttributeIncluded(IPathProvider pathProvider, RegisteredSubjectProperty attribute)
+    private static bool IsPropertyOfAttributeIncluded<TSegments>(TSegments segments, RegisteredSubjectProperty attribute)
+        where TSegments : struct, ISegments
     {
         // Attributes can name each other in a cycle; a chain longer than the subject's properties is one, and it
         // belongs to no included property.
@@ -56,7 +69,7 @@ public static class PathProviderExtensions
         {
             // An attribute whose property is missing belongs to no included property.
             property = property.Parent.TryGetProperty(property.AttributeMetadata.PropertyName);
-            if (property is null || --remainingSteps < 0 || !pathProvider.TryGetPropertySegment(property, out _))
+            if (property is null || --remainingSteps < 0 || !segments.TryGetPropertySegment(property, out _))
             {
                 return false;
             }
@@ -64,5 +77,22 @@ public static class PathProviderExtensions
         while (property.IsAttribute);
 
         return true;
+    }
+
+    private interface ISegments
+    {
+        bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment);
+    }
+
+    private readonly struct InterfaceSegments(IPathProvider pathProvider) : ISegments
+    {
+        public bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+            => pathProvider.TryGetPropertySegment(property, out segment);
+    }
+
+    private readonly struct BaseSegments(PathProviderBase pathProvider) : ISegments
+    {
+        public bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+            => pathProvider.TryGetPropertySegment(property, out segment);
     }
 }
