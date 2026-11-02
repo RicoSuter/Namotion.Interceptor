@@ -1,5 +1,4 @@
 using HomeBlaze.Game.Abstractions;
-using HomeBlaze.Game.Simulation;
 
 namespace HomeBlaze.Game.World;
 
@@ -8,7 +7,8 @@ namespace HomeBlaze.Game.World;
 /// area centers: the straight line while it touches no tile of an object whose
 /// <see cref="GameObject.IsSoundBlocking"/> is true, otherwise the path that <see cref="SoundPathSearch"/> finds around
 /// such objects. The volume is the distance gain of the path length times the occlusion gain of the detour, the length
-/// the path exceeds the straight distance by.
+/// the path exceeds the straight distance by. Players in different areas closed by such objects, by
+/// <see cref="SoundMap.AreSeparated"/>, get no path without a search.
 /// </summary>
 internal static class HearingRange
 {
@@ -40,7 +40,7 @@ internal static class HearingRange
     /// When the straight line is blocked, <paramref name="search"/> searches from the player with the ordinally smaller
     /// client id, so the pairs of one player computed one after the other reuse its search.
     /// </remarks>
-    public static double GetVolume(PlayerEntity first, PlayerEntity second, GameWorldIndex index, SoundPathSearch search)
+    public static double GetVolume(HearingPosition first, HearingPosition second, SoundMap map, SoundPathSearch search)
     {
         var firstArea = first.Area;
         var secondArea = second.Area;
@@ -54,15 +54,20 @@ internal static class HearingRange
             return 0;
         }
 
-        if (!IsLineBlocked(start, end, firstArea, secondArea, index))
+        if (!IsLineBlocked(start, end, firstArea, secondArea, map))
         {
             return GetDistanceGain(distance);
+        }
+
+        if (SoundMap.AreSeparated(map.GetArea(firstArea), map.GetArea(secondArea)))
+        {
+            return 0;
         }
 
         // From one fixed end, so both orders get the same length also where an area overlaps a sound blocking
         // object, whose tiles count as open only in the source area.
         var isFirstSource = IsSearchedFrom(first, second);
-        search.Prepare(isFirstSource ? firstArea : secondArea, index);
+        search.Prepare(isFirstSource ? firstArea : secondArea, map);
         var length = search.GetLength(isFirstSource ? secondArea : firstArea);
         if (length == SoundPathSearch.NoPath)
         {
@@ -98,7 +103,7 @@ internal static class HearingRange
     /// </summary>
     public static double GetOcclusionGain(double detour) => 1 / (1 + detour / HalvingDetour);
 
-    private static bool IsSearchedFrom(PlayerEntity first, PlayerEntity second)
+    private static bool IsSearchedFrom(HearingPosition first, HearingPosition second)
     {
         var order = string.CompareOrdinal(first.ClientId, second.ClientId);
         if (order != 0)
@@ -138,7 +143,7 @@ internal static class HearingRange
     // Walks every tile that the closed segment touches, also only at an edge or a corner, so sound slips neither
     // between two walls that touch at a corner nor along the face of a wall. Called only within the hearing radius,
     // which keeps the products in GetTouchedRows far inside the long range.
-    private static bool IsLineBlocked((long X, long Y) start, (long X, long Y) end, GameArea first, GameArea second, GameWorldIndex index)
+    private static bool IsLineBlocked((long X, long Y) start, (long X, long Y) end, GameArea first, GameArea second, SoundMap map)
     {
         var lastColumn = FloorDivide(Math.Max(start.X, end.X), 2);
         for (var column = CeilingDivide(Math.Min(start.X, end.X), 2) - 1; column <= lastColumn; column++)
@@ -146,7 +151,7 @@ internal static class HearingRange
             var (firstRow, lastRow) = GetTouchedRows(column, start, end);
             for (var row = firstRow; row <= lastRow; row++)
             {
-                if (!first.Contains(column, row) && !second.Contains(column, row) && index.IsSoundBlocked(column, row))
+                if (!first.Contains(column, row) && !second.Contains(column, row) && map.IsSoundBlocked(column, row))
                 {
                     return true;
                 }

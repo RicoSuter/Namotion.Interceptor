@@ -8,11 +8,21 @@ public class HearingRangeTests
 {
     private readonly GameWorldIndex _index = new();
     private readonly SoundPathSearch _search = new();
+    private readonly SoundMap _map = new();
     private readonly Dictionary<GameObject, GameEntity> _entities = new(ReferenceEqualityComparer.Instance);
+    private SoundSnapshot _snapshot = SoundSnapshot.Empty;
 
     private static PlayerEntity CreatePlayer(string clientId, int x, int y) => EntityFactory.Player(clientId, x, y);
 
-    private double GetVolume(PlayerEntity first, PlayerEntity second) => HearingRange.GetVolume(first, second, _index, _search);
+    private double GetVolume(PlayerEntity first, PlayerEntity second) => GetVolume(first, second, _search);
+
+    // Takes in the index's changes first, as the volume table build gets them.
+    private double GetVolume(PlayerEntity first, PlayerEntity second, SoundPathSearch search)
+    {
+        _snapshot = _snapshot.With(_index);
+        _map.Update(_snapshot);
+        return HearingRange.GetVolume(first.ToPosition(), second.ToPosition(), _map, search);
+    }
 
     // Indexes the object as it is now, as the simulation does after a write.
     private void Index(GameObject gameObject)
@@ -318,7 +328,7 @@ public class HearingRangeTests
 
         // Act
         var gapVolume = GetVolume(first, second);
-        var slitVolume = HearingRange.GetVolume(first, second, slitIndex, new SoundPathSearch());
+        var slitVolume = HearingRange.GetVolume(first.ToPosition(), second.ToPosition(), SoundMapFactory.Create(slitIndex), new SoundPathSearch());
 
         // Assert
         Assert.InRange(gapVolume, slitVolume, 0.2 * 0.8);
@@ -338,7 +348,7 @@ public class HearingRangeTests
 
         // Act
         var forward = GetVolume(player, talker);
-        var backward = HearingRange.GetVolume(talker, player, _index, new SoundPathSearch());
+        var backward = GetVolume(talker, player, new SoundPathSearch());
 
         // Assert
         Assert.InRange(forward, 0.05, HearingRange.GetDistanceGain(Math.Sqrt(25 + 196)));
@@ -485,7 +495,7 @@ public class HearingRangeTests
 
         // Act
         var forward = GetVolume(playerA, playerB);
-        var backward = HearingRange.GetVolume(playerB, playerA, _index, new SoundPathSearch());
+        var backward = GetVolume(playerB, playerA, new SoundPathSearch());
 
         // Assert
         Assert.Equal(forward, backward);

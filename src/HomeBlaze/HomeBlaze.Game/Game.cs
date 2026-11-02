@@ -97,7 +97,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation.AddTickHandler(PublishObjectSetWhenChanged);
         _simulation.AddTickHandler(_world.RefreshChangedSubjects);
         _simulation.AddTickHandler(_world.PublishSnapshot);
-        _simulation.AddTickHandler(RebuildVolumeTableWhenDue);
+        _simulation.AddTickHandler(UpdateVolumeTable);
         _simulation.AddTickHandler(PublishWhenDue);
         _simulation.AddTickHandler(StartSaveWhenDue);
         _simulation.AddTickHandler(CompleteWrittenPlacements);
@@ -284,6 +284,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
             _simulation.Restart();
             _isSaving = false;
             _publisher.IsPaused = false;
+            ResetVolumeTableBuild();
         }
 
         if (Interlocked.Exchange(ref _isStarted, 1) == 0)

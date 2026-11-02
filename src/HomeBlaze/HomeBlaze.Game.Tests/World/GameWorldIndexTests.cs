@@ -228,26 +228,97 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenTheSoundBlockingEntitiesOfAnAreaAreQueried_ThenOnlySoundBlockingOnesAreFoundOnce()
+    public void WhenTheSoundChunkIsRead_ThenOnlyTheTilesOfSoundBlockingEntitiesInsideItAreBlocked()
+    {
+        // Arrange
+        // The wall reaches from the first chunk into the next one.
+        var index = new GameWorldIndex();
+        index.AddOrUpdate(CreateEntity(new GameArea(14, 0, 4, 1), isMovementBlocking: true, isSoundBlocking: true));
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 4, 4, 1), isMovementBlocking: true, isSoundBlocking: true));
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 8, 4, 1)));
+        index.AddOrUpdate(CreateEntity(new GameArea(8, 8, 1, 1), isMovementBlocking: true));
+
+        // Act
+        var first = index.GetSoundChunk((0, 0));
+        var next = index.GetSoundChunk((1, 0));
+        var empty = index.GetSoundChunk((5, 5));
+
+        // Assert
+        var blockedInFirst = new List<(int X, int Y)>();
+        for (var y = 0; y < SoundChunk.Size; y++)
+        {
+            for (var x = 0; x < SoundChunk.Size; x++)
+            {
+                if (first.IsBlocked(x, y))
+                {
+                    blockedInFirst.Add((x, y));
+                }
+            }
+        }
+
+        Assert.Equal([(0, 4), (1, 4), (2, 4), (3, 4), (14, 0), (15, 0)], blockedInFirst.Order());
+        Assert.True(next.IsBlocked(0, 0));
+        Assert.True(next.IsBlocked(1, 0));
+        Assert.False(next.IsBlocked(2, 0));
+        Assert.True(empty.IsEmpty);
+    }
+
+    [Fact]
+    public void WhenOnlyEntitiesThatLetSoundThroughChange_ThenTheSoundVersionStaysAndNoSoundChangeIsRecorded()
     {
         // Arrange
         var index = new GameWorldIndex();
-        var wall = CreateEntity(new GameArea(14, 0, 4, 1), isMovementBlocking: true, isSoundBlocking: true);
-        var closedDoor = CreateEntity(new GameArea(0, 4, 4, 1), isMovementBlocking: true, isSoundBlocking: true);
-        index.AddOrUpdate(wall);
-        index.AddOrUpdate(closedDoor);
-        index.AddOrUpdate(CreateEntity(new GameArea(0, 8, 4, 1)));
-        index.AddOrUpdate(CreateEntity(new GameArea(8, 8, 1, 1), isMovementBlocking: true));
-        index.AddOrUpdate(CreateEntity(new GameArea(100, 100, 4, 1), isMovementBlocking: true, isSoundBlocking: true));
-        var results = new List<GameArea>();
+        index.AddOrUpdate(CreateEntity(new GameArea(0, 4, 4, 1), isMovementBlocking: true, isSoundBlocking: true));
+        index.SoundChanges.Clear();
+        var soundVersion = index.SoundVersion;
+        var player = CreateEntity(new GameArea(0, 0, 2, 2), isMovementBlocking: true);
+        var tree = CreateEntity(new GameArea(20, 0, 2, 2), isMovementBlocking: true);
 
         // Act
-        index.QuerySoundBlocking(new GameArea(0, 0, 20, 20), results);
+        index.AddOrUpdate(player);
+        index.AddOrUpdate(tree);
+        player.Area = player.Area with { X = 1 };
+        index.AddOrUpdate(player);
+        tree.IsVisible = false;
+        index.AddOrUpdate(tree);
+        index.Remove(tree);
 
         // Assert
-        Assert.Equal(2, results.Count);
-        Assert.Contains(wall.Area, results);
-        Assert.Contains(closedDoor.Area, results);
+        Assert.Equal(soundVersion, index.SoundVersion);
+        Assert.Equal(0, index.SoundChanges.Count);
+    }
+
+    [Fact]
+    public void WhenASoundBlockingEntityChanges_ThenTheSoundVersionIncreasesAndItsChunksAreRecorded()
+    {
+        // Arrange
+        var index = new GameWorldIndex();
+        var door = CreateEntity(new GameArea(0, 4, 4, 1), isMovementBlocking: true, isSoundBlocking: true);
+        var versions = new List<long> { index.SoundVersion };
+
+        // Act
+        index.AddOrUpdate(door);
+        versions.Add(index.SoundVersion);
+        door.IsSoundBlocking = false;
+        index.AddOrUpdate(door);
+        versions.Add(index.SoundVersion);
+        door.IsSoundBlocking = true;
+        index.AddOrUpdate(door);
+        versions.Add(index.SoundVersion);
+        index.SoundChanges.Clear();
+        door.Area = door.Area with { X = 30 };
+        index.AddOrUpdate(door);
+        versions.Add(index.SoundVersion);
+        var movedChunks = index.SoundChanges.Chunks.Order().ToList();
+        index.Remove(door);
+        versions.Add(index.SoundVersion);
+        index.Clear();
+        versions.Add(index.SoundVersion);
+
+        // Assert
+        Assert.Equal(versions.Distinct().Count(), versions.Count);
+        Assert.Equal(versions.Order(), versions);
+        Assert.Equal([(0L, 0L), (1L, 0L), (2L, 0L)], movedChunks);
     }
 
     [Fact]
@@ -491,7 +562,7 @@ public class GameWorldIndexTests
     }
 
     [Fact]
-    public void WhenTheSameAreaIsQueriedTwiceOrQueriedForSoundAfterwards_ThenEachQueryReturnsTheEntity()
+    public void WhenTheSameAreaIsQueriedTwice_ThenEachQueryReturnsTheEntity()
     {
         // Arrange
         var index = new GameWorldIndex();
@@ -500,17 +571,14 @@ public class GameWorldIndexTests
         var area = new GameArea(-30, -10, 60, 20);
         var first = new List<GameEntity>();
         var second = new List<GameEntity>();
-        var soundBlocking = new List<GameArea>();
 
         // Act
         index.Query(area, first);
         index.Query(area, second);
-        index.QuerySoundBlocking(area, soundBlocking);
 
         // Assert
         Assert.Same(entity, Assert.Single(first));
         Assert.Same(entity, Assert.Single(second));
-        Assert.Equal(entity.Area, Assert.Single(soundBlocking));
     }
 
     [Fact]

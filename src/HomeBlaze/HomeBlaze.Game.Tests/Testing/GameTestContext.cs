@@ -1,6 +1,7 @@
 using HomeBlaze.Game.Buildings;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.View;
+using HomeBlaze.Game.Voice;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -38,17 +39,27 @@ internal sealed class GameTestContext
     }
 
     /// <summary>
-    /// Advances the clock by one tick interval and runs one tick on the test thread; waits for a save the tick started,
-    /// so the next tick takes in its result.
+    /// Advances the clock by one tick interval and runs one tick on the test thread; waits for a save and a volume table
+    /// build the tick started, so the next tick takes in their results.
     /// </summary>
     public void Tick(int count = 1)
     {
         for (var i = 0; i < count; i++)
         {
             TimeProvider.Advance(GameSimulationSettings.TickInterval);
-            Game.RunTickForTest();
-            Game.SaveTask.GetAwaiter().GetResult();
+            RunTick();
         }
+    }
+
+    /// <summary>
+    /// Runs one tick on the test thread without advancing the clock; waits for a save and a volume table build the tick
+    /// started.
+    /// </summary>
+    public void RunTick()
+    {
+        Game.RunTickForTest();
+        Game.SaveTask.GetAwaiter().GetResult();
+        Game.VolumeTableBuildTask.GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -82,10 +93,15 @@ internal sealed class GameTestContext
         Tick();
         for (var i = 1; i < 100 && !((IAsyncResult)task).AsyncWaitHandle.WaitOne(ContinuationWait); i++)
         {
-            Game.RunTickForTest();
-            Game.SaveTask.GetAwaiter().GetResult();
+            RunTick();
         }
     }
+
+    /// <summary>
+    /// Runs ticks until a change made before is in the volume table: one volume table interval until a build starts,
+    /// and the tick after it, which publishes the table that build made.
+    /// </summary>
+    public void BuildVolumeTable() => Tick((int)(GameVoiceSettings.VolumeTableInterval / GameSimulationSettings.TickInterval) + 1);
 
     /// <summary>
     /// Runs ticks until the publish interval passed, so subjects show the simulation's state.

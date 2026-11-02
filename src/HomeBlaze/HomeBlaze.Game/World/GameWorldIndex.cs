@@ -31,11 +31,24 @@ internal sealed class GameWorldIndex
     public long Version { get; private set; }
 
     /// <summary>
+    /// Increases whenever the tiles that sound blocking entities cover may have changed: such an entity was added,
+    /// removed, moved or resized, or its sound blocking turned on or off. Other changes, such as a player's step, leave it
+    /// unchanged.
+    /// </summary>
+    public long SoundVersion { get; private set; }
+
+    /// <summary>
     /// The chunks whose entities were added, moved, removed or changed, including a change of only the visual, title or
     /// height.
     /// The index only adds to it; its reader clears it.
     /// </summary>
     public ChangedChunks Changes { get; } = new();
+
+    /// <summary>
+    /// The chunks whose sound blocked tiles may have changed, a subset of what <see cref="Changes"/> got. The index only
+    /// adds to it; its reader, the sound snapshot, clears it.
+    /// </summary>
+    public ChangedChunks SoundChanges { get; } = new();
 
     /// <summary>
     /// Returns the chunk that contains the tile.
@@ -59,6 +72,7 @@ internal sealed class GameWorldIndex
         foreach (var (chunk, slots) in _chunks)
         {
             Changes.Add(chunk);
+            SoundChanges.Add(chunk);
             if (_pooledLists.Count < MaximumPooledLists)
             {
                 slots.Clear();
@@ -69,6 +83,7 @@ internal sealed class GameWorldIndex
         _chunks.Clear();
         _slots.Clear();
         Version++;
+        SoundVersion++;
     }
 
     /// <summary>
@@ -87,11 +102,7 @@ internal sealed class GameWorldIndex
         var entry = new Entry(entity.Area, entity.IsMovementBlocking, entity.IsSoundBlocking, entity.IsVisible);
         if (!_slots.TryGetValue(entity, out var slot))
         {
-            slot = new Slot(entity) { Entry = entry, Visual = entity.Visual, Title = entity.Title, Height = entity.Height };
-            _slots.Add(entity, slot);
-            AddToChunks(slot, entry.Area);
-            AddChangedChunks(entry.Area);
-            Version++;
+            Add(entity, entry);
             return;
         }
 
@@ -118,6 +129,20 @@ internal sealed class GameWorldIndex
         {
             slot.Entry = entry;
             Version++;
+            AddSoundChanges(existing, entry);
+        }
+    }
+
+    private void Add(GameEntity entity, Entry entry)
+    {
+        var slot = new Slot(entity) { Entry = entry, Visual = entity.Visual, Title = entity.Title, Height = entity.Height };
+        _slots.Add(entity, slot);
+        AddToChunks(slot, entry.Area);
+        AddChangedChunks(entry.Area);
+        Version++;
+        if (entry.IsSoundBlocking)
+        {
+            AddSoundChange(entry.Area);
         }
     }
 
@@ -128,6 +153,10 @@ internal sealed class GameWorldIndex
             RemoveFromChunks(slot, slot.Entry.Area);
             AddChangedChunks(slot.Entry.Area);
             Version++;
+            if (slot.Entry.IsSoundBlocking)
+            {
+                AddSoundChange(slot.Entry.Area);
+            }
         }
     }
 
@@ -261,22 +290,27 @@ internal sealed class GameWorldIndex
     }
 
     /// <summary>
-    /// Adds the area of each entity that blocks sound by <see cref="IsSoundBlocked"/> and covers a tile of the area to
-    /// <paramref name="results"/>, once.
+    /// Gets the tiles of the chunk that a sound blocking entity covers, whether visible or not.
     /// </summary>
-    public void QuerySoundBlocking(GameArea area, List<GameArea> results)
+    public SoundChunk GetSoundChunk((long X, long Y) chunk)
     {
-        var stamp = ++_queryStamp;
-        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        if (!_chunks.TryGetValue(chunk, out var slots))
         {
-            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
+            return default;
+        }
+
+        Span<ushort> rows = stackalloc ushort[SoundChunk.Size];
+        var originX = chunk.X << ChunkShift;
+        var originY = chunk.Y << ChunkShift;
+        foreach (var slot in slots)
+        {
+            if (slot.Entry.IsSoundBlocking)
             {
-                if (_chunks.TryGetValue((chunkX, chunkY), out var slots))
-                {
-                    AddSoundBlockingIntersecting(slots, area, results, stamp);
-                }
+                SoundChunk.AddArea(rows, originX, originY, slot.Entry.Area);
             }
         }
+
+        return SoundChunk.Create(rows);
     }
 
     private static bool IsBlockedByAny(List<Slot> slots, GameArea area, GameEntity? ignored)
@@ -319,18 +353,6 @@ internal sealed class GameWorldIndex
         }
     }
 
-    private static void AddSoundBlockingIntersecting(List<Slot> slots, GameArea area, List<GameArea> results, long stamp)
-    {
-        foreach (var slot in slots)
-        {
-            if (slot.QueryStamp != stamp && slot.Entry.IsSoundBlocking && slot.Entry.Area.Intersects(area))
-            {
-                slot.QueryStamp = stamp;
-                results.Add(slot.Entry.Area);
-            }
-        }
-    }
-
     private void AddChangedChunks(GameArea area)
     {
         for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
@@ -338,6 +360,36 @@ internal sealed class GameWorldIndex
             for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
             {
                 Changes.Add((chunkX, chunkY));
+            }
+        }
+    }
+
+    private void AddSoundChanges(Entry existing, Entry entry)
+    {
+        if (existing.IsSoundBlocking == entry.IsSoundBlocking && (!entry.IsSoundBlocking || existing.Area == entry.Area))
+        {
+            return;
+        }
+
+        if (existing.IsSoundBlocking)
+        {
+            AddSoundChange(existing.Area);
+        }
+
+        if (entry.IsSoundBlocking)
+        {
+            AddSoundChange(entry.Area);
+        }
+    }
+
+    private void AddSoundChange(GameArea area)
+    {
+        SoundVersion++;
+        for (var chunkY = (long)area.Y >> ChunkShift; chunkY <= area.Top >> ChunkShift; chunkY++)
+        {
+            for (var chunkX = (long)area.X >> ChunkShift; chunkX <= area.Right >> ChunkShift; chunkX++)
+            {
+                SoundChanges.Add((chunkX, chunkY));
             }
         }
     }

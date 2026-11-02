@@ -25,7 +25,7 @@ public class GameVoiceTests
     // Lets the volume table follow the changes, then mixes one frame with it.
     private void Mix()
     {
-        _context.Tick((int)(GameVoiceSettings.VolumeTableInterval / GameSimulationSettings.TickInterval));
+        _context.BuildVolumeTable();
         _context.Game.VoiceMixer.Mix(_context.Game.VolumeTable);
     }
 
@@ -291,6 +291,7 @@ public class GameVoiceTests
         _context.AddConnectedPlayer("tab-2", x: 20);
         var sink = new RecordingVoiceSink();
         using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
+        _context.BuildVolumeTable();
         var calls = 0;
         _context.Game.VolumeTableChanged += () =>
         {

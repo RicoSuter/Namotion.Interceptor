@@ -91,7 +91,7 @@ internal sealed class GameWorldState
     public bool IsSaveRequested { get; set; }
 
     /// <summary>
-    /// Whether a voice switch changed since the last volume table, which the index version does not show.
+    /// Whether a voice switch changed since the last volume table build started, which the index version does not show.
     /// </summary>
     public bool IsVoiceChanged { get; set; } = true;
 

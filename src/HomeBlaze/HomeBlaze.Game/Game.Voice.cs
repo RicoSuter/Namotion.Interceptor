@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Voice;
 using HomeBlaze.Game.World;
@@ -13,12 +14,26 @@ public partial class Game
     // Replaced on the simulation thread only and read by any thread; a published table never changes.
     private volatile GameVolumeTable _volumeTable = GameVolumeTable.Empty;
 
-    // Touched only on the simulation thread: scratch space and state of the volume table rebuild.
-    private readonly List<GameEntity> _volumeCandidates = [];
-    private readonly SoundPathSearch _soundPathSearch = new();
+    // Touched only by the running volume table build. The simulation starts a build only after it saw the previous one
+    // complete, so two builds never touch it at once.
+    private readonly GameVolumeTableBuilder _volumeTableBuilder = new();
+
+    // Touched only on the simulation thread, and by Start while no tick runs: the running build and the inputs of the
+    // last one started.
+    private readonly List<HearingPosition> _hearingPositions = [];
+    private HearingPosition[] _builtHearingPositions = [];
+    private Task<VolumeTableBuild>? _volumeTableBuild;
+    private bool _isVolumeTableBuildAbandoned;
     private long _volumeTableIndexVersion = -1;
-    private long _lastVolumeTableRebuild;
-    private bool _hasVolumeTableRebuilt;
+    private long _volumeTableSoundVersion = -1;
+    private long _lastVolumeTableBuildStart;
+    private bool _hasVolumeTableBuildStarted;
+    private bool _isVolumeTableBuildFailing;
+
+    private volatile Task? _volumeTableBuildBlocker;
+
+    // Replaced on the simulation thread only and read by any thread; a published snapshot never changes.
+    private volatile SoundSnapshot _soundSnapshot = SoundSnapshot.Empty;
 
     // Touched only by the voice loop.
     private bool _isVoiceTickFailing;
@@ -38,6 +53,26 @@ public partial class Game
     /// Raised on the simulation thread after a new <see cref="VolumeTable"/> was published; handlers must not block or throw.
     /// </summary>
     internal event Action? VolumeTableChanged;
+
+    /// <summary>
+    /// The running or last volume table build, which never faults; read it on the thread that runs the ticks.
+    /// </summary>
+    internal Task VolumeTableBuildTask => _volumeTableBuild ?? Task.CompletedTask;
+
+    /// <summary>
+    /// The sound blocked tiles as of the last tick, for benchmarks that measure a build on their own.
+    /// </summary>
+    internal SoundSnapshot SoundSnapshotForTest => _soundSnapshot;
+
+    /// <summary>
+    /// A task that every volume table build awaits before it builds, so a test holds builds or, with a faulted task, fails
+    /// them; null builds at once.
+    /// </summary>
+    internal Task? VolumeTableBuildBlockerForTest
+    {
+        get => _volumeTableBuildBlocker;
+        set => _volumeTableBuildBlocker = value;
+    }
 
     /// <summary>
     /// Turns the microphone of the client's player on for the page, which makes it the only page whose frames count, or
@@ -147,27 +182,139 @@ public partial class Game
     private bool TryGetVoicePlayer(string clientId, bool isOn, [NotNullWhen(true)] out PlayerEntity? player) =>
         _world.Players.TryGetValue(clientId, out player) && (player.IsConnected || !isOn);
 
-    // Rebuilds at most every VolumeTableInterval, and only when the index or a voice switch changed: the rows ignore
-    // the switches, but VolumeTableChanged tells the pages about them.
-    private void RebuildVolumeTableWhenDue()
+    // Takes the sound changes of the tick into the snapshot, swaps in a finished build, then starts the next one. Never
+    // waits for a build, so a slow one only delays the table.
+    private void UpdateVolumeTable()
+    {
+        _soundSnapshot = _soundSnapshot.With(_world.Index);
+        var isPublished = TryCompleteVolumeTableBuild();
+        try
+        {
+            StartVolumeTableBuildWhenDue();
+        }
+        finally
+        {
+            if (isPublished)
+            {
+                VolumeTableChanged?.Invoke();
+            }
+        }
+    }
+
+    // Returns whether it published a new table.
+    private bool TryCompleteVolumeTableBuild()
+    {
+        if (_volumeTableBuild is not { IsCompleted: true } build)
+        {
+            return false;
+        }
+
+        _volumeTableBuild = null;
+        if (_isVolumeTableBuildAbandoned)
+        {
+            _isVolumeTableBuildAbandoned = false;
+            return false;
+        }
+
+        var (table, exception) = build.Result;
+        if (table is not null)
+        {
+            _volumeTable = table;
+            _isVolumeTableBuildFailing = false;
+            return true;
+        }
+
+        // Warns when builds start failing and stays at debug level while they keep failing, so a persistent fault does
+        // not flood the log at the build rate.
+        var level = _isVolumeTableBuildFailing ? LogLevel.Debug : LogLevel.Warning;
+        _isVolumeTableBuildFailing = true;
+        _logger.Log(level, exception, "Building the volume table of the game {Game} failed and is tried again", Title);
+        _volumeTableSoundVersion = -1;
+        return false;
+    }
+
+    // Starts at most every VolumeTableInterval, and only when the players, the sound blocked tiles or a voice switch
+    // changed: the rows ignore the switches, but VolumeTableChanged tells the pages about them.
+    private void StartVolumeTableBuildWhenDue()
     {
         var now = _timeProvider.GetTimestamp();
-        if (_hasVolumeTableRebuilt && _timeProvider.GetElapsedTime(_lastVolumeTableRebuild, now) < GameVoiceSettings.VolumeTableInterval)
+        if (_volumeTableBuild is not null
+            || (_hasVolumeTableBuildStarted && _timeProvider.GetElapsedTime(_lastVolumeTableBuildStart, now) < GameVoiceSettings.VolumeTableInterval))
         {
             return;
         }
 
-        if (!_world.IsVoiceChanged && _world.Index.Version == _volumeTableIndexVersion)
+        // The players' areas and connections are in the index, so its version tells whether to compare them.
+        var sound = _soundSnapshot;
+        var indexVersion = _world.Index.Version;
+        var isChanged = _world.IsVoiceChanged || sound.Version != _volumeTableSoundVersion;
+        if (!isChanged && indexVersion == _volumeTableIndexVersion)
         {
             return;
         }
 
-        _volumeTable = GameVolumeTable.Build(_world.Players, _world.Index, _volumeCandidates, _soundPathSearch);
+        _volumeTableIndexVersion = indexVersion;
+        CollectHearingPositions();
+        if (!isChanged && CollectionsMarshal.AsSpan(_hearingPositions).SequenceEqual(_builtHearingPositions))
+        {
+            return;
+        }
+
+        var positions = _hearingPositions.ToArray();
+        _builtHearingPositions = positions;
+        _volumeTableSoundVersion = sound.Version;
         _world.IsVoiceChanged = false;
-        _volumeTableIndexVersion = _world.Index.Version;
-        _lastVolumeTableRebuild = now;
-        _hasVolumeTableRebuilt = true;
-        VolumeTableChanged?.Invoke();
+        _lastVolumeTableBuildStart = now;
+        _hasVolumeTableBuildStarted = true;
+        _volumeTableBuild = StartVolumeTableBuild(positions, sound);
+    }
+
+    // Its own method, so the closure is allocated only when a build starts.
+    private Task<VolumeTableBuild> StartVolumeTableBuild(HearingPosition[] positions, SoundSnapshot sound) =>
+        Task.Run(() => BuildVolumeTableAsync(positions, sound));
+
+    // A player of a size that the index leaves out hears nobody and is heard by nobody, so its huge area is never searched.
+    private void CollectHearingPositions()
+    {
+        _hearingPositions.Clear();
+        foreach (var player in _world.Players.Values)
+        {
+            if (player.IsConnected && GameWorldIndex.HasValidSize(player.Area, player.Height))
+            {
+                _hearingPositions.Add(new HearingPosition(player.ClientId, player.Area));
+            }
+        }
+    }
+
+    // Runs on the thread pool and never throws, so an abandoned build leaves no unobserved exception.
+    private async Task<VolumeTableBuild> BuildVolumeTableAsync(HearingPosition[] positions, SoundSnapshot sound)
+    {
+        try
+        {
+            if (_volumeTableBuildBlocker is { } blocker)
+            {
+                await blocker.ConfigureAwait(false);
+            }
+
+            return new VolumeTableBuild(_volumeTableBuilder.Build(positions, sound), null);
+        }
+        catch (Exception exception)
+        {
+            _volumeTableBuilder.Reset();
+            return new VolumeTableBuild(null, exception);
+        }
+    }
+
+    // A build that the stop left running or unpublished is dropped once it completes, and the next one starts afresh;
+    // until it completes, none starts, so the builder stays with one build.
+    private void ResetVolumeTableBuild()
+    {
+        _isVolumeTableBuildAbandoned = _volumeTableBuild is not null;
+        _builtHearingPositions = [];
+        _volumeTableIndexVersion = -1;
+        _volumeTableSoundVersion = -1;
+        _hasVolumeTableBuildStarted = false;
+        _isVolumeTableBuildFailing = false;
     }
 
     // Ticks every frame duration until canceled.
@@ -186,4 +333,6 @@ public partial class Game
             // The game stops.
         }
     }
+
+    private readonly record struct VolumeTableBuild(GameVolumeTable? Table, Exception? Exception);
 }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.Voice;
@@ -15,11 +16,11 @@ public class GameVolumeTableTests
         _context.Game.VolumeTableChanged += () => _rebuilds++;
     }
 
-    // Runs the ticks of one volume table interval; returns whether the table was rebuilt meanwhile.
+    // Runs the ticks until a change is in the table; returns whether the table was rebuilt meanwhile.
     private bool Rebuild()
     {
         var before = _rebuilds;
-        _context.Tick((int)(GameVoiceSettings.VolumeTableInterval / GameSimulationSettings.TickInterval));
+        _context.BuildVolumeTable();
         return _rebuilds > before;
     }
 
@@ -99,18 +100,17 @@ public class GameVolumeTableTests
         // Arrange
         // A loaded configuration skips the range validation. Its id is the smaller one and its center is near the other
         // player, so it would compute the pair as the listener.
-        var index = new GameWorldIndex();
-        var listener = EntityFactory.Player("tab-1", 0, 0);
-        var huge = EntityFactory.Player("tab-0", 10, 0);
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-0", x: 10);
+        var huge = _context.Game.WorldForTest.Players["tab-0"];
         huge.Area = huge.Area with { X = -500, Width = GameObject.MaximumSize + 1 };
-        index.AddOrUpdate(listener);
-        index.AddOrUpdate(huge);
-        var players = new Dictionary<string, PlayerEntity> { ["tab-0"] = huge, ["tab-1"] = listener };
+        _context.Game.WorldForTest.Index.AddOrUpdate(huge);
 
         // Act
-        var table = GameVolumeTable.Build(players, index, [], new SoundPathSearch());
+        Rebuild();
 
         // Assert
+        var table = _context.Game.VolumeTable;
         Assert.Equal(0, table.GetRow("tab-0").Length);
         Assert.Equal(0, table.GetRow("tab-1").Length);
     }
@@ -327,5 +327,132 @@ public class GameVolumeTableTests
 
         // Assert
         Assert.Equal(1, raised);
+    }
+
+    // Runs a tick without GameTestContext.Tick, which would wait for a held build.
+    private void TickWithoutWaiting()
+    {
+        _context.TimeProvider.Advance(GameSimulationSettings.TickInterval);
+        _context.Game.RunTickForTest();
+    }
+
+    [Fact]
+    public async Task WhenABuildIsHeld_ThenTicksGoOnAndTheTableFollowsOnceItCompletes()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var second = _context.AddConnectedPlayer("tab-2", x: 10);
+        Rebuild();
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _context.Game.VolumeTableBuildBlockerForTest = blocker.Task;
+        second.X = 20;
+
+        // Act
+        for (var i = 0; i < 5; i++)
+        {
+            TickWithoutWaiting();
+        }
+
+        var isBuildRunning = !_context.Game.VolumeTableBuildTask.IsCompleted;
+        var volumeWhileHeld = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
+        _context.TimeProvider.Advance(Game.StepInterval);
+        var step = _context.Game.StepAsync("tab-1", GameDirection.West, turnOnly: false);
+        _context.Game.RunTickForTest();
+        var isStepCompletedWhileHeld = step.IsCompleted;
+        blocker.SetResult();
+        await _context.Game.VolumeTableBuildTask;
+        TickWithoutWaiting();
+
+        // Assert
+        Assert.True(isBuildRunning);
+        Assert.Equal(0.4f, volumeWhileHeld);
+        Assert.True(isStepCompletedWhileHeld);
+        Assert.Equal(0.2f, FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+    }
+
+    [Fact]
+    public async Task WhenTheGameStopsDuringABuild_ThenItsTableIsNeverPublishedAndARestartBuildsAfresh()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var second = _context.AddConnectedPlayer("tab-2", x: 10);
+        Rebuild();
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _context.Game.VolumeTableBuildBlockerForTest = blocker.Task;
+        second.X = 20;
+        for (var i = 0; i < 3; i++)
+        {
+            TickWithoutWaiting();
+        }
+
+        var heldBuild = _context.Game.VolumeTableBuildTask;
+        var publishedVolumes = new List<float?>();
+        _context.Game.VolumeTableChanged += () => publishedVolumes.Add(FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+
+        // Act
+        var isHeldAtStop = !heldBuild.IsCompleted;
+        await _context.Game.StopAsync(CancellationToken.None);
+        blocker.SetResult();
+        await heldBuild;
+        var volumeAfterStop = FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2");
+        var publishedAfterStop = publishedVolumes.Count;
+
+        // Written while stopped, so only the restart's take-over reads it.
+        second.X = 16;
+        _context.Game.VolumeTableBuildBlockerForTest = null;
+        _context.Game.StartForTest();
+        Rebuild();
+
+        // Assert
+        Assert.True(isHeldAtStop);
+        Assert.False(heldBuild.IsFaulted);
+        Assert.Equal(0.4f, volumeAfterStop);
+        Assert.Equal(0, publishedAfterStop);
+        Assert.Equal(0.25f, FindVolume(_context.Game.VolumeTable, "tab-1", "tab-2"));
+        Assert.DoesNotContain(0.2f, publishedVolumes);
+    }
+
+    [Fact]
+    public void WhenABuildFails_ThenItIsLoggedAndBuiltAgainAfterTheInterval()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = new GameTestContext(logger);
+        context.AddConnectedPlayer("tab-1");
+        var second = context.AddConnectedPlayer("tab-2", x: 10);
+        context.BuildVolumeTable();
+        context.Game.VolumeTableBuildBlockerForTest = Task.FromException(new InvalidOperationException("The build failed."));
+        second.X = 20;
+
+        // Act
+        context.BuildVolumeTable();
+        var volumeAfterFailure = FindVolume(context.Game.VolumeTable, "tab-1", "tab-2");
+        context.BuildVolumeTable();
+        var warningsWhileFailing = logger.Entries.Count(entry => entry.Level == LogLevel.Warning);
+        context.Game.VolumeTableBuildBlockerForTest = null;
+        context.BuildVolumeTable();
+
+        // Assert
+        Assert.Equal(0.4f, volumeAfterFailure);
+        Assert.Equal(1, warningsWhileFailing);
+        Assert.Contains(logger.Entries, entry => entry.Message.Contains("volume table"));
+        Assert.Equal(0.2f, FindVolume(context.Game.VolumeTable, "tab-1", "tab-2"));
+    }
+
+    [Fact]
+    public void WhenOnlyAnObjectThatLetsSoundThroughMoves_ThenTheTableIsNotRebuilt()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        var tree = _context.AddObject("tree", new Tree { X = 5, Y = 20, Variant = 6 });
+        Rebuild();
+
+        // Act
+        tree.X = 6;
+        var isRebuilt = Rebuild();
+
+        // Assert
+        Assert.False(isRebuilt);
     }
 }

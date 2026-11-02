@@ -12,9 +12,9 @@ namespace HomeBlaze.Game.Benchmark;
 /// simulation, so no tick runs around them. The clustered rows put all players within view of each other.
 /// </summary>
 /// <remarks>
-/// A measured tick advances the clock by <see cref="Game.StepInterval"/>, so the volume table, rebuilt at most every
-/// <see cref="GameVoiceSettings.VolumeTableInterval"/>, is rebuilt in every measured tick, while a running game rebuilds
-/// it in every second tick.
+/// A tick only starts a volume table build on the thread pool, when one is due and none runs, and never waits for it;
+/// the VolumeTableBuild rows measure a build on its own. Their players step east and west in turns, so from the second
+/// build on each source of a path search was searched before, unless a door changed the sound blocked tiles meanwhile.
 /// </remarks>
 [MemoryDiagnoser]
 [SimpleJob(launchCount: 1, warmupCount: 5, iterationCount: 20)]
@@ -24,14 +24,15 @@ public class SimulationTickBenchmark
     private const int ObjectCount = 100_000;
     private const int MovingPlayersInView = 10;
 
-    private readonly List<GameEntity> _volumeCandidates = [];
-    private readonly SoundPathSearch _soundPathSearch = new();
+    private readonly GameVolumeTableBuilder _volumeTableBuilder = new();
 
     private BenchmarkWorld _world = null!;
     private Action _publishMovedPlayers = null!;
     private Action _placeOrRemoveAndPublishObjectSet = null!;
     private GameViewSession _session = null!;
     private OccupancySnapshot _snapshotBeforeMoves = null!;
+    private SoundSnapshot _soundSnapshot = null!;
+    private GameEntity _door = null!;
     private GameArea _placeArea;
     private Tree? _placedTree;
     private int _invocation;
@@ -44,12 +45,16 @@ public class SimulationTickBenchmark
 
     [GlobalSetup(Targets = new[]
     {
-        nameof(PublishMovedPlayers), nameof(MovePlayers), nameof(MovePlayersAndPublishSnapshot), nameof(VolumeTableWithAllPlayersMoved),
-        nameof(ViewSessionsWithAllPlayersMoved)
+        nameof(PublishMovedPlayers), nameof(MovePlayers), nameof(MovePlayersAndPublishSnapshot), nameof(VolumeTableBuildWithAllPlayersMoved),
+        nameof(VolumeTableBuildAfterADoorToggled), nameof(ViewSessionsWithAllPlayersMoved)
     })]
     public void SetupStopped() => SetupStopped(PlayerSpread.Groups);
 
-    [GlobalSetup(Targets = new[] { nameof(VolumeTableWithAllPlayersMovedClustered), nameof(ViewSessionsWithAllPlayersMovedClustered) })]
+    [GlobalSetup(Targets = new[]
+    {
+        nameof(VolumeTableBuildWithAllPlayersMovedClustered), nameof(VolumeTableBuildAfterADoorToggledClustered),
+        nameof(ViewSessionsWithAllPlayersMovedClustered)
+    })]
     public void SetupStoppedClustered() => SetupStopped(PlayerSpread.Clustered);
 
     [GlobalSetup(Target = nameof(ViewSessionWithTenMovingPlayers))]
@@ -123,16 +128,30 @@ public class SimulationTickBenchmark
     public void ViewSessionsWithAllPlayersMovedClustered() => UpdateViewSessionsAfterMoves();
 
     /// <summary>
-    /// The volume table after every player moved, including moving them in the index.
+    /// A volume table build after every player moved, as the thread pool runs it, including moving the players in the
+    /// index and copying their positions as the tick does.
     /// </summary>
     [Benchmark]
-    public object VolumeTableWithAllPlayersMoved() => BuildVolumeTableAfterMoves();
+    public object VolumeTableBuildWithAllPlayersMoved() => BuildVolumeTableAfterMoves(isDoorToggled: false);
 
     /// <summary>
-    /// The volume table after every player moved, all players within view of each other.
+    /// A volume table build after every player moved, all players within view of each other.
     /// </summary>
     [Benchmark]
-    public object VolumeTableWithAllPlayersMovedClustered() => BuildVolumeTableAfterMoves();
+    public object VolumeTableBuildWithAllPlayersMovedClustered() => BuildVolumeTableAfterMoves(isDoorToggled: false);
+
+    /// <summary>
+    /// A volume table build after every player moved and a door opened or closed, which drops the closed areas and paths
+    /// the builds keep, including the sound snapshot of the door.
+    /// </summary>
+    [Benchmark]
+    public object VolumeTableBuildAfterADoorToggled() => BuildVolumeTableAfterMoves(isDoorToggled: true);
+
+    /// <summary>
+    /// A volume table build after every player moved and a door opened or closed, all players within view of each other.
+    /// </summary>
+    [Benchmark]
+    public object VolumeTableBuildAfterADoorToggledClustered() => BuildVolumeTableAfterMoves(isDoorToggled: true);
 
     /// <summary>
     /// Places one object into the 100k, or removes the one placed before, and publishes the object set, which writes a
@@ -175,6 +194,8 @@ public class SimulationTickBenchmark
         _world = BenchmarkWorld.Create(PlayerCount, ObjectCount, spread);
         _world.StopSimulation();
         _publishMovedPlayers = MoveAndPublishPlayers;
+        _soundSnapshot = _world.Game.SoundSnapshotForTest;
+        _door = _world.World.Objects.Values.First(entity => entity.Subject is Door);
     }
 
     private int NextOffset() => (_invocation++ & 1) == 0 ? 1 : -1;
@@ -204,11 +225,25 @@ public class SimulationTickBenchmark
         _world.World.Index.Changes.Clear();
     }
 
-    private GameVolumeTable BuildVolumeTableAfterMoves()
+    private GameVolumeTable BuildVolumeTableAfterMoves(bool isDoorToggled)
     {
+        var index = _world.World.Index;
         MovePlayersInIndex(_world.Players, NextOffset());
-        _world.World.Index.Changes.Clear();
-        return GameVolumeTable.Build(_world.World.Players, _world.World.Index, _volumeCandidates, _soundPathSearch);
+        if (isDoorToggled)
+        {
+            _door.IsSoundBlocking = !_door.IsSoundBlocking;
+            index.AddOrUpdate(_door);
+        }
+
+        index.Changes.Clear();
+        _soundSnapshot = _soundSnapshot.With(index);
+        var positions = new HearingPosition[_world.Players.Length];
+        for (var i = 0; i < positions.Length; i++)
+        {
+            positions[i] = new HearingPosition(_world.Players[i].ClientId, _world.Players[i].Area);
+        }
+
+        return _volumeTableBuilder.Build(positions, _soundSnapshot);
     }
 
     // Leaves the index alone, which only the publish's own measurement may do.
