@@ -48,12 +48,11 @@ public abstract class PathProviderBase : IPathProvider
     public virtual bool TryGetPropertyFromSegment(
         RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
     {
-        var subjectType = subject.Subject.GetType();
         foreach (var candidate in subject.Properties)
         {
             // The [InlinePaths] property yields its own segment to every other property, so it is matched only below.
             if (TryGetPropertySegment(candidate, out var candidateSegment) && candidateSegment == segment &&
-                !InlinePathsAttribute.IsInlinePathsProperty(subjectType, candidate.Name))
+                !candidate.IsInlinePathsProperty)
             {
                 property = candidate;
                 return true;
@@ -61,7 +60,7 @@ public abstract class PathProviderBase : IPathProvider
         }
 
         // The segment is the [InlinePaths] property's own segment or a dictionary key; the caller tells them apart.
-        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subjectType);
+        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
         if (inlinePathsPropertyName is not null &&
             subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
             TryGetPropertySegment(inlinePathsProperty, out _))
