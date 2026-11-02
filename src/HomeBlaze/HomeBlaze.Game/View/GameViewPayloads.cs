@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Simulation;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,11 @@ internal sealed class GameViewPayloads
 {
     private readonly Dictionary<GameEntity, GameViewPayload> _payloads = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> _playerColors = new();
+
+    // Visuals are immutable and usually cached, so an entity that moves keeps its parts; weak keys drop the parts of a
+    // visual nobody holds anymore.
+    private readonly ConditionalWeakTable<GameVisual, GameViewPart[]> _parts = new();
+    private static readonly ConditionalWeakTable<GameVisual, GameViewPart[]>.CreateValueCallback CreateParts = GameViewPart.FromVisual;
     private readonly ILogger _logger;
 
     /// <param name="logger">Warns about object types with an invalid visual.</param>
@@ -71,7 +77,7 @@ internal sealed class GameViewPayloads
 
         var visual = GameVisualValidator.GetValidVisual(entity.Subject, entity.Visual, _logger);
         return new GameViewPayload(GameViewPayload.ObjectKind, area.X, area.Y, area.Width, area.Depth, entity.Height, 0,
-            entity.Title, string.Empty, entity.IsMovementBlocking, false, false, GameViewPart.FromVisual(visual));
+            entity.Title, string.Empty, entity.IsMovementBlocking, false, false, _parts.GetValue(visual, CreateParts));
     }
 
     // Other objects take their colors from their visual.

@@ -12,20 +12,29 @@ internal sealed class GameViewChanges
 {
     private const int BucketShift = 4;
 
+    // Every this many sorts, the buckets that stayed empty since the last pruning are dropped.
+    private const int PruneInterval = 256;
+
+    // Larger lists and stamp arrays are dropped after a burst rather than kept.
+    private const int MaximumKeptCapacity = 1024;
+
     // Kept over the ticks, so the buckets of a busy area allocate nothing once they exist.
-    private readonly Dictionary<(long X, long Y), List<int>> _buckets = new();
-    private readonly List<List<int>> _filledBuckets = [];
+    private readonly Dictionary<(long X, long Y), Bucket> _buckets = new();
+    private readonly List<Bucket> _filledBuckets = [];
+    private readonly List<(long X, long Y)> _prunedKeys = [];
     private readonly List<GameEntityChange> _results = [];
 
     // Per change the collection that last returned it, so a change in several buckets of a window is returned once.
     private int[] _collectedStamps = [];
     private int _stamp;
     private bool _isSorted;
+    private long _sortCount;
 
     /// <summary>
     /// Gets the changes of <see cref="GameWorldIndex.EntityChanges"/> whose entity covered a chunk of the window before
     /// the change or covers one now, and maybe a few more nearby; valid until the next call or <see cref="Clear"/>. The
-    /// index must not change before <see cref="Clear"/>.
+    /// changes of one entity come in the order they were recorded, which a reader that keeps the first of an entity
+    /// relies on. The index must not change before <see cref="Clear"/>.
     /// </summary>
     public ReadOnlySpan<GameEntityChange> Collect(GameWorldIndex index, GameViewWindow window)
     {
@@ -49,7 +58,7 @@ internal sealed class GameViewChanges
             {
                 if (_buckets.TryGetValue((x, y), out var bucket))
                 {
-                    AddUncollected(bucket, changes);
+                    AddUncollected(bucket.Changes, changes);
                 }
             }
         }
@@ -64,12 +73,49 @@ internal sealed class GameViewChanges
     {
         foreach (var bucket in _filledBuckets)
         {
-            bucket.Clear();
+            bucket.Changes.Clear();
+            if (bucket.Changes.Capacity > MaximumKeptCapacity)
+            {
+                bucket.Changes.Capacity = 0;
+            }
         }
 
         _filledBuckets.Clear();
         _results.Clear();
+        if (_results.Capacity > MaximumKeptCapacity)
+        {
+            _results.Capacity = 0;
+        }
+
+        if (_isSorted && ++_sortCount % PruneInterval == 0)
+        {
+            Prune();
+        }
+
         _isSorted = false;
+    }
+
+    // Drops the buckets of the areas nobody changed for a while, so the buckets do not pile up as players roam.
+    private void Prune()
+    {
+        foreach (var (key, bucket) in _buckets)
+        {
+            if (bucket.LastFilledSort <= _sortCount - PruneInterval)
+            {
+                _prunedKeys.Add(key);
+            }
+        }
+
+        foreach (var key in _prunedKeys)
+        {
+            _buckets.Remove(key);
+        }
+
+        _prunedKeys.Clear();
+        if (_collectedStamps.Length > MaximumKeptCapacity)
+        {
+            _collectedStamps = [];
+        }
     }
 
     private void Sort(GameWorldIndex index, ReadOnlySpan<GameEntityChange> changes)
@@ -110,25 +156,29 @@ internal sealed class GameViewChanges
         }
     }
 
-    // A change whose areas before and now share a bucket is added to it once.
+    // A change whose areas before and now share a bucket is added to it once. The changes are added in their order, so
+    // the earlier change of an entity precedes a later one in every bucket that holds both, and each bucket that holds
+    // the later one also holds the earlier one, as both were added by the entity's current area.
     private void AddToBucket((long X, long Y) key, int change)
     {
         if (!_buckets.TryGetValue(key, out var bucket))
         {
-            bucket = [];
+            bucket = new Bucket();
             _buckets.Add(key, bucket);
         }
 
-        if (bucket.Count == 0)
+        var changes = bucket.Changes;
+        if (changes.Count == 0)
         {
+            bucket.LastFilledSort = _sortCount;
             _filledBuckets.Add(bucket);
         }
-        else if (bucket[^1] == change)
+        else if (changes[^1] == change)
         {
             return;
         }
 
-        bucket.Add(change);
+        changes.Add(change);
     }
 
     private void AddUncollected(List<int> bucket, ReadOnlySpan<GameEntityChange> changes)
@@ -155,4 +205,12 @@ internal sealed class GameViewChanges
     private static GameViewWindow GetBuckets(GameViewWindow chunks) => new(
         (chunks.Minimum.X >> BucketShift, chunks.Minimum.Y >> BucketShift),
         (chunks.Maximum.X >> BucketShift, chunks.Maximum.Y >> BucketShift));
+
+    private sealed class Bucket
+    {
+        public List<int> Changes { get; } = [];
+
+        // The sort count when the bucket last got a change.
+        public long LastFilledSort { get; set; }
+    }
 }

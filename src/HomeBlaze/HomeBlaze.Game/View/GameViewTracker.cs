@@ -19,6 +19,9 @@ internal sealed class GameViewTracker
 
     private const int MaximumPooledLists = 64;
 
+    // Bounds the first allocation of an upserted list, as most changed entities near a window are not in it.
+    private const int MaximumUpsertedCapacity = 64;
+
     /// <summary>
     /// The update without changes; shared, so an unchanged view allocates nothing.
     /// </summary>
@@ -38,7 +41,11 @@ internal sealed class GameViewTracker
     private readonly List<GameEntity> _uncounted = [];
     private List<GameViewEntry>? _upserted;
 
-    // The capacity of the upserted list of an update, so one that upserts each changed entity does not grow it.
+    // The ids of the entities known before a reset, which the next update removes.
+    private List<string>? _resetIds;
+
+    // The initial capacity of the upserted list of an update, so one that upserts each of a few changed entities does
+    // not grow it.
     private int _upsertedCapacity;
 
     private int _nextId;
@@ -63,6 +70,36 @@ internal sealed class GameViewTracker
     /// The number of times an entity was compared with what the page knows of it, over all updates.
     /// </summary>
     public long ComparisonCount { get; private set; }
+
+    /// <summary>
+    /// Forgets everything the page knows, after an update that may have been left half done or did not reach the page;
+    /// the next update removes the former ids and reads every chunk of its window, adding the entities with new ids.
+    /// </summary>
+    public void Reset()
+    {
+        _resetIds ??= [];
+        foreach (var known in _known.Values)
+        {
+            _resetIds.Add(known.Id);
+        }
+
+        _known.Clear();
+        foreach (var list in _chunks.Values)
+        {
+            list.Clear();
+            if (_pooledLists.Count < MaximumPooledLists)
+            {
+                _pooledLists.Push(list);
+            }
+        }
+
+        _chunks.Clear();
+        _queried.Clear();
+        _previous.Clear();
+        _uncounted.Clear();
+        _upserted = null;
+        _hasWindow = false;
+    }
 
     /// <summary>
     /// Brings the page in line with the changed entities inside the window and the visible entities of the chunks that
@@ -113,7 +150,7 @@ internal sealed class GameViewTracker
     private void SyncChangedAndEntering(ReadOnlySpan<GameEntityChange> changes, GameViewWindow window, GameViewWindow previousWindow,
         RefreshContext context)
     {
-        _upsertedCapacity = changes.Length;
+        _upsertedCapacity = Math.Min(changes.Length, MaximumUpsertedCapacity);
         var established = window.Intersect(previousWindow);
         foreach (ref readonly var change in changes)
         {
@@ -397,12 +434,13 @@ internal sealed class GameViewTracker
     // An entity uncounted to zero may have been counted again later in the same update.
     private List<string>? RemoveUncounted()
     {
+        var removed = _resetIds;
+        _resetIds = null;
         if (_uncounted.Count == 0)
         {
-            return null;
+            return removed;
         }
 
-        List<string>? removed = null;
         foreach (var entity in _uncounted)
         {
             if (_known.TryGetValue(entity, out var known) && known.ChunkCount == 0)

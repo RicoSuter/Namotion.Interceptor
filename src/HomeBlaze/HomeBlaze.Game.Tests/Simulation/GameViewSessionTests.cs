@@ -513,5 +513,107 @@ public class GameViewSessionTests
         Assert.Contains(update.Upserted, view => view.Payload is { X: 9, Y: 10 });
         Assert.Empty(update.Removed);
     }
+
+    [Fact]
+    public async Task WhenEntitiesLeaveAndComeBackWhileTheSinkIsBusy_ThenTheNextUpdateShowsWhereTheyAreNow()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        var other = _context.AddConnectedPlayer("tab-2", x: 10);
+        var wall = _context.AddWall(-20, 8);
+        _context.OpenView("tab-1", _sink);
+        var otherId = GetId(_sink.Updates[0], 10, 0);
+        var wallId = GetId(_sink.Updates[0], -20, 8);
+        _sink.Clear();
+
+        // Act
+        _sink.IsBusy = true;
+        other.X = 5000;
+        await _context.RunAsync(_context.Game.RemoveAsync(wall, CancellationToken.None));
+        other.X = 12;
+        wall.X = -30;
+        await _context.RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
+        _context.Tick();
+        _sink.IsBusy = false;
+        _context.Tick();
+
+        // Assert
+        var update = Assert.Single(_sink.Updates);
+        Assert.Equal(new[] { wallId }, update.Removed);
+        Assert.Equal(2, update.Upserted.Count);
+        Assert.Contains(update.Upserted, view => view.Id == otherId && view.Payload.X == 12);
+        Assert.Contains(update.Upserted, view => view.Id != wallId && view.Payload is { X: -30, Y: 8 });
+    }
+
+    [Fact]
+    public void WhenADeliveryThrows_ThenTheNextUpdateReplacesEverythingThePageKnows()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddWall(-20, 8);
+        var door = _context.AddDoor(10, 10);
+        _context.OpenView("tab-1", _sink);
+        var formerIds = _sink.Updates[0].Upserted.Select(view => view.Id).ToHashSet();
+        var isThrowing = true;
+        _sink.Delivered = () =>
+        {
+            if (isThrowing)
+            {
+                isThrowing = false;
+                throw new InvalidOperationException("The page broke.");
+            }
+        };
+
+        // Act
+        door.IsOpen = true;
+        _context.Tick();
+        _sink.Clear();
+        _context.Tick();
+
+        // Assert
+        var update = Assert.Single(_sink.Updates);
+        Assert.Equal(formerIds, update.Removed.ToHashSet());
+        Assert.Equal(3, update.Upserted.Count);
+        Assert.DoesNotContain(update.Upserted, view => formerIds.Contains(view.Id));
+        Assert.Contains(update.Upserted, view => view.Payload is { X: 10, Y: 10, IsMovementBlocking: false });
+    }
+
+    [Fact]
+    public void WhenEntitiesChangeOnlyOutsideEveryWindow_ThenTheViewSessionsAllocateNothing()
+    {
+        // Arrange
+        _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 10);
+        _context.AddConnectedPlayer("tab-3", x: 5000);
+        _context.AddWall(-20, 8);
+        _context.OpenView("tab-1", _sink);
+        _context.OpenView("tab-2", new RecordingViewSink());
+        _context.Publish();
+        _sink.Clear();
+        var world = _context.Game.WorldForTest;
+        var far = world.Players["tab-3"];
+        for (var i = 0; i < 4; i++)
+        {
+            MoveAndUpdateViews(world, far, i % 2 == 0 ? 1 : -1);
+        }
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        MoveAndUpdateViews(world, far, 1);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Empty(_sink.Deliveries);
+        Assert.Equal(0, allocated);
+    }
+
+    // Moves the player in the index and updates the view sessions as a tick does, without the rest of the tick.
+    private void MoveAndUpdateViews(GameWorldState world, PlayerEntity player, int offset)
+    {
+        player.Area = player.Area with { X = player.Area.X + offset };
+        world.Index.AddOrUpdate(player);
+        _context.Game.Views.Update(_context.Game.PublishVersion);
+        world.Index.ClearChanges();
+    }
 }
 

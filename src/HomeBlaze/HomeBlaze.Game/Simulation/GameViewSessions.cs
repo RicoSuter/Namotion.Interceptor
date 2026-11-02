@@ -89,9 +89,17 @@ internal sealed class GameViewSessions
 
     private void Update((GameViewSession Session, long PublishVersion) state)
     {
-        if (state.Session.Update(_world, state.PublishVersion, _remainingFullRefreshes > 0, _payloads, _changes))
+        try
         {
-            _remainingFullRefreshes--;
+            if (state.Session.Update(_world, state.PublishVersion, _remainingFullRefreshes > 0, _payloads, _changes))
+            {
+                _remainingFullRefreshes--;
+            }
+        }
+        catch
+        {
+            state.Session.RequestReset();
+            throw;
         }
     }
 }

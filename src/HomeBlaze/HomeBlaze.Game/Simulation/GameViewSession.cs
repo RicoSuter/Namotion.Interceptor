@@ -30,6 +30,7 @@ internal sealed class GameViewSession : IDisposable
     private string? _clientId;
     private int _isDisposed;
     private bool _isFullRefreshRequested = true;
+    private bool _isResetRequested;
     private PlayerEntity? _self;
     private GamePanelState _panel = GamePanelState.Empty;
 
@@ -73,6 +74,17 @@ internal sealed class GameViewSession : IDisposable
     public void RequestFullRefresh() => _isFullRefreshRequested = true;
 
     /// <summary>
+    /// Makes the next update replace everything the page knows, after an update that threw: the tracker may have been
+    /// left half done, or the page missed what it was sent.
+    /// </summary>
+    public void RequestReset()
+    {
+        _isResetRequested = true;
+        _isFullRefreshRequested = true;
+        ClearPending();
+    }
+
+    /// <summary>
     /// Delivers what changed in the window since the last delivery, with the panel state, unless the sink is busy, a full
     /// refresh is due but not allowed, or nothing changed; call once per tick, after the world changes of the tick were
     /// applied and before <see cref="GameWorldIndex.ClearChanges"/>.
@@ -94,6 +106,7 @@ internal sealed class GameViewSession : IDisposable
             return false;
         }
 
+        ResetWhenRequested();
         var self = FindSelf(world);
         var window = self is null ? GameViewWindow.Around(0, 0) : GameViewWindow.Around(self.Area.X, self.Area.Y);
         var isFullRefresh = IsFullRefreshDue(window);
@@ -117,6 +130,15 @@ internal sealed class GameViewSession : IDisposable
         ClearPending();
         DeliverWhenChanged(update, panel, publishVersion);
         return isFullRefresh;
+    }
+
+    private void ResetWhenRequested()
+    {
+        if (_isResetRequested)
+        {
+            _isResetRequested = false;
+            _tracker.Reset();
+        }
     }
 
     // The first update, a different own player and a window that jumped refresh every chunk.

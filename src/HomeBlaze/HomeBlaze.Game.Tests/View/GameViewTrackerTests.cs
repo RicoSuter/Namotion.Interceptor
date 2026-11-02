@@ -569,4 +569,23 @@ public class GameViewTrackerTests
         Assert.Empty(outside.Upserted);
         Assert.Equal(1, _tracker.Count);
     }
+
+    [Fact]
+    public void WhenAnObjectMovesWithTheSameVisual_ThenItsPayloadsShareTheParts()
+    {
+        // Arrange
+        var player = AddPlayer("tab-1");
+        var entity = AddObject(new VisualObject { X = 5, Y = 5 });
+        var first = Assert.Single(Update(player).Upserted, view => !view.IsSelf);
+
+        // Act
+        entity.Area = entity.Area with { X = 6 };
+        _index.AddOrUpdate(entity);
+        var moved = Assert.Single(Update(player).Upserted);
+
+        // Assert
+        Assert.NotSame(first.Payload, moved.Payload);
+        Assert.Same(first.Payload.Parts, moved.Payload.Parts);
+    }
 }
+
