@@ -18,6 +18,7 @@ internal sealed class GameViewSession : IDisposable
     // The changed chunks of the ticks the sink was busy in, limited to the window the page knows.
     private readonly ChangedChunks _pendingChunks = new();
     private readonly List<GameEntity> _targetResults = [];
+    private readonly List<GameArea> _targetTiles = new(3);
 
     private string? _clientId;
     private int _isDisposed;
@@ -224,7 +225,7 @@ internal sealed class GameViewSession : IDisposable
     private IReadOnlyList<GameObject> GetTargets(GameWorldState world, PlayerEntity self, IReadOnlyList<GameObject> former)
     {
         _targetResults.Clear();
-        world.GetTargets(self, _targetResults);
+        TargetArea.GetTargets(world.Index, self, _targetTiles, _targetResults);
         try
         {
             if (HasSameSubjects(_targetResults, former))

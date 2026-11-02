@@ -35,6 +35,9 @@ public partial class Game
     // Replaced on the simulation thread only and read by any thread; a published snapshot never changes.
     private volatile SoundSnapshot _soundSnapshot = SoundSnapshot.Empty;
 
+    // Switched on the simulation thread only.
+    private readonly GameVoiceLoop _voiceLoop;
+
     // Touched only by the voice loop.
     private bool _isVoiceTickFailing;
 
@@ -53,6 +56,11 @@ public partial class Game
     /// Raised on the simulation thread after a new <see cref="VolumeTable"/> was published; handlers must not block or throw.
     /// </summary>
     internal event Action? VolumeTableChanged;
+
+    /// <summary>
+    /// Whether the voice loop waits for a player to turn the microphone or the speaker on; any thread may read it.
+    /// </summary>
+    internal bool IsVoiceLoopPaused => _voiceLoop.IsPaused;
 
     /// <summary>
     /// The running or last volume table build, which never faults; read it on the thread that runs the ticks.
@@ -331,22 +339,11 @@ public partial class Game
         _isVolumeTableBuildFailing = false;
     }
 
-    // Ticks every frame duration until canceled.
-    private async Task RunVoiceLoopAsync(CancellationToken cancellationToken)
-    {
-        using var timer = new PeriodicTimer(GameVoiceSettings.FrameDuration, _timeProvider);
-        try
-        {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
-            {
-                TickVoice();
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // The game stops.
-        }
-    }
+    private GameVoiceLoop CreateVoiceLoop() => new(_voiceMixer, _timeProvider, TickVoice);
+
+    // Lets the voice loop run while a player has the microphone or the speaker on; with all of them off nothing is mixed
+    // or sent, so the loop pauses without changing what anybody hears.
+    private void UpdateVoiceLoop() => _voiceLoop.SetActive(_world.HasVoiceOn);
 
     private readonly record struct VolumeTableBuild(GameVolumeTable? Table, Exception? Exception);
 }

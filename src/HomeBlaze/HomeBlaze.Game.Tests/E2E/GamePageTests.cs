@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Game.Voice;
 using HomeBlaze.Installation;
 using Microsoft.Playwright;
@@ -122,7 +123,7 @@ public class GamePageTests
         var (x, y) = (player.X, player.Y);
 
         // Right in front of the player, who faces north.
-        world.Game.Objects = new Dictionary<string, GameObject> { ["wall"] = new Wall { X = x - 1, Y = y + GamePlayer.Size } };
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = x - 1, Y = y + GamePlayer.Size } });
         await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Wall", new() { Timeout = Timeout });
         await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-parts", "1", new() { Timeout = Timeout });
 
@@ -147,14 +148,14 @@ public class GamePageTests
         // Act
         await page.GetByTestId("game-action").Filter(new() { HasText = "Build wall" }).ClickAsync(new() { Timeout = Timeout });
         await page.Locator(".mud-dialog").GetByRole(AriaRole.Button, new() { Name = "Execute" }).ClickAsync(new() { Timeout = Timeout });
-        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 1, message: "The wall was not built");
-        var wall = Assert.IsType<Wall>(Assert.Single(world.Game.Objects.Values));
+        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.GetObjects().Count == 1, message: "The wall was not built");
+        var wall = Assert.IsType<Wall>(Assert.Single(world.Game.GetObjects().Values));
         await page.GetByTestId("game-target-action").Filter(new() { HasText = "Demolish" }).ClickAsync(new() { Timeout = Timeout });
 
         // Assert
         // A default wall of 4 tiles stands across the facing, centered on the player.
         Assert.Equal((player.X - 1, player.Y + GamePlayer.Size), (wall.X, wall.Y));
-        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 0, message: "The wall was not demolished");
+        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.GetObjects().Count == 0, message: "The wall was not demolished");
         await Expect(page.GetByTestId("game-looking-at")).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
@@ -175,12 +176,12 @@ public class GamePageTests
         await dialog.Locator(".mud-select .mud-input-control").ClickAsync(new() { Timeout = Timeout });
         await page.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasTextString = "Concrete" }).ClickAsync(new() { Timeout = Timeout });
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Execute" }).ClickAsync(new() { Timeout = Timeout });
-        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 1, message: "The wall was not built");
+        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.GetObjects().Count == 1, message: "The wall was not built");
         await Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await buildWall.ClickAsync(new() { Timeout = Timeout });
 
         // Assert
-        var wall = Assert.IsType<Wall>(Assert.Single(world.Game.Objects.Values));
+        var wall = Assert.IsType<Wall>(Assert.Single(world.Game.GetObjects().Values));
         Assert.Equal((player.X - 3, player.Y + GamePlayer.Size, 8, 1, WallMaterial.Concrete), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Material));
         await Expect(dialog.GetByLabel("Length", new() { Exact = true })).ToHaveValueAsync("8", new() { Timeout = Timeout });
         await Expect(dialog.Locator(".mud-select input").First).ToHaveValueAsync("Concrete", new() { Timeout = Timeout });
@@ -196,7 +197,7 @@ public class GamePageTests
 
         // Right in front of the player, who faces north.
         var door = new Door { X = x - 1, Y = y + GamePlayer.Size };
-        world.Game.Objects = new Dictionary<string, GameObject> { ["door"] = door };
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["door"] = door });
         await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Door", new() { Timeout = Timeout });
         // The lintel and the leaf.
         await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-parts", "2", new() { Timeout = Timeout });
@@ -227,14 +228,14 @@ public class GamePageTests
         // Act
         await page.GetByTestId("game-action").Filter(new() { HasText = "Plant tree" }).ClickAsync(new() { Timeout = Timeout });
         await page.Locator(".mud-dialog").GetByRole(AriaRole.Button, new() { Name = "Execute" }).ClickAsync(new() { Timeout = Timeout });
-        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.Objects.Count == 1, message: "The tree was not planted");
+        await AsyncTestHelpers.WaitUntilAsync(() => world.Game.GetObjects().Count == 1, message: "The tree was not planted");
         await Expect(page.GetByTestId("game-target-title")).ToHaveTextAsync("Tree", new() { Timeout = Timeout });
         await page.Keyboard.PressAsync("ArrowUp");
         // The circuit answers the turn after the step, so the turn shows only once the step was decided.
         await page.Keyboard.PressAsync("Shift+ArrowLeft");
 
         // Assert
-        var tree = Assert.IsType<Tree>(Assert.Single(world.Game.Objects.Values));
+        var tree = Assert.IsType<Tree>(Assert.Single(world.Game.GetObjects().Values));
         Assert.Equal((x + GamePlayer.Size / 2, y + GamePlayer.Size), (tree.X + tree.Width / 2, tree.Y));
         await Expect(page.GetByTestId("game-position")).ToHaveTextAsync(FormatPosition(x, y, "W"), new() { Timeout = Timeout });
         var canvas = page.GetByTestId("game-canvas");
@@ -259,7 +260,7 @@ public class GamePageTests
         var canvas = page.GetByTestId("game-canvas");
         // North of the player, with a gap so that a step toward the player stays free.
         var animal = new Animal { X = player.X - 1, Y = player.Y + GamePlayer.Size + 3, Variant = AnimalVariant.Stag };
-        world.Game.Objects = new Dictionary<string, GameObject> { ["animal"] = animal };
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["animal"] = animal });
         await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
 
         // Act
@@ -283,7 +284,7 @@ public class GamePageTests
         // Two meters east of the listener, with a tree right between them.
         talkerPlayer.X = listenerPlayer.X + 8;
         talkerPlayer.Y = listenerPlayer.Y;
-        world.Game.Objects = new Dictionary<string, GameObject> { ["tree"] = new Tree { X = listenerPlayer.X + 4, Y = listenerPlayer.Y, Variant = 6 } };
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["tree"] = new Tree { X = listenerPlayer.X + 4, Y = listenerPlayer.Y, Variant = 6 } });
 
         // Act
         await TurnOnVoiceAsync(talker);
@@ -304,12 +305,12 @@ public class GamePageTests
 
         // Act
         // South of the player, toward the camera: the lintel of the open door hides the head, the walls beside it do not.
-        world.Game.Objects = new Dictionary<string, GameObject>
+        world.Game.SetObjects(new Dictionary<string, GameObject>
         {
             ["left"] = new Wall { X = x - 5, Y = y - 3 },
             ["door"] = new Door { X = x - 1, Y = y - 3, IsOpen = true },
             ["right"] = new Wall { X = x + 3, Y = y - 3 }
-        };
+        });
 
         // Assert
         await Expect(page.GetByTestId("game-canvas")).ToHaveAttributeAsync("data-game-parts", "4", new() { Timeout = Timeout });
@@ -325,7 +326,7 @@ public class GamePageTests
         var canvas = page.GetByTestId("game-canvas");
         // A slim pine south of the player, toward the camera.
         var tree = new Tree { X = player.X, Y = player.Y - 6, Variant = 6 };
-        world.Game.Objects = new Dictionary<string, GameObject> { ["tree"] = tree };
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["tree"] = tree });
         await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
         await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "1", new() { Timeout = Timeout });
 
@@ -345,7 +346,7 @@ public class GamePageTests
         var canvas = page.GetByTestId("game-canvas");
         // North of the player, away from the camera; the bounds of its leaning trunk cross the sightline, its triangles do not.
         var behind = new Tree { X = player.X - 2, Y = player.Y + 2, Variant = 0, Rotation = 180 };
-        world.Game.Objects = new Dictionary<string, GameObject> { ["behind"] = behind };
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["behind"] = behind });
         await Expect(canvas).ToHaveAttributeAsync("data-game-models", "1", new() { Timeout = Timeout });
         await canvas.EvaluateAsync(@"canvas => {
             window.gameMostFaded = Number(canvas.dataset.gameFaded);
@@ -355,7 +356,7 @@ public class GamePageTests
 
         // Act
         // A slim pine south of the player, toward the camera.
-        world.Game.Objects = new Dictionary<string, GameObject>(world.Game.Objects) { ["front"] = new Tree { X = player.X, Y = player.Y - 6, Variant = 6 } };
+        world.Game.SetObjects(new Dictionary<string, GameObject>(world.Game.GetObjects()) { ["front"] = new Tree { X = player.X, Y = player.Y - 6, Variant = 6 } });
 
         // Assert
         await Expect(canvas).ToHaveAttributeAsync("data-game-models", "2", new() { Timeout = Timeout });

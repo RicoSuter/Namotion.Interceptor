@@ -155,7 +155,7 @@ public class SimulationTickBenchmark
 
     /// <summary>
     /// Places one object into the 100k, or removes the one placed before, and publishes the object set, which writes a
-    /// new dictionary of all objects to <see cref="Game.Objects"/>.
+    /// new dictionary of the objects of its region to <see cref="GameRegion.Objects"/>.
     /// </summary>
     [Benchmark]
     public void PublishObjectSetAfterOnePlace() => _world.RunOnSimulation(_placeOrRemoveAndPublishObjectSet);

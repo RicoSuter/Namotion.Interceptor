@@ -10,7 +10,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Game;
@@ -54,10 +53,11 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     public partial Dictionary<string, GamePlayer> Players { get; set; }
 
     /// <summary>
-    /// The objects by name.
+    /// The objects in regions of <see cref="GameRegion.Size"/> by <see cref="GameRegion.Size"/> tiles, by the key of the
+    /// region, its coordinates as "{X}_{Y}"; the game keeps every object in the region of its south-west corner.
     /// </summary>
     [Configuration]
-    public partial Dictionary<string, GameObject> Objects { get; set; }
+    public partial Dictionary<string, GameRegion> Regions { get; set; }
 
     /// <summary>
     /// The tools by name, whose operations the game page offers every player; the game never changes them.
@@ -84,11 +84,12 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation = new GameSimulation(timeProvider, logger);
         _world = new GameWorldState(timeProvider, _voiceMixer);
         _publisher = new GamePublisher(this, _world, timeProvider);
+        _voiceLoop = CreateVoiceLoop();
         _viewSessions = CreateViewSessions();
         _lastSaveTimestamp = timeProvider.GetTimestamp();
         Name = string.Empty;
         Players = new Dictionary<string, GamePlayer>();
-        Objects = new Dictionary<string, GameObject>();
+        Regions = new Dictionary<string, GameRegion>();
         Tools = new Dictionary<string, GameTool>();
 
         // Index.Changes is cleared last, after everything that reads it in the tick; the view sessions come right before,
@@ -97,6 +98,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation.AddTickHandler(PublishObjectSetWhenChanged);
         _simulation.AddTickHandler(_world.RefreshChangedSubjects);
         _simulation.AddTickHandler(_world.PublishSnapshot);
+        _simulation.AddTickHandler(UpdateVoiceLoop);
         _simulation.AddTickHandler(UpdateVolumeTable);
         _simulation.AddTickHandler(PublishWhenDue);
         _simulation.AddTickHandler(StartSaveWhenDue);
@@ -148,9 +150,9 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
     }
 
-    partial void OnObjectsChanging(ref Dictionary<string, GameObject> newValue, ref bool cancel)
+    partial void OnRegionsChanging(ref Dictionary<string, GameRegion> newValue, ref bool cancel)
     {
-        newValue ??= new Dictionary<string, GameObject>();
+        newValue ??= new Dictionary<string, GameRegion>();
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
@@ -183,45 +185,6 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     /// The publisher, for benchmarks that measure its parts one by one; touch it only on the simulation thread.
     /// </summary>
     internal GamePublisher PublisherForTest => _publisher;
-
-    /// <summary>
-    /// Takes in a write that landed on this game or one of its objects; called by <see cref="GameWriteInterceptor"/>
-    /// inside the write, so it never waits for the simulation.
-    /// </summary>
-    internal void OnWritten<TProperty>(IInterceptorSubject subject, string name, TProperty value, bool isOnSimulation)
-    {
-        if (isOnSimulation && IsPublishersOwnWrite(subject, name, value))
-        {
-            return;
-        }
-
-        switch (subject)
-        {
-            case Game:
-                OnGameWritten(name, value);
-                break;
-            case GamePlayer player:
-                OnPlayerWritten(player, name, value);
-                break;
-            // Read again at the end of the tick, so a schedule or handler writing several properties is read once.
-            case GameObject gameObject when isOnSimulation:
-                _world.ChangedSubjects.Add(gameObject);
-                break;
-
-            // Read again in queue order, so a command queued after the write sees it.
-            case GameObject gameObject:
-                _simulation.Post(() => _world.RefreshSubject(gameObject));
-                break;
-        }
-    }
-
-    // A set is compared by reference, so an observer that writes another set of the game during a publish is not ignored.
-    private bool IsPublishersOwnWrite<TProperty>(IInterceptorSubject subject, string name, TProperty value) => subject switch
-    {
-        Game => _publisher.IsOwnWrite(subject, name, value),
-        GamePlayer => _publisher.IsOwnWrite(subject, name, null),
-        _ => false
-    };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -256,7 +219,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
 
         // Stopped together with the simulation, also when that one ends on an unexpected exception.
         using var loopsStopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var voiceLoop = RunVoiceLoopAsync(loopsStopping.Token);
+        var voiceLoop = _voiceLoop.RunAsync(loopsStopping.Token);
         var housekeepingLoop = RunHousekeepingLoopAsync(loopsStopping.Token);
         try
         {
@@ -267,82 +230,6 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
             await loopsStopping.CancelAsync();
             await voiceLoop;
             await housekeepingLoop;
-        }
-    }
-
-    // Called for every start, also after a stop: work given to a stopped game was dropped, so the game takes over its
-    // subjects again.
-    private void Start()
-    {
-        var isRestarting = _simulation.HasStopped;
-        if (isRestarting)
-        {
-            // Left over when a stop timed out while a save paused publishing; the restart's take-over drops their objects.
-            _simulation.RunExclusive(AbandonPlacements);
-
-            // The stop dropped the completion of a save that ran then; StopAsync awaited it.
-            _simulation.Restart();
-            _isSaving = false;
-            _publisher.IsPaused = false;
-            ResetVolumeTableBuild();
-        }
-
-        if (Interlocked.Exchange(ref _isStarted, 1) == 0)
-        {
-            ((IInterceptorSubject)this).Context.TryAddService<IWriteInterceptor>(() => new GameWriteInterceptor(), existing => existing is GameWriteInterceptor);
-        }
-
-        // Reads the sets in the tick, after the interceptor is in place: a write that lands before that tick is read here,
-        // one after it queues its own take-over, which runs later.
-        _simulation.Post(() =>
-        {
-            _world.TakeOverPlayers(Players, isRestart: isRestarting);
-            var (added, removed) = _world.TakeOverObjects(Objects);
-
-            // The stop dropped the schedules, so every object of a restarted game sets them up again.
-            OnObjectsTakenOver(isRestarting ? GetObjectSubjects() : added, removed);
-            if (isRestarting)
-            {
-                _viewSessions.RequestFullRefresh();
-            }
-        });
-    }
-
-    private void OnGameWritten<TProperty>(string name, TProperty value)
-    {
-        if (name == nameof(Players) && value is Dictionary<string, GamePlayer> players)
-        {
-            _simulation.Post(() =>
-            {
-                _world.TakeOverPlayers(players);
-                _world.IsSaveRequested = true;
-            });
-            SignalReconcile();
-        }
-        else if (name == nameof(Objects) && value is Dictionary<string, GameObject> objects)
-        {
-            _simulation.Post(() =>
-            {
-                var (added, removed) = _world.TakeOverObjects(objects);
-                _world.IsSaveRequested = true;
-                OnObjectsTakenOver(added, removed);
-            });
-        }
-    }
-
-    private void OnPlayerWritten<TProperty>(GamePlayer player, string name, TProperty value)
-    {
-        switch (name)
-        {
-            case nameof(GamePlayer.X) when value is int x:
-                _simulation.Post(() => _world.Teleport(player, x, null));
-                break;
-            case nameof(GamePlayer.Y) when value is int y:
-                _simulation.Post(() => _world.Teleport(player, null, y));
-                break;
-            case nameof(GamePlayer.Facing) when value is GameDirection facing:
-                _simulation.Post(() => _world.Turn(player, facing));
-                break;
         }
     }
 

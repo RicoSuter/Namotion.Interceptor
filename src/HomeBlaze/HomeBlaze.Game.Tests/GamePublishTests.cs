@@ -72,7 +72,7 @@ public class GamePublishTests
         await _context.RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
 
         // Assert
-        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects()).Value);
     }
 
     [Fact]
@@ -88,21 +88,21 @@ public class GamePublishTests
         _context.Game.RunTickForTest();
         _context.Game.RunTickForTest();
         var isCompletedDuringSave = place.IsCompleted;
-        var objectCountDuringSave = _context.Game.Objects.Count;
+        var objectCountDuringSave = _context.Game.GetObjects().Count;
         await _context.ReleaseSaveAsync(blocker);
 
         // Assert
         await place;
         Assert.False(isCompletedDuringSave);
         Assert.Equal(1, objectCountDuringSave);
-        Assert.Same(wall, _context.Game.Objects.Values.Last());
+        Assert.Same(wall, _context.Game.GetObjects().Values.Last());
     }
 
     [Fact]
-    public async Task WhenTheWriteOfTheObjectsFails_ThenTheNextTickWritesThemAgain()
+    public async Task WhenTheWriteOfTheRegionsFails_ThenTheNextTickWritesThemAgain()
     {
         // Arrange
-        var failingInterceptor = new FailingWriteInterceptor(nameof(Game.Objects));
+        var failingInterceptor = new FailingWriteInterceptor(nameof(Game.Regions));
         var context = new GameTestContext(subjectContext: InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithParents()
@@ -115,7 +115,7 @@ public class GamePublishTests
 
         // Assert
         Assert.Equal(1, failingInterceptor.FailureCount);
-        Assert.Same(wall, Assert.Single(context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(context.Game.GetObjects()).Value);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class GamePublishTests
         // The held save pauses publishing, so the placed wall is not published at once.
         var place = context.Game.PlaceAsync(wall, CancellationToken.None);
         context.Game.RunTickForTest();
-        var isPublishedAtOnce = context.Game.Objects.ContainsValue(wall);
+        var isPublishedAtOnce = context.Game.GetObjects().ContainsValue(wall);
 
         // Act
         // Unseen by the write interceptor, because the wall is not attached to the game yet.
@@ -182,7 +182,7 @@ public class GamePublishTests
                 if (!isWritten)
                 {
                     isWritten = true;
-                    _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["extra"] = extra };
+                    _context.Game.SetObjects(new Dictionary<string, GameObject>(_context.Game.GetObjects()) { ["extra"] = extra });
                 }
             });
 
@@ -192,7 +192,7 @@ public class GamePublishTests
 
         // Assert
         Assert.True(isWritten);
-        Assert.Same(extra, _context.Game.Objects["extra"]);
+        Assert.Same(extra, _context.Game.GetObjects()["extra"]);
         Assert.False(_context.Game.IsFree(extra.Area));
     }
 

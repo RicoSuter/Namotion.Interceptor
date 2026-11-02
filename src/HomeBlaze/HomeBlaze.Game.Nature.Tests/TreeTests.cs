@@ -190,7 +190,7 @@ public class TreeTests
 
         // Assert
         await _context.SaveAsync();
-        Assert.Empty(_context.Game.Objects);
+        Assert.Empty(_context.Game.GetObjects());
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 }

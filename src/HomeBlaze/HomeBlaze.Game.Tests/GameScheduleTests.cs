@@ -116,7 +116,7 @@ public class GameScheduleTests
         _context.Publish();
 
         // Act
-        _context.Game.Objects = new Dictionary<string, GameObject>();
+        _context.Game.SetObjects(new Dictionary<string, GameObject>());
         _context.Tick();
         _context.TimeProvider.Advance(TimeSpan.FromSeconds(2));
         _context.Tick();
@@ -185,7 +185,7 @@ public class GameScheduleTests
         var game = new Game(new FakeClientDirectory(), timeProvider, NullLogger.Instance);
         var first = new ScheduledObject { X = 0, Y = 0 };
         var second = new ScheduledObject { X = 10, Y = 0 };
-        game.Objects = new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second };
+        game.SetObjects(new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second });
         root.Game = game;
 
         // Act
@@ -302,7 +302,7 @@ public class GameScheduleTests
         var first = new ScheduledObject { X = 0, Y = 0, OnAdded = first => first.RemoveFromWorld(second) };
 
         // Act
-        _context.Game.Objects = new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second };
+        _context.Game.SetObjects(new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second });
         _context.Tick();
 
         // Assert
@@ -325,7 +325,7 @@ public class GameScheduleTests
         // Assert
         Assert.True(place!.IsCompletedSuccessfully);
         Assert.Equal(1, child.AddedCount);
-        Assert.Contains(child, _context.Game.Objects.Values);
+        Assert.Contains(child, _context.Game.GetObjects().Values);
     }
 
     [Fact]
@@ -344,7 +344,7 @@ public class GameScheduleTests
         Assert.Equal(1, parent.AddedCount);
         Assert.Equal(0, childAddedCountInTheParentsTick);
         Assert.Equal(1, child.AddedCount);
-        Assert.Contains(child, _context.Game.Objects.Values);
+        Assert.Contains(child, _context.Game.GetObjects().Values);
     }
 
     [Fact]
@@ -380,7 +380,7 @@ public class GameScheduleTests
         _context.Game.RunTickForTest();
 
         // Act
-        _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["placed"] = placed };
+        _context.Game.SetObjects(new Dictionary<string, GameObject>(_context.Game.GetObjects()) { ["placed"] = placed });
         _context.Game.RunTickForTest();
         await _context.ReleaseSaveAsync(blocker);
         await place;
@@ -400,7 +400,7 @@ public class GameScheduleTests
         var other = CreateIncrementingObject(10, TickInterval);
 
         // Act
-        context.Game.Objects = new Dictionary<string, GameObject> { ["throwing"] = throwing, ["other"] = other };
+        context.Game.SetObjects(new Dictionary<string, GameObject> { ["throwing"] = throwing, ["other"] = other });
         context.Tick(2);
 
         // Assert

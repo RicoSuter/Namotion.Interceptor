@@ -32,7 +32,7 @@ public class WallToolTests
 
         // Assert
         await _context.SaveAsync();
-        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
+        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.GetObjects()).Value);
         Assert.Equal((-1, 2, 4, 1, 10, WallMaterial.Bricks), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Height, wall.Material));
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
         Assert.Same(wall, Assert.Single(_context.GetTargets(player.ClientId)));
@@ -53,7 +53,7 @@ public class WallToolTests
         await RunAsync(_tool.BuildWallAsync(8, null, null, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
-        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
+        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.GetObjects()).Value);
         Assert.Equal((x, y, width, depth), (wall.X, wall.Y, wall.Width, wall.Depth));
     }
 
@@ -67,7 +67,7 @@ public class WallToolTests
         await RunAsync(_tool.BuildWallAsync(8, 12, WallMaterial.Concrete, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
-        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.Objects).Value);
+        var wall = Assert.IsType<Wall>(Assert.Single(_context.Game.GetObjects()).Value);
         Assert.Equal((8, 12, WallMaterial.Concrete), (wall.Width, wall.Height, wall.Material));
     }
 
@@ -83,7 +83,7 @@ public class WallToolTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => RunAsync(_tool.BuildWallAsync(length, height, null, new GameCaller(player.ClientId), CancellationToken.None)));
-        Assert.Empty(_context.Game.Objects);
+        Assert.Empty(_context.Game.GetObjects());
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class WallToolTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Single(_context.Game.Objects);
+        Assert.Single(_context.Game.GetObjects());
     }
 
     [Fact]
@@ -135,15 +135,15 @@ public class WallToolTests
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1");
         var existing = new Wall { X = 20, Y = 20 };
-        _context.Game.Objects = new Dictionary<string, GameObject> { ["loaded"] = existing };
+        _context.Game.SetObjects(new Dictionary<string, GameObject> { ["loaded"] = existing });
         _context.Tick();
 
         // Act
         await RunAsync(_tool.BuildWallAsync(null, null, null, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
-        Assert.Equal(2, _context.Game.Objects.Count);
-        Assert.Same(existing, _context.Game.Objects["loaded"]);
+        Assert.Equal(2, _context.Game.GetObjects().Count);
+        Assert.Same(existing, _context.Game.GetObjects()["loaded"]);
     }
 
     [Fact]

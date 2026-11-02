@@ -17,9 +17,9 @@ public class WallDoorTests
 
     private (Wall Before, Door Door, Wall After) GetPieces()
     {
-        var walls = _context.Game.Objects.Values.OfType<Wall>().OrderBy(wall => wall.X).ThenBy(wall => wall.Y).ToArray();
+        var walls = _context.Game.GetObjects().Values.OfType<Wall>().OrderBy(wall => wall.X).ThenBy(wall => wall.Y).ToArray();
         Assert.Equal(2, walls.Length);
-        return (walls[0], Assert.Single(_context.Game.Objects.Values.OfType<Door>()), walls[1]);
+        return (walls[0], Assert.Single(_context.Game.GetObjects().Values.OfType<Door>()), walls[1]);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public class WallDoorTests
         Assert.Equal((-4, 2, 3, 1), (before.X, before.Y, before.Width, before.Depth));
         Assert.Equal((-1, 2, 4, 1, false), (door.X, door.Y, door.Width, door.Depth, door.IsOpen));
         Assert.Equal((3, 2, 9, 1), (after.X, after.Y, after.Width, after.Depth));
-        Assert.Equal(3, _context.Game.Objects.Count);
+        Assert.Equal(3, _context.Game.GetObjects().Count);
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 
@@ -60,7 +60,7 @@ public class WallDoorTests
 
         // Assert
         Assert.Equal("Face north, east, south or west to place objects.", exception.Message);
-        Assert.Same(wall, Assert.Single(_context.Game.Objects.Values));
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects().Values));
         await _context.SaveAsync();
         Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
@@ -77,8 +77,8 @@ public class WallDoorTests
         await RunAsync(wall.AddDoorAsync(6, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
-        var walls = _context.Game.Objects.Values.OfType<Wall>().OrderBy(piece => piece.Y).ToArray();
-        var door = Assert.Single(_context.Game.Objects.Values.OfType<Door>());
+        var walls = _context.Game.GetObjects().Values.OfType<Wall>().OrderBy(piece => piece.Y).ToArray();
+        var door = Assert.Single(_context.Game.GetObjects().Values.OfType<Door>());
         Assert.Equal((2, -4, 1, 2), (walls[0].X, walls[0].Y, walls[0].Width, walls[0].Depth));
         Assert.Equal((2, -2, 1, 6), (door.X, door.Y, door.Width, door.Depth));
         Assert.Equal((2, 4, 1, 8), (walls[1].X, walls[1].Y, walls[1].Width, walls[1].Depth));
@@ -164,7 +164,7 @@ public class WallDoorTests
 
         // Assert
         Assert.Equal("Only a player in the game can place objects.", exception.Message);
-        Assert.Same(wall, Assert.Single(_context.Game.Objects.Values));
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects().Values));
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public class WallDoorTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects()).Value);
         await _context.SaveAsync();
         Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
@@ -231,7 +231,7 @@ public class WallDoorTests
 
         // Assert
         Assert.Equal("This wall is too short for a door of 4 tiles; it fits up to 3.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects()).Value);
         await _context.SaveAsync();
         Assert.Equal(writesBefore, _context.Root.WriteCount);
     }
@@ -291,7 +291,7 @@ public class WallDoorTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Equal(2, _context.Game.Objects.Count);
-        Assert.Contains(wall, _context.Game.Objects.Values);
+        Assert.Equal(2, _context.Game.GetObjects().Count);
+        Assert.Contains(wall, _context.Game.GetObjects().Values);
     }
 }

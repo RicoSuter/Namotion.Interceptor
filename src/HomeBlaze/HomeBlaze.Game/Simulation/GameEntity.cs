@@ -37,6 +37,11 @@ internal class GameEntity
     public string Title { get; set; } = string.Empty;
 
     /// <summary>
+    /// The region of an object in the world, null for a player and for an object that left the world.
+    /// </summary>
+    public GameRegionState? Region { get; set; }
+
+    /// <summary>
     /// Reads area, height, blocking, visibility, visual and title from the subject; returns whether anything changed.
     /// </summary>
     public bool ReadFromSubject()

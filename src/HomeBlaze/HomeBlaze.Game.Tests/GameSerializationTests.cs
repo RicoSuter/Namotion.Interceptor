@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -23,8 +24,12 @@ public class GameSerializationTests
             {
               "$type": "HomeBlaze.Game.Game",
               "name": "Demo world",
-              "objects": {
-                "wall-1": { "$type": "HomeBlaze.Game.Buildings.Wall", "x": -20, "y": 8, "width": 19, "depth": 1, "height": 10 }
+              "regions": {
+                "-1_0": {
+                  "objects": {
+                    "wall-1": { "$type": "HomeBlaze.Game.Buildings.Wall", "x": -20, "y": 8, "width": 19, "depth": 1, "height": 10 }
+                  }
+                }
               },
               "players": {
                 "kitchen": { "x": 3, "y": -2, "facing": "East" }
@@ -37,7 +42,7 @@ public class GameSerializationTests
 
         // Assert
         Assert.Equal("Demo world", game.Name);
-        var wall = Assert.IsType<Wall>(game.Objects["wall-1"]);
+        var wall = Assert.IsType<Wall>(game.GetObjects()["wall-1"]);
         Assert.Equal((-20, 8, 19, 1, 10), (wall.X, wall.Y, wall.Width, wall.Depth, wall.Height));
         var player = game.Players["kitchen"];
         Assert.Equal((3, -2, GameDirection.East), (player.X, player.Y, player.Facing));
@@ -50,7 +55,7 @@ public class GameSerializationTests
         // Arrange
         var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
         {
-            Objects = new Dictionary<string, GameObject> { ["wall-1"] = new Wall { X = 1, Y = 2 } }
+            Regions = GameRegion.CreateRegions(new Dictionary<string, GameObject> { ["wall-1"] = new Wall { X = 1, Y = 2 } })
         };
 
         // Act
@@ -124,7 +129,7 @@ public class GameSerializationTests
         // Arrange
         var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
         {
-            Objects = new Dictionary<string, GameObject> { ["door-1"] = new Door { X = 3, Y = -4, Width = 1, Depth = 4, IsOpen = true } }
+            Regions = GameRegion.CreateRegions(new Dictionary<string, GameObject> { ["door-1"] = new Door { X = 3, Y = -4, Width = 1, Depth = 4, IsOpen = true } })
         };
 
         // Act
@@ -133,7 +138,7 @@ public class GameSerializationTests
 
         // Assert
         Assert.Contains("\"$type\": \"HomeBlaze.Game.Buildings.Door\"", json);
-        var door = Assert.IsType<Door>(loaded.Objects["door-1"]);
+        var door = Assert.IsType<Door>(loaded.GetObjects()["door-1"]);
         Assert.Equal((3, -4, 1, 4, 10, true), (door.X, door.Y, door.Width, door.Depth, door.Height, door.IsOpen));
     }
 
@@ -143,7 +148,7 @@ public class GameSerializationTests
         // Arrange
         var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
         {
-            Objects = new Dictionary<string, GameObject> { ["wall-1"] = new Wall { Material = WallMaterial.Concrete } }
+            Regions = GameRegion.CreateRegions(new Dictionary<string, GameObject> { ["wall-1"] = new Wall { Material = WallMaterial.Concrete } })
         };
 
         // Act
@@ -152,7 +157,7 @@ public class GameSerializationTests
 
         // Assert
         Assert.Contains("\"material\": \"Concrete\"", json);
-        Assert.Equal(WallMaterial.Concrete, Assert.IsType<Wall>(loaded.Objects["wall-1"]).Material);
+        Assert.Equal(WallMaterial.Concrete, Assert.IsType<Wall>(loaded.GetObjects()["wall-1"]).Material);
     }
 
     [Fact]
@@ -161,7 +166,7 @@ public class GameSerializationTests
         // Arrange
         var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
         {
-            Objects = new Dictionary<string, GameObject> { ["door-1"] = new Door { Material = WallMaterial.Wood } }
+            Regions = GameRegion.CreateRegions(new Dictionary<string, GameObject> { ["door-1"] = new Door { Material = WallMaterial.Wood } })
         };
 
         // Act
@@ -170,7 +175,7 @@ public class GameSerializationTests
 
         // Assert
         Assert.Contains("\"material\": \"Wood\"", json);
-        Assert.Equal(WallMaterial.Wood, Assert.IsType<Door>(loaded.Objects["door-1"]).Material);
+        Assert.Equal(WallMaterial.Wood, Assert.IsType<Door>(loaded.GetObjects()["door-1"]).Material);
     }
 
     [Fact]
@@ -207,7 +212,7 @@ public class GameSerializationTests
         // Arrange
         var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
         {
-            Objects = new Dictionary<string, GameObject> { ["tree-1"] = new Tree { X = 3, Y = 4, Variant = 5, Rotation = 120, Scale = 90 } },
+            Regions = GameRegion.CreateRegions(new Dictionary<string, GameObject> { ["tree-1"] = new Tree { X = 3, Y = 4, Variant = 5, Rotation = 120, Scale = 90 } }),
             Tools = new Dictionary<string, GameTool> { ["tree-tool"] = new TreeTool() }
         };
 
@@ -218,7 +223,7 @@ public class GameSerializationTests
         // Assert
         Assert.Contains("\"$type\": \"HomeBlaze.Game.Nature.Tree\"", json);
         Assert.Contains("\"$type\": \"HomeBlaze.Game.Nature.TreeTool\"", json);
-        var tree = Assert.IsType<Tree>(loaded.Objects["tree-1"]);
+        var tree = Assert.IsType<Tree>(loaded.GetObjects()["tree-1"]);
         Assert.Equal((3, 4, 5, 120, 90), (tree.X, tree.Y, tree.Variant, tree.Rotation, tree.Scale));
         Assert.IsType<TreeTool>(loaded.Tools["tree-tool"]);
     }

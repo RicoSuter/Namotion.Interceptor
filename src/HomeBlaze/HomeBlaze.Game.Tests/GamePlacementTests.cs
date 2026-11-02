@@ -98,7 +98,7 @@ public class GamePlacementTests
         await _context.SaveAsync();
 
         // Assert
-        var (name, placed) = Assert.Single(_context.Game.Objects);
+        var (name, placed) = Assert.Single(_context.Game.GetObjects());
         Assert.Same(wall, placed);
         Assert.StartsWith("wall-", name);
         Assert.Equal("wall-".Length + 8, name.Length);
@@ -116,7 +116,7 @@ public class GamePlacementTests
         await RunAsync(_context.Game.PlaceAsync(tree, CancellationToken.None));
 
         // Assert
-        var (name, placed) = Assert.Single(_context.Game.Objects);
+        var (name, placed) = Assert.Single(_context.Game.GetObjects());
         Assert.Same(tree, placed);
         Assert.Matches("^tree-[0-9a-f]{8}$", name);
     }
@@ -133,7 +133,7 @@ public class GamePlacementTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Single(_context.Game.Objects);
+        Assert.Single(_context.Game.GetObjects());
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class GamePlacementTests
         await RunAsync(_context.Game.PlaceAsync(new Door { X = 0, Y = 0, IsOpen = true }, CancellationToken.None));
 
         // Assert
-        Assert.Single(_context.Game.Objects);
+        Assert.Single(_context.Game.GetObjects());
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public class GamePlacementTests
         await RunAsync(_context.Game.PlaceAsync(wall, CancellationToken.None));
 
         // Assert
-        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects()).Value);
     }
 
     [Fact]

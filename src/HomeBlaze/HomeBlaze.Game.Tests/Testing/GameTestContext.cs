@@ -202,19 +202,30 @@ internal sealed class GameTestContext
     }
 
     public Wall AddWall(int x, int y, int width = Wall.DefaultLength, int depth = 1) =>
-        AddObject($"wall-{Game.Objects.Count}", new Wall { X = x, Y = y, Width = width, Depth = depth });
+        AddObject($"wall-{Game.GetObjects().Count}", new Wall { X = x, Y = y, Width = width, Depth = depth });
 
     public Door AddDoor(int x, int y, bool isOpen = false, int width = Door.DefaultLength, int depth = 1) =>
-        AddObject($"door-{Game.Objects.Count}", new Door { X = x, Y = y, Width = width, Depth = depth, IsOpen = isOpen });
+        AddObject($"door-{Game.GetObjects().Count}", new Door { X = x, Y = y, Width = width, Depth = depth, IsOpen = isOpen });
 
     /// <summary>
-    /// Adds the object to the game under the name and runs the tick that takes it over; publishes first, so the write
-    /// starts from the objects the simulation holds.
+    /// Adds the object to the game under the name, as an edit of its region from outside does, and runs the tick that
+    /// takes it over; publishes first, so the write starts from the objects the simulation holds.
     /// </summary>
     public T AddObject<T>(string name, T gameObject) where T : GameObject
     {
         Publish();
-        Game.Objects = new Dictionary<string, GameObject>(Game.Objects) { [name] = gameObject };
+        var (regionX, regionY) = GameRegion.GetCoordinates(gameObject.X, gameObject.Y);
+        var key = GameRegion.GetKey(regionX, regionY);
+        if (Game.Regions.TryGetValue(key, out var region))
+        {
+            region.Objects = new Dictionary<string, GameObject>(region.Objects) { [name] = gameObject };
+        }
+        else
+        {
+            var added = new GameRegion { Objects = { [name] = gameObject } };
+            Game.Regions = new Dictionary<string, GameRegion>(Game.Regions) { [key] = added };
+        }
+
         Tick();
         return gameObject;
     }

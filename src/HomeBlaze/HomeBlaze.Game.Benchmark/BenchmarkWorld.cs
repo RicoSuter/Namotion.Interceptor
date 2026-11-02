@@ -84,7 +84,7 @@ internal sealed class BenchmarkWorld
         world.Game.StartForTest();
         world.Tick();
 
-        world.Game.Objects = world.CreateObjectSet();
+        world.Game.Regions = GameRegion.CreateRegions(world.CreateObjectSet());
         world.Tick();
         if (world.World.Objects.Count != objects)
         {

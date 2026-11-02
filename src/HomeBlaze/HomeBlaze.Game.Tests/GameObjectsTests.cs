@@ -26,7 +26,7 @@ public class GameObjectsTests
         await _context.SaveAsync();
 
         // Assert
-        Assert.Empty(_context.Game.Objects);
+        Assert.Empty(_context.Game.GetObjects());
         Assert.Equal(writesBefore + 1, _context.Root.WriteCount);
     }
 
@@ -41,7 +41,7 @@ public class GameObjectsTests
 
         // Assert
         Assert.Equal("The object is not part of this game.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Single(_context.Game.Objects);
+        Assert.Single(_context.Game.GetObjects());
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class GameObjectsTests
         await _context.SaveAsync();
 
         // Assert
-        var objects = _context.Game.Objects;
+        var objects = _context.Game.GetObjects();
         Assert.Equal(3, objects.Count);
         Assert.DoesNotContain(wall, objects.Values);
         Assert.Equal(2, objects.Count(pair => pair.Key.StartsWith("wall-", StringComparison.Ordinal)));
@@ -74,7 +74,7 @@ public class GameObjectsTests
         // Arrange
         var wall = _context.AddWall(0, 10, width: 10);
         var other = _context.AddWall(12, 10);
-        var before = new Dictionary<string, GameObject>(_context.Game.Objects);
+        var before = new Dictionary<string, GameObject>(_context.Game.GetObjects());
 
         // Act
         var exception = await Record.ExceptionAsync(() =>
@@ -82,8 +82,8 @@ public class GameObjectsTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Equal(before, _context.Game.Objects);
-        Assert.Contains(other, _context.Game.Objects.Values);
+        Assert.Equal(before, _context.Game.GetObjects());
+        Assert.Contains(other, _context.Game.GetObjects().Values);
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class GameObjectsTests
     {
         // Arrange
         var wall = _context.AddWall(0, 10, width: 10);
-        var before = new Dictionary<string, GameObject>(_context.Game.Objects);
+        var before = new Dictionary<string, GameObject>(_context.Game.GetObjects());
 
         // Act
         var exception = await Record.ExceptionAsync(() => RunAsync(_context.Game.ReplaceAsync(wall,
@@ -99,7 +99,7 @@ public class GameObjectsTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Equal(before, _context.Game.Objects);
+        Assert.Equal(before, _context.Game.GetObjects());
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public class GameObjectsTests
 
         // Assert
         Assert.IsType<ArgumentException>(exception);
-        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects()).Value);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class GameObjectsTests
 
         // Assert
         Assert.Equal("replacements", Assert.IsType<ArgumentException>(exception).ParamName);
-        Assert.Same(wall, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(wall, Assert.Single(_context.Game.GetObjects()).Value);
     }
 
     [Fact]
@@ -180,6 +180,6 @@ public class GameObjectsTests
 
         // Assert
         Assert.Equal("The object is not part of this game.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Single(_context.Game.Objects);
+        Assert.Single(_context.Game.GetObjects());
     }
 }

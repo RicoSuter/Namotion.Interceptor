@@ -32,7 +32,7 @@ public class TreeToolTests
         await _context.SaveAsync();
 
         // Assert
-        var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
+        var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.GetObjects()).Value);
         Assert.Equal((GamePlayer.Size / 2, 2), (tree.X + tree.Width / 2, tree.Y));
         Assert.InRange(tree.Variant, 0, Tree.VariantCount - 1);
         Assert.InRange(tree.Rotation, 0, 359);
@@ -51,7 +51,7 @@ public class TreeToolTests
         await RunAsync(_tool.PlantTreeAsync(5, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
-        Assert.Equal(5, Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value).Variant);
+        Assert.Equal(5, Assert.IsType<Tree>(Assert.Single(_context.Game.GetObjects()).Value).Variant);
     }
 
     [Theory]
@@ -66,7 +66,7 @@ public class TreeToolTests
         await RunAsync(_tool.PlantTreeAsync(variant, new GameCaller(player.ClientId), CancellationToken.None));
 
         // Assert
-        var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
+        var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.GetObjects()).Value);
         Assert.InRange(tree.Width, smallestSize, smallestSize * 2);
         Assert.Equal((GamePlayer.Size / 2, 2), (tree.X + tree.Width / 2, tree.Y));
     }
@@ -83,7 +83,7 @@ public class TreeToolTests
         for (var index = 0; index < 20; index++)
         {
             await RunAsync(_tool.PlantTreeAsync(null, new GameCaller(player.ClientId), CancellationToken.None));
-            var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.Objects).Value);
+            var tree = Assert.IsType<Tree>(Assert.Single(_context.Game.GetObjects()).Value);
             rotations.Add(tree.Rotation);
             scales.Add(tree.Scale);
             await RunAsync(tree.DemolishAsync(CancellationToken.None));
@@ -106,7 +106,7 @@ public class TreeToolTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => RunAsync(_tool.PlantTreeAsync(variant, new GameCaller(player.ClientId), CancellationToken.None)));
-        Assert.Empty(_context.Game.Objects);
+        Assert.Empty(_context.Game.GetObjects());
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public class TreeToolTests
 
         // Assert
         Assert.Equal("Something is in the way.", Assert.IsType<InvalidOperationException>(exception).Message);
-        Assert.Single(_context.Game.Objects);
+        Assert.Single(_context.Game.GetObjects());
     }
 
     [Fact]

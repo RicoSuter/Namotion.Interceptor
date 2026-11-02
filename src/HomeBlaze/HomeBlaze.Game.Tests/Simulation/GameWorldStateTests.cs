@@ -24,6 +24,9 @@ public class GameWorldStateTests
         return player;
     }
 
+    private (List<GameObject> Added, List<GameObject> Removed) TakeOverObjects(Dictionary<string, GameObject> objects) =>
+        _world.TakeOverRegions(GameRegion.CreateRegions(objects));
+
     private MoveResult Step(PlayerEntity player, GameDirection direction)
     {
         _timeProvider.Advance(Game.StepInterval);
@@ -38,7 +41,7 @@ public class GameWorldStateTests
         var second = new Wall { X = 2, Y = 0 };
 
         // Act
-        var (added, removed) = _world.TakeOverObjects(new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second });
+        var (added, removed) = TakeOverObjects(new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second });
 
         // Assert
         Assert.Equal(2, _world.Objects.Count);
@@ -53,11 +56,11 @@ public class GameWorldStateTests
         // Arrange
         var staying = new Wall { X = 0, Y = 0 };
         var leaving = new Wall { X = 10, Y = 0 };
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying, ["leaving"] = leaving });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying, ["leaving"] = leaving });
         var entity = _world.EntitiesBySubject[staying];
 
         // Act
-        var (added, removed) = _world.TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying });
+        var (added, removed) = TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying });
 
         // Assert
         Assert.Same(entity, _world.EntitiesBySubject[staying]);
@@ -71,7 +74,7 @@ public class GameWorldStateTests
     public void WhenAPlayerJoinsOnABlockedPosition_ThenItSpawnsOnTheNearestFreePosition()
     {
         // Arrange
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = -1, Y = 0 } });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = -1, Y = 0 } });
 
         // Act
         var joined = _world.Reconcile([new GameClient("tab-1", "Tab", IsNamed: false, IsConnected: true)]);
@@ -90,7 +93,7 @@ public class GameWorldStateTests
     {
         // Arrange
         var player = Join("tab-1");
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = 1, Y = 2, Width = 1 } });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = 1, Y = 2, Width = 1 } });
 
         // Act
         var result = Step(player, GameDirection.North);
@@ -106,7 +109,7 @@ public class GameWorldStateTests
         // Arrange
         // The door closed by an automation while the player stood in it.
         var player = Join("tab-1", y: 2);
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["door"] = new Door { X = -1, Y = 2, Depth = 2 } });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["door"] = new Door { X = -1, Y = 2, Depth = 2 } });
 
         // Act
         var result = Step(player, GameDirection.North);
@@ -121,7 +124,7 @@ public class GameWorldStateTests
     {
         // Arrange
         var player = Join("tab-1");
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["door"] = new Door { X = -1, Y = 2 } });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["door"] = new Door { X = -1, Y = 2 } });
 
         // Act
         var result = Step(player, GameDirection.North);
@@ -134,7 +137,7 @@ public class GameWorldStateTests
     public void WhenAnObjectIsPlacedOntoABlockingObject_ThenItIsRefused()
     {
         // Arrange
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = 0, Y = 4, Width = 1 } });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = 0, Y = 4, Width = 1 } });
 
         // Act
         var exception = Record.Exception(() => _world.Place(new Wall { X = 0, Y = 2, Width = 1, Depth = 4 }));
@@ -150,8 +153,8 @@ public class GameWorldStateTests
         // Arrange
         var wall = new Wall { X = 0, Y = 10, Width = 10 };
         var other = new Wall { X = 12, Y = 10 };
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall, ["other"] = other });
-        _world.IsObjectSetChanged = false;
+        TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall, ["other"] = other });
+        _world.Regions.OnPublished();
         var fitting = new Wall { X = 0, Y = 10, Width = 3 };
 
         // Act
@@ -170,7 +173,7 @@ public class GameWorldStateTests
     {
         // Arrange
         var wall = new Wall { X = 0, Y = 10, Width = 10 };
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall });
         var west = new Wall { X = 0, Y = 10, Width = 3 };
         var door = new Door { X = 3, Y = 10, Width = 4 };
         var east = new Wall { X = 7, Y = 10, Width = 3 };
@@ -191,7 +194,7 @@ public class GameWorldStateTests
     {
         // Arrange
         var door = new Door { X = 0, Y = 0 };
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["door"] = door });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["door"] = door });
         var isBlockedBefore = _world.Index.IsBlocked(door.Area, ignored: null);
 
         // Act
@@ -212,7 +215,7 @@ public class GameWorldStateTests
         // Arrange
         var player = Join("tab-1", x: 5, y: 6);
         var wall = new Wall { X = 20, Y = 0 };
-        _world.TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall });
+        TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall });
 
         // Act
         _world.PublishSnapshot();

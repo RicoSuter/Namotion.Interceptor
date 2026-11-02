@@ -193,6 +193,65 @@ public class GameRuntimeTests
         }
     }
 
+    [Fact]
+    public async Task WhenAllVoiceSwitchesAreOff_ThenTheVoiceLoopPausesUntilOneIsTurnedOn()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAsync(() => _context.Game.IsVoiceLoopPaused, "The voice loop did not pause", GameVoiceSettings.FrameDuration);
+
+            // Act
+            var turnOn = _context.Game.SetAudioAsync(player.ClientId, pageId: 1, isOn: true);
+            await WaitUntilAsync(() => turnOn.IsCompleted && !_context.Game.IsVoiceLoopPaused, "The voice loop did not resume",
+                GameVoiceSettings.FrameDuration);
+            var turnOff = _context.Game.SetAudioAsync(player.ClientId, pageId: 1, isOn: false);
+            await WaitUntilAsync(() => turnOff.IsCompleted && _context.Game.IsVoiceLoopPaused, "The voice loop did not pause again",
+                GameVoiceSettings.FrameDuration);
+
+            // Assert
+            Assert.True(await turnOn);
+            Assert.True(await turnOff);
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheMicrophoneIsTurnedOnWhileTheVoiceLoopPauses_ThenTheLoopMixesAgain()
+    {
+        // Arrange
+        var talker = _context.AddConnectedPlayer("tab-1");
+        _context.AddConnectedPlayer("tab-2", x: 20);
+        var sink = new RecordingVoiceSink();
+        using var registration = _context.Game.VoiceMixer.RegisterSink("tab-2", sink);
+        await _context.Game.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAsync(() => _context.Game.IsVoiceLoopPaused, "The voice loop did not pause", GameVoiceSettings.FrameDuration);
+
+            // Act
+            var turnOn = _context.Game.SetMicrophoneAsync(talker.ClientId, pageId: 1, isOn: true);
+            await WaitUntilAsync(() => turnOn.IsCompleted, "The microphone was not turned on", GameVoiceSettings.FrameDuration);
+            await WaitUntilAsync(() =>
+            {
+                _context.Game.VoiceMixer.Receive("tab-1", 1, VoiceFrames.Create(1000));
+                return sink.Count > 0;
+            }, "The voice loop did not mix the frame", GameVoiceSettings.FrameDuration);
+
+            // Assert
+            Assert.Equal(200, VoiceFrames.ReadLastSample(sink.Frames[0]));
+        }
+        finally
+        {
+            await _context.Game.StopAsync(CancellationToken.None);
+        }
+    }
+
     private float? FindVolume(string listenerId, string talkerId)
     {
         foreach (var entry in _context.Game.VolumeTable.GetRow(listenerId))
@@ -332,7 +391,7 @@ public class GameRuntimeTests
         using var session = _context.OpenView("tab-1", sink);
         await _context.Game.StartAsync(CancellationToken.None);
         await _context.Game.StopAsync(CancellationToken.None);
-        _context.Game.Objects = new Dictionary<string, GameObject>(_context.Game.Objects) { ["wall-new"] = new Wall { X = -20, Y = 8 } };
+        _context.Game.SetObjects(new Dictionary<string, GameObject>(_context.Game.GetObjects()) { ["wall-new"] = new Wall { X = -20, Y = 8 } });
 
         // Act
         await _context.Game.StartAsync(CancellationToken.None);

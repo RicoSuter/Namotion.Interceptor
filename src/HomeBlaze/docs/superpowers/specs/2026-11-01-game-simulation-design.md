@@ -49,7 +49,7 @@ Namespace `HomeBlaze.Game.Abstractions`.
 - `GameVisualPart.AnimationMode`: `Loop` (default) plays `Animation` in a loop; `Once` plays it once whenever the part's `Animation` changes and holds the last frame.
 - The object API methods throw `InvalidOperationException("The object is not part of this game.")` for objects of another game, and `ArgumentException` for invalid sizes (1 to `GameObject.MaximumSize`) or objects already in the game, as today. Canceling a world command before its tick drops it; after that the change stays applied.
 
-`GameObject` and `GameTool` stay abstract classes because `Game.Objects` and `Game.Tools` load polymorphically through `$type`, which the loader supports for abstract `IConfigurable` classes only, and because `X`/`Y` are shared persisted properties.
+`GameObject` and `GameTool` stay abstract classes because `GameRegion.Objects` and `Game.Tools` load polymorphically through `$type`, which the loader supports for abstract `IConfigurable` classes only, and because `X`/`Y` are shared persisted properties.
 
 ## Author rules
 
@@ -70,7 +70,7 @@ A player inside a movement blocking object, for example a door closed by an auto
   - the chunk index (`GameWorldIndex`, chunks of 16 by 16 tiles) and the chunks changed in this tick;
   - schedules in a priority queue by due tick.
 - Each tick, in order:
-  1. Run the due schedules, then the queued commands: steps and turns, world commands, object changes, take-overs, teleports, voice switches, client changes (then reconcile players), view sessions joining and leaving. Then write a changed object set to `Game.Objects` right away, so placed objects are attached to the game when their command completes, and call `OnAddedToWorld` for the placed objects and replacements it attached.
+  1. Run the due schedules, then the queued commands: steps and turns, world commands, object changes, take-overs, teleports, voice switches, client changes (then reconcile players), view sessions joining and leaving. Then write the changed regions and region set (see Facade) right away, so placed objects are attached to the game when their command completes, and call `OnAddedToWorld` for the placed objects and replacements it attached.
   2. Publish the occupancy snapshot for `IsFree`: immutable chunks, only changed chunks replaced, swapped in with a volatile write.
   3. Update the view sessions (see Views).
   4. Take the chunks whose sound blocking changed into the sound snapshot and publish the table of a finished volume table build. Then, when no build runs and 100 ms passed since the last one started, start the next build on the thread pool if the hearing players' positions or the sound blocked tiles changed; a voice switch alone starts none. Last, raise `VolumeTableChanged` when a table was published or a voice switch changed. The tick never waits for a build.
@@ -81,16 +81,22 @@ A player inside a movement blocking object, for example a door closed by an auto
 
 ## Facade
 
+- The objects live in regions: `Game.Regions` is a `[Configuration] Dictionary<string, GameRegion>`, and `GameRegion` is a core subject (`IConfigurable`, not polymorphic) with `[Configuration] Dictionary<string, GameObject> Objects`. A region covers 64 by 64 tiles (16 m) and its key is its coordinates, `"{regionX}_{regionY}"` with regionX = floor(X / 64), negative coordinates included. An object belongs to the region of its south-west corner; names are unique across all regions. `GameObject.World` resolves through the region to the game.
+- Only changed regions are written: a place or remove writes the dictionary of one region, so its cost grows with the objects of that region, not of the world. Adding a region or emptying one also writes `Game.Regions`, which is small; empty regions are removed.
+- An object whose position crosses a region boundary, such as a walking animal or a teleport through `X`/`Y`, migrates in one publish and never leaves the graph in between, so it keeps its identity and schedules, `OnAddedToWorld` does not run again and no outside write to it is missed. The publish writes the regions that gain objects first, still holding the objects that left them, then the region set with the new regions, then the regions without the objects that left them, and last the region set without the emptied regions. A migration is published in the first tick handler after the simulation read the move, at most one tick later.
+- A place or replace from another thread completes once a publish wrote every region change.
 - A write interceptor, registered once per context with `TryAddService`, sees writes after they landed:
   - to a property of a `GameObject` of a running game: mark the object changed, directly on the simulation thread (a schedule or `OnAddedToWorld` writing any object) and through the queue from other threads; the simulation reads every changed object again before the views update. The publish's own writes do not mark anything;
-  - to `Game.Players` or `Game.Objects`: queue a take-over carrying the new value, so a publish in between cannot overwrite it; the simulation takes over the world without overlap checks and calls `OnAddedToWorld` for new objects and cancels the schedules of removed ones;
+  - to `Game.Players` or `Game.Regions`: queue a take-over carrying the new value, so a publish in between cannot overwrite it; the simulation takes over the world without overlap checks and calls `OnAddedToWorld` for new objects and cancels the schedules of removed ones. A take-over of the regions moves an object listed in another region than that of its position into its region, removes regions listed under a key that names no region, gives an object a new name when an earlier region listed its name, and writes the region set again;
+  - to `GameRegion.Objects`: queue a take-over of that region carrying the new value: objects of the region it leaves out leave the world, new ones enter it (under a new name when another object has theirs), kept ones are read again, and the next publish writes the region again;
   - to `GamePlayer.X`, `Y` or `Facing` from outside the simulation thread: queue a teleport or turn carrying the value; this rule comes before the general object rule.
 - Writes to `GamePlayer.ClientId`, `ClientTitle`, `IsConnected`, `IsMicrophoneOn` and `IsAudioOn` from outside the simulation are refused before they land (`InvalidOperationException`), also through the registry; the setters stay internal.
 - The interceptor never waits for the simulation, so a write from a synchronous change observer cannot deadlock with the simulation's own writes.
-- Publishing writes, from the simulation thread, the latest values of the players changed since the last publish (`X`, `Y`, `Facing`, `IsConnected`, `ClientTitle`, `IsMicrophoneOn`, `IsAudioOn`) and `Game.Players`/`Game.Objects` when their set changed. Object properties are not published; their writers set them.
+- Publishing writes, from the simulation thread, the latest values of the players changed since the last publish (`X`, `Y`, `Facing`, `IsConnected`, `ClientTitle`, `IsMicrophoneOn`, `IsAudioOn`), `Game.Players` when the set changed, and the changed regions and `Game.Regions` as above. Object properties are not published; their writers set them. The interceptor ignores exactly the publisher's own writes, by subject, property and written instance.
 
 ## Persistence
 
+- The file holds the objects by region: `"regions": { "0_0": { "objects": { ... } } }`. A file that lists an object in another region than that of its position loads; the start moves the object into its region.
 - Saves at most every save interval when something changed, and on shutdown: publish, pause publishing, write the configuration through the storage as today, resume. A failed or canceled write stays pending for the next attempt. The file always holds one consistent publish.
 - A crash loses at most one save interval of positions.
 - Schedules are not saved; `OnAddedToWorld` sets them up again after a restart.
@@ -105,7 +111,7 @@ A player inside a movement blocking object, for example a door closed by an auto
 
 ## Voice and players
 
-- The voice mixer keeps its own 20 ms loop and its own lock; frames go from the page to the mixer as today, never through the simulation.
+- The voice mixer keeps its own 20 ms loop and its own lock; the loop runs only while a player has the microphone or the speaker on and pauses otherwise, which changes nothing anybody hears, since nothing is mixed or sent then; after a pause every talker glides in from silence, as after a gap. frames go from the page to the mixer as today, never through the simulation.
 - The volume table is built on its own thread from immutable inputs, one build at a time: a `SoundSnapshot` of the sound blocked tiles per chunk (immutable chunks of 16 by 16 bits, only the chunks whose sound blocking changed replaced, swapped in with a volatile write) and a copy of the client ids and areas of the connected players. The snapshot carries the index's `SoundVersion`, which only a change of a sound blocking object increases (added, removed, moved, resized or its `IsSoundBlocking` toggled), never a player's step. The tick publishes a finished table with a volatile write and then raises `VolumeTableChanged` on the simulation thread. A table is published in the first tick after its build completes. A change that arrives while a build runs waits for it, so the extra latency is one tick plus up to two build durations. A voice switch alone changes no row, so it raises `VolumeTableChanged` without a build. The mixer and Nearby read the table without a lock.
 - The build owns its caches, which only a new sound version drops: the regions of connected open tiles, labeled by a flood fill that counts a region of more tiles than the search grid of a player as open, so two players in different regions, at least one of them closed, are silent to each other without a search; and the search lengths per source footprint, bounded in number. `HearingRange` and `SoundPathSearch` read the snapshot through these caches, with results identical to a search on the chunk index.
 - A failing build is logged, warning once per streak, and built again after the interval. A stop drops the table of a running build, and a restart starts from an empty table and builds afresh once that build completed.
@@ -150,4 +156,4 @@ A player inside a movement blocking object, for example a door closed by an auto
 
 ## Breaking changes
 
-Both libraries are unreleased: the `$type` names change to `HomeBlaze.Game.Buildings.*` and `HomeBlaze.Game.Nature.*`, asset paths move with the libraries, the demo world is regenerated, and object types use `World` instead of `GetGame()` and the new object API.
+Both libraries are unreleased: the objects of a game move from `Game.Objects` into `Game.Regions` (the file format changes from `"objects"` to `"regions"`), the `$type` names change to `HomeBlaze.Game.Buildings.*` and `HomeBlaze.Game.Nature.*`, asset paths move with the libraries, the demo world is regenerated, and object types use `World` instead of `GetGame()` and the new object API.

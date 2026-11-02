@@ -37,9 +37,9 @@ public class DemoWorldTests
     public void WhenTheDemoWorldLoads_ThenItHasAHouseAShedAForestAndTheTools()
     {
         // Act
-        var walls = _game.Objects.Values.OfType<Wall>().ToArray();
-        var doors = _game.Objects.Values.OfType<Door>().ToArray();
-        var forest = _game.Objects
+        var walls = _game.GetObjects().Values.OfType<Wall>().ToArray();
+        var doors = _game.GetObjects().Values.OfType<Door>().ToArray();
+        var forest = _game.GetObjects()
             .Where(pair => pair.Key.StartsWith("forest-", StringComparison.Ordinal))
             .Select(pair => Assert.IsType<Tree>(pair.Value))
             .ToArray();
@@ -58,6 +58,20 @@ public class DemoWorldTests
     }
 
     [Fact]
+    public void WhenTheDemoWorldLoads_ThenEveryObjectIsInTheRegionOfItsPosition()
+    {
+        // Act
+        var misplaced = _game.Regions
+            .SelectMany(pair => pair.Value.Objects.Select(gameObject => (Key: pair.Key, Name: gameObject.Key, Object: gameObject.Value)))
+            .Where(entry => GetRegionKey(entry.Object) != entry.Key)
+            .Select(entry => entry.Name)
+            .ToArray();
+
+        // Assert
+        Assert.Empty(misplaced);
+    }
+
+    [Fact]
     public void WhenWalkingFromTheSpawnPoint_ThenEveryRoomIsReachableThroughItsDoors()
     {
         // Act
@@ -71,10 +85,10 @@ public class DemoWorldTests
     public void WhenTheTreesStand_ThenNoneBlocksADoorOrTheSpawnPoint()
     {
         // Arrange
-        var keepClear = _game.Objects.Values.OfType<Door>().Select(GetApproach).Append(new GameArea(-2, -2, 6, 6)).ToArray();
+        var keepClear = _game.GetObjects().Values.OfType<Door>().Select(GetApproach).Append(new GameArea(-2, -2, 6, 6)).ToArray();
 
         // Act
-        var blocking = _game.Objects.Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Area))).ToArray();
+        var blocking = _game.GetObjects().Values.OfType<Tree>().Where(tree => keepClear.Any(area => area.Intersects(tree.Area))).ToArray();
 
         // Assert
         Assert.Empty(blocking);
@@ -84,8 +98,8 @@ public class DemoWorldTests
     public void WhenTheDemoWorldLoads_ThenTheAnimalsStandOnFreeTiles()
     {
         // Arrange
-        var animals = _game.Objects.Values.OfType<Animal>().ToArray();
-        var others = _game.Objects.Values.Where(gameObject => gameObject.IsMovementBlocking).ToArray();
+        var animals = _game.GetObjects().Values.OfType<Animal>().ToArray();
+        var others = _game.GetObjects().Values.Where(gameObject => gameObject.IsMovementBlocking).ToArray();
 
         // Act
         var overlapping = animals
@@ -108,7 +122,7 @@ public class DemoWorldTests
     private HashSet<(int X, int Y)> FindReachablePositions()
     {
         var index = new GameWorldIndex();
-        foreach (var gameObject in _game.Objects.Values.Where(gameObject => gameObject is not Door))
+        foreach (var gameObject in _game.GetObjects().Values.Where(gameObject => gameObject is not Door))
         {
             index.AddOrUpdate(EntityFactory.Object(gameObject));
         }
@@ -133,4 +147,10 @@ public class DemoWorldTests
 
     private static bool IsWithinArea((int X, int Y) position) =>
         position.X is >= -70 and <= 120 && position.Y is >= -40 and <= 80;
+
+    private static string GetRegionKey(GameObject gameObject)
+    {
+        var (regionX, regionY) = GameRegion.GetCoordinates(gameObject.X, gameObject.Y);
+        return GameRegion.GetKey(regionX, regionY);
+    }
 }

@@ -8,7 +8,7 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace HomeBlaze.Game.Simulation;
 
 /// <summary>
-/// Reports writes to games and their objects to the game's simulation; one instance serves every game of a context.
+/// Reports writes to games, their regions and their objects to the game's simulation; one instance serves every game of a context.
 /// Never waits for a simulation, so a write from a change observer cannot deadlock with the simulation's own writes.
 /// </summary>
 /// <remarks>
@@ -20,7 +20,7 @@ internal sealed class GameWriteInterceptor : IWriteInterceptor
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var subject = context.Property.Subject;
-        if (subject is not (GameObject or Game))
+        if (subject is not (GameObject or Game or GameRegion))
         {
             next(ref context);
             return;

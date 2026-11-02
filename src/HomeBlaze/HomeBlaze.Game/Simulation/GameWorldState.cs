@@ -27,7 +27,6 @@ internal sealed class GameWorldState
     private readonly GameVoiceMixer _voiceMixer;
     private readonly List<PlayerEntity> _pendingPublishes = [];
     private readonly HashSet<string> _changedPositions = [];
-    private readonly List<GameArea> _targetTiles = new(3);
 
     // Objects added since the last publish of the object set; writes to them go unseen until the set attaches them.
     private readonly List<GameObject> _unpublishedObjects = [];
@@ -76,9 +75,14 @@ internal sealed class GameWorldState
     public HashSet<GameObject> ChangedSubjects { get; } = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// Whether the set of objects changed since the last publish of <see cref="Game.Objects"/>.
+    /// The regions of the objects.
     /// </summary>
-    public bool IsObjectSetChanged { get; set; }
+    public GameRegionMap Regions { get; } = new();
+
+    /// <summary>
+    /// Whether the regions or their objects changed since the last publish of <see cref="Game.Regions"/>.
+    /// </summary>
+    public bool IsObjectSetChanged => Regions.IsChanged;
 
     /// <summary>
     /// Whether the set of players changed since the last publish of <see cref="Game.Players"/>.
@@ -94,6 +98,11 @@ internal sealed class GameWorldState
     /// Whether a voice switch changed since the last volume table build started, which the index version does not show.
     /// </summary>
     public bool IsVoiceChanged { get; set; } = true;
+
+    /// <summary>
+    /// Whether a player has the microphone or the speaker on.
+    /// </summary>
+    public bool HasVoiceOn { get; private set; }
 
     /// <summary>
     /// The players whose facade values changed since the last publish, removed players included, in the order they changed.
@@ -164,70 +173,6 @@ internal sealed class GameWorldState
         }
 
         _pendingPublishes.Clear();
-    }
-
-    /// <summary>
-    /// Takes over the objects as they are, without overlap checks: keeps the entities of subjects that stay, reads every
-    /// subject again and indexes it. A subject listed under several names is taken once.
-    /// </summary>
-    /// <returns>The subjects that entered the world, including kept ones placed or added by a replacement that
-    /// <see cref="MovePublishedNewObjectsTo"/> has not reported yet, and those that left it.</returns>
-    public (List<GameObject> Added, List<GameObject> Removed) TakeOverObjects(Dictionary<string, GameObject> objects)
-    {
-        var added = new List<GameObject>();
-        var removed = new List<GameObject>();
-
-        // The taken-over subjects come from a set written to the game, which attached them, so none waits for a publish.
-        var pendingObjects = GetPendingNewObjects();
-        _unpublishedObjects.Clear();
-        _publishedNewObjects.Clear();
-        var next = new Dictionary<string, GameEntity>(objects.Count);
-        var names = new Dictionary<GameObject, string>(objects.Count, ReferenceEqualityComparer.Instance);
-        foreach (var (name, subject) in objects)
-        {
-            // A player subject belongs to Players, and a subject under a second name is the same object.
-            if (subject is null or GamePlayer || names.ContainsKey(subject))
-            {
-                continue;
-            }
-
-            if (!NamesBySubject.ContainsKey(subject) || !EntitiesBySubject.TryGetValue(subject, out var entity))
-            {
-                entity = new GameEntity(subject);
-                added.Add(subject);
-            }
-            else if (pendingObjects?.Contains(subject) == true)
-            {
-                added.Add(subject);
-            }
-
-            next[name] = entity;
-            names[subject] = name;
-        }
-
-        foreach (var entity in Objects.Values)
-        {
-            if (!names.ContainsKey(entity.Subject))
-            {
-                Index.Remove(entity);
-                EntitiesBySubject.Remove(entity.Subject);
-                removed.Add(entity.Subject);
-            }
-        }
-
-        Objects.Clear();
-        NamesBySubject.Clear();
-        foreach (var (name, entity) in next)
-        {
-            Objects[name] = entity;
-            NamesBySubject[entity.Subject] = name;
-            EntitiesBySubject[entity.Subject] = entity;
-            entity.ReadFromSubject();
-            Index.AddOrUpdate(entity);
-        }
-
-        IsObjectSetChanged = true;
-        return (added, removed);
     }
 
     /// <summary>
@@ -372,12 +317,6 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
-    /// Adds the visible entities other than the player in the tiles in front of it to <paramref name="results"/>, which
-    /// must be empty, from south-west to north-east.
-    /// </summary>
-    public void GetTargets(PlayerEntity player, List<GameEntity> results) => TargetArea.GetTargets(Index, player, _targetTiles, results);
-
-    /// <summary>
     /// Adds the object under a new name.
     /// </summary>
     /// <exception cref="ArgumentException">The object is already part of the world or has an invalid size.</exception>
@@ -392,7 +331,6 @@ internal sealed class GameWorldState
         }
 
         AddObject(entity);
-        IsObjectSetChanged = true;
         IsSaveRequested = true;
     }
 
@@ -405,7 +343,6 @@ internal sealed class GameWorldState
         }
 
         RemoveObject(gameObject);
-        IsObjectSetChanged = true;
         IsSaveRequested = true;
     }
 
@@ -443,7 +380,6 @@ internal sealed class GameWorldState
             AddObject(entity);
         }
 
-        IsObjectSetChanged = true;
         IsSaveRequested = true;
     }
 
@@ -470,10 +406,11 @@ internal sealed class GameWorldState
     /// </summary>
     public void RefreshSubject(GameObject subject)
     {
-        if (NamesBySubject.ContainsKey(subject) && EntitiesBySubject.TryGetValue(subject, out var entity))
+        if (NamesBySubject.TryGetValue(subject, out var name) && EntitiesBySubject.TryGetValue(subject, out var entity))
         {
             entity.ReadFromSubject();
             Index.AddOrUpdate(entity);
+            Regions.Update(name, entity);
             IsSaveRequested = true;
         }
     }
@@ -531,8 +468,23 @@ internal sealed class GameWorldState
     public void OnVoiceChanged(PlayerEntity player)
     {
         IsVoiceChanged = true;
+        HasVoiceOn = player.IsMicrophoneOn || player.IsAudioOn || IsAnyVoiceOn();
         Index.MarkChanged(player);
         RequestPublish(player);
+    }
+
+    // A player that leaves had its voice turned off before, so it counts as off while it is still listed.
+    private bool IsAnyVoiceOn()
+    {
+        foreach (var player in Players.Values)
+        {
+            if (player.IsMicrophoneOn || player.IsAudioOn)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool ShouldHavePlayer(GameClient client) => client.IsNamed || client.IsConnected;
@@ -561,8 +513,12 @@ internal sealed class GameWorldState
         }
     }
 
-    // The type name in lowercase, a dash and 8 random hex digits.
-    private string CreateObjectName(GameObject gameObject)
+    private string CreateObjectName(GameObject gameObject) => CreateObjectName(gameObject, Objects);
+
+    /// <summary>
+    /// Creates a name that <paramref name="taken"/> does not hold: the type name in lowercase, a dash and 8 random hex digits.
+    /// </summary>
+    public static string CreateObjectName(GameObject gameObject, Dictionary<string, GameEntity> taken)
     {
         var prefix = gameObject.GetType().Name.ToLowerInvariant();
         string name;
@@ -570,7 +526,7 @@ internal sealed class GameWorldState
         {
             name = $"{prefix}-{Guid.NewGuid():N}"[..(prefix.Length + 9)];
         }
-        while (Objects.ContainsKey(name));
+        while (taken.ContainsKey(name));
 
         return name;
     }
@@ -774,7 +730,12 @@ internal sealed class GameWorldState
         return entity;
     }
 
-    private HashSet<GameObject>? GetPendingNewObjects()
+    /// <summary>
+    /// Takes the objects placed or added by a replacement whose OnAddedToWorld has not run, attached yet or not, as a
+    /// take-over of the whole set does, which attached all of its objects.
+    /// </summary>
+    /// <returns>The objects, or null when there are none.</returns>
+    public HashSet<GameObject>? TakePendingNewObjects()
     {
         if (_unpublishedObjects.Count == 0 && _publishedNewObjects.Count == 0)
         {
@@ -783,20 +744,34 @@ internal sealed class GameWorldState
 
         var pendingObjects = new HashSet<GameObject>(_unpublishedObjects, ReferenceEqualityComparer.Instance);
         pendingObjects.UnionWith(_publishedNewObjects);
+        _unpublishedObjects.Clear();
+        _publishedNewObjects.Clear();
         return pendingObjects;
     }
 
+    // A placed object waits for the publish that attaches it.
     private void AddObject(GameEntity entity)
     {
         _unpublishedObjects.Add(entity.Subject);
-        var name = CreateObjectName(entity.Subject);
+        AddEntity(entity, CreateObjectName(entity.Subject));
+    }
+
+    /// <summary>
+    /// Adds the object under the name without overlap checks, as a take-over does whose write attached it already.
+    /// </summary>
+    public void AddEntity(GameEntity entity, string name)
+    {
         Objects[name] = entity;
         NamesBySubject[entity.Subject] = name;
         EntitiesBySubject[entity.Subject] = entity;
         Index.AddOrUpdate(entity);
+        Regions.Add(name, entity);
     }
 
-    private void RemoveObject(GameObject gameObject)
+    /// <summary>
+    /// Takes the object out of the world; it must be part of it.
+    /// </summary>
+    public void RemoveObject(GameObject gameObject)
     {
         // Both usually empty: the game empties them with the next publish and the tick after it.
         _unpublishedObjects.Remove(gameObject);
@@ -805,6 +780,7 @@ internal sealed class GameWorldState
         EntitiesBySubject.Remove(gameObject, out var entity);
         Objects.Remove(name!);
         Index.Remove(entity!);
+        Regions.Remove(name!, entity!);
     }
 
     /// <summary>

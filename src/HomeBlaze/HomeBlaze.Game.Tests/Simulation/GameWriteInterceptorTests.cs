@@ -59,13 +59,13 @@ public class GameWriteInterceptorTests
         var placed = new Wall { X = 20, Y = 20 };
 
         // Act
-        _context.Game.Objects = new Dictionary<string, GameObject> { ["replaced"] = replaced };
+        _context.Game.SetObjects(new Dictionary<string, GameObject> { ["replaced"] = replaced });
         var place = _context.Game.PlaceAsync(placed, CancellationToken.None);
         await _context.RunAsync(place);
         _context.Publish();
 
         // Assert
-        var objects = _context.Game.Objects;
+        var objects = _context.Game.GetObjects();
         Assert.Equal(2, objects.Count);
         Assert.Same(replaced, objects["replaced"]);
         Assert.Contains(placed, objects.Values);
@@ -82,18 +82,18 @@ public class GameWriteInterceptorTests
         {
             X = 20,
             Y = 20,
-            OnFirstRead = () => _context.Game.Objects = new Dictionary<string, GameObject> { ["replacement"] = replacement }
+            OnFirstRead = () => _context.Game.SetObjects(new Dictionary<string, GameObject> { ["replacement"] = replacement })
         };
         _context.Publish();
 
         // Act
         await _context.RunAsync(_context.Game.PlaceAsync(placed, CancellationToken.None));
-        var isOverwrittenByThePublish = !_context.Game.Objects.ContainsKey("replacement");
+        var isOverwrittenByThePublish = !_context.Game.GetObjects().ContainsKey("replacement");
         _context.Publish();
 
         // Assert
         Assert.True(isOverwrittenByThePublish);
-        Assert.Same(replacement, Assert.Single(_context.Game.Objects).Value);
+        Assert.Same(replacement, Assert.Single(_context.Game.GetObjects()).Value);
         Assert.True(_context.Game.IsFree(placed.Area));
         Assert.False(_context.Game.IsFree(replacement.Area));
     }

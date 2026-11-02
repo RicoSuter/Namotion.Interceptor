@@ -36,6 +36,7 @@
     <!-- The shared helpers of the game tests; GameTestContext needs HomeBlaze.Game.Buildings for AddWall and AddDoor. -->
     <ItemGroup>
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\FakeClientDirectory.cs" Link="Testing\FakeClientDirectory.cs" />
+        <Compile Include="..\HomeBlaze.Game.Tests\Testing\GameObjectSets.cs" Link="Testing\GameObjectSets.cs" />
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\GameTestContext.cs" Link="Testing\GameTestContext.cs" />
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\RecordingLogger.cs" Link="Testing\RecordingLogger.cs" />
         <Compile Include="..\HomeBlaze.Game.Tests\Testing\RecordingViewSink.cs" Link="Testing\RecordingViewSink.cs" />
