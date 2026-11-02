@@ -606,13 +606,18 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
-    /// Reads the appearance of a player after an outside write; views see a change in this tick.
+    /// Reads the appearance of a player after an outside write and requests a save; views see a change in this tick.
     /// </summary>
     public void RefreshAppearance(GamePlayer subject)
     {
-        if (EntitiesBySubject.TryGetValue(subject, out var entity) && entity is PlayerEntity player && player.ReadAppearance())
+        if (EntitiesBySubject.TryGetValue(subject, out var entity) && entity is PlayerEntity player)
         {
-            Index.MarkChanged(player);
+            if (player.ReadAppearance())
+            {
+                Index.MarkChanged(player);
+            }
+
+            // The written value is saved even when it resolves to the same appearance.
             IsSaveRequested = true;
         }
     }
@@ -669,6 +674,11 @@ internal sealed class GameWorldState
         if (isKeptOverRestart)
         {
             ReadPosition(player);
+            if (player.ReadAppearance())
+            {
+                Index.MarkChanged(player);
+            }
+
             ResetVoice(player);
         }
 

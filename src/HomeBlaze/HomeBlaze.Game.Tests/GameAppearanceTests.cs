@@ -52,6 +52,8 @@ public class GameAppearanceTests
         var sink = new RecordingViewSink();
         var player = _context.AddConnectedPlayer("tab-1");
         using var view = _context.OpenView("tab-1", sink);
+        player.Character = "male-shirt";
+        _context.Tick();
 
         // Act
         player.Character = "robot";

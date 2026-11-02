@@ -239,6 +239,37 @@ public class GameWorldStateTests
     }
 
     [Fact]
+    public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersTakeTheirSubjectsAppearance()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.Subject.Character = "male-shirt";
+        player.Subject.Color = "#112233";
+        var players = new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject };
+
+        // Act
+        _world.TakeOverPlayers(players, isRestart: true);
+
+        // Assert
+        Assert.Equal(("male-shirt", "#112233"), (player.Character, player.Color));
+    }
+
+    [Fact]
+    public void WhenAnAppearanceWriteResolvesToTheSameValue_ThenASaveIsStillRequested()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.Subject.Character = "robot";
+        _world.IsSaveRequested = false;
+
+        // Act
+        _world.RefreshAppearance(player.Subject);
+
+        // Assert
+        Assert.True(_world.IsSaveRequested);
+    }
+
+    [Fact]
     public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersTakeTheirSubjectsPositionWithTheirVoiceOff()
     {
         // Arrange

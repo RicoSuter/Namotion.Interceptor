@@ -176,7 +176,7 @@ public partial class GamePage
     }
 
     private static NearbyEntry CreateNearbyEntry(GamePlayer player, bool isSelf) =>
-        new(player.Title ?? string.Empty, GameColors.FromId(player.ClientId), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
+        new(player.Title ?? string.Empty, GameColors.Resolve(player.Color, player.ClientId), isSelf, player.IsMicrophoneOn, player.IsAudioOn);
 
     // Keeps the former lists while they hold the same entries; returns whether they changed.
     private bool RefreshActions(Game game, GamePanelState panelState)
