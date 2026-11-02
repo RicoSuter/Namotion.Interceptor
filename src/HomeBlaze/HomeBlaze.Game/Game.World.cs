@@ -44,6 +44,11 @@ public partial class Game
     /// </summary>
     internal const string NoSenderMessage = "Only a player in the game can send messages.";
 
+    /// <summary>
+    /// The message with which playing an animation is refused for a caller that is not a connected player of this game.
+    /// </summary>
+    internal const string NoAnimationActorMessage = "Only a player in the game can play animations.";
+
     // Touched only on the simulation thread: the objects whose OnAddedToWorld runs.
     private readonly List<GameObject> _addedObjects = [];
 
@@ -155,6 +160,31 @@ public partial class Game
         var schedule = new PendingSchedule(gameObject, delay, action);
         _simulation.Post(() => schedule.Register(this));
         return schedule;
+    }
+
+    /// <inheritdoc />
+    public void PlayAnimation(GameCaller? caller, string animation, GameVisualAnimationMode mode)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(animation);
+        if (animation is "Idle" or "Walk")
+        {
+            throw new ArgumentException("Idle and Walk are played by the game.", nameof(animation));
+        }
+
+        if (caller is null || GetActor(caller) is null)
+        {
+            throw new InvalidOperationException(NoAnimationActorMessage);
+        }
+
+        var clientId = caller.ClientId;
+        _simulation.Post(() =>
+        {
+            if (_world.Players.TryGetValue(clientId, out var player) && player.IsConnected)
+            {
+                player.StartAnimation(animation, mode, _timeProvider.GetTimestamp());
+                _world.OnAnimationChanged(player);
+            }
+        });
     }
 
     // Called from another thread, the task waits until the object set with the new objects is written, so their World

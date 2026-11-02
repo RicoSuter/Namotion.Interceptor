@@ -17,6 +17,18 @@ public interface IGameWorld
     GameSpot GetSpotInFront(GameCaller? caller, int across, int along);
 
     /// <summary>
+    /// Plays an animation of the person on the caller's player. <see cref="GameVisualAnimationMode.Once"/> returns to idle
+    /// when the animation ends; <see cref="GameVisualAnimationMode.Loop"/> holds until the player's next step, which also
+    /// ends a running animation. An animation the person does not have shows nothing.
+    /// </summary>
+    /// <param name="caller">The acting player; only the game page provides one.</param>
+    /// <param name="animation">The name of the animation in the person's model, such as <c>Clapping</c>.</param>
+    /// <param name="mode">Whether the animation plays once or loops.</param>
+    /// <exception cref="ArgumentException">The animation is empty, <c>Idle</c> or <c>Walk</c>.</exception>
+    /// <exception cref="InvalidOperationException">There is no player for the caller.</exception>
+    void PlayAnimation(GameCaller? caller, string animation, GameVisualAnimationMode mode);
+
+    /// <summary>
     /// Whether no movement blocking object other than <paramref name="except"/> overlaps the area. Callable from any
     /// thread; on the game's own thread it includes what objects wrote earlier in the tick, elsewhere it answers from the
     /// state of the last tick.

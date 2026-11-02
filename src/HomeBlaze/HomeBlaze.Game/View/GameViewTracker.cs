@@ -503,6 +503,10 @@ internal sealed class GameViewTracker
 
         public string? Color { get; private set; }
 
+        public string? Animation { get; private set; }
+
+        public (int Mode, int Sequence) AnimationRun { get; private set; }
+
         // A cached visual is the same instance, so the reference check spares the value comparison; neither allocates.
         public readonly bool IsSameAs(GameEntity entity, bool isSelf) =>
             HasSamePlacement(entity) && HasSameState(entity, isSelf) && HasSamePlayerState(entity) &&
@@ -521,6 +525,8 @@ internal sealed class GameViewTracker
             IsAudioOn = GameViewPayloads.IsAudioOn(entity);
             Character = GameViewPayloads.GetCharacter(entity);
             Color = GameViewPayloads.GetColor(entity);
+            Animation = GameViewPayloads.GetAnimation(entity);
+            AnimationRun = GameViewPayloads.GetAnimationRun(entity);
         }
 
         private readonly bool HasSamePlacement(GameEntity entity) =>
@@ -529,10 +535,13 @@ internal sealed class GameViewTracker
         private readonly bool HasSameState(GameEntity entity, bool isSelf) =>
             IsSelf == isSelf && IsMovementBlocking == entity.IsMovementBlocking && Title == entity.Title;
 
-        private readonly bool HasSamePlayerState(GameEntity entity) => HasSameAppearance(entity) && HasSameVoice(entity);
+        private readonly bool HasSamePlayerState(GameEntity entity) => HasSameAppearance(entity) && HasSameVoice(entity) && HasSameAnimation(entity);
 
         private readonly bool HasSameAppearance(GameEntity entity) =>
             Character == GameViewPayloads.GetCharacter(entity) && Color == GameViewPayloads.GetColor(entity);
+
+        private readonly bool HasSameAnimation(GameEntity entity) =>
+            Animation == GameViewPayloads.GetAnimation(entity) && AnimationRun == GameViewPayloads.GetAnimationRun(entity);
 
         private readonly bool HasSameVoice(GameEntity entity) =>
             IsMicrophoneOn == GameViewPayloads.IsMicrophoneOn(entity) && IsAudioOn == GameViewPayloads.IsAudioOn(entity);

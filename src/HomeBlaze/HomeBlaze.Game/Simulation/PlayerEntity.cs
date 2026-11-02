@@ -45,6 +45,20 @@ internal sealed class PlayerEntity : GameEntity
 
     public bool IsAudioOn { get; set; }
 
+    /// <summary>
+    /// The animation the player plays, or null.
+    /// </summary>
+    public string? Animation { get; set; }
+
+    public GameVisualAnimationMode AnimationMode { get; set; }
+
+    /// <summary>
+    /// Counts every start, so the same animation twice in a row plays twice.
+    /// </summary>
+    public int AnimationSequence { get; set; }
+
+    public long AnimationStartedAt { get; set; }
+
     public RateLimiter? StepRateLimiter { get; set; }
 
     public RateLimiter? TurnRateLimiter { get; set; }
@@ -75,6 +89,38 @@ internal sealed class PlayerEntity : GameEntity
         (Character, Color) = (character, color);
         return true;
     }
+
+    /// <summary>
+    /// Starts the animation, replacing a running one; a repeated start counts as a new run.
+    /// </summary>
+    public void StartAnimation(string animation, GameVisualAnimationMode mode, long timestamp)
+    {
+        Animation = animation;
+        AnimationMode = mode;
+        AnimationSequence++;
+        AnimationStartedAt = timestamp;
+    }
+
+    /// <summary>
+    /// Ends the animation; returns whether there was one.
+    /// </summary>
+    public bool ClearAnimation()
+    {
+        if (Animation is null)
+        {
+            return false;
+        }
+
+        Animation = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a once animation ran for <see cref="GameSimulationSettings.AnimationLimit"/>; a loop never expires.
+    /// </summary>
+    public bool IsAnimationExpired(TimeProvider timeProvider) =>
+        Animation is not null && AnimationMode == GameVisualAnimationMode.Once &&
+        timeProvider.GetElapsedTime(AnimationStartedAt) >= GameSimulationSettings.AnimationLimit;
 
     /// <summary>
     /// Sets connected; a connected player blocks movement and is visible.

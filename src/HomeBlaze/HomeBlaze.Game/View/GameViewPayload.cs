@@ -20,6 +20,9 @@ internal sealed record GameViewPayload(
     bool IsMovementBlocking,
     bool IsMicrophoneOn,
     bool IsAudioOn,
+    string? Animation,
+    int AnimationMode,
+    int AnimationSequence,
     IReadOnlyList<GameViewPart> Parts)
 {
     public const string PlayerKind = "player";

@@ -121,6 +121,8 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
                 subject.IsMicrophoneOn = player.IsMicrophoneOn;
                 SetWriting(subject, nameof(GamePlayer.IsAudioOn));
                 subject.IsAudioOn = player.IsAudioOn;
+                SetWriting(subject, nameof(GamePlayer.Animation));
+                subject.Animation = player.Animation;
             }
 
             world.ClearPendingPublishes();

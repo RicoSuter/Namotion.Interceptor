@@ -74,6 +74,17 @@ internal sealed class GameViewPayloads
 
     public static bool IsAudioOn(GameEntity entity) => entity is PlayerEntity { IsAudioOn: true };
 
+    /// <summary>
+    /// The animation the view shows, null for an object or a player without one.
+    /// </summary>
+    public static string? GetAnimation(GameEntity entity) => entity is PlayerEntity player ? player.Animation : null;
+
+    /// <summary>
+    /// The mode and start counter of the animation the view shows, zero for an object.
+    /// </summary>
+    public static (int Mode, int Sequence) GetAnimationRun(GameEntity entity) =>
+        entity is PlayerEntity player ? ((int)player.AnimationMode, player.AnimationSequence) : (0, 0);
+
     private GameViewPayload Create(GameEntity entity)
     {
         var area = entity.Area;
@@ -81,11 +92,11 @@ internal sealed class GameViewPayloads
         {
             return new GameViewPayload(GameViewPayload.PlayerKind, area.X, area.Y, area.Width, area.Depth, entity.Height,
                 (int)player.Facing, entity.Title, player.Color, player.Character, entity.IsMovementBlocking, player.IsMicrophoneOn,
-                player.IsAudioOn, []);
+                player.IsAudioOn, player.Animation, (int)player.AnimationMode, player.AnimationSequence, []);
         }
 
         var visual = GameVisualValidator.GetValidVisual(entity.Subject, entity.Visual, _logger);
         return new GameViewPayload(GameViewPayload.ObjectKind, area.X, area.Y, area.Width, area.Depth, entity.Height, 0,
-            entity.Title, string.Empty, string.Empty, entity.IsMovementBlocking, false, false, _parts.GetValue(visual, CreateParts));
+            entity.Title, string.Empty, string.Empty, entity.IsMovementBlocking, false, false, null, 0, 0, _parts.GetValue(visual, CreateParts));
     }
 }

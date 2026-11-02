@@ -303,6 +303,7 @@ internal sealed class GameWorldState
             return CreateMoveResult(player, turnOnly);
         }
 
+        ClearAnimation(player);
         player.Area = moved;
         Index.AddOrUpdate(player);
         OnPositionChanged(player);
@@ -493,6 +494,40 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
+    /// Records a start or an end of the player's animation for the views and the next publish.
+    /// </summary>
+    public void OnAnimationChanged(PlayerEntity player)
+    {
+        Index.MarkChanged(player);
+        RequestPublish(player);
+    }
+
+    /// <summary>
+    /// Ends the animation of the player, if it plays one.
+    /// </summary>
+    public void ClearAnimation(PlayerEntity player)
+    {
+        if (player.ClearAnimation())
+        {
+            OnAnimationChanged(player);
+        }
+    }
+
+    /// <summary>
+    /// Ends the once animations that ran too long; run once per tick.
+    /// </summary>
+    public void ExpireAnimations()
+    {
+        foreach (var player in Players.Values)
+        {
+            if (player.IsAnimationExpired(_timeProvider))
+            {
+                ClearAnimation(player);
+            }
+        }
+    }
+
+    /// <summary>
     /// Turns the voice of the player off and releases its talker in the mixer.
     /// </summary>
     public void ResetVoice(PlayerEntity player)
@@ -680,6 +715,7 @@ internal sealed class GameWorldState
             }
 
             ResetVoice(player);
+            ClearAnimation(player);
         }
 
         Players[player.ClientId] = player;
@@ -721,6 +757,7 @@ internal sealed class GameWorldState
         if (!client.IsConnected)
         {
             ResetVoice(player);
+            ClearAnimation(player);
         }
 
         if (isJoining)
@@ -744,6 +781,7 @@ internal sealed class GameWorldState
         }
 
         ResetVoice(player);
+        ClearAnimation(player);
         if (player.IsConnected)
         {
             player.SetConnected(false);

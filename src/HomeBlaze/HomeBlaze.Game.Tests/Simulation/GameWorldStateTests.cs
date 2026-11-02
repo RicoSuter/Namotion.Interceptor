@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Clients;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Voice;
@@ -307,5 +308,33 @@ public class GameWorldStateTests
         // Assert
         Assert.Equal(1, player.MicrophonePageId);
         Assert.True(player.IsMicrophoneOn);
+    }
+
+    [Fact]
+    public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersLoseTheirAnimation()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.StartAnimation("Sitting", GameVisualAnimationMode.Loop, _timeProvider.GetTimestamp());
+
+        // Act
+        _world.TakeOverPlayers(new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject }, isRestart: true);
+
+        // Assert
+        Assert.Null(player.Animation);
+    }
+
+    [Fact]
+    public void WhenPlayersAreTakenOverWithoutARestart_ThenKeptPlayersKeepTheirAnimation()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.StartAnimation("Sitting", GameVisualAnimationMode.Loop, _timeProvider.GetTimestamp());
+
+        // Act
+        _world.TakeOverPlayers(new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject });
+
+        // Assert
+        Assert.Equal("Sitting", player.Animation);
     }
 }

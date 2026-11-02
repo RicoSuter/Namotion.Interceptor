@@ -82,6 +82,12 @@ public partial class GamePlayer : GameObject, ITitleProvider, IIconProvider
     [State(IsDiscrete = true, Position = 5)]
     public partial bool IsAudioOn { get; internal set; }
 
+    /// <summary>
+    /// The animation the player plays right now, such as <c>Clapping</c>, or null. Only the game sets it; it is not saved.
+    /// </summary>
+    [State(Position = 6)]
+    public partial string? Animation { get; internal set; }
+
     [Derived]
     public string? Title => string.IsNullOrEmpty(ClientTitle) ? "Player" : ClientTitle;
 
