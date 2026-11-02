@@ -41,8 +41,7 @@ public class ReadInvariantAccessTests
         { "browse", JsonSerializer.Serialize(new { format = "json", depth = 0, includeProperties = true }) },
         { "browse", JsonSerializer.Serialize(new { format = "json", path = "Device", depth = 0, includeProperties = true }) },
         { "search", JsonSerializer.Serialize(new { format = "json", includeProperties = true, includeAttributes = true }) },
-        { "get_property", JsonSerializer.Serialize(new { path = "Temperature" }) },
-        { "get_property", JsonSerializer.Serialize(new { path = "Device.DeviceName" }) }
+        { "get_property", JsonSerializer.Serialize(new { path = "Name" }) }
     };
 
     [Theory]
@@ -62,6 +61,24 @@ public class ReadInvariantAccessTests
         Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
     }
 
+    [Theory]
+    [InlineData("Temperature")]
+    [InlineData("Device.DeviceName")]
+    public async Task WhenThePolicyDeniesOnlyWritesAndThePathPassesAPropertyTheProviderExcludes_ThenGetPropertyAnswersAsWithoutAPolicy(string path)
+    {
+        // Arrange
+        var room = CreateRoom();
+        var request = JsonSerializer.SerializeToElement(new { path });
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(room, CreateConfiguration(policy: null), "get_property", request);
+        var withPolicy = await McpToolCaller.CallAsync(room, CreateConfiguration(DenyAllWrites), "get_property", request);
+
+        // Assert
+        Assert.Equal($"Path not found: {path}", withoutPolicy.GetProperty("error").GetString());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
+    }
+
     [Fact]
     public void WhenThePolicyDeniesOnlyWrites_ThenTheHelpersResolveAsWithoutAPolicy()
     {
@@ -71,11 +88,13 @@ public class ReadInvariantAccessTests
         var configuration = CreateConfiguration(DenyAllWrites);
 
         // Act
-        var property = configuration.TryGetReadableProperty(root, "Device.DeviceName");
+        var property = configuration.TryGetReadableProperty(root, "Name");
+        var excludedProperty = configuration.TryGetReadableProperty(root, "Device.DeviceName");
         var subject = configuration.TryGetReadableSubject(root, "Device");
 
         // Assert
-        Assert.Equal(nameof(TestDevice.DeviceName), property!.Value.Property.Name);
+        Assert.Equal(nameof(TestRoom.Name), property!.Value.Property.Name);
+        Assert.Null(excludedProperty);
         Assert.Same(room.Device, subject!.Subject);
     }
 
