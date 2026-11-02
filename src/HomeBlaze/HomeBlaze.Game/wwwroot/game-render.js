@@ -59,6 +59,8 @@ export function createRenderer(scene, camera) {
     shadows.filteringQuality = BABYLON.ShadowGenerator.QUALITY_MEDIUM;
     shadows.darkness = 0.35;
     shadows.bias = 0.002;
+    // A faded wall keeps its shadow.
+    shadows.transparencyShadow = true;
 
     // The axes of the shadow map in world space, to which follow snaps the sun, so that shadow edges do not shimmer while
     // the camera glides.

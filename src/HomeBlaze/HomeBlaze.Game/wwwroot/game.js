@@ -152,7 +152,6 @@ class GameView {
         this.camera.maxZ = 500;
         this.camera.setTarget(BABYLON.Vector3.Zero());
 
-        // Sets the sky and fog colors, the lights and the post-processing.
         this.renderer = createRenderer(this.scene, this.camera);
 
         // The canvas carries the part and model counts for tests and diagnosis.

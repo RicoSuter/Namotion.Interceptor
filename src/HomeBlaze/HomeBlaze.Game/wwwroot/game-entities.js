@@ -136,8 +136,8 @@ function patchGeometryShader() {
 
 // The geometry buffer draws with a shader of its own, which the wind plugin does not reach, so the outline and the corner
 // shading of a swaying tree would stay where it stands still. While the buffer prepares a submesh of a wind material, the
-// effect it creates gets the GAME_WIND define and the phases; the define is not in the defines the buffer compares, so it
-// keeps the effect.
+// effect it creates gets the GAME_WIND define and the phases. The define is not in the defines the buffer compares, so a
+// submesh keeps its first geometry effect: a mesh must never switch between a wind and a non-wind material.
 function addWindToGeometryBuffer(geometry, engine) {
     let isPreparingWind = false;
     const isReady = geometry.isReady;
@@ -622,8 +622,8 @@ export async function createEntities(scene, options) {
         }
 
         entity.meshes = meshes;
-        entity.materials.push(...materials);
         applyAnimation(entity, entity.view);
+        entity.materials.push(...materials);
     }
 
     // Releases what a failed showPerson created; its cloned materials are not in the entity's list yet.
@@ -763,6 +763,17 @@ export async function createEntities(scene, options) {
 
         for (const mesh of meshes) {
             mesh.morphTargetManager?.dispose();
+            releaseWindShadow(mesh);
+        }
+    }
+
+    // A ShadowDepthWrapper keeps every mesh it drew in a map that the mesh's dispose does not clean, so a disposed tree
+    // would stay referenced by the wrappers of its wind material and of the fade copy.
+    function releaseWindShadow(mesh) {
+        const material = mesh.gameMaterial;
+        if (material?.gameWind) {
+            material.shadowDepthWrapper._meshes?.delete(mesh);
+            fadeMaterials.get(material)?.shadowDepthWrapper._meshes?.delete(mesh);
         }
     }
 
