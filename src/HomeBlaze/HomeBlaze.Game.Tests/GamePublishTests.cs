@@ -169,6 +169,34 @@ public class GamePublishTests
     }
 
     [Fact]
+    public async Task WhenAVisualWritesAnotherObjectWhileTheGameReadsTheChangedObjects_ThenTheGameReadsBothWithoutFailing()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = new GameTestContext(logger);
+        var moved = context.AddWall(10, 0, width: 1);
+        var mover = new MovingVisualObject { X = 0, Y = 0, Moved = moved };
+
+        // Act
+        // The publish that attaches the mover makes the game read it again, and that read moves the wall.
+        await context.RunAsync(context.Game.PlaceAsync(mover, CancellationToken.None));
+        context.Tick(2);
+        var xAfterPlace = moved.X;
+
+        // A write on the game's thread makes the game read the mover again at the end of the tick, which moves the wall.
+        using var schedule = context.Game.Schedule(mover, TimeSpan.Zero, () => mover.Y = 2);
+        context.Tick(3);
+
+        // Assert
+        Assert.DoesNotContain(logger.Entries, entry => entry.Level >= Microsoft.Extensions.Logging.LogLevel.Warning);
+        Assert.True(xAfterPlace > 10);
+        Assert.True(moved.X > xAfterPlace);
+        Assert.False(context.Game.IsFree(mover.Area));
+        Assert.False(context.Game.IsFree(moved.Area));
+        Assert.True(context.Game.IsFree(new GameArea(10, 0, xAfterPlace - 10, 1)));
+    }
+
+    [Fact]
     public async Task WhenAnObserverWritesTheObjectsDuringAPublish_ThenTheWriteIsTakenOver()
     {
         // Arrange

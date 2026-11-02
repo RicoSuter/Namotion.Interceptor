@@ -30,7 +30,7 @@ The library depends on `HomeBlaze.Abstractions`, `HomeBlaze.Game.Abstractions`, 
 | `Game*.cs` | The `Game` subject, split by concern: `Game.cs` (properties, tick handlers, the run loop), `Game.Facade.cs` (start, take-overs, what the write interceptor reports), `Game.World.cs` (the `IGameWorld` API, steps, messages, `GetActor`), `Game.Players.cs` (reconciling, renaming, housekeeping loop), `Game.Persistence.cs`, `Game.Voice.cs` (voice switches, volume table builds, voice loop) |
 | `GamePlayer.cs`, `GameRegion.cs` | The player and the region subjects |
 | `GameSimulationSettings.cs` | The tick, publish and save intervals |
-| `Simulation/` | `GameSimulation` (tick, queue, schedules through `GameSchedules`), `GameWorldState` with `GameEntity` and `PlayerEntity`, the regions (`GameRegionMap`, `GameRegionState`, `GameObjectTakeOver`), `GamePublisher`, `GameSetWaiters`, `GameWriteInterceptor`, `OccupancySnapshot`, `SoundSnapshot`, `GameViewSession`, `GameViewSessions`, `GameStoppedException` |
+| `Simulation/` | `GameSimulation` (tick, queue, schedules through `GameSchedules`), `GameWorldState` with `GameEntity` and `PlayerEntity`, the regions (`GameRegionMap`, `GameRegionState`, `GameObjectTakeOver`), `GamePublisher`, `GameSetWaiters`, `GameWriteInterceptor`, `OccupancySnapshot`, `SoundSnapshot`, `GameViewSession`, `GameViewSessions` |
 | `World/` | Pure grid logic: `GameWorldIndex` with `ChangedChunks`, `ChangedEntities` and `GameEntityChange`, `SoundChunk`, `SoundMap`, `HearingPosition`, `HearingRange`, `SoundPathSearch`, `RateLimiter`, `SpawnFinder`, `TargetArea`, `FrontPlacement` |
 | `View/` | `GameViewTracker`, `GameViewWindow`, `GameViewChanges`, and what goes to the browser: `GameViewPayload`, `GameViewPayloads`, `GameViewEntry`, `GameViewPart`, `GameViewUpdate`, `IGameViewSink`, `GamePanelState`, `GameVisualValidator`, `GameDirectionNames`, and `GameColors` for players |
 | `Voice/` | `GameVoiceSettings`, `GameVoiceCodec`, `GameVoiceLoop`, `GameVoiceMixer`, `GameVolumeTable`, `GameVolumeTableBuilder`, `TalkerQueue`, `IGameVoiceSink` |
@@ -150,7 +150,7 @@ State, touched only on the simulation thread (`GameWorldState`):
 - the chunk index (`GameWorldIndex`, chunks of 16 by 16 tiles), which records per tick the changed chunks, the changed entities with their area before, and the chunks whose sound blocked tiles may have changed;
 - the schedules, in `GameSimulation`.
 
-`Game.StopAsync` stops the simulation: one last tick runs what was queued, the schedules are dropped and later work fails with `GameStoppedException`. A start after a stop restarts it, takes the subjects over again, calls `OnAddedToWorld` for every object, since their schedules were dropped, and refreshes every view.
+`Game.StopAsync` stops the simulation: one last tick runs what was queued, the schedules are dropped and later work fails with the public `GameStoppedException` of the abstractions. A start after a stop restarts it, takes the subjects over again, calls `OnAddedToWorld` for every object, since their schedules were dropped, and refreshes every view.
 
 Steps keep the browser protocol: the page awaits the `MoveResult` of `Game.StepAsync`, which completes in the next tick; the browser's prediction hides that. A token bucket per player (`RateLimiter`, burst `StepBurst` of 3, one token per `StepInterval` of 180 ms) limits steps, a second one limits turns.
 
@@ -176,7 +176,7 @@ The interceptor runs before the transaction interceptor, so a refused write fail
 
 - The game writes its configuration through the first parent `IConfigurationWriter`. Without one it logs a warning and does not retry.
 - It saves at most every `SaveInterval` (10 s) when something changed, and on shutdown: publish, pause publishing, write on the thread pool, resume publishing once the write completed. The file therefore holds one consistent publish. A write that hangs for more than a save interval lets publishing go on with a warning, at the price of a file that may mix two publishes.
-- Steps, place, remove, replace, take-overs and writes to objects only request a save, which the next interval writes. Canceling a world command after the game processed it leaves the change applied.
+- Steps, place, remove, replace, take-overs and writes to objects only request a save, which the next interval writes. The objects a publish attached are read again, for writes the interceptor did not see before, but request a save only when that read finds a change, so a game that starts and is left alone does not save. Canceling a world command after the game processed it leaves the change applied.
 - A write that fails or returns false logs a warning and requests the save again, so the next interval retries; the game keeps running.
 - A crash loses at most one save interval of positions and changes. Schedules are not saved; `OnAddedToWorld` sets them up again after a restart.
 - A file that lists an object in another region than that of its position loads; the start moves the object into its region.
@@ -486,7 +486,7 @@ The last column is the first version of the simulation, before the regions, the 
 - `Door.Close` checks `World.IsFree` before it writes `IsOpen`, from the state of the last tick, so a player stepping into the doorway in between ends up inside the closed door; the player can step out.
 - The footprint of a tree follows its variant and scale from its south-west corner, so changing `Variant` or `Scale` on the subject page grows or shrinks it toward the north-east rather than around the trunk, and nothing checks that the new tiles are free.
 - "Add door" reads the wall's geometry before the game processes the replacement, so a wall edited from outside in between is replaced by pieces of its former geometry.
-- A stop that timed out while a save paused publishing can leave place and replace calls pending until the game starts again.
+- A stop that timed out while a save paused publishing can leave place and replace calls pending until the game starts again, which fails them with `GameStoppedException` and drops their objects.
 - Without an installation the page keeps showing "Joining the game…" rather than saying it needs one.
 - Only one character model.
 - A tree blocks only the tiles of its trunk; its crown passes through walls and players.

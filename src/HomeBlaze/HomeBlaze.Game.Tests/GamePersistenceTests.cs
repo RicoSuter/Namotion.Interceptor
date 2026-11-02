@@ -1,4 +1,9 @@
+using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Tests.Testing;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace HomeBlaze.Game.Tests;
 
@@ -39,6 +44,36 @@ public class GamePersistenceTests
 
         // Assert
         Assert.Equal(writesBefore, _context.Root.WriteCount);
+    }
+
+    [Fact]
+    public async Task WhenAStartedGameIsNotTouched_ThenNothingIsWrittenAfterTheSaveInterval()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var root = new TestRoot(SubjectContextFactory.Create(new ServiceCollection()));
+        var game = new Game(new FakeClientDirectory(), timeProvider, NullLogger.Instance);
+        game.SetObjects(new Dictionary<string, GameObject>
+        {
+            ["wall"] = new Wall { X = 0, Y = 0 },
+            ["door"] = new Door { X = 0, Y = 10 },
+            ["far"] = new Wall { X = 300, Y = 0 }
+        });
+        root.Game = game;
+
+        // Act
+        game.StartForTest();
+        var tickCount = (int)(GameSimulationSettings.SaveInterval / GameSimulationSettings.TickInterval) + 2;
+        for (var i = 0; i < tickCount; i++)
+        {
+            timeProvider.Advance(GameSimulationSettings.TickInterval);
+            game.RunTickForTest();
+            await game.SaveTask;
+        }
+
+        // Assert
+        Assert.Equal(3, game.GetObjects().Count);
+        Assert.Equal(0, root.WriteCount);
     }
 
     [Fact]

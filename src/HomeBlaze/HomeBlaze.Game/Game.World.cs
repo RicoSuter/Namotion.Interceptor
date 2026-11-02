@@ -35,6 +35,11 @@ public partial class Game
     internal const string DiagonalMessage = "Face north, east, south or west to place objects.";
 
     /// <summary>
+    /// The message with which placing in front of a player is refused when the spot would leave the <see cref="int"/> range.
+    /// </summary>
+    internal const string NoRoomInFrontMessage = "There is no room in front of you.";
+
+    /// <summary>
     /// The message with which sending is refused for a caller that is not a connected player of this game.
     /// </summary>
     internal const string NoSenderMessage = "Only a player in the game can send messages.";
@@ -66,7 +71,7 @@ public partial class Game
 
         if (!FrontPlacement.TryGetArea(actorArea, facing, across, along, out var area))
         {
-            throw new InvalidOperationException(!Enum.IsDefined(facing) || facing.IsDiagonal() ? DiagonalMessage : GameMessages.Blocked);
+            throw new InvalidOperationException(!Enum.IsDefined(facing) || facing.IsDiagonal() ? DiagonalMessage : NoRoomInFrontMessage);
         }
 
         return new GameSpot(area.X, area.Y, area.Width, area.Depth, facing);

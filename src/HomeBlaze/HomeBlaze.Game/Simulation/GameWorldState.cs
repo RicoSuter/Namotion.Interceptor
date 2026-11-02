@@ -39,6 +39,16 @@ internal sealed class GameWorldState
     // OnAddedToWorld is due.
     private readonly List<GameObject> _publishedNewObjects = [];
 
+    // Objects a write of the object set attached, read again with the changed subjects; unlike those, saved only when the
+    // read finds a change, so the first publish after a start does not save every object.
+    private List<GameObject> _attachedSubjects = [];
+
+    // RefreshChangedSubjects swaps these with ChangedSubjects and _attachedSubjects before it reads them, because a getter
+    // it calls may write on the simulation thread, which adds to ChangedSubjects.
+    private HashSet<GameObject> _refreshingSubjects = new(ReferenceEqualityComparer.Instance);
+    private List<GameObject> _refreshingAttachedSubjects = [];
+    private bool _isRefreshing;
+
     // Swapped in whole by the simulation thread and read by any thread; a published instance never changes.
     private volatile OccupancySnapshot _snapshot = OccupancySnapshot.Empty;
     private volatile ImmutableDictionary<string, PlayerPosition> _playerPositions = ImmutableDictionary<string, PlayerPosition>.Empty;
@@ -76,7 +86,7 @@ internal sealed class GameWorldState
     /// are read again at the end of the tick, and before a step, place, replace or game-thread free check, so these never
     /// decide on positions that earlier work of the tick already changed.
     /// </summary>
-    public HashSet<GameObject> ChangedSubjects { get; } = new(ReferenceEqualityComparer.Instance);
+    public HashSet<GameObject> ChangedSubjects { get; private set; } = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// The regions of the objects.
@@ -156,19 +166,16 @@ internal sealed class GameWorldState
     public void BeginObjectSetPublish() => (_publishingObjects, _unpublishedObjects) = (_unpublishedObjects, _publishingObjects);
 
     /// <summary>
-    /// Ends the publish of <see cref="BeginObjectSetPublish"/>. When it wrote, its objects are read again in the next tick,
-    /// because a write to them before the publish attached them did not reach the write interceptor, and their
-    /// OnAddedToWorld becomes due; otherwise they wait for the next publish.
+    /// Ends the publish of <see cref="BeginObjectSetPublish"/>. When it wrote, its objects are read again with the changed
+    /// subjects, because a write to them before the publish attached them did not reach the write interceptor, but saved
+    /// only when that read finds a change, and their OnAddedToWorld becomes due; otherwise they wait for the next publish.
     /// </summary>
     public void EndObjectSetPublish(bool isWritten)
     {
         if (isWritten)
         {
-            foreach (var subject in _publishingObjects)
-            {
-                ChangedSubjects.Add(subject);
-                _publishedNewObjects.Add(subject);
-            }
+            _attachedSubjects.AddRange(_publishingObjects);
+            _publishedNewObjects.AddRange(_publishingObjects);
         }
         else
         {
@@ -401,34 +408,58 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
-    /// Reads every changed object subject of the world again and indexes it; a changed object is saved with the next save.
+    /// Reads every changed and newly attached object subject of the world again and indexes it; a changed object is saved
+    /// with the next save. A subject that a getter writes meanwhile is read with the next call.
     /// </summary>
     public void RefreshChangedSubjects()
     {
-        if (ChangedSubjects.Count == 0)
+        // A getter that reaches this again, as through a free check, would swap the sets this call is reading.
+        if (_isRefreshing || (ChangedSubjects.Count == 0 && _attachedSubjects.Count == 0))
         {
             return;
         }
 
-        foreach (var subject in ChangedSubjects)
+        _isRefreshing = true;
+        (_refreshingSubjects, ChangedSubjects) = (ChangedSubjects, _refreshingSubjects);
+        (_refreshingAttachedSubjects, _attachedSubjects) = (_attachedSubjects, _refreshingAttachedSubjects);
+        try
         {
-            RefreshSubject(subject);
-        }
+            foreach (var subject in _refreshingAttachedSubjects)
+            {
+                RefreshSubject(subject, isWritten: false);
+            }
 
-        ChangedSubjects.Clear();
+            foreach (var subject in _refreshingSubjects)
+            {
+                RefreshSubject(subject, isWritten: true);
+            }
+        }
+        finally
+        {
+            _refreshingSubjects.Clear();
+            _refreshingAttachedSubjects.Clear();
+            _isRefreshing = false;
+        }
     }
 
     /// <summary>
     /// Reads the subject again and indexes it when it is an object of the world; a changed object is saved with the next save.
     /// </summary>
-    public void RefreshSubject(GameObject subject)
+    public void RefreshSubject(GameObject subject) => RefreshSubject(subject, isWritten: true);
+
+    // A written subject is saved even when the entity did not change, because the write may be to a property the entity
+    // does not hold.
+    private void RefreshSubject(GameObject subject, bool isWritten)
     {
         if (NamesBySubject.TryGetValue(subject, out var name) && EntitiesBySubject.TryGetValue(subject, out var entity))
         {
-            entity.ReadFromSubject();
+            var isChanged = entity.ReadFromSubject();
             Index.AddOrUpdate(entity);
             Regions.Update(name, entity);
-            IsSaveRequested = true;
+            if (isWritten || isChanged)
+            {
+                IsSaveRequested = true;
+            }
         }
     }
 

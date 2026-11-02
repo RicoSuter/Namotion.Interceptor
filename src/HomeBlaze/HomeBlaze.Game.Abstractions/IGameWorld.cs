@@ -32,27 +32,32 @@ public interface IGameWorld
     /// once and the task completes with it; the object joins the game's objects later in that tick or in the next, and
     /// its <see cref="GameObject.OnAddedToWorld"/> follows. Canceling before the game processed the command drops it;
     /// after that the object stays placed, and canceling no longer ends the wait, which ends once the game wrote its
-    /// objects, at the latest when a save in progress completed.
+    /// objects, at the latest when a save in progress completed. A stop that timed out while a save held that write back
+    /// may still drop the object; the task then fails with <see cref="GameStoppedException"/>.
     /// </summary>
     /// <exception cref="ArgumentException">The object is already part of this game, or its size is outside 1 to
     /// <see cref="GameObject.MaximumSize"/>.</exception>
     /// <exception cref="InvalidOperationException">The object blocks movement and overlaps a movement blocking object.</exception>
+    /// <exception cref="GameStoppedException">The game stopped before the command completed.</exception>
     Task PlaceAsync(GameObject gameObject, CancellationToken cancellationToken);
 
     /// <summary>
     /// Removes the object. Canceling before the game processed the command drops it; after that the object stays removed.
     /// </summary>
     /// <exception cref="InvalidOperationException">The object is not part of this game.</exception>
+    /// <exception cref="GameStoppedException">The game stopped before the command completed.</exception>
     Task RemoveAsync(GameObject gameObject, CancellationToken cancellationToken);
 
     /// <summary>
     /// Replaces the object by the replacements in one step; no player sees an intermediate state. The task completes
     /// and the replacements join the game's objects as with <see cref="PlaceAsync"/>. Canceling before the game
-    /// processed the command drops it; after that the replacement stays applied, and canceling no longer ends the wait.
+    /// processed the command drops it; after that the replacement stays applied, unless a stop drops it as with
+    /// <see cref="PlaceAsync"/>, and canceling no longer ends the wait.
     /// </summary>
     /// <exception cref="ArgumentException">A replacement is listed twice, already part of this game, or of invalid size.</exception>
     /// <exception cref="InvalidOperationException">The object is not part of this game, or a movement blocking replacement
     /// overlaps a movement blocking object other than the replaced one or another replacement; nothing changes then.</exception>
+    /// <exception cref="GameStoppedException">The game stopped before the command completed.</exception>
     Task ReplaceAsync(GameObject gameObject, IReadOnlyList<GameObject> replacements, CancellationToken cancellationToken);
 
     /// <summary>

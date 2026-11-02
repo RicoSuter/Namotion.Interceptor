@@ -47,6 +47,20 @@ public class GamePlacementTests
     }
 
     [Fact]
+    public async Task WhenTheSpotWouldLeaveTheIntRange_ThenThePlacementIsRefused()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1", y: int.MaxValue - 1);
+        await _context.StepAsync(player.ClientId, GameDirection.North, turnOnly: true);
+
+        // Act
+        var exception = Record.Exception(() => _context.Game.GetSpotInFront(new GameCaller(player.ClientId), across: 4, along: 1));
+
+        // Assert
+        Assert.Equal("There is no room in front of you.", Assert.IsType<InvalidOperationException>(exception).Message);
+    }
+
+    [Fact]
     public void WhenThereIsNoActor_ThenThePlacementIsRefused()
     {
         // Act

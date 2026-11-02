@@ -34,18 +34,19 @@ public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
     public partial int Y { get; set; }
 
     /// <summary>
-    /// The width in tiles. Walls and doors configure it; a player has a fixed size and ignores a set value.
+    /// The width in tiles. Types with a configurable size set it; a player has a fixed size and ignores a set value.
     /// </summary>
     public virtual int Width { get; set; } = 1;
 
     /// <summary>
-    /// The depth in tiles. Walls and doors configure it; a player has a fixed size and ignores a set value.
+    /// The depth in tiles. Types with a configurable size set it; a player has a fixed size and ignores a set value.
     /// </summary>
     public virtual int Depth { get; set; } = 1;
 
     /// <summary>
-    /// The height in tiles, which only the rendering uses. Walls and doors configure it; a player has a fixed size
-    /// and ignores a set value.
+    /// The height in tiles, which is drawn and, like the width and depth, must be from 1 to <see cref="MaximumSize"/>;
+    /// a type may derive <see cref="IsSoundBlocking"/> from it. Types with a configurable size set it; a player has a
+    /// fixed size and ignores a set value.
     /// </summary>
     public virtual int Height { get; set; } = 1;
 
@@ -66,8 +67,9 @@ public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
 
     /// <summary>
     /// How the object looks; a gray box filling the area and <see cref="Height"/> by default. An override computes it
-    /// from configuration or state properties only, which the page observes, and caches it per state, for example with
-    /// <see cref="GameVisualCache{TKey}"/>. Players are drawn by the page itself and ignore it.
+    /// from configuration or state properties only, which the game reads again whenever a property of the object is
+    /// written, and caches it per state, for example with <see cref="GameVisualCache{TKey}"/>. Players are drawn by the
+    /// page itself and ignore it.
     /// </summary>
     public virtual GameVisual Visual => DefaultVisual;
 

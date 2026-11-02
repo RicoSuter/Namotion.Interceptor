@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using HomeBlaze.Game.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Game.Simulation;

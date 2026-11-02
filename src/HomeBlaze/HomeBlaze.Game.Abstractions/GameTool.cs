@@ -18,5 +18,9 @@ public abstract partial class GameTool : IConfigurable
     protected IGameWorld World =>
         this.TryGetFirstParent<IGameWorld>() ?? throw new InvalidOperationException("The tool is not part of a game.");
 
+    protected GameTool()
+    {
+    }
+
     public virtual Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

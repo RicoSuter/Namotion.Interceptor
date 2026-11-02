@@ -88,10 +88,16 @@ namespace HomeBlaze.Game.Abstractions
         public int X { get; init; }
         public int Y { get; init; }
     }
+    public sealed class GameStoppedException : System.InvalidOperationException
+    {
+        public GameStoppedException() { }
+        public GameStoppedException(string? message) { }
+        public GameStoppedException(string? message, System.Exception? innerException) { }
+    }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public abstract class GameTool : HomeBlaze.Abstractions.IConfigurable, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public GameTool() { }
+        protected GameTool() { }
         public GameTool(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         protected HomeBlaze.Game.Abstractions.IGameWorld World { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
