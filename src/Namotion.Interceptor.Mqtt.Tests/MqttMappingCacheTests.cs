@@ -437,8 +437,16 @@ public class MqttMappingCacheTests
     {
         public bool Included { get; set; } = true;
 
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-            => Included && base.IsPropertyIncluded(property);
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (!Included)
+            {
+                segment = null;
+                return false;
+            }
+
+            return base.TryGetPropertySegment(property, out segment);
+        }
     }
 
     private static MqttCacheTestRoot CreateRootSubject()
