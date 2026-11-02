@@ -616,4 +616,3 @@ public class GameViewSessionTests
         world.Index.ClearChanges();
     }
 }
-

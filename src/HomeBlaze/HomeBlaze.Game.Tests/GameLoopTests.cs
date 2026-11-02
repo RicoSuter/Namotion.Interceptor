@@ -4,7 +4,7 @@ using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Game.Tests;
 
-public class GameRuntimeTests
+public class GameLoopTests
 {
     private readonly GameTestContext _context = new();
 
@@ -408,4 +408,3 @@ public class GameRuntimeTests
         }
     }
 }
-

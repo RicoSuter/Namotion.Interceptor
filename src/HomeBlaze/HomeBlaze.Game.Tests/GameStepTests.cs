@@ -2,7 +2,7 @@ using HomeBlaze.Game.Tests.Testing;
 
 namespace HomeBlaze.Game.Tests;
 
-public class GameMovementTests
+public class GameStepTests
 {
     private readonly GameTestContext _context = new();
 

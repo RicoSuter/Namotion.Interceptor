@@ -588,4 +588,3 @@ public class GameViewTrackerTests
         Assert.Same(first.Payload.Parts, moved.Payload.Parts);
     }
 }
-

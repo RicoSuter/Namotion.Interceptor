@@ -6,12 +6,12 @@ using HomeBlaze.Game.World;
 
 namespace HomeBlaze.Game.Tests;
 
-public class GameVolumeTableTests
+public class GameHearingTests
 {
     private readonly GameTestContext _context = new();
     private int _rebuilds;
 
-    public GameVolumeTableTests()
+    public GameHearingTests()
     {
         _context.Game.VolumeTableChanged += () => _rebuilds++;
     }

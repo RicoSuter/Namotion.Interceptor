@@ -8,6 +8,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
         <PackageReference Include="PublicApiGenerator" />
+        <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
         <PackageReference Include="Verify.Xunit" />
         <PackageReference Include="xunit" />
         <PackageReference Include="xunit.runner.visualstudio">
