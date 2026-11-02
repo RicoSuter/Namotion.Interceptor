@@ -239,11 +239,11 @@ public class GamePlayerAnimationTests
     {
         // Arrange
         var player = _context.AddConnectedPlayer("tab-1", isNamed: true);
-        _context.Game.PlayAnimation(new GameCaller("tab-1"), "Sitting", GameVisualAnimationMode.Loop);
+        _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
+        _context.Game.PostReconcile();
 
         // Act
-        _context.Clients.Set("tab-1", isNamed: true, isConnected: false);
-        _context.Reconcile();
+        _context.Game.PlayAnimation(new GameCaller("tab-1"), "Sitting", GameVisualAnimationMode.Loop);
         _context.Publish();
 
         // Assert
