@@ -488,6 +488,25 @@ internal sealed class StorageReconciler
         return true;
     }
 
+    /// <summary>
+    /// Brings the subject of a file in line with the file when it changed since its version was recorded, so that
+    /// writing the subject does not overwrite an edit that no pass has applied yet. A subject that the content
+    /// replaces is placed in the tree.
+    /// </summary>
+    /// <returns>True when the content replaced the subject.</returns>
+    public async Task<bool> RefreshChangedAsync(StorageEntry entry, CancellationToken cancellationToken)
+    {
+        // A file that is gone has nothing to apply; the write creates it again.
+        var version = await GetVersionAsync(entry.Path, cancellationToken);
+        if (version == default || version == entry.Version || !await RefreshAsync(entry, version, content: null, cancellationToken))
+        {
+            return false;
+        }
+
+        Apply();
+        return true;
+    }
+
     private static string GetChildKey(string path, IInterceptorSubject subject)
         => subject is IConfigurable && StoragePath.IsJson(path)
             ? Path.GetFileNameWithoutExtension(path)
