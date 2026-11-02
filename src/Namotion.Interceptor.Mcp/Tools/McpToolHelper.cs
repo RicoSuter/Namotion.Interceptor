@@ -176,22 +176,6 @@ internal static class McpToolHelper
             : null;
 
     /// <summary>
-    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
-    /// exposes, or null when there is none.
-    /// </summary>
-    internal static RegisteredSubjectProperty? TryGetScalarProperty(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        string segment)
-    {
-        return pathProvider.TryGetPropertyFromSegment(subject, segment, out var property) &&
-               !property.IsAttribute &&
-               !property.CanContainSubjects
-            ? property
-            : null;
-    }
-
-    /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
     /// on the way is one the provider includes, and the last one is no attribute and has no index. A property that holds
     /// subjects is one a filter can read, and its value is the subject, the collection or the dictionary, or null.
