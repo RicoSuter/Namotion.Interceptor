@@ -406,8 +406,9 @@ Everything is vendored under the `wwwroot/` of the library that uses it, served 
 |---|---|---|
 | `HomeBlaze.Game/wwwroot/lib/babylonjs/` | Babylon.js 9.31.0 core and glTF loader (UMD builds) | Apache 2.0 |
 | `HomeBlaze.Game/wwwroot/models/` | `Casual_2.glb` from the Ultimate Modular Men pack by Quaternius, only `Idle_Neutral` and `Walk` kept | CC0 |
-| `HomeBlaze.Game/wwwroot/textures/` | ambientCG Grass004 (`grass.jpg`), re-encoded | CC0 |
-| `HomeBlaze.Game.Buildings/wwwroot/textures/` | ambientCG Bricks097 (`bricks.jpg`, stacked to a square), Concrete046 (`concrete.jpg`) and Planks021 (`wood.jpg`), re-encoded to 512 x 512 | CC0 |
+| `HomeBlaze.Game/wwwroot/models/people/` | Six animated men and women by Quaternius with previews, converted by `tools/convert-people.js` | CC0 |
+| `HomeBlaze.Game/wwwroot/textures/` | `grass.png`, drawn by `tools/make-textures.js` | CC0 |
+| `HomeBlaze.Game.Buildings/wwwroot/textures/` | `bricks.png`, `concrete.png` and `wood.png`, drawn by `HomeBlaze.Game/tools/make-textures.js` | CC0 |
 | `HomeBlaze.Game.Nature/wwwroot/models/` | Seven trees of the low poly nature pack by flo-bit, unchanged GLB files from a pinned commit | CC0 |
 | `HomeBlaze.Game.Nature/wwwroot/models/animals/` | Deer and stag by Quaternius, with their animations | CC0 |
 

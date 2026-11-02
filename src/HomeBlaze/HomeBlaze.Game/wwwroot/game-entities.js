@@ -128,7 +128,7 @@ export async function createEntities(scene, options) {
     const sightline = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, 1), 1);
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
-    ground.material = await createGroundMaterial();
+    ground.material = createGroundMaterial();
     ground.isPickable = false;
 
     const targetMaterial = new BABYLON.StandardMaterial('target', scene);
@@ -145,22 +145,9 @@ export async function createEntities(scene, options) {
     const character = await BABYLON.LoadAssetContainerAsync(`${options.baseUrl}models/Casual_2.glb`, scene);
     updateStats();
 
-    async function createGroundMaterial() {
-        // The border of each repeat draws the meter grid; half of the stroke lies outside, so each edge shows half of it.
-        // It stays wide enough to survive the smaller mipmaps that the usual camera distance samples.
-        const image = new Image();
-        image.src = `${options.baseUrl}textures/grass.jpg`;
-        await image.decode();
-        const texture = new BABYLON.DynamicTexture('grass', 512, scene, true);
-        const context = texture.getContext();
-        context.drawImage(image, 0, 0, 512, 512);
-        context.strokeStyle = 'rgba(0, 0, 0, 0.16)';
-        context.lineWidth = 8;
-        context.strokeRect(0, 0, 512, 512);
-        texture.update();
-        // Dynamic textures clamp by default.
-        texture.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
-        texture.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+    function createGroundMaterial() {
+        // The border of each repeat in the texture draws the meter grid.
+        const texture = new BABYLON.Texture(`${options.baseUrl}textures/grass.png`, scene);
         texture.anisotropicFilteringLevel = 8;
         texture.uScale = 600 / METER;
         texture.vScale = 600 / METER;

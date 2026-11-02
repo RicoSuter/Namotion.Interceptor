@@ -338,7 +338,7 @@ The game validates every visual before it sends it to a browser. An object whose
 Ship textures and models in the `wwwroot/` folder of the library that uses them. The library is then a Razor class library (`Microsoft.NET.Sdk.Razor`), whose static web assets the host serves at `_content/<assembly name>/`. `GameAssets.Url(typeof(MyObject), "models/chair.glb")` builds that URL from the assembly of the type, so it follows the type when it moves to another library:
 
 ```csharp
-private static readonly string BricksUrl = GameAssets.Url(typeof(WallTextures), "textures/bricks.jpg");
+private static readonly string BricksUrl = GameAssets.Url(typeof(WallTextures), "textures/bricks.png");
 ```
 
 Every external asset needs a free license that allows redistribution, CC0 preferably, and a `LICENSE.md` next to it that names its source and terms and lists every file of the folder, as `HomeBlaze.Game.Nature/wwwroot/models/LICENSE.md` does.
