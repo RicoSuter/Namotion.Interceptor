@@ -121,7 +121,8 @@ internal sealed class McpVisibility
 
     /// <summary>
     /// <see cref="IsShown(RegisteredSubject)"/> for a subject whose path <see cref="McpToolHelper.TryGetSubjectPath"/>
-    /// has written, which is a readable path, so only whether the subject is empty for the policy is left to check.
+    /// has written from the root this visibility is for, which is a readable path, so only whether the subject is empty
+    /// for the policy is left to check.
     /// </summary>
     public bool IsShownWithWrittenPath(RegisteredSubject subject)
     {
