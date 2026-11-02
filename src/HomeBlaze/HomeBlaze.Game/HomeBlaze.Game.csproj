@@ -6,6 +6,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Game.Benchmark" />
         <InternalsVisibleTo Include="HomeBlaze.Game.Buildings.Tests" />
         <InternalsVisibleTo Include="HomeBlaze.Game.Nature.Tests" />
         <InternalsVisibleTo Include="HomeBlaze.Game.Tests" />

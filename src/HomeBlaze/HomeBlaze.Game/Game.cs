@@ -170,6 +170,21 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
     internal void RunTickForTest() => _simulation.RunTick();
 
     /// <summary>
+    /// The simulation, for benchmarks that measure its parts one by one.
+    /// </summary>
+    internal GameSimulation SimulationForTest => _simulation;
+
+    /// <summary>
+    /// The world state, for benchmarks that measure its parts one by one; touch it only on the simulation thread.
+    /// </summary>
+    internal GameWorldState WorldForTest => _world;
+
+    /// <summary>
+    /// The publisher, for benchmarks that measure its parts one by one; touch it only on the simulation thread.
+    /// </summary>
+    internal GamePublisher PublisherForTest => _publisher;
+
+    /// <summary>
     /// Takes in a write that landed on this game or one of its objects; called by <see cref="GameWriteInterceptor"/>
     /// inside the write, so it never waits for the simulation.
     /// </summary>

@@ -44,6 +44,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Installation/HomeBlaze.Installation.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Installation.Blazor/HomeBlaze.Installation.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Game.Abstractions/HomeBlaze.Game.Abstractions.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Game.Benchmark/HomeBlaze.Game.Benchmark.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Game.Buildings/HomeBlaze.Game.Buildings.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Game.Nature/HomeBlaze.Game.Nature.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Game/HomeBlaze.Game.csproj" />
