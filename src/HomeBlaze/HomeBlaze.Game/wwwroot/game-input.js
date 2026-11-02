@@ -70,7 +70,7 @@ function isFree(x, y, width, depth, blockers) {
     return !blockers.some(blocker => intersects(x, y, width, depth, blocker));
 }
 
-// Mirrors Game.TryGetStep, so a prediction only differs from the server when the world changed in between.
+// Mirrors GameWorldState.TryGetStep, so a prediction only differs from the server when the world changed in between.
 export function predictStep(state, direction, blockers) {
     const [offsetX, offsetY] = DIRECTIONS[direction];
     const { x, y, width, depth } = state;

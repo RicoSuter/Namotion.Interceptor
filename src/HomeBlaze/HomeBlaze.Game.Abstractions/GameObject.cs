@@ -90,7 +90,7 @@ public abstract partial class GameObject : IConfigurable, IGameObjectLifecycle
         this.TryGetFirstParent<IGameWorld>() ?? throw new InvalidOperationException("The object is not part of a game.");
 
     /// <summary>
-    /// Whether the object is part of a game; false while it is being loaded or after it was removed.
+    /// Whether the object is part of a game; false while it is being loaded or once its removal was published.
     /// </summary>
     protected bool TryGetWorld([NotNullWhen(true)] out IGameWorld? world)
     {
