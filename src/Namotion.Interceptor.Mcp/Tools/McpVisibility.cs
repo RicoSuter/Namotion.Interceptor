@@ -8,8 +8,8 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// <summary>
 /// Whether the tools show a subject, for one tool call. Without an access policy every subject is shown. With one, a
 /// subject is shown when it is the root, or when it is not empty for the policy and has a readable path: a path from the
-/// root, through one of its parents, that passes only properties the configuration's tool path provider includes, which
-/// are ones the path provider includes and the policy allows to read.
+/// root, through one of its parents, that passes only properties the configuration's tool path provider effectively
+/// includes, which are ones the path provider effectively includes and the policy allows to read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpVisibility
