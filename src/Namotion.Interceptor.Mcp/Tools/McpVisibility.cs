@@ -65,23 +65,27 @@ internal sealed class McpVisibility
     /// configuration's path provider effectively includes, and the policy denies read on every one of them. A subject
     /// without such properties is not empty. Always false without a policy.
     /// </summary>
-    internal bool IsEmptyForPolicy(RegisteredSubject subject)
-    {
-        if (_policy is null)
-        {
-            return false;
-        }
+    internal bool IsEmptyForPolicy(RegisteredSubject subject) =>
+        _policy is not null && IsEmptyForPolicy(_policy, _pathProvider!, subject);
 
+    /// <summary>
+    /// Whether the subject is empty for <paramref name="policy"/>, see <see cref="IsEmptyForPolicy(RegisteredSubject)"/>.
+    /// </summary>
+    /// <param name="policy">The access policy.</param>
+    /// <param name="pathProvider">The configuration's <see cref="McpServerConfiguration.PathProvider"/>.</param>
+    /// <param name="subject">The subject.</param>
+    internal static bool IsEmptyForPolicy(IMcpAccessPolicy policy, PathProviderBase pathProvider, RegisteredSubject subject)
+    {
         // Attributes are listed only on a listed property, so they make a subject neither shown nor empty.
         var hasProperty = false;
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute || !_pathProvider!.IsPropertyEffectivelyIncluded(property))
+            if (property.IsAttribute || !pathProvider.IsPropertyEffectivelyIncluded(property))
             {
                 continue;
             }
 
-            if (_policy.IsAllowed(property, McpAccessActions.Read))
+            if (policy.IsAllowed(property, McpAccessActions.Read))
             {
                 return false;
             }

@@ -78,6 +78,93 @@ public class HiddenSubjectAccessTests
         Assert.Null(hiddenSubject);
     }
 
+    // Search leaves out the root, so the house is held by a group.
+    private static (TestMixedGroup Root, TestHouse House, TestDevice Device) CreateHouseInGroup()
+    {
+        var (house, device) = CreateHouse();
+        var root = new TestMixedGroup(((IInterceptorSubject)house).Context);
+        root.Items = new Dictionary<string, IInterceptorSubject> { ["house"] = house };
+        return (root, house, device);
+    }
+
+    [Theory]
+    [InlineData(false, "Items[house].Private")]
+    [InlineData(true, "Items[house].Public")]
+    public async Task WhenTheHelperWritesThePathOfASubject_ThenItIsThePathSearchLists(bool hidesFirstParent, string expectedPath)
+    {
+        // Arrange
+        var (root, _, device) = CreateHouseInGroup();
+        var configuration = CreateConfiguration(hidesFirstParent ? TestAccessPolicy.DenyRead(nameof(TestHouse.Private)) : null);
+
+        // Act
+        var path = configuration.TryGetSubjectPath(root.TryGetRegisteredSubject()!, device.TryGetRegisteredSubject()!);
+        var search = await McpToolCaller.CallAsync(root, configuration, "search", new { format = "json", types = new[] { nameof(TestDevice) } });
+
+        // Assert
+        Assert.Equal(expectedPath, path);
+        Assert.Equal([expectedPath], GetResultPaths(search));
+    }
+
+    [Theory]
+    [InlineData(nameof(TestHouse.Private), nameof(TestHouse.Public))]
+    [InlineData(nameof(TestDevice.DeviceName), nameof(TestDevice.IsOn))]
+    public async Task WhenThePolicyDoesNotShowASubject_ThenTheHelperWritesNoPathAndSearchDoesNotListIt(params string[] hiddenMembers)
+    {
+        // Arrange
+        // Hiding both parents leaves no readable path; hiding every property of the device makes it empty for the policy.
+        var (root, _, device) = CreateHouseInGroup();
+        var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(hiddenMembers));
+
+        // Act
+        var path = configuration.TryGetSubjectPath(root.TryGetRegisteredSubject()!, device.TryGetRegisteredSubject()!);
+        var search = await McpToolCaller.CallAsync(root, configuration, "search", new { format = "json", types = new[] { nameof(TestDevice) } });
+
+        // Assert
+        Assert.Null(path);
+        Assert.Empty(GetResultPaths(search));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenTheHelperWritesThePathOfASubject_ThenTryGetReadableSubjectResolvesItBack(bool hidesFirstParent)
+    {
+        // Arrange
+        var (root, house, device) = CreateHouseInGroup();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var configuration = CreateConfiguration(hidesFirstParent ? TestAccessPolicy.DenyRead(nameof(TestHouse.Private)) : null);
+
+        // Act
+        var housePath = configuration.TryGetSubjectPath(registeredRoot, house.TryGetRegisteredSubject()!);
+        var devicePath = configuration.TryGetSubjectPath(registeredRoot, device.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.Same(house, configuration.TryGetReadableSubject(registeredRoot, housePath!)!.Subject);
+        Assert.Same(device, configuration.TryGetReadableSubject(registeredRoot, devicePath!)!.Subject);
+    }
+
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("/", "/")]
+    public void WhenTheHelperWritesThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
+    {
+        // Arrange
+        var (root, _, _) = CreateHouseInGroup();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            PathPrefix = pathPrefix,
+            AccessPolicy = TestAccessPolicy.DenyRead(nameof(TestMixedGroup.Items))
+        };
+
+        // Act
+        var path = configuration.TryGetSubjectPath(registeredRoot, registeredRoot);
+
+        // Assert
+        Assert.Equal(expectedPath, path);
+    }
+
     [Fact]
     public async Task WhenOneParentOfASubjectIsHidden_ThenAWherePathThroughTheOtherReadsIt()
     {
