@@ -1,3 +1,4 @@
+@using System.Globalization
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Services.Display
@@ -71,6 +72,11 @@
 
     [Parameter] public MethodMetadata? Method { get; set; }
 
+    /// <summary>
+    /// The values that prefill the fields, keyed by parameter name; only parameters entered in one field use them.
+    /// </summary>
+    [Parameter] public IReadOnlyDictionary<string, object?>? InitialValues { get; set; }
+
     private readonly Dictionary<string, string?> _inputValues = new();
     private readonly Dictionary<string, string?> _errors = new();
 
@@ -100,7 +106,53 @@
             _inputValues[input.Parameter.Name] = "false";
         }
 
+        ApplyInitialValues();
         ValidateAll();
+    }
+
+    private void ApplyInitialValues()
+    {
+        if (InitialValues is null)
+        {
+            return;
+        }
+
+        foreach (var input in _inputs.Where(input => input.Kind == InputKind.Simple))
+        {
+            if (InitialValues.TryGetValue(input.Parameter.Name, out var value))
+            {
+                _inputValues[input.Parameter.Name] = FormatInitialValue(value, input.Parameter.Unit);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Formats a value as the user would enter it, so that the field converts it back to the same value; a percent shows
+    /// from 0 to 100.
+    /// </summary>
+    internal static string? FormatInitialValue(object? value, StateUnit? unit) => value switch
+    {
+        null => null,
+        // G29 drops the trailing zeros that the decimal multiplication keeps.
+        _ when unit == StateUnit.Percent && TryGetFraction(value, out var fraction) => (fraction * 100m).ToString("G29", CultureInfo.InvariantCulture),
+        // The general format drops the fractions of a second.
+        DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString()
+    };
+
+    // A fraction beyond 1e15 is no percent value and would overflow the decimal.
+    private static bool TryGetFraction(object value, out decimal fraction)
+    {
+        (var isFraction, fraction) = value switch
+        {
+            decimal number when Math.Abs(number) < 1e15m => (true, number),
+            double number when Math.Abs(number) < 1e15 => (true, (decimal)number),
+            float number when Math.Abs(number) < 1e15f => (true, (decimal)number),
+            _ => (false, 0m)
+        };
+        return isFraction;
     }
 
     private static ParameterInput CreateParameterInput(MethodParameter parameter)
@@ -317,11 +369,13 @@
 
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,
-        MethodMetadata method)
+        MethodMetadata method,
+        IReadOnlyDictionary<string, object?>? initialValues = null)
     {
         var parameters = new DialogParameters<MethodParameterDialog>
         {
-            { x => x.Method, method }
+            { x => x.Method, method },
+            { x => x.InitialValues, initialValues }
         };
 
         var options = new DialogOptions
