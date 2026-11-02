@@ -213,10 +213,10 @@ internal static class McpToolHelper
     }
 
     /// <summary>
-    /// The path of the subject with <paramref name="pathPrefix"/>, or null when it has none: the root's path is the
-    /// prefix, and any other subject's is the first path, in parent order, that reaches the root only through
-    /// properties <paramref name="pathProvider"/> effectively includes (see
-    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), the holding property too.
+    /// The path of the subject with <paramref name="pathPrefix"/>: for the root the prefix, or null when it is empty.
+    /// Any other subject's path is the first, in parent order, that reaches the root only through properties
+    /// <paramref name="pathProvider"/> effectively includes (see <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>),
+    /// the holding property too; null when there is none.
     /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
