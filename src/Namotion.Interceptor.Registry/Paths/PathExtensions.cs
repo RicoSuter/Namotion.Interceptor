@@ -406,9 +406,9 @@ public static class PathExtensions
 
     /// <summary>
     /// Gets whether a path from <paramref name="property"/> up to <paramref name="rootSubject"/>, or to the absolute
-    /// top when it is null, passes only properties <paramref name="pathProvider"/> includes under the rule of
-    /// <see cref="PathProviderBase.IsPropertyIncludedInPaths"/>: the property itself and every property holding it, an
-    /// [InlinePaths] dictionary included. The path is searched as
+    /// top when it is null, passes only properties <paramref name="pathProvider"/> effectively includes (see
+    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>): the property itself and every property holding it,
+    /// an [InlinePaths] dictionary included. The path is searched as
     /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> searches it:
     /// with a root through any parent of a subject with several parents, without one through the first parent of each
     /// subject.
@@ -427,7 +427,7 @@ public static class PathExtensions
     /// </remarks>
     public static bool HasIncludedPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
     {
-        if (!pathProvider.TryGetSegmentIncludedInPaths(property, out var leafSegment))
+        if (!pathProvider.TryGetEffectivelyIncludedSegment(property, out var leafSegment))
         {
             return false;
         }
