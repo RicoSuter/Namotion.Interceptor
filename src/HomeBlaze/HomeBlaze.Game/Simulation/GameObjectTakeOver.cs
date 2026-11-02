@@ -12,23 +12,19 @@ internal static class GameObjectTakeOver
     /// Takes over the regions and their objects as they are: keeps the entities of subjects that stay, reads every subject
     /// again and indexes it. A subject listed under several names is taken once, and an object whose name an earlier
     /// region listed already gets a new one. The next publish writes the region set, and every region whose objects
-    /// differ from the regions of their positions.
+    /// differ from the regions of their positions. The objects that enter the world get OnAddedToWorld after that publish,
+    /// like placed ones, since a publish that ran between the write and the take-over may have detached them.
     /// </summary>
-    /// <returns>The subjects that entered the world, including kept ones placed or added by a replacement that
-    /// <see cref="GameWorldState.MovePublishedNewObjectsTo"/> has not reported yet, and those that left it.</returns>
-    public static (List<GameObject> Added, List<GameObject> Removed) TakeOverRegions(this GameWorldState world, Dictionary<string, GameRegion> regions)
+    /// <returns>The subjects that left the world.</returns>
+    public static List<GameObject> TakeOverRegions(this GameWorldState world, Dictionary<string, GameRegion> regions)
     {
-        var added = new List<GameObject>();
         var removed = new List<GameObject>();
-
-        // The taken-over subjects come from a set written to the game, which attached them, so none waits for a publish.
-        var pendingObjects = world.TakePendingNewObjects();
         world.Regions.Clear();
         var listings = new List<(GameRegionState Region, Dictionary<string, GameObject> Objects)>(regions.Count);
         var count = CountObjects(regions);
         var next = new Dictionary<string, GameEntity>(count);
         var names = new Dictionary<GameObject, string>(count, ReferenceEqualityComparer.Instance);
-        var taken = new TakenObjects(next, names, pendingObjects, added);
+        var taken = new TakenObjects(next, names);
         foreach (var (key, subject) in regions)
         {
             if (subject is null || world.Regions.AddPublished(key, subject) is not { } region)
@@ -50,6 +46,7 @@ internal static class GameObjectTakeOver
             {
                 world.Index.Remove(entity);
                 world.EntitiesBySubject.Remove(entity.Subject);
+                world.ForgetUnpublishedObject(entity.Subject);
                 entity.Region = null;
                 removed.Add(entity.Subject);
             }
@@ -59,6 +56,11 @@ internal static class GameObjectTakeOver
         world.NamesBySubject.Clear();
         foreach (var (name, entity) in next)
         {
+            if (!world.EntitiesBySubject.ContainsKey(entity.Subject))
+            {
+                world.AddUnpublishedObject(entity.Subject);
+            }
+
             world.Objects[name] = entity;
             world.NamesBySubject[entity.Subject] = name;
             world.EntitiesBySubject[entity.Subject] = entity;
@@ -77,19 +79,18 @@ internal static class GameObjectTakeOver
         }
 
         world.Regions.RequestRegionSetWrite();
-        return (added, removed);
+        return removed;
     }
 
     /// <summary>
     /// Takes over the objects of one region as they are: objects of the region that the set leaves out leave the world,
     /// new ones enter it, under a new name when another object has theirs, and kept ones are read again. The next publish
-    /// writes the region. A region that is not part of the world only adds its new objects.
+    /// writes the region, after which the new objects get OnAddedToWorld. A region that is not part of the world only adds
+    /// its new objects.
     /// </summary>
-    /// <returns>The subjects that entered the world and those that left it.</returns>
-    public static (List<GameObject> Added, List<GameObject> Removed) TakeOverRegion(this GameWorldState world, GameRegion subject,
-        Dictionary<string, GameObject> objects)
+    /// <returns>The subjects that left the world.</returns>
+    public static List<GameObject> TakeOverRegion(this GameWorldState world, GameRegion subject, Dictionary<string, GameObject> objects)
     {
-        var added = new List<GameObject>();
         var removed = new List<GameObject>();
         var region = world.Regions.Find(subject);
         if (region is { IsStray: false })
@@ -113,7 +114,7 @@ internal static class GameObjectTakeOver
             var entity = new GameEntity(gameObject);
             entity.ReadFromSubject();
             world.AddEntity(entity, world.Objects.ContainsKey(name) ? GameWorldState.CreateObjectName(gameObject, world.Objects) : name);
-            added.Add(gameObject);
+            world.AddUnpublishedObject(gameObject);
         }
 
         if (region is { IsStray: false })
@@ -122,7 +123,7 @@ internal static class GameObjectTakeOver
             AddLeavingObjects(world, region, objects);
         }
 
-        return (added, removed);
+        return removed;
     }
 
     private static int CountObjects(Dictionary<string, GameRegion> regions)
@@ -147,11 +148,6 @@ internal static class GameObjectTakeOver
         if (!world.NamesBySubject.ContainsKey(gameObject) || !world.EntitiesBySubject.TryGetValue(gameObject, out var entity))
         {
             entity = new GameEntity(gameObject);
-            taken.Added.Add(gameObject);
-        }
-        else if (taken.PendingObjects?.Contains(gameObject) == true)
-        {
-            taken.Added.Add(gameObject);
         }
 
         var entityName = taken.Entities.ContainsKey(name) ? GameWorldState.CreateObjectName(gameObject, taken.Entities) : name;
@@ -218,11 +214,6 @@ internal static class GameObjectTakeOver
         }
     }
 
-    // The objects a take-over of the whole set has taken so far: the entities by their new names, the names by subject,
-    // the objects whose OnAddedToWorld is pending and those that enter the world.
-    private readonly record struct TakenObjects(
-        Dictionary<string, GameEntity> Entities,
-        Dictionary<GameObject, string> Names,
-        HashSet<GameObject>? PendingObjects,
-        List<GameObject> Added);
+    // The objects a take-over of the whole set has taken so far: the entities by their new names and the names by subject.
+    private readonly record struct TakenObjects(Dictionary<string, GameEntity> Entities, Dictionary<GameObject, string> Names);
 }

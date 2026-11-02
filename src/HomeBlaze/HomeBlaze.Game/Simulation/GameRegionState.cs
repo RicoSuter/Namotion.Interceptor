@@ -43,6 +43,11 @@ internal sealed class GameRegionState
     public bool IsPublished { get; set; }
 
     /// <summary>
+    /// The <see cref="GameRegionMap.ChangeCount"/> when the region last changed.
+    /// </summary>
+    public long LastChange { get; set; }
+
+    /// <summary>
     /// Whether the next publish writes the region's objects, or removes the region once it is empty.
     /// </summary>
     public bool IsChanged { get; set; }
@@ -54,8 +59,9 @@ internal sealed class GameRegionState
     public List<(string Name, GameEntity Entity)>? Leaving { get; set; }
 
     /// <summary>
-    /// Whether the entity is in the world and in another region, so a write of this region keeps it until the write of
-    /// its region holds it.
+    /// Whether the entity is in the world and in another region that changed after <paramref name="changedAfter"/>, so a
+    /// write of this region keeps it until the write of its region holds it.
     /// </summary>
-    public bool IsLeaving(GameEntity entity) => entity.Region is { } region && !ReferenceEquals(region, this);
+    public bool IsLeaving(GameEntity entity, long changedAfter = long.MinValue) =>
+        entity.Region is { } region && !ReferenceEquals(region, this) && region.LastChange > changedAfter;
 }

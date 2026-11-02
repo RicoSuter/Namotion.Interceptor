@@ -24,8 +24,18 @@ public class GameWorldStateTests
         return player;
     }
 
-    private (List<GameObject> Added, List<GameObject> Removed) TakeOverObjects(Dictionary<string, GameObject> objects) =>
+    private List<GameObject> TakeOverObjects(Dictionary<string, GameObject> objects) =>
         _world.TakeOverRegions(GameRegion.CreateRegions(objects));
+
+    // The objects whose OnAddedToWorld a publish of the object set makes due.
+    private List<GameObject> PublishNewObjects()
+    {
+        _world.BeginObjectSetPublish();
+        _world.EndObjectSetPublish(isWritten: true);
+        var published = new List<GameObject>();
+        _world.MovePublishedNewObjectsTo(published);
+        return published;
+    }
 
     private MoveResult Step(PlayerEntity player, GameDirection direction)
     {
@@ -41,12 +51,12 @@ public class GameWorldStateTests
         var second = new Wall { X = 2, Y = 0 };
 
         // Act
-        var (added, removed) = TakeOverObjects(new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second });
+        var removed = TakeOverObjects(new Dictionary<string, GameObject> { ["first"] = first, ["second"] = second });
 
         // Assert
         Assert.Equal(2, _world.Objects.Count);
         Assert.Equal(2, _world.Index.Count);
-        Assert.Equal(new GameObject[] { first, second }, added);
+        Assert.Equal(new GameObject[] { first, second }, PublishNewObjects());
         Assert.Empty(removed);
     }
 
@@ -57,14 +67,15 @@ public class GameWorldStateTests
         var staying = new Wall { X = 0, Y = 0 };
         var leaving = new Wall { X = 10, Y = 0 };
         TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying, ["leaving"] = leaving });
+        PublishNewObjects();
         var entity = _world.EntitiesBySubject[staying];
 
         // Act
-        var (added, removed) = TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying });
+        var removed = TakeOverObjects(new Dictionary<string, GameObject> { ["staying"] = staying });
 
         // Assert
         Assert.Same(entity, _world.EntitiesBySubject[staying]);
-        Assert.Empty(added);
+        Assert.Empty(PublishNewObjects());
         Assert.Equal(new GameObject[] { leaving }, removed);
         Assert.False(_world.EntitiesBySubject.ContainsKey(leaving));
         Assert.Equal(1, _world.Index.Count);
@@ -154,7 +165,7 @@ public class GameWorldStateTests
         var wall = new Wall { X = 0, Y = 10, Width = 10 };
         var other = new Wall { X = 12, Y = 10 };
         TakeOverObjects(new Dictionary<string, GameObject> { ["wall"] = wall, ["other"] = other });
-        _world.Regions.OnPublished();
+        _world.Regions.OnPublished(_world.Regions.ChangeCount);
         var fitting = new Wall { X = 0, Y = 10, Width = 3 };
 
         // Act

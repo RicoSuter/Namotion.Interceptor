@@ -11,11 +11,19 @@ internal sealed class GameRegionMap
     private readonly List<GameRegionState> _changed = [];
     private readonly List<GameRegionState> _strays = [];
     private bool _isRegionSetWriteRequested;
+    private long _regionSetWriteChange;
+    private long _changeCount;
 
     /// <summary>
     /// The regions by their coordinates, including emptied ones the next publish removes.
     /// </summary>
-    public IReadOnlyDictionary<(int X, int Y), GameRegionState> Regions => _regions;
+    public IReadOnlyDictionary<(int X, int Y), GameRegionState> ByCoordinates => _regions;
+
+    /// <summary>
+    /// Counts the changes of regions; a region's <see cref="GameRegionState.LastChange"/> above the count at the start of a
+    /// publish shows that it changed during that publish.
+    /// </summary>
+    public long ChangeCount => _changeCount;
 
     /// <summary>
     /// The regions whose objects changed since the last publish of the object set, in the order they changed.
@@ -142,11 +150,18 @@ internal sealed class GameRegionMap
     public static void AddLeaving(GameRegionState region, string name, GameEntity entity) => (region.Leaving ??= []).Add((name, entity));
 
     /// <summary>
-    /// Makes the next publish write the region's objects, or remove it once it is empty; a stray is removed anyway.
+    /// Makes the next publish write the region's objects, or remove it once it is empty; a stray is removed anyway. Only
+    /// appends to <see cref="Changed"/>, so a publish that walks it by index sees no reordering.
     /// </summary>
     public void MarkChanged(GameRegionState region)
     {
-        if (!region.IsChanged && !region.IsStray)
+        if (region.IsStray)
+        {
+            return;
+        }
+
+        region.LastChange = ++_changeCount;
+        if (!region.IsChanged)
         {
             region.IsChanged = true;
             _changed.Add(region);
@@ -156,27 +171,39 @@ internal sealed class GameRegionMap
     /// <summary>
     /// Makes the next publish write <see cref="Game.Regions"/>.
     /// </summary>
-    public void RequestRegionSetWrite() => _isRegionSetWriteRequested = true;
+    public void RequestRegionSetWrite()
+    {
+        _isRegionSetWriteRequested = true;
+        _regionSetWriteChange = ++_changeCount;
+    }
 
     /// <summary>
-    /// Records that a publish wrote every changed region and the region set: drops the emptied regions and the strays.
+    /// Records that a publish that started at <paramref name="publishStart"/> (<see cref="ChangeCount"/>) wrote its changes:
+    /// clears the regions it covered and drops the emptied ones that the region set no longer holds, and the strays. Regions
+    /// changed during the publish stay changed, as does a region set write requested meanwhile.
     /// </summary>
-    public void OnPublished()
+    public void OnPublished(long publishStart)
     {
-        foreach (var region in _changed)
+        var kept = 0;
+        for (var i = 0; i < _changed.Count; i++)
         {
+            var region = _changed[i];
+            if (region.LastChange > publishStart)
+            {
+                _changed[kept++] = region;
+                continue;
+            }
+
             region.IsChanged = false;
             region.Leaving = null;
-            if (region.Objects.Count > 0)
-            {
-                region.IsPublished = true;
-            }
-            else
+            if (region.Objects.Count == 0 && !region.IsPublished)
             {
                 _regions.Remove((region.X, region.Y));
                 _regionsBySubject.Remove(region.Subject);
             }
         }
+
+        _changed.RemoveRange(kept, _changed.Count - kept);
 
         foreach (var stray in _strays)
         {
@@ -187,8 +214,10 @@ internal sealed class GameRegionMap
             }
         }
 
-        _changed.Clear();
         _strays.Clear();
-        _isRegionSetWriteRequested = false;
+        if (_regionSetWriteChange <= publishStart)
+        {
+            _isRegionSetWriteRequested = false;
+        }
     }
 }

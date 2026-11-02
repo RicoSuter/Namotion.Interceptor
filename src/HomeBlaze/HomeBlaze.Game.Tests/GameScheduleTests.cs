@@ -312,7 +312,7 @@ public class GameScheduleTests
     }
 
     [Fact]
-    public void WhenAHookOfATakenOverObjectPlacesAnother_ThenThePlaceCompletesAtOnceAndTheOtherHookRunsInTheSameTick()
+    public void WhenAHookOfATakenOverObjectPlacesAnother_ThenThePlaceCompletesAtOnceAndTheOtherHookRunsInTheNextTick()
     {
         // Arrange
         var child = new ScheduledObject { X = 20, Y = 0 };
@@ -321,9 +321,12 @@ public class GameScheduleTests
 
         // Act
         _context.AddObject("parent", parent);
+        var childAddedCountInTheParentsTick = child.AddedCount;
+        _context.Tick();
 
         // Assert
         Assert.True(place!.IsCompletedSuccessfully);
+        Assert.Equal(0, childAddedCountInTheParentsTick);
         Assert.Equal(1, child.AddedCount);
         Assert.Contains(child, _context.Game.GetObjects().Values);
     }

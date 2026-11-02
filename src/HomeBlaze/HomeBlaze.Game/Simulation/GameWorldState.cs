@@ -29,10 +29,14 @@ internal sealed class GameWorldState
     private readonly HashSet<string> _changedPositions = [];
 
     // Objects added since the last publish of the object set; writes to them go unseen until the set attaches them.
-    private readonly List<GameObject> _unpublishedObjects = [];
+    private List<GameObject> _unpublishedObjects = [];
 
-    // Objects placed or added by a replacement that the last publish of the object set attached, whose OnAddedToWorld
-    // is due.
+    // The unpublished objects as a running publish of the object set started; an object added during that publish, by a
+    // synchronous observer of its writes, waits in _unpublishedObjects for the next one.
+    private List<GameObject> _publishingObjects = [];
+
+    // Objects added by a place, a replacement or a take-over that the last publish of the object set attached, whose
+    // OnAddedToWorld is due.
     private readonly List<GameObject> _publishedNewObjects = [];
 
     // Swapped in whole by the simulation thread and read by any thread; a published instance never changes.
@@ -115,9 +119,8 @@ internal sealed class GameWorldState
     public OccupancySnapshot Snapshot => _snapshot;
 
     /// <summary>
-    /// Moves the objects of the world placed or added by a replacement that a write of the object set attached since the
-    /// last call to the target, in the order added. Removing an object takes it out before; a take-over drops them and
-    /// reports the objects it keeps as added instead.
+    /// Moves the objects that entered the world by a place, a replacement or a take-over and that a write of the object
+    /// set attached since the last call to the target, in the order added. Removing an object takes it out before.
     /// </summary>
     public void MovePublishedNewObjectsTo(List<GameObject> target)
     {
@@ -148,18 +151,32 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
-    /// Reads the objects added since the last publish of the object set again in the next tick, because a write to them
-    /// before the publish attached them to the game did not reach the write interceptor.
+    /// Sets aside the objects added since the last publish of the object set as the ones the starting publish attaches.
     /// </summary>
-    public void OnObjectSetPublished()
+    public void BeginObjectSetPublish() => (_publishingObjects, _unpublishedObjects) = (_unpublishedObjects, _publishingObjects);
+
+    /// <summary>
+    /// Ends the publish of <see cref="BeginObjectSetPublish"/>. When it wrote, its objects are read again in the next tick,
+    /// because a write to them before the publish attached them did not reach the write interceptor, and their
+    /// OnAddedToWorld becomes due; otherwise they wait for the next publish.
+    /// </summary>
+    public void EndObjectSetPublish(bool isWritten)
     {
-        foreach (var subject in _unpublishedObjects)
+        if (isWritten)
         {
-            ChangedSubjects.Add(subject);
-            _publishedNewObjects.Add(subject);
+            foreach (var subject in _publishingObjects)
+            {
+                ChangedSubjects.Add(subject);
+                _publishedNewObjects.Add(subject);
+            }
+        }
+        else
+        {
+            _publishingObjects.AddRange(_unpublishedObjects);
+            (_publishingObjects, _unpublishedObjects) = (_unpublishedObjects, _publishingObjects);
         }
 
-        _unpublishedObjects.Clear();
+        _publishingObjects.Clear();
     }
 
     /// <summary>
@@ -731,22 +748,26 @@ internal sealed class GameWorldState
     }
 
     /// <summary>
-    /// Takes the objects placed or added by a replacement whose OnAddedToWorld has not run, attached yet or not, as a
-    /// take-over of the whole set does, which attached all of its objects.
+    /// Whether the object entered the world and its OnAddedToWorld has not run yet.
     /// </summary>
-    /// <returns>The objects, or null when there are none.</returns>
-    public HashSet<GameObject>? TakePendingNewObjects()
-    {
-        if (_unpublishedObjects.Count == 0 && _publishedNewObjects.Count == 0)
-        {
-            return null;
-        }
+    public bool IsAddedToWorldPending(GameObject gameObject) =>
+        _unpublishedObjects.Contains(gameObject) || _publishingObjects.Contains(gameObject) || _publishedNewObjects.Contains(gameObject);
 
-        var pendingObjects = new HashSet<GameObject>(_unpublishedObjects, ReferenceEqualityComparer.Instance);
-        pendingObjects.UnionWith(_publishedNewObjects);
-        _unpublishedObjects.Clear();
-        _publishedNewObjects.Clear();
-        return pendingObjects;
+    /// <summary>
+    /// Lets the object wait for the next publish of the object set, after which its OnAddedToWorld runs, so World
+    /// resolves in it even when a publish in between detached it again.
+    /// </summary>
+    public void AddUnpublishedObject(GameObject gameObject) => _unpublishedObjects.Add(gameObject);
+
+    /// <summary>
+    /// Forgets an object that left the world, so its OnAddedToWorld no longer runs.
+    /// </summary>
+    public void ForgetUnpublishedObject(GameObject gameObject)
+    {
+        // All usually empty: the game empties them with the next publish and the tick after it.
+        _unpublishedObjects.Remove(gameObject);
+        _publishingObjects.Remove(gameObject);
+        _publishedNewObjects.Remove(gameObject);
     }
 
     // A placed object waits for the publish that attaches it.
@@ -773,9 +794,7 @@ internal sealed class GameWorldState
     /// </summary>
     public void RemoveObject(GameObject gameObject)
     {
-        // Both usually empty: the game empties them with the next publish and the tick after it.
-        _unpublishedObjects.Remove(gameObject);
-        _publishedNewObjects.Remove(gameObject);
+        ForgetUnpublishedObject(gameObject);
         NamesBySubject.Remove(gameObject, out var name);
         EntitiesBySubject.Remove(gameObject, out var entity);
         Objects.Remove(name!);

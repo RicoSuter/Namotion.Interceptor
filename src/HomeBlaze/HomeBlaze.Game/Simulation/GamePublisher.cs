@@ -151,18 +151,41 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         return true;
     }
 
-    // Writes the changed regions in an order that keeps an object that moved to another region attached throughout: the
-    // regions with new objects first, holding on to the objects that left them, then the region set with the new regions,
-    // then the regions without the objects that left them, and last the region set without the emptied regions. The
-    // changes are cleared only once every write went through, so a write that an observer fails is retried next tick.
+    // The changes are cleared only once every write went through, so a write that an observer fails is retried next tick.
+    // A synchronous observer on the simulation thread may place, remove or move objects meanwhile: the regions it changes
+    // stay changed for the next publish, and the objects it adds wait for it.
     private void WriteObjectSet()
     {
         var regions = world.Regions;
-        var hasNewRegions = false;
-        var hasLeavingObjects = false;
-        var hasRemovedRegions = regions.Strays.Count > 0 || regions.IsRegionSetWriteRequested;
-        foreach (var region in regions.Changed)
+        var publishStart = regions.ChangeCount;
+        world.BeginObjectSetPublish();
+        var isWritten = false;
+        try
         {
+            WriteRegions(regions, publishStart);
+            regions.OnPublished(publishStart);
+            isWritten = true;
+        }
+        finally
+        {
+            world.EndObjectSetPublish(isWritten);
+        }
+
+        ObjectSetVersion++;
+    }
+
+    // Writes the changed regions in an order that keeps an object that moved to another region attached throughout: the
+    // regions with objects first, holding on to the objects that left them, then the region set with the new regions, then
+    // the regions without the objects that left them, and last the region set without the emptied regions. Walks only the
+    // regions changed before the publish started, by index, since observers may append more.
+    private void WriteRegions(GameRegionMap regions, long publishStart)
+    {
+        var count = regions.Changed.Count;
+        var hasNewRegions = false;
+        var hasRemovedRegions = regions.Strays.Count > 0 || regions.IsRegionSetWriteRequested;
+        for (var i = 0; i < count; i++)
+        {
+            var region = regions.Changed[i];
             if (region.Objects.Count == 0)
             {
                 hasRemovedRegions |= region.IsPublished;
@@ -170,36 +193,31 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
             }
 
             hasNewRegions |= !region.IsPublished;
-            hasLeavingObjects |= WriteRegion(region, includesLeaving: true);
+            WriteRegion(region, long.MinValue);
         }
 
         if (hasNewRegions)
         {
-            WriteRegionSet(includesRemoved: hasRemovedRegions);
+            WriteRegionSet(includesRemoved: hasRemovedRegions, publishStart);
         }
 
-        if (hasLeavingObjects)
+        // An object that left for a region changed during the publish stays until the next publish wrote that region.
+        for (var i = 0; i < count; i++)
         {
-            foreach (var region in regions.Changed)
+            var region = regions.Changed[i];
+            if (region.Objects.Count > 0 && CountLeaving(region, long.MinValue) > 0 && WriteRegion(region, publishStart) > 0)
             {
-                if (region.Objects.Count > 0 && CountLeaving(region) > 0)
-                {
-                    WriteRegion(region, includesLeaving: false);
-                }
+                regions.MarkChanged(region);
             }
         }
 
         if (hasRemovedRegions)
         {
-            WriteRegionSet(includesRemoved: false);
+            WriteRegionSet(includesRemoved: false, publishStart);
         }
-
-        regions.OnPublished();
-        ObjectSetVersion++;
-        world.OnObjectSetPublished();
     }
 
-    private static int CountLeaving(GameRegionState region)
+    private static int CountLeaving(GameRegionState region, long changedAfter)
     {
         if (region.Leaving is not { } leaving)
         {
@@ -209,28 +227,27 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         var count = 0;
         foreach (var (_, entity) in leaving)
         {
-            count += region.IsLeaving(entity) ? 1 : 0;
+            count += region.IsLeaving(entity, changedAfter) ? 1 : 0;
         }
 
         return count;
     }
 
-    // Returns whether the write held on to objects that left the region.
-    private bool WriteRegion(GameRegionState region, bool includesLeaving)
+    // Holds on to the objects that left for a region changed after changedAfter; returns how many.
+    private int WriteRegion(GameRegionState region, long changedAfter)
     {
-        var leaving = includesLeaving ? region.Leaving : null;
-        var leavingCount = leaving is null ? 0 : CountLeaving(region);
+        var leavingCount = CountLeaving(region, changedAfter);
         var objects = new Dictionary<string, Abstractions.GameObject>(region.Objects.Count + leavingCount);
         foreach (var (name, entity) in region.Objects)
         {
             objects[name] = entity.Subject;
         }
 
-        if (leaving is not null && leavingCount > 0)
+        if (leavingCount > 0 && region.Leaving is { } leaving)
         {
             foreach (var (name, entity) in leaving)
             {
-                if (region.IsLeaving(entity))
+                if (region.IsLeaving(entity, changedAfter))
                 {
                     objects[name] = entity.Subject;
                 }
@@ -240,17 +257,19 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
         var subject = region.Subject;
         SetWriting(subject, nameof(GameRegion.Objects), objects);
         subject.Objects = objects;
-        return leavingCount > 0;
+        return leavingCount;
     }
 
-    // With the removed regions, the set also holds the published regions that are empty now and the strays.
-    private void WriteRegionSet(bool includesRemoved)
+    // With the removed regions, the set also holds the published regions that are empty now and the strays. Without them
+    // it still holds an emptied region that changed during the publish, which may hold an object until its new region is
+    // written. Records which regions the written set holds.
+    private void WriteRegionSet(bool includesRemoved, long publishStart)
     {
         var regions = world.Regions;
-        var set = new Dictionary<string, GameRegion>(regions.Regions.Count + (includesRemoved ? regions.Strays.Count : 0));
-        foreach (var region in regions.Regions.Values)
+        var set = new Dictionary<string, GameRegion>(regions.ByCoordinates.Count + (includesRemoved ? regions.Strays.Count : 0));
+        foreach (var region in regions.ByCoordinates.Values)
         {
-            if (region.Objects.Count > 0 || (includesRemoved && region.IsPublished))
+            if (IsInRegionSet(region, includesRemoved, publishStart))
             {
                 set[region.Key] = region.Subject;
             }
@@ -266,6 +285,18 @@ internal sealed class GamePublisher(Game game, GameWorldState world, TimeProvide
 
         SetWriting(game, nameof(Game.Regions), set);
         game.Regions = set;
+        RecordPublishedRegions(set);
+    }
+
+    private static bool IsInRegionSet(GameRegionState region, bool includesRemoved, long publishStart) =>
+        region.Objects.Count > 0 || (region.IsPublished && (includesRemoved || region.LastChange > publishStart));
+
+    private void RecordPublishedRegions(Dictionary<string, GameRegion> set)
+    {
+        foreach (var region in world.Regions.ByCoordinates.Values)
+        {
+            region.IsPublished = set.TryGetValue(region.Key, out var written) && ReferenceEquals(written, region.Subject);
+        }
     }
 
     private void SetWriting(object? subject, string? property, object? set = null)

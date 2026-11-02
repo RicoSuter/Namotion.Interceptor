@@ -179,31 +179,33 @@ public partial class Game
     private void AbandonPlacements() => _placementsAwaitingWrite.Abandon();
 
     /// <summary>
-    /// Cancels the schedules of the objects that left the world and runs <see cref="IGameObjectLifecycle.OnAddedToWorld"/>
-    /// of the ones that entered it; call on the simulation thread.
+    /// Cancels the schedules of the objects that left the world; call on the simulation thread. The objects that entered
+    /// it get <see cref="IGameObjectLifecycle.OnAddedToWorld"/> after the publish that attaches them.
     /// </summary>
-    private void OnObjectsTakenOver(List<GameObject> added, List<GameObject> removed)
+    private void OnObjectsTakenOver(List<GameObject> removed)
     {
         foreach (var subject in removed)
         {
             _simulation.CancelSchedules(subject);
         }
-
-        foreach (var subject in added)
-        {
-            RunAddedToWorld(subject);
-        }
     }
 
-    private List<GameObject> GetObjectSubjects()
+    // Collected first, because a hook may remove an object, which changes the world's objects.
+    private void RunAddedToWorldOfKeptObjects()
     {
         var subjects = new List<GameObject>(_world.Objects.Count);
         foreach (var entity in _world.Objects.Values)
         {
-            subjects.Add(entity.Subject);
+            if (!_world.IsAddedToWorldPending(entity.Subject))
+            {
+                subjects.Add(entity.Subject);
+            }
         }
 
-        return subjects;
+        foreach (var subject in subjects)
+        {
+            RunAddedToWorld(subject);
+        }
     }
 
     // Moved out first, because a hook may remove an object, which takes it out of the world's list.

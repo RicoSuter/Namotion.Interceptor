@@ -1,9 +1,14 @@
+using System.Reactive.Concurrency;
 using HomeBlaze.Game.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Parent;
+using RecordingLogger = HomeBlaze.Game.Tests.Testing.RecordingLogger;
 
 namespace HomeBlaze.Game.Tests;
 
@@ -285,5 +290,92 @@ public class GameRegionTests
         Assert.Equal(["south"], regions["0_-1"].Objects.Keys);
         Assert.Equal(4, game.GetObjects().Count);
         Assert.All(game.GetObjects().Values, gameObject => Assert.False(game.IsFree(gameObject.Area)));
+    }
+
+    [Theory]
+    [InlineData(10, 20)]
+    [InlineData(300, 0)]
+    public async Task WhenAnObserverOfARegionWritePlacesAnObject_ThenThePublishGoesOnAndTheNextPublishWritesIt(int x, int y)
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = new GameTestContext(logger);
+        context.AddWall(0, 0);
+        context.AddWall(100, 0);
+        var placed = new LifecycleObject { X = x, Y = y };
+        Task? place = null;
+        var isFreeDuringThePublish = false;
+        using var subscription = ((IInterceptorSubject)context.Root).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (place is null && change.Property.Subject is GameRegion && change.Property.Name == nameof(GameRegion.Objects))
+                {
+                    isFreeDuringThePublish = context.Game.IsFree(new GameArea(200, 200, 1, 1));
+                    place = context.Game.PlaceAsync(placed, CancellationToken.None);
+                }
+            });
+
+        // Act
+        await context.RunAsync(context.Game.PlaceAsync(new Wall { X = 20, Y = 0 }, CancellationToken.None));
+        context.Tick();
+
+        // Assert
+        Assert.True(isFreeDuringThePublish);
+        Assert.True(place!.IsCompletedSuccessfully);
+        Assert.Contains(placed, context.Game.GetObjects().Values);
+        Assert.Same(context.Game, placed.TryGetFirstParent<Game>());
+        Assert.Equal(1, placed.AddedCount);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Level >= LogLevel.Warning);
+    }
+
+    [Fact]
+    public void WhenARegionWriteLandsAfterTheQueueDrainedButBeforeThePublish_ThenTheNewObjectGetsOnAddedToWorldOnceItIsAttached()
+    {
+        // Arrange
+        _context.AddWall(0, 0);
+        var region = _context.Game.Regions["0_0"];
+        var added = new HookObject { X = 10, Y = 10 };
+        var placed = new ProbeObject
+        {
+            X = 20,
+            Y = 20,
+            OnFirstRead = () => region.Objects = new Dictionary<string, GameObject>(region.Objects) { ["added"] = added }
+        };
+
+        // Act
+        // The place reads the probe inside the tick, after the queue drained, and its publish overwrites the region.
+        var place = _context.Game.PlaceAsync(placed, CancellationToken.None);
+        _context.Tick();
+        var isAttachedAfterThePlace = added.TryGetFirstParent<Game>() is not null;
+        _context.Tick();
+
+        // Assert
+        Assert.True(place.IsCompletedSuccessfully);
+        Assert.False(isAttachedAfterThePlace);
+        Assert.Equal(1, added.AddedCount);
+        Assert.True(added.HadWorldInHook);
+        Assert.Contains(added, _context.Game.GetObjects().Values);
+    }
+
+    [Fact]
+    public void WhenAScheduleMovesAnObjectAcrossARegionBoundary_ThenTheSameTickPublishesItsRegionWithoutDetachingIt()
+    {
+        // Arrange
+        var moving = _context.AddObject("moving", new LifecycleObject { X = 62, Y = 0 });
+        _context.AddWall(0, 10);
+        _context.Game.Schedule(moving, TimeSpan.Zero, () => moving.X = 66);
+
+        // Act
+        for (var i = 0; i < 3 && moving.X != 66; i++)
+        {
+            _context.Tick();
+        }
+
+        // Assert
+        Assert.Equal(66, moving.X);
+        Assert.Same(moving, Assert.Single(_context.Game.Regions["1_0"].Objects).Value);
+        Assert.DoesNotContain(moving, _context.Game.Regions["0_0"].Objects.Values);
+        Assert.Equal((1, 0, 1), (moving.AttachCount, moving.DetachCount, moving.AddedCount));
     }
 }

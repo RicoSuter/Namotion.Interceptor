@@ -34,12 +34,13 @@ public partial class Game
         _simulation.Post(() =>
         {
             _world.TakeOverPlayers(Players, isRestart: isRestarting);
-            var (added, removed) = _world.TakeOverRegions(Regions);
+            OnObjectsTakenOver(_world.TakeOverRegions(Regions));
 
-            // The stop dropped the schedules, so every object of a restarted game sets them up again.
-            OnObjectsTakenOver(isRestarting ? GetObjectSubjects() : added, removed);
+            // The stop dropped the schedules, so every object of a restarted game sets them up again; one whose
+            // OnAddedToWorld is pending gets it with the next publish anyway.
             if (isRestarting)
             {
+                RunAddedToWorldOfKeptObjects();
                 _viewSessions.RequestFullRefresh();
             }
         });
@@ -102,9 +103,8 @@ public partial class Game
         {
             _simulation.Post(() =>
             {
-                var (added, removed) = _world.TakeOverRegions(regions);
+                OnObjectsTakenOver(_world.TakeOverRegions(regions));
                 _world.IsSaveRequested = true;
-                OnObjectsTakenOver(added, removed);
             });
         }
     }
@@ -115,9 +115,8 @@ public partial class Game
         {
             _simulation.Post(() =>
             {
-                var (added, removed) = _world.TakeOverRegion(region, objects);
+                OnObjectsTakenOver(_world.TakeOverRegion(region, objects));
                 _world.IsSaveRequested = true;
-                OnObjectsTakenOver(added, removed);
             });
         }
     }

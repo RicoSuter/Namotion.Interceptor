@@ -233,9 +233,12 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         }
     }
 
-    // Placed objects are attached in the tick that adds them, so their World resolves once the command completes.
+    // Placed objects are attached in the tick that adds them, so their World resolves once the command completes. Reads
+    // the objects that schedules and commands of the tick wrote first, so an object that crossed a region boundary moves
+    // to its new region in the same tick.
     private void PublishObjectSetWhenChanged()
     {
+        _world.RefreshChangedSubjects();
         _publisher.TryPublishObjectSet();
         RunAddedToWorldOfPublishedObjects();
     }
