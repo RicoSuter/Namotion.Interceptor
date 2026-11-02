@@ -58,7 +58,7 @@ public class GamePageTests
         var name = $"E2E player {Guid.NewGuid():N}";
 
         // Act
-        await page.GetByRole(AriaRole.Button, new() { Name = "Change my name" }).ClickAsync(new() { Timeout = Timeout });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
         var input = page.GetByTestId("game-name-input");
         await input.FillAsync(name, new() { Timeout = Timeout });
         await input.PressAsync("Enter");
@@ -67,6 +67,24 @@ public class GamePageTests
         await Expect(page.GetByTestId("game-nearby-player").Filter(new() { HasText = name + SelfSuffix })).ToHaveCountAsync(1, new() { Timeout = Timeout });
         await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         Assert.Equal(name, player.ClientTitle);
+    }
+
+    [Fact]
+    public async Task WhenThePlayerPicksAPersonInTheEditDialog_ThenThePlayerLooksLikeIt()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+
+        // Act
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-person-female-tank-top").ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-player-save").ClickAsync();
+
+        // Assert
+        await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top");
+        Assert.Matches("^#[0-9a-f]{6}$", player.Color);
     }
 
     [Fact]

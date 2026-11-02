@@ -1,0 +1,96 @@
+@using HomeBlaze.Game.People
+@using HomeBlaze.Game.View
+@using MudBlazor.Utilities
+
+<MudDialog data-testid="game-player-dialog">
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Immediate="true" AutoFocus="true" MaxLength="@Game.MaximumNameLength"
+                      OnKeyDown="OnKeyDown" data-testid="game-name-input" />
+        <MudColorPicker @bind-Value="_color" Label="Shirt color" ColorPickerView="ColorPickerView.Palette" ShowAlpha="false"
+                        data-testid="game-color-input" />
+        <MudText Typo="Typo.caption" Class="mt-4">Person</MudText>
+        <div class="game-people">
+            @foreach (var person in GamePeople.Names)
+            {
+                <button type="button" class="@(person == _character ? "game-person selected" : "game-person")"
+                        @onclick="() => _character = person" title="@person" aria-pressed="@(person == _character)"
+                        data-testid="game-person-@person">
+                    <img src="_content/HomeBlaze.Game/models/people/@(person).png" alt="@person" />
+                </button>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" data-testid="game-player-cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" OnClick="Save" data-testid="game-player-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>
+    /// The name the field starts with, null for an empty field.
+    /// </summary>
+    [Parameter] public string? Name { get; set; }
+
+    /// <summary>
+    /// The person that starts selected, one of <see cref="GamePeople.Names"/>.
+    /// </summary>
+    [Parameter] public string Character { get; set; } = "";
+
+    /// <summary>
+    /// The shirt color the picker starts with, as <c>#rrggbb</c>.
+    /// </summary>
+    [Parameter] public string ShirtColor { get; set; } = "#000000";
+
+    private string? _name;
+    private string _character = "";
+    private MudColor _color = new("#000000");
+
+    protected override void OnInitialized()
+    {
+        _name = Name;
+        _character = Character;
+        _color = new MudColor(ShirtColor);
+    }
+
+    private void OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            Save();
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private void Save()
+    {
+        // The picker also formats an alpha channel; the shirt color is #rrggbb only.
+        var color = _color.ToString(MudColorOutputFormats.Hex).ToLowerInvariant();
+        var name = string.IsNullOrWhiteSpace(_name) ? null : _name.Trim();
+        MudDialog?.Close(DialogResult.Ok(new GamePlayerEdit(name, _character, color)));
+    }
+
+    /// <summary>
+    /// Asks for the name, person and shirt color of <paramref name="player"/>, starting from its current ones where null
+    /// or invalid values show the defaults of its client; returns null when canceled.
+    /// </summary>
+    /// <param name="dialogService">The service that shows the dialog.</param>
+    /// <param name="player">The player to edit.</param>
+    /// <param name="name">The name of its client, null while the client is anonymous.</param>
+    public static async Task<GamePlayerEdit?> ShowAsync(IDialogService dialogService, GamePlayer player, string? name)
+    {
+        var parameters = new DialogParameters<GamePlayerDialog>
+        {
+            { x => x.Name, name },
+            { x => x.Character, GamePeople.Resolve(player.Character, player.ClientId) },
+            { x => x.ShirtColor, GameColors.Resolve(player.Color, player.ClientId) },
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseButton = true };
+        var dialog = await dialogService.ShowAsync<GamePlayerDialog>("Edit me", parameters, options);
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: GamePlayerEdit edit } ? edit : null;
+    }
+}

@@ -32,6 +32,14 @@ internal sealed class FakeClientDirectory : IGameClientDirectory
         }
     }
 
+    public bool IsNamed(string id)
+    {
+        lock (_lock)
+        {
+            return _clients?.Any(client => client.Id == id && client.IsNamed) == true;
+        }
+    }
+
     public Task SendNotificationAsync(string clientId, Notification notification, CancellationToken cancellationToken)
     {
         lock (_lock)

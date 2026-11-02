@@ -83,30 +83,30 @@ public partial class GamePage
         }
     }
 
-    private async Task RenameAsync()
+    private async Task EditAsync()
     {
-        if (_isDisposed || _isRenaming || Game is not { } game || _player is not { } player)
+        if (_isDisposed || _isEditing || Game is not { } game || _player is not { } player)
         {
             return;
         }
 
-        _isRenaming = true;
+        _isEditing = true;
         try
         {
             var caller = new GameCaller(player.ClientId);
-            var name = await GameNameDialog.ShowAsync(DialogService, game.GetClientName(caller));
-            if (name is not null && !_isDisposed)
+            var edit = await GamePlayerDialog.ShowAsync(DialogService, player, game.GetClientName(caller));
+            if (edit is not null && !_isDisposed)
             {
-                await game.RenameAsync(caller, name, CancellationToken.None);
+                await game.EditAsync(caller, edit.Name, edit.Character, edit.Color, CancellationToken.None);
             }
         }
         catch (Exception exception) when (!_isDisposed)
         {
-            await MethodErrorDialog.ShowAsync(DialogService, RenameTitle, exception);
+            await MethodErrorDialog.ShowAsync(DialogService, EditTitle, exception);
         }
         finally
         {
-            _isRenaming = false;
+            _isEditing = false;
         }
     }
 

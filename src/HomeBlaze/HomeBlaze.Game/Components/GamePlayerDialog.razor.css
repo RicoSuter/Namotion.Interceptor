@@ -1,0 +1,26 @@
+.game-people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.game-person {
+    width: 64px;
+    height: 64px;
+    padding: 2px;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--mud-palette-background-gray);
+    cursor: pointer;
+}
+
+.game-person img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.game-person.selected {
+    border-color: var(--mud-palette-primary);
+}

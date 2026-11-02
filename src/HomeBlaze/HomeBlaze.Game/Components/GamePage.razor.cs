@@ -10,7 +10,7 @@ namespace HomeBlaze.Game.Components;
 public partial class GamePage
 {
     private const string JoiningMessage = "Joining the game…";
-    private const string RenameTitle = "Change my name";
+    private const string EditTitle = "Edit me";
     private static readonly TimeSpan FlushDelay = TimeSpan.FromMilliseconds(50);
 
     // In the order of the pad's 3 by 3 grid; the middle one toggles turning only.
@@ -59,7 +59,7 @@ public partial class GamePage
     // of the same operation, also on another object of that type, starts from them.
     private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _lastParameters = new();
     private bool _isInvoking;
-    private bool _isRenaming;
+    private bool _isEditing;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }

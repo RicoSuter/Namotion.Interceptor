@@ -124,10 +124,10 @@
                     <span class="game-nearby-title">@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
                     @if (player.IsSelf)
                     {
-                        <span class="game-nearby-icon" title="@RenameTitle">
+                        <span class="game-nearby-icon" title="@EditTitle">
                             <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="game-nearby-rename"
-                                           Disabled="@_isRenaming" aria-label="@RenameTitle"
-                                           data-testid="game-rename" OnClick="RenameAsync" />
+                                           Disabled="@_isEditing" aria-label="@EditTitle"
+                                           data-testid="game-rename" OnClick="EditAsync" />
                         </span>
                     }
                     @if (!player.IsMicrophoneOn)

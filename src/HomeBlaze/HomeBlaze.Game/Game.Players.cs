@@ -12,9 +12,9 @@ public partial class Game
     internal const int MaximumNameLength = 50;
 
     /// <summary>
-    /// The message with which renaming is refused for a caller that is not a player of this game.
+    /// The message with which renaming and editing are refused for a caller that is not a player of this game.
     /// </summary>
-    internal const string NoRenameActorMessage = "Only a player in the game can change their name.";
+    internal const string NoRenameActorMessage = "Only a player in the game can edit their name and look.";
 
     /// <summary>
     /// How often the game reconciles its players without a signal.
@@ -71,6 +71,29 @@ public partial class Game
 
         // Not every directory reports the rename as a client change.
         PostReconcile();
+    }
+
+    /// <summary>
+    /// Changes the caller's player: renames its client when <paramref name="name"/> is not empty, and sets the person
+    /// and shirt color, where null shows the default of the client.
+    /// </summary>
+    /// <exception cref="ArgumentException">The name is longer than <see cref="MaximumNameLength"/> after trimming.</exception>
+    /// <exception cref="InvalidOperationException">The caller is not a player of this game, or its client is gone.</exception>
+    internal async Task EditAsync(GameCaller? caller, string? name, string? character, string? color, CancellationToken cancellationToken)
+    {
+        if (GetActor(caller) is not { } player)
+        {
+            throw new InvalidOperationException(NoRenameActorMessage);
+        }
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            await RenameAsync(caller, name, cancellationToken);
+        }
+
+        // Ordinary subject writes; the facade hands them to the simulation like any outside write.
+        player.Character = character;
+        player.Color = color;
     }
 
     /// <summary>

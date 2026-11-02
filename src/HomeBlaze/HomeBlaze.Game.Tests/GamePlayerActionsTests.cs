@@ -49,6 +49,57 @@ public class GamePlayerActionsTests
     }
 
     [Fact]
+    public async Task WhenAPlayerEditsItsLookWithoutAName_ThenThePersonAndColorChangeAndTheClientStaysAnonymous()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        await _context.Game.EditAsync(new GameCaller("tab-1"), name: null, "male-shirt", "#00ff00", CancellationToken.None);
+        _context.Publish();
+
+        // Assert
+        Assert.Equal(("male-shirt", "#00ff00"), (player.Character, player.Color));
+        Assert.False(_context.Clients.IsNamed("tab-1"));
+    }
+
+    [Fact]
+    public async Task WhenAPlayerEditsItsNameAndLook_ThenAllThreeChange()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+
+        // Act
+        await _context.Game.EditAsync(new GameCaller("tab-1"), "Rico", "female-casual", "#123456", CancellationToken.None);
+        _context.Reconcile();
+        _context.Publish();
+
+        // Assert
+        Assert.Equal(("Rico", "female-casual", "#123456"), (player.ClientTitle, player.Character, player.Color));
+    }
+
+    [Fact]
+    public async Task WhenTheCallerIsNotAPlayer_ThenEditingThrows()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _context.Game.EditAsync(new GameCaller("nobody"), null, "male-shirt", null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenTheNameIsTooLong_ThenEditingChangesNothing()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var name = new string('a', Game.MaximumNameLength + 1);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _context.Game.EditAsync(new GameCaller("tab-1"), name, "male-shirt", "#00ff00", CancellationToken.None));
+        Assert.Equal((null, null), (player.Character, player.Color));
+    }
+
+    [Fact]
     public async Task WhenAWallIsDemolished_ThenItIsRemovedAndWritten()
     {
         // Arrange
