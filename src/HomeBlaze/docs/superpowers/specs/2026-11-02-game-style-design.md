@@ -6,7 +6,7 @@ A pull request on top of #876 that gives the game one consistent look, lets play
 
 - One art direction for every object: low poly shapes in a warm pastel palette, soft sun shadows, corner shading and thin dark outlines with faint drawn lines on surfaces ("style E" of the style lab, a mix of diorama and comic).
 - Players are low poly people that match the trees and animals, and each player picks a person and a shirt color.
-- Players can clap, sit and jump, and everyone nearby sees it.
+- Players can clap, sit and jump through an ordinary tool on a generic player animation API, and everyone nearby sees it.
 - The page renders only as much as the device and the situation need.
 
 Not goals: more than one art style to choose from, realistic rendering, new object types.
@@ -79,22 +79,29 @@ A dropdown in the game panel offers Low, Medium, High and Auto. The choice is st
 
 ## Emotes
 
-- The panel gets an "Emotes" section with Clap (C), Sit (V) and Jump (B). The keys work like the voice keys: not while a dialog or text field has focus.
-- The page calls an internal method of the game, like a step; operations from MCP or other clients cannot trigger an emote.
-- The simulation stores the emote on the player entity with a sequence number, so the same emote twice in a row plays twice. Clap and Jump end after their animation length; Sit lasts until the player's next step.
-- The view payload carries the emote and its sequence; the browser plays Clap and Jump once and returns to idle, and holds the last frame of Sitting until the emote ends.
-- A step during Clap or Jump cancels it. Emotes are not saved and are cleared when the client disconnects.
+### Player animation in the extension contract
+
+- `IGameWorld.PlayAnimation(GameCaller? caller, string animation, GameVisualAnimationMode mode)` plays an animation of the person on the calling player. `Once` returns to idle when the animation ends; `Loop` holds until the player's next step. A step cancels a running animation either way.
+- It throws `InvalidOperationException` when there is no player for the caller, as `GetSpotInFront` does; from the subject browser, MCP or agents the caller is null, so only the player's own page can make it animate. An animation the person does not have is ignored by the browser; `Idle` and `Walk` are reserved and throw `ArgumentException`.
+- The simulation stores the animation, its mode and a sequence number on the player entity, so the same animation twice in a row plays twice; it applies on the simulation thread like other actions. The duration of a `Once` animation is the browser's business: the server clears the state after a fixed upper bound (5 s) or the next step, whichever comes first.
+- `GamePlayer.Animation` (`[State]`, string, internal setter) shows the playing animation, or null. It is published from the simulation like the other player properties, refused from outside the game like `IsMicrophoneOn`, not saved and cleared when the client disconnects. The sequence number stays internal.
+- The view payload carries the animation, its mode and its sequence; the browser plays `Once` animations once and returns to idle, and loops or holds `Loop` animations until the state ends.
+
+### Emote tool
+
+- `EmoteTool` is a configurable tool in `Game.Tools`, written only against the abstractions, with the operations Clap (`Clapping`, once), Sit (`Sitting`, loop) and Jump (`Jump`, once). Each operation takes only `[FromServices] GameCaller? caller`, so a click or its number key plays it without a dialog.
+- It lives in the core next to the people, because the available animation names depend on the people models. It is registered in the demo world's tools like the wall and tree tools; other emotes are new tools of the same shape.
 
 ## Code structure
 
 - `game.js` owns the scene setup, so lights, shadows, the post-processing chain, quality presets and the render loop pause live there, split into a new `game-render.js` module for the quality and pipeline code if `game.js` grows past what reads well.
 - `game-entities.js` keeps building entities; it registers shadow casters and keeps labels and faded meshes out of the geometry buffer through a small interface the render module provides.
-- Server side: `GamePlayer` gains the two properties, `PlayerEntity` the appearance and emote fields, `GameViewPayloads` the new payload fields, `Game.Players.cs` the edit and emote methods, `GamePage.Panel.cs` the emote section and the quality dropdown, and `GameNameDialog` becomes `GamePlayerDialog`.
+- Server side: `GamePlayer` gains the two properties, `PlayerEntity` the appearance and emote fields, `GameViewPayloads` the new payload fields, `Game.Players.cs` the edit method, `Game.World.cs` `PlayAnimation`, `HomeBlaze.Game.Abstractions` the new `IGameWorld` method (public API snapshot updated), a new `EmoteTool`, `GamePage.Panel.cs` the quality dropdown, and `GameNameDialog` becomes `GamePlayerDialog`.
 
 ## Testing
 
-- Unit tests: default person and color per client id, fallback for invalid values, emote state (sequence, end after the animation length, Sit until the next step, cleared on disconnect), payload fields.
-- E2E tests: the quality dropdown persists across a reload; the edit dialog changes person and color and both survive a reload; an emote on one page shows on another page's player (asserted through the canvas data attributes the tests already use); the render loop pauses while the tab is hidden.
+- Unit tests: default person and color per client id, fallback for invalid values, animation state (sequence, cleared after the upper bound or the next step, `Loop` until the next step, cleared on disconnect, refused outside writes of `GamePlayer.Animation`, reserved names), `EmoteTool` operations, payload fields.
+- E2E tests: the quality dropdown persists across a reload; the edit dialog changes person and color and both survive a reload; a clap through the emote tool on one page shows on another page's player (asserted through the canvas data attributes the tests already use); the render loop pauses while the tab is hidden.
 - The existing E2E tests keep passing, including the one that checks a prefilled dialog.
 - A before and after screenshot of the demo world goes into the pull request.
 
@@ -107,4 +114,5 @@ A dropdown in the game panel offers Low, Medium, High and Auto. The choice is st
 ## Documentation
 
 - The game README describes the look, the quality presets, the render pause, the people and the emotes.
+- The abstractions README documents `PlayAnimation` with the emote tool as the example.
 - The abstractions README tells object authors that surfaces should use flat pastel colors or drawn textures and that the outline and shading come from the core.
