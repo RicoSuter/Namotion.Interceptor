@@ -45,9 +45,10 @@ public static class McpServerConfigurationExtensions
     /// Writes the path of <paramref name="subject"/> from <paramref name="root"/> as search lists it, and browse as its
     /// <c>$path</c>: after <see cref="McpServerConfiguration.PathPrefix"/>, through the first parent, in parent order,
     /// from which the path can be written; for <paramref name="root"/> itself the prefix, or null when the prefix is
-    /// empty. Null when no path can be written or the <see cref="McpServerConfiguration.AccessPolicy"/> does not show the
-    /// subject, see "Access Policy" in the MCP documentation, so that a subject gets a path exactly when search can list
-    /// it. <see cref="McpServerConfiguration.ExcludeTypes"/> is not applied. The counterpart of
+    /// empty. Null when no path can be written, the <see cref="McpServerConfiguration.AccessPolicy"/> does not show the
+    /// subject, see "Access Policy" in the MCP documentation, or the subject's type is in
+    /// <see cref="McpServerConfiguration.ExcludeTypes"/> or derived from one, so that a subject gets a path exactly when
+    /// search can list it. The counterpart of
     /// <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/>, which resolves a path this
     /// returns for a subject other than <paramref name="root"/> back to the subject.
     /// </summary>
@@ -55,6 +56,11 @@ public static class McpServerConfigurationExtensions
     public static string? TryGetSubjectPath(
         this McpServerConfiguration configuration, RegisteredSubject root, RegisteredSubject subject)
     {
+        if (McpToolHelper.ShouldExcludeByType(subject, configuration.ExcludeTypes, requestExcludeTypes: null))
+        {
+            return null;
+        }
+
         var path = McpToolHelper.TryGetSubjectPath(subject, configuration, root.Subject);
 
         // A written path is a readable one, so whether the subject is empty for the policy is left, as search checks it.
