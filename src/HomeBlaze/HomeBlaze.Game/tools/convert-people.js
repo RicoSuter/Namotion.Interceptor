@@ -60,8 +60,14 @@ function toMatte(material) {
 // The loader leaves one draw group per run of faces and duplicates every corner; welding the corners and sorting the
 // faces by material leaves one primitive per material, which shrinks the file several times.
 function compact(geometry) {
+    // The people are untextured, and texture coordinates would keep corners apart that are otherwise equal.
+    geometry.deleteAttribute('uv');
     const groups = geometry.groups.map(group => ({ ...group }));
     const welded = mergeVertices(geometry);
+    if (groups.length === 0) {
+        return welded;
+    }
+
     const index = welded.index.array;
     const materialIndices = [...new Set(groups.map(group => group.materialIndex))].sort((a, b) => a - b);
     const sorted = [];
@@ -79,7 +85,8 @@ function compact(geometry) {
     return welded;
 }
 
-// Skin weights fit in normalized bytes and the 32 joints in byte indices, which glTF allows without an extension.
+// Skin weights fit in normalized bytes and fewer than 256 joints fit in byte indices, which glTF allows without an
+// extension.
 function quantizeSkin(geometry) {
     const weights = geometry.getAttribute('skinWeight');
     const indices = geometry.getAttribute('skinIndex');

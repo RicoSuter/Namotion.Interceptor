@@ -31,7 +31,7 @@ For each model the script:
 - turns every material into a matte `MeshStandardMaterial` of the same name, undoing the second color space conversion that the FBX loader applies to colors the files already store in linear space;
 - keeps the clips `Idle`, `Walk`, `Clapping`, `Sitting` and `Jump` under these exact names, which the game plays, and drops the others;
 - keeps the material `Shirt`, which the game tints with the player color;
-- shrinks the file below 400 KB: it welds duplicated corners, sorts the faces into one primitive per material, stores skin weights and joints as bytes, drops repeated animation keys, and drops the tracks that hold a bone at its rest transform in every clip;
+- shrinks the file below 400 KB: it drops the unused texture coordinates, welds duplicated corners, sorts the faces into one primitive per material, stores skin weights and joints as bytes, drops repeated animation keys, and drops the tracks that hold a bone at its rest transform in every clip;
 - renders the preview from the front with a transparent background, in the first frame of `Idle`.
 
 The output is deterministic: the same input files give the same bytes.
