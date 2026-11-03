@@ -64,7 +64,7 @@ public sealed class AuthorizationPolicy
     /// <param name="systemDenyRules">Deny rules of the application that no role can override.</param>
     /// <param name="knownActions">Every action a rule may name; <see cref="PermissionAction.Read"/> and <see cref="PermissionAction.Write"/> are always known. At most 64.</param>
     /// <param name="tagProvider">Supplies the tags of members.</param>
-    /// <param name="pathProvider">Defines path syntax and writes the paths that patterns are matched against.</param>
+    /// <param name="pathProvider">Defines path syntax and builds the paths that patterns are matched against.</param>
     /// <exception cref="AuthorizationException">
     /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
     /// A role or include name is unknown or empty, includes form a cycle, or includes are nested more than 64 levels deep.
