@@ -1287,7 +1287,7 @@ export async function createEntities(scene, options) {
             isFadeSettled = isSettled;
         },
 
-        /** Lets trees and other wind parts sway, or stands them still. */
+        /** Lets trees and other wind parts sway, or stands them still, in every view of the tab, which share the wind. */
         setWind(isEnabled) {
             windStrength = isEnabled ? WIND_STRENGTH : 0;
         },
