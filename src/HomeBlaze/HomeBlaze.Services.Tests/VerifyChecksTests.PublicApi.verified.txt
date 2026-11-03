@@ -221,11 +221,8 @@ namespace HomeBlaze.Services
         public static HomeBlaze.Abstractions.Metadata.StateMetadata? GetStateMetadata(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetStateProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static bool HasConfigurationProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static bool HasEditableConfigurationProperties(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static bool IsConfigurationProperty(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public static bool IsDisplayable(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public static bool IsEditableConfigurationProperty(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public static bool IsHeldInConfiguration(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.IInterceptorSubject? TryGetConfigurationOwner(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.IInterceptorSubject? TryGetConfigurationOwner(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.IInterceptorSubject, bool> isOwner) { }
     }

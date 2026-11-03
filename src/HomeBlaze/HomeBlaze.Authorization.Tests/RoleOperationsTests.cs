@@ -1,4 +1,5 @@
 using System.Reactive.Concurrency;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Authorization.Tests.Subjects;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -425,6 +426,23 @@ public sealed class RoleOperationsTests : IDisposable
         Assert.Equal("DriveFileRenameOutline", rename.Icon);
         Assert.Equal("Delete", delete.Title);
         Assert.Equal("Delete", delete.Icon);
+    }
+
+    [Fact]
+    public void WhenTheDeleteOperationOfARoleIsLookedUp_ThenItIsTheRolesDeleteOperation()
+    {
+        // Arrange
+        var kitchen = _authorization.Roles["Kitchen"].TryGetRegisteredSubject()!;
+
+        // Act
+        var deleteOperation = kitchen.GetDeleteOperation(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.NotNull(deleteOperation);
+        Assert.Equal("Delete", deleteOperation.PropertyName);
+        Assert.Equal(OperationPurpose.Delete, deleteOperation.Purpose);
+        Assert.True(deleteOperation.RequiresConfirmation);
+        Assert.DoesNotContain(kitchen.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true), method => method.PropertyName == "Delete");
     }
 
     private RegisteredSubjectProperty PlainMember() =>

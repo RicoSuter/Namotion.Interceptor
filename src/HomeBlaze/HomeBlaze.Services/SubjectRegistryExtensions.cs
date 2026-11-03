@@ -149,66 +149,6 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets whether the configuration properties editor edits the property as a value: a [Configuration] property with a
-    /// setter that is no slot and cannot hold subjects, as such a property is edited through the subjects it holds.
-    /// </summary>
-    public static bool IsEditableConfigurationProperty(this RegisteredSubjectProperty property)
-    {
-        if (!property.HasSetter || property.CanContainSubjects || !property.IsConfigurationProperty())
-        {
-            return false;
-        }
-
-        foreach (var attribute in property.ReflectionAttributes)
-        {
-            if (attribute is SlotAttribute)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Gets whether the subject has a property that the configuration properties editor edits, see
-    /// <see cref="IsEditableConfigurationProperty"/>.
-    /// </summary>
-    public static bool HasEditableConfigurationProperties(this IInterceptorSubject subject)
-    {
-        var registered = subject.TryGetRegisteredSubject();
-        if (registered == null)
-            return false;
-
-        foreach (var property in registered.Properties)
-        {
-            if (property.IsEditableConfigurationProperty())
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Gets whether a [Configuration] property of another subject holds the subject, which is then saved as part of that
-    /// subject's configuration rather than on its own.
-    /// </summary>
-    public static bool IsHeldInConfiguration(this IInterceptorSubject subject)
-    {
-        var registered = subject.TryGetRegisteredSubject();
-        if (registered == null)
-            return false;
-
-        foreach (var parent in registered.Parents)
-        {
-            if (parent.Property.IsConfigurationProperty())
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Finds the configurable subject whose configuration contains the subject: the subject itself when it is
     /// configurable, else the nearest configurable parent that holds it through [Configuration] properties only.
     /// </summary>

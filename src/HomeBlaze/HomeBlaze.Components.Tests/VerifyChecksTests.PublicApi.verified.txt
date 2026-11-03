@@ -1767,6 +1767,7 @@ namespace HomeBlaze.Components.Editors
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override void OnInitialized() { }
+        public static bool HasEditableProperties(Namotion.Interceptor.IInterceptorSubject subject) { }
     }
     public class PropertyEditor : Microsoft.AspNetCore.Components.ComponentBase
     {

@@ -36,4 +36,56 @@ public sealed class ConfigurationPropertiesEditorTests : BunitContext, IAsyncLif
         var labels = component.FindComponents<MudTextField<string>>().Select(field => field.Instance.Label).ToList();
         Assert.Equal(["Label"], labels);
     }
+
+    [Fact]
+    public void WhenTheOnlyConfigurationPropertyHoldsSubjects_ThenTheSubjectHasNoEditableProperties()
+    {
+        // Arrange
+        var subject = new SubjectsOnlyHoldingSubject(SubjectContextFactory.Create(new ServiceCollection()));
+
+        // Act
+        var hasEditableProperties = ConfigurationPropertiesEditor.HasEditableProperties(subject);
+
+        // Assert
+        Assert.False(hasEditableProperties);
+    }
+
+    [Fact]
+    public void WhenAConfigurationPropertyHoldsAValue_ThenTheSubjectHasEditableProperties()
+    {
+        // Arrange
+        var subject = new SubjectHoldingSubject(SubjectContextFactory.Create(new ServiceCollection()));
+
+        // Act
+        var hasEditableProperties = ConfigurationPropertiesEditor.HasEditableProperties(subject);
+
+        // Assert
+        Assert.True(hasEditableProperties);
+    }
+
+    [Fact]
+    public void WhenTheOnlyConfigurationPropertyIsASlot_ThenTheSubjectHasNoEditableProperties()
+    {
+        // Arrange
+        var subject = new SlotOnlySubject(SubjectContextFactory.Create(new ServiceCollection()));
+
+        // Act
+        var hasEditableProperties = ConfigurationPropertiesEditor.HasEditableProperties(subject);
+
+        // Assert
+        Assert.False(hasEditableProperties);
+    }
+
+    [Fact]
+    public void WhenTheOnlyConfigurationPropertyHasNoSetter_ThenTheSubjectHasNoEditableProperties()
+    {
+        // Arrange
+        var subject = new InitOnlySubject(SubjectContextFactory.Create(new ServiceCollection()));
+
+        // Act
+        var hasEditableProperties = ConfigurationPropertiesEditor.HasEditableProperties(subject);
+
+        // Assert
+        Assert.False(hasEditableProperties);
+    }
 }

@@ -16,8 +16,9 @@ using Xunit.Abstractions;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for adding, renaming and deleting a custom role with the operations of the Authorization subject and its
-/// roles, editing its rules in its dialog, picking a path into a rule, and giving the role to an agent.
+/// E2E tests for adding and renaming a custom role with the operations of the Authorization subject and its roles,
+/// deleting it with the Delete button of its pane, editing its rules in its dialog, picking a path into a rule, and giving
+/// the role to an agent.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
@@ -190,19 +191,19 @@ public class AuthorizationRoleTests
             await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles-error"))
                 .ToContainTextAsync($"Role '{RoleName}' is not defined.", new() { Timeout = Timeout });
 
-            // Act: delete the renamed role with its operation, which takes the place of the Delete button of the pane.
+            // Act: delete the renamed role with the Delete button of its pane, which runs the role's delete operation.
             rolePane = await OpenPaneAsync($"Authorization/{RenamedRoleName}");
-            var delete = Method(rolePane, "Delete");
-            await Assertions.Expect(delete).ToBeEnabledAsync(new() { Timeout = Timeout });
-            await Assertions.Expect(delete).ToHaveCountAsync(1);
-            await Assertions.Expect(rolePane.Locator("button[aria-label='Delete']")).ToHaveCountAsync(0);
-            await delete.ClickAsync();
+            var deleteButton = rolePane.GetByTestId("delete-subject-button");
+            await Assertions.Expect(deleteButton).ToBeEnabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(Method(rolePane, "Delete")).ToHaveCountAsync(0);
+            await deleteButton.ClickAsync();
             var confirmation = rolePane.Page.GetByRole(AriaRole.Dialog);
-            await Assertions.Expect(confirmation).ToContainTextAsync("Confirm: Delete", new() { Timeout = Timeout });
-            await Assertions.Expect(confirmation).ToContainTextAsync("report it as unknown afterwards");
-            await confirmation.GetByRole(AriaRole.Button, new() { Name = "Execute", Exact = true }).ClickAsync();
+            await Assertions.Expect(confirmation).ToContainTextAsync($"Delete '{RenamedRoleName}'?", new() { Timeout = Timeout });
+            await confirmation.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
 
             // Assert
+            var panes = rolePane.Page.Locator("#scrollContainer [data-testid='subject-pane']");
+            await Assertions.Expect(panes).ToHaveCountAsync(2, new() { Timeout = Timeout });
             await WaitForAuthorizationFileAsync(
                 authorizationFilePath,
                 roles => roles.AsObject().Count == 0,

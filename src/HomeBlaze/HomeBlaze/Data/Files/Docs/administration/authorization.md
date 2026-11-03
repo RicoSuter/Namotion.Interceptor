@@ -77,7 +77,7 @@ A member can have several tags, such as a property that is both `[State]` and `[
 
 ## Custom Roles
 
-Custom roles live in one `Authorization` subject, and each role is a subject below it, reachable at the path of the `Authorization` subject followed by the role name, such as `/Authorization/LightOperator`. They are created and edited in the subject browser: the operation "Add Role" of the `Authorization` subject adds a role, the operations "Rename" and "Delete" of a role rename and delete it, and the edit dialog of a role edits its rules. Each of them saves into the file of the `Authorization` subject, such as `Files/Authorization.json`, which can also be written by hand, see [File Format](#file-format).
+Custom roles live in one `Authorization` subject, and each role is a subject below it, reachable at the path of the `Authorization` subject followed by the role name, such as `/Authorization/LightOperator`. They are created and edited in the subject browser: the operation "Add Role" of the `Authorization` subject adds a role, the operation "Rename" of a role renames it, the Delete button of its pane deletes it, and the edit dialog of a role edits its rules. Each of them saves into the file of the `Authorization` subject, such as `Files/Authorization.json`, which can also be written by hand, see [File Format](#file-format).
 
 ### Creating the Authorization Subject
 
@@ -88,7 +88,7 @@ Custom roles live in one `Authorization` subject, and each role is a subject bel
 
 ### Adding, Renaming and Deleting Roles
 
-Select the `Authorization` subject in the subject browser. Its pane lists the custom roles under "Roles" and has the operation "Add Role"; the subject has no edit dialog. The pane of a role, titled with its name, has the operations "Rename" and "Delete" and the "Edit" pencil, and shows the `Status`, `Warning` and `UsedByAgents` of the role, see [Status and Usage](#status-and-usage). The built-in roles are not listed there; the tab "Roles" of the edit dialog of a role describes them.
+Select the `Authorization` subject in the subject browser. Its pane lists the custom roles under "Roles" and has the operation "Add Role"; the subject has no edit dialog. The pane of a role, titled with its name, has the operation "Rename", the "Edit" pencil and the Delete button, and shows the `Status`, `Warning` and `UsedByAgents` of the role, see [Status and Usage](#status-and-usage). The built-in roles are not listed there; the tab "Roles" of the edit dialog of a role describes them.
 
 To add a role:
 
@@ -102,7 +102,7 @@ To rename a role:
 2. Type the new name into the field "Name".
 3. Click "Execute" to rename the role, or "Cancel" to keep it. The role keeps its rules and is saved at once.
 
-To delete a role, click "Delete" in its pane. The confirmation "Confirm: Delete" reads "Deletes the role. Agents and roles that name it report it as unknown afterwards."; click "Execute" to delete the role, or "Cancel" to keep it. The file is saved at once.
+To delete a role, click the Delete button in its pane. The confirmation asks "Delete 'LightOperator'?" with the name of the role; click "Delete" to delete the role, or "Cancel" to keep it. The file is saved at once and the pane of the role closes. Agents and roles that name the role report it as unknown afterwards, which the confirmation does not say, see [Roles That Agents Use](#roles-that-agents-use).
 
 The name is checked when "Execute" is clicked. An invalid name changes nothing and shows "Add Role failed with an error." or "Rename failed with an error." with the reason:
 
@@ -112,15 +112,15 @@ The name is checked when "Execute" is clicked. An invalid name changes nothing a
 - It contains no `/`, `[` or `]`, because the name is part of the role's path, else "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.".
 - No other custom role has it, ignoring case, else "A role with this name exists already.". A rename may change only the case of the name, and a rename to the same name changes nothing.
 
-When the file holds two roles whose names differ only in case, such as after it was written by hand, "Add Role" fails with "Several roles are named 'KITCHEN', ignoring case. Rename or delete one of them first."; "Rename" and "Delete" of one of them work.
+When the file holds two roles whose names differ only in case, such as after it was written by hand, "Add Role" fails with "Several roles are named 'KITCHEN', ignoring case. Rename or delete one of them first."; "Rename" and the Delete button of one of them work.
 
-A change that cannot be saved stays applied until the next restart, and the operation shows an error that says so. When the file cannot be written, it reads, for example, "The role 'LightOperator' was added, but the configuration could not be saved (...) and will be lost on restart.", with the error of the storage in the parentheses. When no file holds the `Authorization` subject, it reads, for example, "The role 'LightOperator' was added, but the configuration was not saved and will be lost on restart.".
+A change that cannot be saved stays applied until the next restart, and the operation, or "Delete Failed" for a deletion, shows an error that says so. When the file cannot be written, it reads, for example, "The role 'LightOperator' was added, but the configuration could not be saved (...) and will be lost on restart.", with the error of the storage in the parentheses. When no file holds the `Authorization` subject, it reads, for example, "The role 'LightOperator' was added, but the configuration was not saved and will be lost on restart.".
 
-"Rename" and "Delete" of a role that was deleted, or whose file was reloaded, after its pane was opened change nothing and fail with "The role is not part of an Authorization subject. It may have been deleted, or its file reloaded.". "Add Role" of an `Authorization` subject that was deleted after its pane was opened fails with "The Authorization subject is not part of the graph. It may have been deleted.". Open the subject again in the subject browser.
+"Rename" and the Delete button of a role that was deleted, or whose file was reloaded, after its pane was opened change nothing and fail with "The role is not part of an Authorization subject. It may have been deleted, or its file reloaded.". "Add Role" of an `Authorization` subject that was deleted after its pane was opened fails with "The Authorization subject is not part of the graph. It may have been deleted.". Open the subject again in the subject browser.
 
 ### Roles That Agents Use
 
-Agents and the custom roles that include a role name it, so a rename or deletion changes what they may do. The operations do not change those names for you; the dialog of "Rename" and the confirmation of "Delete" say so, see [Adding, Renaming and Deleting Roles](#adding-renaming-and-deleting-roles). The number of agents that use a role is its `UsedByAgents`, and its edit dialog shows "Used by N agents".
+Agents and the custom roles that include a role name it, so a rename or deletion changes what they may do. Neither a rename nor a deletion changes those names for you. The dialog of "Rename" says so, the confirmation of the Delete button does not, see [Adding, Renaming and Deleting Roles](#adding-renaming-and-deleting-roles). The number of agents that use a role is its `UsedByAgents`, and its edit dialog shows "Used by N agents".
 
 - **Agents**: the agents keep the old name in their `Roles`. They show the status "Invalid roles: Role 'LightOperator' is not defined." and every tool call of theirs is denied, not only the calls the role allowed, see [Invalid Roles](#invalid-roles). Their edit dialog shows the old name as a red chip with the tooltip "Unknown role". Remove it there and select the new name or another role, then save the agent. A rename that changes only the case of the name changes nothing for them, as names compare ignoring case.
 - **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." and cannot be used until its includes are changed as well, so the agents that use it are denied everything until then.

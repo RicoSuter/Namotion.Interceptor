@@ -118,7 +118,7 @@ public partial class Role : IConfigurable, ITitleProvider, IIconProvider
     /// No <see cref="Authorization"/> holds the role; two other roles have the same name, ignoring case; or the
     /// configuration was not or could not be written, in which case the role stays deleted.
     /// </exception>
-    [Operation(Title = "Delete", Description = "Deletes the role. Agents and roles that name it report it as unknown afterwards.", Icon = "Delete", RequiresConfirmation = true)]
+    [Operation(Title = "Delete", Description = "Deletes the role. Agents and roles that name it report it as unknown afterwards.", Icon = "Delete", RequiresConfirmation = true, Purpose = OperationPurpose.Delete)]
     public Task DeleteAsync([FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
         RoleEdits.DeleteAsync(this, authorizationService, rootManager);
 

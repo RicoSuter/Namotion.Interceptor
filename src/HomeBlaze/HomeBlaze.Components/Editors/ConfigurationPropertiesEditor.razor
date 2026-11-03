@@ -1,6 +1,7 @@
 @implements IDisposable
 @using System.Reactive.Concurrency
 @using System.Reactive.Linq
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 
 @if (!_configurationProperties.Any())
@@ -111,6 +112,49 @@ else
     /// </summary>
     public bool HasErrors => _errors.Any();
 
+    /// <summary>
+    /// Gets whether the editor has a field for at least one property of the subject: a [Configuration] property with a
+    /// setter that is no slot and cannot hold subjects. False when the subject is not registered.
+    /// </summary>
+    public static bool HasEditableProperties(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return false;
+        }
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (IsEditableProperty(property))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A slot or a property that can hold subjects is edited through the subjects it holds, which this editor has no
+    // field for.
+    private static bool IsEditableProperty(RegisteredSubjectProperty property)
+    {
+        if (!property.HasSetter || property.CanContainSubjects || !property.IsConfigurationProperty())
+        {
+            return false;
+        }
+
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is SlotAttribute)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     protected override void OnInitialized()
     {
         _changeSubscription?.Dispose();
@@ -118,10 +162,10 @@ else
 
         if (Subject != null)
         {
-            _configurationProperties = Subject.GetConfigurationProperties()
-                .Where(p => p.IsEditableConfigurationProperty())
+            _configurationProperties = Subject.TryGetRegisteredSubject()?.Properties
+                .Where(IsEditableProperty)
                 .OrderBy(p => p.GetDisplayPosition())
-                .ToList();
+                .ToList() ?? [];
 
             _editValues = _configurationProperties.ToDictionary(
                 p => p.Name,
@@ -151,7 +195,7 @@ else
                 .Subscribe(
                     onNext: change =>
                     {
-                        if (change.Property.TryGetRegisteredProperty()?.IsEditableConfigurationProperty() == true)
+                        if (change.Property.TryGetRegisteredProperty() is { } property && IsEditableProperty(property))
                         {
                             _externalChangeDetected = true;
                             InvokeAsync(StateHasChanged);

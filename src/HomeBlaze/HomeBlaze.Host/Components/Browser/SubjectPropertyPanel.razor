@@ -1010,7 +1010,7 @@
             Subject.GetType(),
             SubjectComponentType.Edit);
 
-        return hasEditComponent || Subject.HasEditableConfigurationProperties();
+        return hasEditComponent || ConfigurationPropertiesEditor.HasEditableProperties(Subject);
     }
 
     private async Task OpenEditDialog()
