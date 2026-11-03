@@ -91,7 +91,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData(false, "Items[house].Private")]
     [InlineData(true, "Items[house].Public")]
-    public async Task WhenTheHelperWritesThePathOfASubject_ThenItIsThePathSearchLists(bool hidesFirstParent, string expectedPath)
+    public async Task WhenTheHelperBuildsThePathOfASubject_ThenItIsThePathSearchLists(bool hidesFirstParent, string expectedPath)
     {
         // Arrange
         var (root, _, device) = CreateHouseInGroup();
@@ -109,7 +109,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData(nameof(TestHouse.Private), nameof(TestHouse.Public))]
     [InlineData(nameof(TestDevice.DeviceName), nameof(TestDevice.IsOn))]
-    public async Task WhenThePolicyDoesNotShowASubject_ThenTheHelperWritesNoPathAndSearchDoesNotListIt(params string[] hiddenMembers)
+    public async Task WhenThePolicyDoesNotShowASubject_ThenTheHelperBuildsNoPathAndSearchDoesNotListIt(params string[] hiddenMembers)
     {
         // Arrange
         // Hiding both parents leaves no readable path; hiding every property of the device makes it empty for the policy.
@@ -126,7 +126,7 @@ public class HiddenSubjectAccessTests
     }
 
     [Fact]
-    public async Task WhenASubjectIsOfAnExcludedType_ThenTheHelperWritesNoPathAndSearchDoesNotListIt()
+    public async Task WhenASubjectIsOfAnExcludedType_ThenTheHelperBuildsNoPathAndSearchDoesNotListIt()
     {
         // Arrange
         var (root, house, device) = CreateHouseInGroup();
@@ -151,7 +151,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void WhenTheHelperWritesThePathOfASubject_ThenTryGetReadableSubjectResolvesItBack(bool hidesFirstParent)
+    public void WhenTheHelperBuildsThePathOfASubject_ThenTryGetReadableSubjectResolvesItBack(bool hidesFirstParent)
     {
         // Arrange
         var (root, house, device) = CreateHouseInGroup();
@@ -170,7 +170,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData("", null)]
     [InlineData("/", "/")]
-    public async Task WhenTheHelperWritesThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
+    public async Task WhenTheHelperBuildsThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
     {
         // Arrange
         var (root, _, _) = CreateHouseInGroup();
