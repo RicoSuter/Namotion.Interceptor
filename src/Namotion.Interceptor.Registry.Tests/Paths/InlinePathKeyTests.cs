@@ -344,4 +344,51 @@ public class InlinePathKeyTests
         Assert.Same(children, resolved?.Property);
         Assert.Null(resolved?.Index);
     }
+
+    [Fact]
+    public void WhenInlinePropertyHasItsOwnSegment_ThenInlinePropertyPathRoundTrips()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var root = new TestRenamedInlineContainer(context) { Name = "root" };
+        var registered = root.TryGetRegisteredSubject()!;
+        var children = registered.TryGetProperty(nameof(TestRenamedInlineContainer.Children))!;
+
+        // Act
+        var path = children.TryGetPath(pathProvider, null);
+        var pathFromRoot = children.TryGetPath(pathProvider, root);
+        var resolved = pathProvider.TryGetPropertyFromPath(registered, path!);
+
+        // Assert
+        Assert.Equal("kids", path);
+        Assert.Equal("kids", pathFromRoot);
+        Assert.Same(children, resolved?.Property);
+        Assert.Null(resolved?.Index);
+    }
+
+    [Theory]
+    [InlineData("k1", "k1.name")]
+    [InlineData("a.b", "kids[a.b].name")]
+    [InlineData("name", "kids[name].name")]
+    public void WhenInlinePropertyHasItsOwnSegment_ThenKeyPathRoundTrips(string key, string expectedPath)
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestRenamedInlineContainer(context) { Name = "child" };
+        var root = new TestRenamedInlineContainer(context)
+        {
+            Name = "root",
+            Children = new Dictionary<string, TestRenamedInlineContainer> { [key] = child }
+        };
+
+        // Act
+        var path = GetNameProperty(child).TryGetPath(pathProvider, null);
+        var resolved = pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
+
+        // Assert
+        Assert.Equal(expectedPath, path);
+        Assert.Same(GetNameProperty(child), resolved?.Property);
+    }
 }
