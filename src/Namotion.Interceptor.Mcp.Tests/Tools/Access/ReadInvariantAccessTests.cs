@@ -9,7 +9,7 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
-/// A policy that allows every read changes nothing about what the tools make visible or resolve, also when the path provider
+/// A policy that allows every read changes nothing about what the tools show or resolve, also when the path provider
 /// includes only some properties.
 /// </summary>
 public class ReadInvariantAccessTests
@@ -99,7 +99,7 @@ public class ReadInvariantAccessTests
         Assert.Same(room.Device, subject!.Subject);
     }
 
-    // The text the answer without a policy contains, so the case checks that the device is visible.
+    // The text the answer without a policy contains, so the case checks that the device is readable.
     public static TheoryData<string, string, string> SubtreeCalls => new()
     {
         { "browse", JsonSerializer.Serialize(new { format = "json", depth = 3, includeProperties = true }), "Light" },

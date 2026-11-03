@@ -27,8 +27,8 @@ public static class McpServerConfigurationExtensions
     /// <returns>The property and the key of its last segment, as <see cref="PathExtensions.TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> returns them, or null.</returns>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetReadableProperty(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
-        => McpSubjectVisibility.For(configuration, root.Subject)
-            .GetVisibleSubjectsPathProvider(configuration.ToolPathProvider)
+        => McpSubjectReadability.For(configuration, root.Subject)
+            .GetReadableSubjectsPathProvider(configuration.ToolPathProvider)
             .TryGetPropertyFromPath(root, path);
 
     /// <summary>
@@ -39,7 +39,7 @@ public static class McpServerConfigurationExtensions
     /// <returns>The subject, or null.</returns>
     public static RegisteredSubject? TryGetReadableSubject(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
-        => configuration.TryGetReadableSubject(root, path, McpSubjectVisibility.For(configuration, root.Subject));
+        => configuration.TryGetReadableSubject(root, path, McpSubjectReadability.For(configuration, root.Subject));
 
     /// <summary>
     /// Builds the path of <paramref name="subject"/> from <paramref name="root"/> that search lists, which is also the
@@ -67,31 +67,31 @@ public static class McpServerConfigurationExtensions
         return path is not null &&
             configuration.AccessPolicy is { } policy &&
             subject.Subject != root.Subject &&
-            McpSubjectVisibility.IsEmptyForPolicy(policy, configuration.PathProvider, subject)
+            McpSubjectReadability.IsEmptyForPolicy(policy, configuration.PathProvider, subject)
                 ? null
                 : path;
     }
 
     /// <summary>
-    /// <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/> with the visibility of
+    /// <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/> with the readability of
     /// the current call, whose root is <paramref name="root"/>.
     /// </summary>
     internal static RegisteredSubject? TryGetReadableSubject(
-        this McpServerConfiguration configuration, RegisteredSubject root, string path, McpSubjectVisibility visibility)
+        this McpServerConfiguration configuration, RegisteredSubject root, string path, McpSubjectReadability readability)
     {
         if (configuration.AccessPolicy is null)
         {
             return configuration.ToolPathProvider.TryGetSubjectFromPath(root, path);
         }
 
-        var pathProvider = visibility.GetVisibleSubjectsPathProvider(configuration.ToolPathProvider);
-        var subject = TryResolveReadableSubject(pathProvider, visibility, root, path);
-        return subject is not null && visibility.IsVisibleWithPathCheck(subject) ? subject : null;
+        var pathProvider = readability.GetReadableSubjectsPathProvider(configuration.ToolPathProvider);
+        var subject = TryResolveReadableSubject(pathProvider, readability, root, path);
+        return subject is not null && readability.IsReadableWithPathCheck(subject) ? subject : null;
     }
 
     // Resolves through the properties the provider includes to a subject that is not empty for the policy.
     private static RegisteredSubject? TryResolveReadableSubject(
-        PathProviderBase pathProvider, McpSubjectVisibility visibility, RegisteredSubject root, string path)
+        PathProviderBase pathProvider, McpSubjectReadability readability, RegisteredSubject root, string path)
     {
         if (pathProvider.TryGetPropertyFromPath(root, path) is not
             { } resolved)
@@ -112,6 +112,6 @@ public static class McpServerConfigurationExtensions
         };
 
         var registered = subject?.TryGetRegisteredSubject();
-        return registered is not null && !visibility.IsEmptyForPolicy(registered) ? registered : null;
+        return registered is not null && !readability.IsEmptyForPolicy(registered) ? registered : null;
     }
 }

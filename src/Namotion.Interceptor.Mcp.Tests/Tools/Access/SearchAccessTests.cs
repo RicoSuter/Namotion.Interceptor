@@ -47,11 +47,11 @@ public class SearchAccessTests
         var (root, _) = CreateNestedDevice();
 
         // Act
-        var visible = await SearchAsync(root, policy: null, new { format = "json", types = new[] { nameof(TestDevice) } });
+        var readable = await SearchAsync(root, policy: null, new { format = "json", types = new[] { nameof(TestDevice) } });
         var hidden = await SearchAsync(root, DenyReadOnTheItemsOf(root), new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.Single(GetResultPaths(visible));
+        Assert.Single(GetResultPaths(readable));
         Assert.Empty(GetResultPaths(hidden));
     }
 

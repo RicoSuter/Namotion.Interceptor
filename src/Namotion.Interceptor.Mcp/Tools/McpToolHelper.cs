@@ -179,7 +179,7 @@ internal static class McpToolHelper
 
     /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
-    /// on the way is one the provider includes and is owned by a visible subject, and the last one is no attribute and has
+    /// on the way is one the provider includes and is owned by a readable subject, and the last one is no attribute and has
     /// no index. A property that holds subjects is one a filter can read, and its value is the subject,
     /// the collection or the dictionary, or null.
     /// </summary>
@@ -187,9 +187,9 @@ internal static class McpToolHelper
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         string path,
-        McpSubjectVisibility visibility)
+        McpSubjectReadability readability)
     {
-        if (visibility.GetVisibleSubjectsPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
+        if (readability.GetReadableSubjectsPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;

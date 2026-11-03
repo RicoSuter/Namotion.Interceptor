@@ -86,7 +86,7 @@ internal class BrowseTool
 
         depth = Math.Min(depth, _configuration.MaxDepth);
 
-        var visibility = McpSubjectVisibility.For(_configuration, rootSubject);
+        var readability = McpSubjectReadability.For(_configuration, rootSubject);
 
         // Resolve starting subject
         RegisteredSubject startSubject;
@@ -99,7 +99,7 @@ internal class BrowseTool
         }
         else
         {
-            var resolved = _configuration.TryGetReadableSubject(rootRegisteredSubject, path!, visibility);
+            var resolved = _configuration.TryGetReadableSubject(rootRegisteredSubject, path!, readability);
             if (resolved is null)
             {
                 return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path!));
@@ -113,7 +113,7 @@ internal class BrowseTool
         var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var unseenPropertyNames = UnseenPropertyNames.TryCreate(null, propertyNames);
         var options = new NodeOptions(
-            includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes, visibility);
+            includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames, excludeTypes, readability);
         var result = BuildSubjectNode(startSubject, rootSubject, pathProvider, depth, in options,
             visited, maxSubjects, unseenPropertyNames, ref subjectCount, ref omittedCount);
 
@@ -147,7 +147,7 @@ internal class BrowseTool
         ref int subjectCount,
         ref int omittedCount)
     {
-        unseenPropertyNames?.Observe(subject, pathProvider, options.Visibility);
+        unseenPropertyNames?.Observe(subject, pathProvider, options.Readability);
         var node = McpToolHelper.BuildSubjectNodeDto(
             subject, McpToolHelper.TryGetSubjectPath(subject, _configuration, rootSubject), pathProvider, _configuration,
             options.IncludeProperties, options.IncludeAttributes, options.IncludeMethods, options.IncludeInterfaces,
@@ -328,7 +328,7 @@ internal class BrowseTool
     // Expanded and collapsed properties list the same children, so a collapsed count matches the expanded list.
     private bool IsListed(RegisteredSubject child, in NodeOptions options) =>
         !McpToolHelper.ShouldExcludeByType(child, _configuration.ExcludeTypes, options.ExcludeTypes) &&
-        options.Visibility.IsVisibleWithPathCheck(child);
+        options.Readability.IsReadableWithPathCheck(child);
 
     // The request's options, unchanged through the recursion.
     private readonly record struct NodeOptions(
@@ -338,5 +338,5 @@ internal class BrowseTool
         bool IncludeInterfaces,
         IReadOnlySet<string>? PropertyNames,
         string[]? ExcludeTypes,
-        McpSubjectVisibility Visibility);
+        McpSubjectReadability Readability);
 }

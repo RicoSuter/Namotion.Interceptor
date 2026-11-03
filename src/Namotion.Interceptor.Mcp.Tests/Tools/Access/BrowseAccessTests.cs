@@ -93,7 +93,7 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenChildrenAreCollapsed_ThenTheCountOnlyCountsVisibleChildren()
+    public async Task WhenChildrenAreCollapsed_ThenTheCountOnlyCountsReadableChildren()
     {
         // Arrange
         var context = CreateContext();
@@ -143,7 +143,7 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenTheTreeIsTruncated_ThenTheOmittedCountOnlyCountsVisibleChildren()
+    public async Task WhenTheTreeIsTruncated_ThenTheOmittedCountOnlyCountsReadableChildren()
     {
         // Arrange
         var context = CreateContext();
@@ -260,12 +260,12 @@ public class BrowseAccessTests
         // Act
         var throughHiddenPath = hiddenPath.TryGetReadableSubject(root, "Device");
         var withoutReadableMember = noReadableMember.TryGetReadableSubject(root, "Device");
-        var visible = readable.TryGetReadableSubject(root, "Device");
+        var readableSubject = readable.TryGetReadableSubject(root, "Device");
 
         // Assert
         Assert.Null(throughHiddenPath);
         Assert.Null(withoutReadableMember);
-        Assert.Same(room.Device, visible!.Subject);
+        Assert.Same(room.Device, readableSubject!.Subject);
     }
 
     [Fact]
@@ -299,25 +299,25 @@ public class BrowseAccessTests
             action != McpAccessActions.Read || member.Parent.Subject != hidden));
 
         // Act
-        var visible = configuration.TryGetReadableSubject(root, "Devices[a]");
+        var readableSubject = configuration.TryGetReadableSubject(root, "Devices[a]");
         var withoutReadableMember = configuration.TryGetReadableSubject(root, "Devices[b]");
         var missing = configuration.TryGetReadableSubject(root, "Devices[c]");
 
         // Assert
-        Assert.Same(group.Devices["a"], visible!.Subject);
+        Assert.Same(group.Devices["a"], readableSubject!.Subject);
         Assert.Null(withoutReadableMember);
         Assert.Null(missing);
     }
 
     [Fact]
-    public async Task WhenHiddenItemsPrecedeAVisibleOneInACollection_ThenTheVisibleOneKeepsItsPosition()
+    public async Task WhenHiddenItemsPrecedeAReadableOneInACollection_ThenTheReadableOneKeepsItsPosition()
     {
         // Arrange
         // Paths keep the collection position so that they resolve back, so it counts the hidden items before.
         var context = CreateContext();
         var list = new TestDeviceList(context);
         var hidden = new TestDevice[] { new(context) { DeviceName = "Hidden1" }, new(context) { DeviceName = "Hidden2" } };
-        list.Devices = [hidden[0], hidden[1], new TestDevice(context) { DeviceName = "Visible" }];
+        list.Devices = [hidden[0], hidden[1], new TestDevice(context) { DeviceName = "Readable" }];
         var policy = new TestAccessPolicy((member, action) =>
             action != McpAccessActions.Read || !hidden.Contains(member.Parent.Subject));
 

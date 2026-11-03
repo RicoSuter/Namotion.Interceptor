@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
-public class VisibilityAccessTests
+public class ReadabilityAccessTests
 {
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create()
@@ -65,7 +65,7 @@ public class VisibilityAccessTests
     }
 
     [Fact]
-    public void WhenNoPolicyIsSet_ThenEveryCallSharesOneVisibilityInWhichEverySubjectIsVisible()
+    public void WhenNoPolicyIsSet_ThenEveryCallSharesOneReadabilityInWhichEverySubjectIsReadable()
     {
         // Arrange
         var context = CreateContext();
@@ -74,16 +74,16 @@ public class VisibilityAccessTests
         var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
 
         // Act
-        var first = McpSubjectVisibility.For(configuration, room);
-        var second = McpSubjectVisibility.For(configuration, new TestRoom(context));
+        var first = McpSubjectReadability.For(configuration, room);
+        var second = McpSubjectReadability.For(configuration, new TestRoom(context));
 
         // Assert
         Assert.Same(first, second);
-        Assert.True(first.IsVisibleWithPathCheck(room.Device.TryGetRegisteredSubject()!));
+        Assert.True(first.IsReadableWithPathCheck(room.Device.TryGetRegisteredSubject()!));
     }
 
     [Fact]
-    public void WhenAskedForTheVisibleSubjectsPathProviderTwice_ThenTheVisibilityReturnsTheSameOne()
+    public void WhenAskedForTheReadableSubjectsPathProviderTwice_ThenTheReadabilityReturnsTheSameOne()
     {
         // Arrange
         var context = CreateContext();
@@ -93,11 +93,11 @@ public class VisibilityAccessTests
             PathProvider = DefaultPathProvider.Instance,
             AccessPolicy = new TestAccessPolicy((_, _) => true)
         };
-        var visibility = McpSubjectVisibility.For(configuration, room);
+        var readability = McpSubjectReadability.For(configuration, room);
 
         // Act
-        var first = visibility.GetVisibleSubjectsPathProvider(configuration.ToolPathProvider);
-        var again = visibility.GetVisibleSubjectsPathProvider(configuration.ToolPathProvider);
+        var first = readability.GetReadableSubjectsPathProvider(configuration.ToolPathProvider);
+        var again = readability.GetReadableSubjectsPathProvider(configuration.ToolPathProvider);
 
         // Assert
         Assert.Same(first, again);
@@ -122,12 +122,12 @@ public class VisibilityAccessTests
         };
 
         // Act
-        var isVisible = McpSubjectVisibility.For(configuration, room).IsVisibleWithPathCheck(room.Device.TryGetRegisteredSubject()!);
+        var isReadable = McpSubjectReadability.For(configuration, room).IsReadableWithPathCheck(room.Device.TryGetRegisteredSubject()!);
         var subject = configuration.TryGetReadableSubject(room.TryGetRegisteredSubject()!, nameof(TestRoom.Device));
         var result = await McpToolCaller.CallAsync(room, configuration, "search", new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.False(isVisible);
+        Assert.False(isReadable);
         Assert.Null(subject);
         Assert.Empty(result.GetProperty("results").EnumerateObject());
     }
