@@ -68,11 +68,13 @@ public class WriteAccessTests
 
         // Act
         var property = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Device.IsOn" });
+        var writableProperty = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Device.DeviceName" });
         var browse = await McpToolCaller.CallAsync(room, configuration, "browse",
             new { format = "json", path = "Device", depth = 0, includeProperties = true });
 
         // Assert
         Assert.False(property.TryGetProperty("isWritable", out _));
+        Assert.True(writableProperty.GetProperty("isWritable").GetBoolean());
         var properties = browse.GetProperty("result").GetProperty("properties");
         Assert.False(properties.GetProperty("IsOn").TryGetProperty("isWritable", out _));
         Assert.True(properties.GetProperty("DeviceName").GetProperty("isWritable").GetBoolean());

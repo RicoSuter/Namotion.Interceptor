@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
 /// A policy that allows every read changes nothing about what the tools list or resolve, also when the path provider
-/// includes only some properties.
+/// includes only some properties, apart from a subject without a registered parent, which a policy always hides.
 /// </summary>
 public class ReadInvariantAccessTests
 {

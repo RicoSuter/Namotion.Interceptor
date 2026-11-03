@@ -54,7 +54,7 @@ internal static class AgentMetadataAccess
     public static string? GetError(
         RegisteredSubject storage, string path, string? propertyName, PathProviderBase pathProvider, Type[] excludeTypes, bool forAgents)
     {
-        if (TryGetVisibleTarget(storage, path, pathProvider, excludeTypes) is not { } target)
+        if (TryGetReadableTarget(storage, path, pathProvider, excludeTypes) is not { } target)
         {
             return FluentStorageContainer.GetNoSubjectMessage(path);
         }
@@ -73,7 +73,7 @@ internal static class AgentMetadataAccess
     }
 
     // The subject at the path of the storage when the tools resolve the path to it and it is readable for them, else null.
-    private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
+    private static RegisteredSubject? TryGetReadableTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
     {
         var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
         var trimmedPath = path.Trim();
