@@ -21,7 +21,7 @@ A game object is an `[InterceptorSubject]` that derives from `GameObject`. It st
 | `TryGetWorld(out world)` | Protected, the game without throwing; false while the object is being loaded or once its removal was published |
 | `OnAddedToWorld()` | Protected virtual, called on the game's own thread when the object enters the world. See [The four rules](#the-four-rules) |
 
-A tool is an `[InterceptorSubject]` that derives from `GameTool`. The game lists the operations of the tools in `Game.Tools` for every player, which is how players build and plant. A tool reaches its game through the protected `World` like an object; the game itself reads nothing of a tool but its operations.
+A tool is an `[InterceptorSubject]` that derives from `GameTool`. The game lists the operations of the tools in `Game.Tools` for every player, which is how players build, plant and emote. A tool reaches its game through the protected `World` like an object; the game itself reads nothing of a tool but its operations.
 
 Who acts: an operation that needs the acting player takes a `[FromServices] GameCaller? caller` parameter. Only the game page provides one, with the client id of its browser; the subject page, MCP and agents pass none. `World.GetSpotInFront(caller, across, along)` turns the caller into a spot in front of its player and refuses a caller without a player in the game.
 
@@ -31,7 +31,7 @@ Refusals throw `InvalidOperationException` with a message for the player, which 
 
 1. **Describe the object with properties.** `[Configuration]` and `[State]` properties plus overrides of the size, the blocking flags, `IsVisible` and `Visual`. The game reads only these.
 2. **Change the object by writing its properties**, from its operations, the subject page, MCP or anywhere else. A write lands right away, never waits for the game and is never refused by it: the game reads the object again at its next tick, or still in the current tick when the write happens on the game's thread. Where a rule matters, the object checks it before the write, typically with `World.IsFree(area, except: this)`, and throws `InvalidOperationException(GameMessages.Blocked)`.
-3. **Everything beyond the object's own properties goes through `World`**: `GetSpotInFront`, `IsFree`, `PlaceAsync`, `RemoveAsync`, `ReplaceAsync` and `Schedule`.
+3. **Everything beyond the object's own properties goes through `World`**: `GetSpotInFront`, `PlayAnimation`, `IsFree`, `PlaceAsync`, `RemoveAsync`, `ReplaceAsync` and `Schedule`.
 4. **Time-driven behavior is set up in `OnAddedToWorld` with `World.Schedule`.** The game calls `OnAddedToWorld` on its own thread when the object enters the world: on start, restart and load, and when the object is placed, added by a replacement or added by an outside write of the objects. Schedules are not saved, so this is where they come back after a restart.
 
 What follows from them:
@@ -48,6 +48,7 @@ What follows from them:
 | Member of `IGameWorld` | Contract |
 |---|---|
 | `GetSpotInFront(caller, across, along)` | The `GameSpot` (`X`, `Y`, `Width`, `Depth`, `Facing`, `Area`) of an object `across` tiles wide across the facing and `along` tiles deep along it, on the tiles right in front of the caller's player and centered on it across the facing (an odd remainder goes east or north). Does not check whether the area is free. Refuses a caller without a connected player of the game ("Only a player in the game can place objects."), a diagonal facing ("Face north, east, south or west to place objects.") and a spot that would leave the `int` range ("There is no room in front of you.") |
+| `PlayAnimation(caller, animation, mode)` | Plays an animation of the person on the caller's player. See [Emotes](#emotes). Refuses a caller without a connected player of the game ("Only a player in the game can play animations."), an empty name, `Idle` and `Walk` (`ArgumentException`) and an undefined mode |
 | `IsFree(area, except)` | Whether no movement blocking object other than `except` overlaps the area |
 | `PlaceAsync(gameObject, cancellationToken)` | Adds the object under a new name; refused with `GameMessages.Blocked` when it blocks movement and a movement blocking object overlaps it |
 | `RemoveAsync(gameObject, cancellationToken)` | Removes the object |
@@ -317,6 +318,42 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
 
 `Wall.AddDoorAsync` shows `ReplaceAsync`: it replaces a wall by a wall, a door and a wall in one step, and works without a caller too, centering the door on the wall then.
 
+## Emotes
+
+`World.PlayAnimation(caller, animation, mode)` makes the caller's player play an animation of its person, which everyone who sees the player sees. An emote is a tool operation that calls it; the `EmoteTool` of the core is the example, and another emote is another tool of the same shape. The game owns the players, so this is how an extension reaches them.
+
+```csharp
+[Category("Game")]
+[Description("Lets players clap, sit and jump")]
+[DisplayName("Emote tool")]
+[SubjectIcon("SignLanguage")]
+[InterceptorSubject]
+public partial class EmoteTool : GameTool, ITitleProvider, IIconProvider
+{
+    public string? Title => "Emote tool";
+
+    public string? IconName => "SignLanguage";
+
+    [Operation(Title = "Clap", Icon = "SignLanguage", Position = 1, Description = "Claps your hands once.")]
+    public void Clap([FromServices] GameCaller? caller) =>
+        World.PlayAnimation(caller, "Clapping", GameVisualAnimationMode.Once);
+
+    [Operation(Title = "Sit", Icon = "Chair", Position = 2, Description = "Sits down until you walk on.")]
+    public void Sit([FromServices] GameCaller? caller) =>
+        World.PlayAnimation(caller, "Sitting", GameVisualAnimationMode.Loop);
+
+    [Operation(Title = "Jump", Icon = "Height", Position = 3, Description = "Jumps once.")]
+    public void Jump([FromServices] GameCaller? caller) =>
+        World.PlayAnimation(caller, "Jump", GameVisualAnimationMode.Once);
+}
+```
+
+- **`animation`** is the name of a clip in the player's model. The six people of the core have `Clapping`, `Sitting` and `Jump` besides `Idle` and `Walk`, which the game plays itself and which are refused. A person without the named clip shows nothing, and the browser warns once in its console.
+- **`mode`**: `Once` plays the clip to its end and returns to idle; `Loop` repeats it until the player's next step. A step that moves the player or a teleport ends either mode, a new call replaces a running animation, and the same call twice in a row plays twice. The game clears a `Once` animation after 5 seconds at the latest, so a clip longer than that is cut short on the server.
+- **Who**: like `GetSpotInFront`, it needs a caller with a connected player, so only the player's own page can make it animate. From the subject browser, MCP and agents the caller is null and the call throws `InvalidOperationException`. It may be called from any thread; the animation starts in the game's next tick.
+- **State**: `GamePlayer.Animation` shows the playing animation, or null. Only the game writes it, outside writes are refused, and it is not saved. An object does not write it; it calls `PlayAnimation`.
+- Each operation takes only the caller, so a click or a number key plays it without a dialog.
+
 ## Visuals
 
 `Visual` returns a `GameVisual`, an immutable record of up to 16 `GameVisualPart`s (`GameVisual.MaximumParts`) that compares by value, parts included. `GameVisual.Box(width, height, depth, color)` creates a visual of one box.
@@ -332,6 +369,15 @@ public partial class TreeTool : GameTool, ITitleProvider, IIconProvider
 Compute the visual from configuration or state properties only, because the game reads it again exactly when one of the object's properties was written, and cache it per state with `GameVisualCache<TKey>`. The cache returns the same instance for an unchanged key, so the game's comparison stops at the reference and allocates nothing; pass a static lambda, as the door does, so the call allocates nothing either.
 
 The game validates every visual before it sends it to a browser. An object whose visual has more than 16 parts, an offset, size or pivot outside -1024 to 1024 tiles (`GameVisual.MaximumExtent`), a negative size, a rotation that is not finite, an undefined enum value, a texture scale outside 0 (exclusive) to 1024, a color other than `#rrggbb`, an animation name over 64 characters, a model part without a model, or a URL that does not start with `_content/`, is longer than 512 characters or contains `..` or `%`, shows as its gray default box, and the server logs a warning once per object type.
+
+## Look
+
+The core gives every object the same look: low poly shapes, a warm pastel palette, soft sun shadows, shading where surfaces meet and thin dark outlines. The outlines, the shadows and the corner shading come from the core and apply to every box and model of every object, so an object needs nothing for them. What the object supplies is shape and surface:
+
+- Use flat pastel colors, or textures that are drawn, not photographed: a pastel fill with faint darker lines, as `HomeBlaze.Game.Buildings/wwwroot/textures/` has for bricks, planks and concrete. The core's own drawing script is `HomeBlaze.Game/tools/make-textures.js`.
+- Avoid photo textures. Their noise fights with the flat shading and the outlines, and they look out of place next to the other objects.
+- Prefer low poly models with vertex colors or flat colored materials, like the trees and animals. Keep the shape simple enough that an outline reads well.
+- A visual that fades for the sightline (the core does this for every object that hides the own player) keeps its shadow but loses its outline while it is see-through, which needs nothing from the object either.
 
 ## Assets and licenses
 

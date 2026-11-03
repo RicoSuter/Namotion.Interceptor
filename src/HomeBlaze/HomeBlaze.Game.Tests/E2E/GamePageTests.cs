@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Game.Tests.Testing;
+using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.Voice;
 using HomeBlaze.Installation;
 using Microsoft.Playwright;
@@ -85,6 +86,52 @@ public class GamePageTests
         await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top" && player.Color is not null);
         Assert.Matches("^#[0-9a-f]{6}$", player.Color);
+    }
+
+    [Fact]
+    public async Task WhenAPlayerEditsItsPersonAndColor_ThenTheyStayAfterAReload()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var name = $"E2E player {Guid.NewGuid():N}";
+        player.Color = "#336699";
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
+        // Only a named client is recognized again after a reload; an anonymous one starts over as a new player.
+        await page.GetByTestId("game-name-input").FillAsync(name, new() { Timeout = Timeout });
+        await page.GetByTestId("game-person-female-tank-top").ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-player-save").ClickAsync();
+        await Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await AsyncTestHelpers.WaitUntilAsync(() => player.Character == "female-tank-top");
+
+        // Act
+        await page.ReloadAsync();
+        await Expect(page.GetByTestId("game-nearby-player").Filter(new() { HasText = name + SelfSuffix })).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Edit me" }).ClickAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Expect(page.GetByTestId("game-person-female-tank-top")).ToHaveClassAsync(new Regex("selected"), new() { Timeout = Timeout });
+        await Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "Shirt color" })).ToHaveValueAsync("#336699", new() { Timeout = Timeout });
+        Assert.Equal("#336699", player.Color);
+    }
+
+    [Fact]
+    public async Task WhenAPlayerClapsThroughTheEmoteTool_ThenAnotherPageShowsTheAnimation()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        world.Game.Tools = new Dictionary<string, GameTool> { ["emote-tool"] = new EmoteTool() };
+        var (clapper, _) = await world.JoinAsync();
+        var (watcher, _) = await world.JoinAsync();
+        var watcherCanvas = watcher.GetByTestId("game-canvas");
+        // Both players in view of each other, so the watcher has loaded the clapper's person.
+        await Expect(watcherCanvas).ToHaveAttributeAsync("data-game-model-failures", "0", new() { Timeout = Timeout });
+
+        // Act
+        await clapper.GetByTestId("game-action").Filter(new() { HasText = "Clap" }).ClickAsync(new() { Timeout = Timeout });
+
+        // Assert
+        await Expect(watcherCanvas).ToHaveAttributeAsync("data-game-emotes", new Regex("^[1-9]"), new() { Timeout = Timeout });
     }
 
     [Fact]
