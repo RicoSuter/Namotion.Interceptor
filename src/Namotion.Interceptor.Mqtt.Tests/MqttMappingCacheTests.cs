@@ -716,10 +716,12 @@ public class MqttMappingCacheTests
         subject.Other = child;
         subject.Child = null;
         var oldTopic = await client.TryGetPropertyForTopicAsync("child/value");
+        var oldTopicRetained = client.HasCachedProperty("child/value");
         var newTopic = await client.TryGetPropertyForTopicAsync("other/value");
 
         // Assert
         Assert.Null(oldTopic);
+        Assert.False(oldTopicRetained);
         Assert.Same(child, newTopic?.Subject);
     }
 
@@ -736,10 +738,12 @@ public class MqttMappingCacheTests
         // Act
         subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
         var oldKey = await client.TryGetPropertyForTopicAsync("map[a]/value");
+        var oldKeyRetained = client.HasCachedProperty("map[a]/value");
         var newKey = await client.TryGetPropertyForTopicAsync("map[b]/value");
 
         // Assert
         Assert.Null(oldKey);
+        Assert.False(oldKeyRetained);
         Assert.Same(child, newKey?.Subject);
     }
 
@@ -790,6 +794,23 @@ public class MqttMappingCacheTests
         // Assert
         Assert.Equal(nameof(MqttCacheTestChild.Value), racing?.Name);
         Assert.Null(next);
+    }
+
+    [Fact]
+    public async Task WhenProviderExcludesAResolvedProperty_ThenTheClientNoLongerResolvesItsTopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var pathProvider = new MutablePathProvider();
+        await using var client = CreateClient(subject, new MqttPathProviderMapper(pathProvider));
+        Assert.NotNull(await client.TryGetPropertyForTopicAsync("name"));
+
+        // Act
+        pathProvider.Included = false;
+        var resolved = await client.TryGetPropertyForTopicAsync("name");
+
+        // Assert
+        Assert.Null(resolved);
     }
 
     private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')
