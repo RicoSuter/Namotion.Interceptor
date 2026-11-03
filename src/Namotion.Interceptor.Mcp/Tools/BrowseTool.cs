@@ -177,7 +177,7 @@ internal class BrowseTool
 
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property))
+            if (property.IsAttribute)
             {
                 continue;
             }
@@ -187,7 +187,10 @@ internal class BrowseTool
                 continue; // Scalar properties already handled by BuildSubjectNodeDto
             }
 
-            var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+            if (!pathProvider.TryGetPropertySegment(property, out var segment))
+            {
+                continue;
+            }
 
             if (remainingDepth > 0)
             {
