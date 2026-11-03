@@ -44,7 +44,7 @@ A Graphics button in the game panel opens a dialog with the presets Auto, Low, M
 | Medium | 1.5x, at most the device pixel ratio | 60 FPS | soft | half resolution |
 | High | 2x, at most the device pixel ratio | 60 FPS | soft | full resolution |
 
-- Outlines, multisampling, sharpen, wind and the sightline fade stay on in every preset, so the game looks the same everywhere, only sharper or softer.
+- Outlines, multisampling, sharpen, wind and the sightline fade stay on in every preset; the presets differ in sharpness, frame rate, corner shading and the softness of the shadow edges.
 - Auto starts with Low on a touch device (coarse pointer) and Medium elsewhere, and drops one level after the frame time stays above the cap's budget for five seconds. It never raises the level by itself during a session, and a changed setting ends it.
 
 ### Rendering only when needed
@@ -94,7 +94,7 @@ A Graphics button in the game panel opens a dialog with the presets Auto, Low, M
 
 ## Code structure
 
-- `game.js` owns the scene setup, so lights, shadows, the post-processing chain, quality presets and the render loop pause live there, split into a new `game-render.js` module for the quality and pipeline code if `game.js` grows past what reads well.
+- `game.js` owns the scene setup, so lights, shadows, the post-processing chain, graphics presets and the render loop pause live there, split into a new `game-render.js` module for the graphics and pipeline code if `game.js` grows past what reads well.
 - `game-entities.js` keeps building entities; it registers shadow casters and keeps labels and faded meshes out of the geometry buffer through a small interface the render module provides.
 - Server side: `GamePlayer` gains the two properties, `PlayerEntity` the appearance and emote fields, `GameViewPayloads` the new payload fields, `Game.Players.cs` the edit method, `Game.World.cs` `PlayAnimation`, `HomeBlaze.Game.Abstractions` the new `IGameWorld` method (public API snapshot updated), a new `EmoteTool`, `GamePage.Panel.cs` the graphics button and dialog, and `GameNameDialog` becomes `GamePlayerDialog`.
 

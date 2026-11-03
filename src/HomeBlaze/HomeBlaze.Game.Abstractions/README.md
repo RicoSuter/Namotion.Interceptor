@@ -348,7 +348,7 @@ public partial class EmoteTool : GameTool, ITitleProvider, IIconProvider
 }
 ```
 
-- **`animation`** is the name of a clip in the player's model. The six people of the core have `Clapping`, `Sitting` and `Jump` besides `Idle` and `Walk`, which the game plays itself and which are refused. A person without the named clip shows nothing, and the browser warns once in its console.
+- **`animation`** is the name of a clip in the player's model. The six people of the core have `Clapping`, `Sitting` and `Jump` besides `Idle` and `Walk`, which the game plays itself; those two and an empty name throw `ArgumentException`, and an undefined `mode` throws `ArgumentOutOfRangeException`. A person without the named clip shows nothing, and the browser warns once in its console.
 - **`mode`**: `Once` plays the clip to its end and returns to idle; `Loop` repeats it until the player's next step. A step that moves the player or a teleport ends either mode, a new call replaces a running animation, and the same call twice in a row plays twice. The game clears a `Once` animation after 5 seconds at the latest, so a clip longer than that is cut short on the server.
 - **Who**: like `GetSpotInFront`, it needs a caller with a connected player, so only the player's own page can make it animate. From the subject browser, MCP and agents the caller is null and the call throws `InvalidOperationException`. It may be called from any thread; the animation starts in the game's next tick.
 - **State**: `GamePlayer.Animation` shows the playing animation, or null. Only the game writes it, outside writes are refused, and it is not saved. An object does not write it; it calls `PlayAnimation`.
