@@ -378,7 +378,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_InlinePaths_SegmentIsUsedAsDictionaryKey()
+    public void WhenSegmentIsAnInlineKey_ThenInlinePathsPropertyResolvesWithTheKeyAsIndex()
     {
         // Arrange
         var context = CreateContext();
@@ -399,7 +399,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_InlinePaths_NestedProperty()
+    public void WhenPathContinuesThroughAnInlineKey_ThenPropertyOfTheItemResolves()
     {
         // Arrange
         var context = CreateContext();
@@ -421,7 +421,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_InlinePaths_ResolvesChildSubject()
+    public void WhenSubjectPathIsAnInlineKey_ThenItResolvesToTheItem()
     {
         // Arrange
         var context = CreateContext();
@@ -440,7 +440,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_InlinePaths_NestedContainers()
+    public void WhenSubjectPathPassesNestedInlineKeys_ThenItResolvesToTheInnermostItem()
     {
         // Arrange
         var context = CreateContext();
@@ -461,7 +461,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetPath_InlinePaths_EmitsKeyAsPlainSegment()
+    public void WhenPathIsBuiltThroughAnInlineKey_ThenTheKeyIsAPlainSegment()
     {
         // Arrange — set dictionary via property setter to trigger lifecycle tracking
         var context = CreateContext();
@@ -485,7 +485,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetPath_InlinePaths_NestedContainers()
+    public void WhenPathIsBuiltThroughNestedInlineKeys_ThenEachKeyIsAPlainSegment()
     {
         // Arrange — set dictionaries via property setters
         var context = CreateContext();
@@ -514,7 +514,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_InlinePaths_NonExistentKey_ReturnsNull()
+    public void WhenPathContinuesThroughAMissingInlineKey_ThenPropertyPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();

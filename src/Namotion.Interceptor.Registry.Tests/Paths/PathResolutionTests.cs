@@ -14,10 +14,8 @@ public class PathResolutionTests
             .WithRegistry();
     }
 
-    // --- TryGetPropertyFromPath ---
-
     [Fact]
-    public void TryGetPropertyFromPath_SimpleProperty_ReturnsPropertyWithNullIndex()
+    public void WhenPathNamesAPropertyOfTheRoot_ThenItResolvesWithNullIndex()
     {
         // Arrange
         var context = CreateContext();
@@ -36,7 +34,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_DictionaryPath_ReturnsPropertyWithStringIndex()
+    public void WhenPathIndexesADictionary_ThenDictionaryPropertyResolvesWithTheKeyAsIndex()
     {
         // Arrange
         var context = CreateContext();
@@ -57,7 +55,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_NestedDictionaryProperty_ReturnsLeafProperty()
+    public void WhenPathContinuesThroughADictionaryItem_ThenLeafPropertyResolvesWithNullIndex()
     {
         // Arrange
         var context = CreateContext();
@@ -78,7 +76,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_NonExistentPath_ReturnsNull()
+    public void WhenPathNamesAMissingProperty_ThenPropertyPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();
@@ -94,7 +92,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_NonExistentDictionaryKey_ReturnsNull()
+    public void WhenPathContinuesThroughAMissingDictionaryKey_ThenPropertyPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();
@@ -112,7 +110,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_EmptyPath_ReturnsNull()
+    public void WhenPathIsEmpty_ThenPropertyPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();
@@ -127,10 +125,8 @@ public class PathResolutionTests
         Assert.Null(result);
     }
 
-    // --- TryGetSubjectFromPath ---
-
     [Fact]
-    public void TryGetSubjectFromPath_DictionaryIndex_ReturnsChildSubject()
+    public void WhenSubjectPathIndexesADictionary_ThenItResolvesToTheItem()
     {
         // Arrange
         var context = CreateContext();
@@ -149,7 +145,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_NestedDictionaries_ResolvesDeepSubject()
+    public void WhenSubjectPathIndexesNestedDictionaries_ThenItResolvesToTheInnermostItem()
     {
         // Arrange
         var context = CreateContext();
@@ -170,7 +166,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_NonExistentKey_ReturnsNull()
+    public void WhenSubjectPathIndexesAMissingDictionaryKey_ThenSubjectPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();
@@ -186,7 +182,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_NonExistentProperty_ReturnsNull()
+    public void WhenSubjectPathIndexesAMissingProperty_ThenSubjectPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();
@@ -201,10 +197,8 @@ public class PathResolutionTests
         Assert.Null(resolved);
     }
 
-    // --- GetPropertiesFromPaths ---
-
     [Fact]
-    public void GetPropertiesFromPaths_MultiplePaths_ReturnsTuplesWithIndices()
+    public void WhenSeveralPathsAreResolved_ThenEachPropertyIsReturnedInOrderWithItsIndex()
     {
         // Arrange
         var context = CreateContext();
@@ -238,7 +232,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void GetPropertiesFromPaths_SkipsInvalidPaths()
+    public void WhenSeveralPathsAreResolved_ThenPathsThatDoNotResolveAreSkipped()
     {
         // Arrange
         var context = CreateContext();
@@ -255,8 +249,6 @@ public class PathResolutionTests
         Assert.Single(results);
         Assert.Equal("Name", results[0].Property.Name);
     }
-
-    // --- Malformed paths and missing subjects ---
 
     [Theory]
     [InlineData("Items[jazz")]
