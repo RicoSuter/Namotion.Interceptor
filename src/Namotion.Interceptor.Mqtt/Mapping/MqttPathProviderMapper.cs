@@ -21,6 +21,9 @@ public class MqttPathProviderMapper
         _pathProvider = pathProvider;
     }
 
+    /// <inheritdoc />
+    public virtual long Version => _pathProvider.Version;
+
     public virtual bool TryGetMapping(
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,

@@ -18,4 +18,14 @@ public interface IPropertyMapper<TMapping>
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out TMapping? mapping);
+
+    /// <summary>
+    /// Gets a number that increases after every change of the answers of this mapper, and never decreases. 0, the
+    /// default, means the answers never change.
+    /// </summary>
+    /// <remarks>
+    /// A mapper whose answers change while a connector uses it raises it after each change: connectors cache mappings
+    /// only while it is unchanged.
+    /// </remarks>
+    long Version => 0;
 }
