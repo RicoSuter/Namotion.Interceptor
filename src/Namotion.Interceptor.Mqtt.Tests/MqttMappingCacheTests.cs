@@ -108,9 +108,11 @@ public class MqttMappingCacheTests
 
         // Act
         client.TryGetTopicForProperty(detachedProperty.Reference, detachedProperty);
+        var retained = client.HasCachedTopic(detachedProperty.Reference);
         client.TryGetTopicForProperty(detachedProperty.Reference, detachedProperty);
 
         // Assert
+        Assert.False(retained);
         Assert.Equal(2, mapper.MappingLookupCount);
     }
 
@@ -126,9 +128,11 @@ public class MqttMappingCacheTests
 
         // Act
         client.TryGetTopicForProperty(property.Reference, property);
+        var retained = client.HasCachedTopic(property.Reference);
         client.TryGetTopicForProperty(property.Reference, property);
 
         // Assert
+        Assert.False(retained);
         Assert.Equal(2, mapper.MappingLookupCount);
     }
 
@@ -143,10 +147,12 @@ public class MqttMappingCacheTests
         // Act
         var (property, topicSeenDuringDetach) = DetachChildWhileInserting(
             subject, p => client.TryGetTopicForProperty(p.Reference, p).Topic);
+        var retained = client.HasCachedTopic(property.Reference);
         var after = client.TryGetTopicForProperty(property.Reference, property);
 
         // Assert
         Assert.Equal("child/value", topicSeenDuringDetach);
+        Assert.False(retained);
         Assert.Null(after.Topic);
         Assert.Equal(2, mapper.MappingLookupCount);
     }
@@ -166,10 +172,12 @@ public class MqttMappingCacheTests
             return SyncResult(client.TryGetPropertyForTopicAsync("child/value"))?.Name;
         });
         mapper.ResolvedPropertyOverride = null;
+        var retained = client.HasCachedProperty("child/value");
         var after = await client.TryGetPropertyForTopicAsync("child/value");
 
         // Assert
         Assert.Equal(nameof(MqttCacheTestChild.Value), resolvedDuringDetach);
+        Assert.False(retained);
         Assert.Null(after);
         Assert.Equal(2, mapper.PropertyLookupCount);
     }
@@ -631,6 +639,157 @@ public class MqttMappingCacheTests
 
         // Assert
         Assert.Null(resolved);
+    }
+
+    [Fact]
+    public async Task WhenAPublishedSubjectMovesToAnotherMappedPropertyWithoutADetach_ThenTheClientPublishesItUnderItsNewTopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        subject.Other = child;
+        await using var client = CreateClient(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("child/value", client.TryGetTopicForProperty(property.Reference, property).Topic);
+
+        // Act
+        subject.Child = null;
+        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+
+        // Assert
+        Assert.Equal("other/value", topic);
+    }
+
+    [Fact]
+    public async Task WhenASubjectMovesFromAnUnmappedToAMappedPropertyWithoutADetach_ThenTheClientPublishesItsProperty()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Hidden = child;
+        await using var client = CreateClient(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Null(client.TryGetTopicForProperty(property.Reference, property).Topic);
+
+        // Act
+        subject.Child = child;
+        subject.Hidden = null;
+        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+
+        // Assert
+        Assert.Equal("child/value", topic);
+    }
+
+    [Fact]
+    public async Task WhenProviderExcludesAPublishedProperty_ThenTheClientDropsItsTopicUntilIncludedAgain()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var pathProvider = new MutablePathProvider();
+        await using var client = CreateClient(subject, new MqttPathProviderMapper(pathProvider));
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+        Assert.Equal("name", client.TryGetTopicForProperty(property.Reference, property).Topic);
+
+        // Act
+        pathProvider.Included = false;
+        var topicWhileExcluded = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        pathProvider.Included = true;
+        var topicAgain = client.TryGetTopicForProperty(property.Reference, property).Topic;
+
+        // Assert
+        Assert.Null(topicWhileExcluded);
+        Assert.Equal("name", topicAgain);
+    }
+
+    [Fact]
+    public async Task WhenASubjectMovesWithoutADetach_ThenTheClientNoLongerResolvesItsOldTopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var client = CreateClient(subject, CreateMapper());
+        Assert.Same(child, (await client.TryGetPropertyForTopicAsync("child/value"))?.Subject);
+
+        // Act
+        subject.Other = child;
+        subject.Child = null;
+        var oldTopic = await client.TryGetPropertyForTopicAsync("child/value");
+        var newTopic = await client.TryGetPropertyForTopicAsync("other/value");
+
+        // Assert
+        Assert.Null(oldTopic);
+        Assert.Same(child, newTopic?.Subject);
+    }
+
+    [Fact]
+    public async Task WhenADictionaryEntryIsReKeyed_ThenTheClientResolvesTheNewKey()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["a"] = child };
+        await using var client = CreateClient(subject, CreateMapper());
+        Assert.Same(child, (await client.TryGetPropertyForTopicAsync("map[a]/value"))?.Subject);
+
+        // Act
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
+        var oldKey = await client.TryGetPropertyForTopicAsync("map[a]/value");
+        var newKey = await client.TryGetPropertyForTopicAsync("map[b]/value");
+
+        // Assert
+        Assert.Null(oldKey);
+        Assert.Same(child, newKey?.Subject);
+    }
+
+    [Fact]
+    public async Task WhenTheStructureChangesWhileTheClientComputesATopic_ThenTheNextLookupComputesItAgain()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var client = CreateClient(subject, mapper);
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        mapper.DuringNextMapping = () =>
+        {
+            subject.Other = child;
+            subject.Child = null;
+        };
+
+        // Act
+        var racing = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var next = client.TryGetTopicForProperty(property.Reference, property).Topic;
+
+        // Assert
+        Assert.Equal("child/value", racing);
+        Assert.Equal("other/value", next);
+    }
+
+    [Fact]
+    public async Task WhenTheStructureChangesWhileTheClientResolvesATopic_ThenTheNextLookupResolvesItAgain()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var client = CreateClient(subject, mapper);
+        mapper.DuringNextPropertyLookup = () =>
+        {
+            subject.Other = child;
+            subject.Child = null;
+        };
+
+        // Act
+        var racing = await client.TryGetPropertyForTopicAsync("child/value");
+        var next = await client.TryGetPropertyForTopicAsync("child/value");
+
+        // Assert
+        Assert.Equal(nameof(MqttCacheTestChild.Value), racing?.Name);
+        Assert.Null(next);
     }
 
     private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')

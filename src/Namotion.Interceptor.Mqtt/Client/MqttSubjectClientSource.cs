@@ -32,8 +32,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private readonly MqttClientFactory _factory;
 
-    private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
-    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
+    private readonly ISubjectRegistry? _registry;
+
+    // Entries carry the structure and mapper versions read before they were computed and are served only while both are
+    // current, so an entry computed during a change is never served after it.
+    private readonly ConcurrentDictionary<string, (PropertyReference Property, long StructureVersion, long MapperVersion)> _topicToProperty = new();
+    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping, long StructureVersion, long MapperVersion)> _propertyToTopic = new();
 
     private readonly SourceOwnershipManager _ownership;
 
@@ -60,6 +64,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         ArgumentNullException.ThrowIfNull(logger);
 
         _subject = subject;
+        _registry = subject.Context.TryGetService<ISubjectRegistry>();
         _configuration = configuration;
         _logger = logger;
 
@@ -90,7 +95,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         foreach (var kvp in _topicToProperty)
         {
-            if (kvp.Value?.Subject == subject)
+            if (kvp.Value.Property.Subject == subject)
             {
                 _topicToProperty.TryRemove(kvp.Key, out _);
             }
@@ -548,6 +553,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             return;
         }
 
+        // Read before the topics are computed, so that an entry computed during a change carries the versions from before it.
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+
         var properties = registeredSubject
             .GetAllProperties()
             .Where(p => !p.CanContainSubjects && _configuration.Mapper.TryGetMapping(p, _subject, out _))
@@ -580,7 +589,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 continue;
             }
 
-            _topicToProperty[topic] = property.Reference;
+            _topicToProperty[topic] = (property.Reference, structureVersion, mapperVersion);
             var qos = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService;
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
@@ -594,9 +603,13 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cached) &&
+            cached.StructureVersion == structureVersion &&
+            cached.MapperVersion == mapperVersion)
         {
-            return cached;
+            return (cached.Topic, cached.Mapping);
         }
 
         string? topic = null;
@@ -607,22 +620,34 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             resolvedMapping = mapping;
         }
 
-        var entry = (topic, resolvedMapping);
-
         // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
+        _propertyToTopic[propertyReference] = (topic, resolvedMapping, structureVersion, mapperVersion);
+        if (!IsRetainable(propertyReference.Subject))
         {
             _propertyToTopic.TryRemove(propertyReference, out _);
         }
 
-        return entry;
+        return (topic, resolvedMapping);
     }
+
+    /// <summary>
+    /// Whether the topic cache holds an entry for the property.
+    /// </summary>
+    internal bool HasCachedTopic(PropertyReference property) => _propertyToTopic.ContainsKey(property);
+
+    /// <summary>
+    /// Whether the property cache holds an entry for the topic.
+    /// </summary>
+    internal bool HasCachedProperty(string topic) => _topicToProperty.ContainsKey(topic);
 
     internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string topic)
     {
-        if (_topicToProperty.TryGetValue(topic, out var cachedProperty))
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+        var hasCached = _topicToProperty.TryGetValue(topic, out var cached);
+        if (hasCached && cached.StructureVersion == structureVersion && cached.MapperVersion == mapperVersion)
         {
-            return cachedProperty;
+            return cached.Property;
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
@@ -633,11 +658,18 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         var propertyReference = property?.Reference;
 
         // A missing path can become reachable after a structural change; only cache resolved properties.
-        if (propertyReference is { } resolvedProperty &&
-            _topicToProperty.TryAdd(topic, propertyReference) &&
-            !IsRetainable(resolvedProperty.Subject))
+        if (propertyReference is { } resolvedProperty)
         {
-            _topicToProperty.TryRemove(topic, out _);
+            _topicToProperty[topic] = (resolvedProperty, structureVersion, mapperVersion);
+            if (!IsRetainable(resolvedProperty.Subject))
+            {
+                _topicToProperty.TryRemove(topic, out _);
+            }
+        }
+        else if (hasCached)
+        {
+            // Removes only the stale entry, not one a concurrent lookup added since.
+            _topicToProperty.TryRemove(KeyValuePair.Create(topic, cached));
         }
 
         return propertyReference;
