@@ -330,6 +330,8 @@ export async function createEntities(scene, options) {
         if (!windMaterial) {
             windMaterial = material.clone(`${material.name}-wind`);
             addWind(windMaterial);
+            // The shadow map draws with the material's own shader, so that the shadow sways with the wind.
+            windMaterial.shadowDepthWrapper = new BABYLON.ShadowDepthWrapper(windMaterial, scene);
             windMaterial.gameWindSource = material;
             windMaterials.set(material, windMaterial);
         }
@@ -337,11 +339,9 @@ export async function createEntities(scene, options) {
         return windMaterial;
     }
 
-    // The shadow map draws with the material's own shader, so that the shadow sways with the wind.
     function addWind(material) {
         const Plugin = getWindPlugin();
         material.gameWind = new Plugin(material);
-        material.shadowDepthWrapper = new BABYLON.ShadowDepthWrapper(material, scene);
     }
 
     // A glTF material has a fixed transparency mode, with which Babylon ignores the mesh visibility for blending, so a faded
@@ -352,6 +352,9 @@ export async function createEntities(scene, options) {
             // Cloned from the source, because a clone of the wind copy would not carry its plugin reliably.
             const source = material.gameWindSource ?? material;
             fadeMaterial = source.clone(`${material.name}-fade`);
+            // No shadow depth wrapper: Babylon flips the depth pre-pass define twice per frame, each flip creates the
+            // material's effect anew, and the wrapper then compiles a new shadow program for every faded submesh. The
+            // default shadow shader draws the faded shadow instead, which does not sway while the object is faded.
             if (material.gameWindSource) {
                 addWind(fadeMaterial);
             }
@@ -768,12 +771,11 @@ export async function createEntities(scene, options) {
     }
 
     // A ShadowDepthWrapper keeps every mesh it drew in a map that the mesh's dispose does not clean, so a disposed tree
-    // would stay referenced by the wrappers of its wind material and of the fade copy.
+    // would stay referenced by the wrapper of its wind material.
     function releaseWindShadow(mesh) {
         const material = mesh.gameMaterial;
         if (material?.gameWind) {
             material.shadowDepthWrapper._meshes?.delete(mesh);
-            fadeMaterials.get(material)?.shadowDepthWrapper._meshes?.delete(mesh);
         }
     }
 
