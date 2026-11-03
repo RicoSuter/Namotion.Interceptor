@@ -85,6 +85,22 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void WhenTheRoleIsLoaded_ThenTheBuiltInRolesAndTheSystemRulesAreDescribedWithTheIncludes()
+    {
+        // Act
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+
+        // Assert
+        Assert.Contains("The system rules apply to every role.", component.Find("[data-testid='role-edit-builtin-roles']").TextContent);
+        Assert.Equal("Reader: Reads every member and its history and executes queries.",
+            component.Find("[data-testid='role-edit-builtin-role-Reader']").TextContent.Trim());
+        Assert.Equal("Operator: Includes Reader, writes every member and executes operations.",
+            component.Find("[data-testid='role-edit-builtin-role-Operator']").TextContent.Trim());
+        Assert.Equal("Everything: Allows every action on every member.",
+            component.Find("[data-testid='role-edit-builtin-role-Everything']").TextContent.Trim());
+    }
+
+    [Fact]
     public async Task WhenARuleIsAdded_ThenItHasNoActionAndTheRoleIsInvalidUntilOneIsChecked()
     {
         // Arrange

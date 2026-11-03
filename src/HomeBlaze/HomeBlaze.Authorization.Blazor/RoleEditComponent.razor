@@ -37,6 +37,7 @@
                     <RoleSelector @bind-Selected="_includes" @bind-Selected:after="OnChanged" Excluded="@_excluded"
                                   Label="Includes" TestId="role-edit-include" HelperText="Optional." />
                 </div>
+                @RenderBuiltInRoles()
 
                 <MudText Typo="Typo.subtitle2" Class="mt-6">Allow</MudText>
                 <MudText Typo="Typo.body2" Class="mb-2">
@@ -59,6 +60,13 @@
 
 @code {
     internal const string ConcurrentChangeMessage = "The roles changed while this dialog was open. Close it and open it again.";
+
+    private static readonly (string Name, string Description)[] BuiltInRoleDescriptions =
+    [
+        (BuiltInRoles.ReaderName, "Reads every member and its history and executes queries."),
+        (BuiltInRoles.OperatorName, "Includes Reader, writes every member and executes operations."),
+        (BuiltInRoles.EverythingName, "Allows every action on every member.")
+    ];
 
     private string? _name;
     private Authorization? _authorization;
@@ -228,6 +236,20 @@
         </MudStack>
         <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
                    OnClick="@(() => AddRule(rules))" data-testid="@($"role-edit-add-{section}")">Add rule</MudButton>
+    };
+
+    private static RenderFragment RenderBuiltInRoles() => __builder =>
+    {
+        <div data-testid="role-edit-builtin-roles">
+            <MudText Typo="Typo.subtitle2" Class="mt-6">Built-in roles</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Defined in code, always available and not editable. The system rules apply to every role.</MudText>
+            <MudStack Spacing="1">
+                @foreach (var (name, description) in BuiltInRoleDescriptions)
+                {
+                    <MudText Typo="Typo.body2" data-testid="@($"role-edit-builtin-role-{name}")"><b>@name</b>: @description</MudText>
+                }
+            </MudStack>
+        </div>
     };
 
     // A new rule has no action, so the role is invalid until one is chosen rather than granting or denying every action.
