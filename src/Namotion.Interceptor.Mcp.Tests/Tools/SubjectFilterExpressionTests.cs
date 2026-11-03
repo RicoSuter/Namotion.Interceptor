@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -451,9 +452,10 @@ public class SubjectFilterExpressionTests
 
     private sealed class HidingPathProvider(string hiddenName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != hiddenName;
-
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
-            IsPropertyIncluded(property) ? property.Name : null;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != hiddenName ? property.Name : null;
+            return segment is not null;
+        }
     }
 }

@@ -12,7 +12,7 @@ public class McpServerConfiguration
     /// <summary>
     /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list, filter on,
     /// resolve and build paths only through the properties it effectively includes (see
-    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>).
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>).
     /// </summary>
     public required IPathProvider PathProvider { get; init; }
 
