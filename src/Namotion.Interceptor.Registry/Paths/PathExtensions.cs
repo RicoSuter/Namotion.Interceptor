@@ -409,28 +409,19 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Gets whether a path from <paramref name="property"/> up to <paramref name="rootSubject"/>, or to the absolute
-    /// top when it is null, passes only properties <paramref name="pathProvider"/> effectively includes (see
-    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>): the property itself and every property holding it,
-    /// an [InlinePaths] dictionary included. The path is searched as
-    /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> searches it:
-    /// with a root through any parent of a subject with several parents, without one through the first parent of each
-    /// subject.
+    /// Gets whether <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
+    /// finds a path from <paramref name="property"/> to <paramref name="rootSubject"/> through properties
+    /// <paramref name="pathProvider"/> effectively includes, without building the path string.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="pathProvider">The path provider.</param>
-    /// <param name="rootSubject">The root subject or null.</param>
-    /// <returns>
-    /// True when such a path exists; false when every path passes an excluded property, when a given root is not
-    /// reachable, or when the parent chain has a cycle.
-    /// </returns>
+    /// <param name="rootSubject">The root subject.</param>
+    /// <returns>True when such a path exists; otherwise, false.</returns>
     /// <remarks>
-    /// <c>TryGetPath</c> with the same provider and root returns null whenever this returns false. When this returns
-    /// true it returns the path, except that it also returns null when another included property of its subject has the
-    /// segment of an [InlinePaths] property the path would name, as the property itself or with a key that needs the
-    /// explicit form, or when the built text is empty.
+    /// When this returns true, <c>TryGetPath</c> can still return null for a path through an [InlinePaths] property
+    /// whose segment another property has.
     /// </remarks>
-    public static bool HasIncludedPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
+    public static bool HasPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject rootSubject)
     {
         if (!pathProvider.TryGetEffectivelyIncludedSegment(property, out var leafSegment))
         {
