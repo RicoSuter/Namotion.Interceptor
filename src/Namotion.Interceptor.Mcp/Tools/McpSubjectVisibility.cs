@@ -103,9 +103,9 @@ internal sealed class McpSubjectVisibility
         _policy is null || subject.TryGetRegisteredSubject() is { } registered && IsVisibleWithPathCheck(registered);
 
     /// <summary>
-    /// Whether the subject is visible, checking both conditions: it is the root, or it has a readable path from the root
-    /// through one of its parents and is not empty for the policy. Always true without a policy. The result is cached
-    /// for the call, in the cache <see cref="IsVisibleWithoutPathCheck"/> shares.
+    /// Whether the subject is visible: the root always is; any other subject needs a readable path from the root through
+    /// one of its parents and must not be empty for the policy. Always true without a policy. The result is cached for
+    /// the call, in the cache <see cref="IsVisibleWithoutPathCheck"/> shares.
     /// </summary>
     public bool IsVisibleWithPathCheck(RegisteredSubject subject)
     {

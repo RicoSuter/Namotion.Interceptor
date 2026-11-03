@@ -309,7 +309,7 @@ var config = new McpServerConfiguration
 
 ### Access Policy
 
-Two settings decide what a client may do. `IsReadOnly` is the mode of the whole server: when true, `set_property` is blocked, and custom tools provided via `IMcpToolProvider` can read it and apply the same convention to their own mutating operations. `AccessPolicy` decides per member, a property, an attribute or a method registered as a property, and per action. It is optional; without one every action is allowed. In short, a subject whose members the policy all denies to read is hidden from every property, collection and dictionary that holds it, as if it were missing, while the rules below define this precisely.
+Two settings decide what a client may do. `IsReadOnly` is the mode of the whole server: when true, `set_property` is blocked, and custom tools provided via `IMcpToolProvider` can read it and apply the same convention to their own mutating operations. `AccessPolicy` decides per member, a property, an attribute or a method registered as a property, and per action. It is optional; without one every action is allowed. In short, a subject other than the root whose properties the path provider includes, attributes aside, the policy all denies to read is hidden from every property, collection and dictionary that holds it, as if it were missing; the rules below define this precisely.
 
 ```csharp
 public sealed class MyAccessPolicy : IMcpAccessPolicy

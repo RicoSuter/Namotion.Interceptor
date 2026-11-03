@@ -65,7 +65,7 @@ public class VisibilityAccessTests
     }
 
     [Fact]
-    public void WhenNoPolicyIsSet_ThenEveryCallSharesOneVisibilityThatShowsEverySubject()
+    public void WhenNoPolicyIsSet_ThenEveryCallSharesOneVisibilityInWhichEverySubjectIsVisible()
     {
         // Arrange
         var context = CreateContext();
@@ -83,7 +83,7 @@ public class VisibilityAccessTests
     }
 
     [Fact]
-    public void WhenAskedForThePathProviderTwice_ThenTheVisibilityReturnsTheSameOne()
+    public void WhenAskedForTheVisibleSubjectsPathProviderTwice_ThenTheVisibilityReturnsTheSameOne()
     {
         // Arrange
         var context = CreateContext();

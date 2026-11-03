@@ -46,8 +46,8 @@ internal static class AgentMetadataAccess
     }
 
     /// <summary>
-    /// Gets why the metadata at <paramref name="path"/> of the storage is not shown by the tools, or for agents why an agent
-    /// may not set it, or null when it is shown or may be set. The target is resolved as the tools resolve a path, so that
+    /// Gets why the metadata at <paramref name="path"/> of the storage is not visible to the tools, or for agents why an agent
+    /// may not set it, or null when it is visible or may be set. The target is resolved as the tools resolve a path, so that
     /// a subject or property hidden from them is refused as a missing one; for agents, an agent and a subject that an
     /// agent holds through any parent are refused as well.
     /// </summary>
