@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
@@ -53,7 +52,7 @@ public class InlinePathsAccessTests
     }
 
     [Fact]
-    public async Task WhenAChildIsStoredAtTheNameOfAHiddenProperty_ThenItsPathIsWrittenAsForAnyOtherKey()
+    public async Task WhenAChildIsStoredAtTheNameOfAHiddenProperty_ThenItsPathIsBuiltAsForAnyOtherKey()
     {
         // Arrange
         var (root, folder) = CreateFolders();
@@ -95,6 +94,27 @@ public class InlinePathsAccessTests
 
         // Assert
         Assert.Equal("Readable", result.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task WhenTheOnlyOtherMemberWithTheSegmentOfAHiddenPropertyIsAnAttributeOfAHiddenProperty_ThenTheSegmentReadsAsADictionaryKey()
+    {
+        // Arrange
+        // The folder's Secret and the attribute Secret of its Name share a segment, and the policy hides Secret and
+        // the folder's Name, so neither is readable and the segment names the child at the key 'Secret'.
+        var (root, folder) = CreateFolders();
+        var context = ((IInterceptorSubject)root).Context;
+        folder.Children = new Dictionary<string, TestFolder> { ["Secret"] = new(context) { Name = "Named like the hidden property" } };
+        folder.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestFolder.Name))!
+            .AddAttribute<string>(nameof(TestFolder.Secret), _ => "Attribute");
+        var policy = new TestAccessPolicy((member, action) => action != McpAccessActions.Read ||
+            member.Name != nameof(TestFolder.Secret) && !(member.Parent.Subject == folder && member.Name == nameof(TestFolder.Name)));
+
+        // Act
+        var result = await McpToolCaller.CallAsync(root, CreateConfiguration(policy), "get_property", new { path = "Folder.Secret.Name" });
+
+        // Assert
+        Assert.Equal("Named like the hidden property", result.GetProperty("value").GetString());
     }
 
     [Fact]

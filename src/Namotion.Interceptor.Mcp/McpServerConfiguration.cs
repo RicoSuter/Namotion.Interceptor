@@ -11,11 +11,10 @@ namespace Namotion.Interceptor.Mcp;
 public class McpServerConfiguration
 {
     /// <summary>
-    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list, filter on,
-    /// resolve and build paths only through the properties it effectively includes (see
-    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>).
+    /// Property filtering and path resolution. The tools list, filter on, resolve and build paths only through the
+    /// properties it effectively includes (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>).
     /// </summary>
-    public required IPathProvider PathProvider { get; init; }
+    public required PathProviderBase PathProvider { get; init; }
 
     /// <summary>
     /// Subject-level JSON enrichment for query responses (e.g., $title, $icon, $type).
@@ -62,7 +61,7 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// Decides per member and action what the tools show and change, see "Access Policy" in the MCP documentation. A
+    /// Decides per member and action what the tools let a client read and change, see "Access Policy" in the MCP documentation. A
     /// member the policy does not allow to read reads as missing, and set_property refuses a member it does not allow
     /// to write. Null (the default) allows every action. Applies in addition to <see cref="IsReadOnly"/>.
     /// </summary>
@@ -77,9 +76,11 @@ public class McpServerConfiguration
 
     /// <summary>
     /// The path provider the tools list, select, filter and resolve through and build the paths they return with:
-    /// <see cref="PathProvider"/>, which must extend <see cref="PathProviderBase"/>, restricted to what
-    /// <see cref="AccessPolicy"/> allows to read.
+    /// <see cref="PathProvider"/> restricted to what <see cref="AccessPolicy"/> allows to read, or
+    /// <see cref="PathProvider"/> itself without a policy.
     /// </summary>
     // Racing first calls create equal providers, so whichever one is kept is correct.
-    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy);
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= AccessPolicy is { } policy
+        ? new McpAccessPathProvider(PathProvider, policy)
+        : PathProvider;
 }

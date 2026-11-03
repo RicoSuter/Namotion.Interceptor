@@ -44,6 +44,22 @@ public class WriteAccessTests
     }
 
     [Fact]
+    public async Task WhenThePolicyDeniesReadAndWrite_ThenSetPropertyAnswersAsForAMissingPath()
+    {
+        // Arrange
+        var room = CreateRoom();
+        var policy = new TestAccessPolicy((member, _) => member.Name != nameof(TestRoom.Temperature));
+        var configuration = CreateConfiguration(policy);
+
+        // Act
+        var result = await McpToolCaller.CallAsync(room, configuration, "set_property", new { path = "Temperature", value = 25.0 });
+
+        // Assert
+        Assert.Equal("Path not found: Temperature", result.GetProperty("error").GetString());
+        Assert.Equal(21.5m, room.Temperature);
+    }
+
+    [Fact]
     public async Task WhenThePolicyDeniesWrite_ThenGetPropertyAndBrowseDoNotReportThePropertyAsWritable()
     {
         // Arrange
@@ -52,11 +68,13 @@ public class WriteAccessTests
 
         // Act
         var property = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Device.IsOn" });
+        var writableProperty = await McpToolCaller.CallAsync(room, configuration, "get_property", new { path = "Device.DeviceName" });
         var browse = await McpToolCaller.CallAsync(room, configuration, "browse",
             new { format = "json", path = "Device", depth = 0, includeProperties = true });
 
         // Assert
         Assert.False(property.TryGetProperty("isWritable", out _));
+        Assert.True(writableProperty.GetProperty("isWritable").GetBoolean());
         var properties = browse.GetProperty("result").GetProperty("properties");
         Assert.False(properties.GetProperty("IsOn").TryGetProperty("isWritable", out _));
         Assert.True(properties.GetProperty("DeviceName").GetProperty("isWritable").GetBoolean());
@@ -93,6 +111,24 @@ public class WriteAccessTests
         Assert.True(canRead);
         Assert.True(canWrite);
         Assert.True(canDoAnything);
+    }
+
+    [Theory]
+    [InlineData("get_property")]
+    [InlineData("set_property")]
+    [InlineData("browse")]
+    [InlineData("search")]
+    public async Task WhenThePolicyThrows_ThenTheToolCallFails(string toolName)
+    {
+        // Arrange
+        var room = CreateRoom();
+        var configuration = CreateConfiguration(new TestAccessPolicy((_, _) => throw new InvalidOperationException("Policy failed.")));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            McpToolCaller.CallAsync(room, configuration, toolName, new { path = "Temperature", value = 25.0, format = "json", includeProperties = true }));
+        Assert.Equal("Policy failed.", exception.Message);
+        Assert.Equal(21.5m, room.Temperature);
     }
 
     [Fact]

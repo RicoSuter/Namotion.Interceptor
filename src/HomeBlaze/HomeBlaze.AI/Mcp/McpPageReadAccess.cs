@@ -28,7 +28,6 @@ internal sealed class McpPageReadAccess
     /// Creates the check of the access policy of <paramref name="configuration"/>; null without a policy, which reads
     /// every property.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The path provider of the configuration does not extend <see cref="PathProviderBase"/>.</exception>
     public static McpPageReadAccess? TryCreate(McpServerConfiguration configuration)
     {
         if (configuration.AccessPolicy is not { } accessPolicy)
@@ -36,8 +35,7 @@ internal sealed class McpPageReadAccess
             return null;
         }
 
-        var pathProvider = new MemberPathProvider(configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase."));
+        var pathProvider = new MemberPathProvider(configuration.PathProvider);
         return new McpPageReadAccess(new McpServerConfiguration { PathProvider = pathProvider, AccessPolicy = accessPolicy }, pathProvider);
     }
 

@@ -16,23 +16,13 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     private readonly PathProviderBase _inner;
     private readonly IMcpAccessPolicy _policy;
 
-    private McpAccessPathProvider(PathProviderBase inner, IMcpAccessPolicy policy)
+    /// <summary>
+    /// <paramref name="inner"/> restricted to what <paramref name="policy"/> allows to read.
+    /// </summary>
+    internal McpAccessPathProvider(PathProviderBase inner, IMcpAccessPolicy policy)
     {
         _inner = inner;
         _policy = policy;
-    }
-
-    /// <summary>
-    /// <paramref name="pathProvider"/> restricted to what <paramref name="policy"/> allows to read, or
-    /// <paramref name="pathProvider"/> itself without a policy.
-    /// </summary>
-    /// <exception cref="InvalidOperationException"><paramref name="pathProvider"/> does not extend <see cref="PathProviderBase"/>.</exception>
-    public static PathProviderBase Create(IPathProvider pathProvider, IMcpAccessPolicy? policy)
-    {
-        var basePathProvider = pathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
-
-        return policy is null ? basePathProvider : new McpAccessPathProvider(basePathProvider, policy);
     }
 
     /// <summary>
@@ -41,6 +31,9 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     /// </summary>
     public static bool IsReadable(IMcpAccessPolicy policy, RegisteredSubjectProperty member)
     {
+        // The registry's inclusion rule checks the owner of an attribute only for the member a lookup returns, so the
+        // segment lookup below needs the check itself: an attribute of a hidden property must not take a segment that
+        // a later member or the [InlinePaths] dictionary would answer.
         // Attributes can name each other in a cycle; a chain longer than the subject's properties is one.
         var remainingSteps = member.Parent.Properties.Length;
         var current = member;
@@ -108,7 +101,7 @@ internal sealed class McpAccessPathProvider : PathProviderBase
         }
 
         // As for a name that does not exist, the segment is a key of the [InlinePaths] dictionary, so a client cannot
-        // tell the hidden property from a missing one and the registry writes the key without the explicit form.
+        // tell the hidden property from a missing one and the registry builds the key without the explicit form.
         if (inlinePathsPropertyName is not null &&
             subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
             TryGetPropertySegment(inlinePathsProperty, out _))

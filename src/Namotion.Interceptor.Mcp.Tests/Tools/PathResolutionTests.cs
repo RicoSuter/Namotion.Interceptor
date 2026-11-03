@@ -1,8 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -160,15 +158,6 @@ public class PathResolutionTests
         // Assert
         var found = Assert.Single(result.GetProperty("results").EnumerateObject());
         Assert.Equal(nameof(TestAttributedRoom.Device), found.Name);
-    }
-
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
-    {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
-        {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
-        }
     }
 
     [Fact]

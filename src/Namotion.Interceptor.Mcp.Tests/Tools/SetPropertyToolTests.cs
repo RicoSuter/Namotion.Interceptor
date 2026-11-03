@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Mcp.Tests.Tools.Access;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -37,36 +35,6 @@ public class SetPropertyToolTests
         Assert.True(json.GetProperty("success").GetBoolean());
         Assert.Equal(21.5m, json.GetProperty("previousValue").GetDecimal());
         Assert.Equal(25.0m, room.Temperature);
-    }
-
-    [Fact]
-    public async Task WhenThePolicyDeniesWrite_ThenTheErrorIsReturnedAndTheValueIsUnchanged()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false,
-            AccessPolicy = new TestAccessPolicy((member, action) => action != McpAccessActions.Write || member.Name != "Temperature")
-        };
-        var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "set_property");
-
-        // Act
-        var refused = JsonSerializer.SerializeToElement(await tool.Handler(
-            JsonSerializer.SerializeToElement(new { path = "Temperature", value = 25.0 }), CancellationToken.None));
-        var allowed = JsonSerializer.SerializeToElement(await tool.Handler(
-            JsonSerializer.SerializeToElement(new { path = "Name", value = "Changed" }), CancellationToken.None));
-
-        // Assert
-        Assert.Equal("Property is not writable: Temperature. The access policy does not allow it.", refused.GetProperty("error").GetString());
-        Assert.Equal(21.5m, room.Temperature);
-        Assert.True(allowed.GetProperty("success").GetBoolean());
-        Assert.Equal("Changed", room.Name);
     }
 
     [Fact]

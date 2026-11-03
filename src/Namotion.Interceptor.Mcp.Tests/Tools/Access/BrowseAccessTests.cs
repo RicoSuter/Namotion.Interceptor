@@ -2,17 +2,12 @@ using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 public class BrowseAccessTests
 {
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
     private static TestRoom CreateRoom()
     {
         var context = CreateContext();
@@ -93,7 +88,7 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenChildrenAreCollapsed_ThenTheCountOnlyCountsShownChildren()
+    public async Task WhenChildrenAreCollapsed_ThenTheCountOnlyCountsReadableChildren()
     {
         // Arrange
         var context = CreateContext();
@@ -143,7 +138,7 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenTheTreeIsTruncated_ThenTheOmittedCountOnlyCountsShownChildren()
+    public async Task WhenTheTreeIsTruncated_ThenTheOmittedCountOnlyCountsReadableChildren()
     {
         // Arrange
         var context = CreateContext();
@@ -173,15 +168,10 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenOneParentOfASubjectIsHidden_ThenBrowseShowsItUnderTheReadableParentWithAPathThroughIt()
+    public async Task WhenOneParentOfASubjectIsHidden_ThenBrowseListsItUnderTheReadableParentWithAPathThroughIt()
     {
         // Arrange
-        // The device got Private first, so a path through Private would be written without a policy.
-        var context = CreateContext();
-        var house = new TestHouse(context) { Address = "Main Street" };
-        var device = new TestDevice(context) { DeviceName = "Camera" };
-        house.Private = device;
-        house.Public = device;
+        var (house, _) = CreateHouseWithSharedDevice();
 
         // Act
         var result = await BrowseAsync(house, TestAccessPolicy.DenyRead(nameof(TestHouse.Private)),
@@ -218,7 +208,7 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenTheRootHasNoReadableProperty_ThenBrowseStillShowsTheRoot()
+    public async Task WhenTheRootHasNoReadableProperty_ThenBrowseStillListsTheRoot()
     {
         // Arrange
         var room = CreateRoom();
@@ -260,12 +250,12 @@ public class BrowseAccessTests
         // Act
         var throughHiddenPath = hiddenPath.TryGetReadableSubject(root, "Device");
         var withoutReadableMember = noReadableMember.TryGetReadableSubject(root, "Device");
-        var shown = readable.TryGetReadableSubject(root, "Device");
+        var readableSubject = readable.TryGetReadableSubject(root, "Device");
 
         // Assert
         Assert.Null(throughHiddenPath);
         Assert.Null(withoutReadableMember);
-        Assert.Same(room.Device, shown!.Subject);
+        Assert.Same(room.Device, readableSubject!.Subject);
     }
 
     [Fact]
@@ -299,25 +289,25 @@ public class BrowseAccessTests
             action != McpAccessActions.Read || member.Parent.Subject != hidden));
 
         // Act
-        var shown = configuration.TryGetReadableSubject(root, "Devices[a]");
+        var readableSubject = configuration.TryGetReadableSubject(root, "Devices[a]");
         var withoutReadableMember = configuration.TryGetReadableSubject(root, "Devices[b]");
         var missing = configuration.TryGetReadableSubject(root, "Devices[c]");
 
         // Assert
-        Assert.Same(group.Devices["a"], shown!.Subject);
+        Assert.Same(group.Devices["a"], readableSubject!.Subject);
         Assert.Null(withoutReadableMember);
         Assert.Null(missing);
     }
 
     [Fact]
-    public async Task WhenHiddenItemsPrecedeAShownOneInACollection_ThenTheShownOneKeepsItsPosition()
+    public async Task WhenHiddenItemsPrecedeAReadableOneInACollection_ThenTheReadableOneKeepsItsPosition()
     {
         // Arrange
         // Paths keep the collection position so that they resolve back, so it counts the hidden items before.
         var context = CreateContext();
         var list = new TestDeviceList(context);
         var hidden = new TestDevice[] { new(context) { DeviceName = "Hidden1" }, new(context) { DeviceName = "Hidden2" } };
-        list.Devices = [hidden[0], hidden[1], new TestDevice(context) { DeviceName = "Shown" }];
+        list.Devices = [hidden[0], hidden[1], new TestDevice(context) { DeviceName = "Readable" }];
         var policy = new TestAccessPolicy((member, action) =>
             action != McpAccessActions.Read || !hidden.Contains(member.Parent.Subject));
 

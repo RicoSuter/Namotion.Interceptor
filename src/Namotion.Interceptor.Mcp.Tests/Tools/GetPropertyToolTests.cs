@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Mcp.Tests.Tools.Access;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -63,34 +61,6 @@ public class GetPropertyToolTests
 
         // Assert
         Assert.True(json.TryGetProperty("error", out _));
-    }
-
-    [Fact]
-    public async Task WhenThePolicyDeniesWrite_ThenIsWritableIsOmitted()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false,
-            AccessPolicy = TestAccessPolicy.DenyWrite("Temperature")
-        };
-        var tool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "get_property");
-
-        // Act
-        var refused = JsonSerializer.SerializeToElement(await tool.Handler(
-            JsonSerializer.SerializeToElement(new { path = "Temperature" }), CancellationToken.None));
-        var allowed = JsonSerializer.SerializeToElement(await tool.Handler(
-            JsonSerializer.SerializeToElement(new { path = "Name" }), CancellationToken.None));
-
-        // Assert
-        Assert.False(refused.TryGetProperty("isWritable", out _));
-        Assert.True(allowed.GetProperty("isWritable").GetBoolean());
     }
 
     [Fact]

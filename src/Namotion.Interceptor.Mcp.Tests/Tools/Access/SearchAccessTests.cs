@@ -1,27 +1,18 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 public class SearchAccessTests
 {
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
     private static Task<JsonElement> SearchAsync(IInterceptorSubject root, IMcpAccessPolicy? policy, object input) =>
         McpToolCaller.CallAsync(root, new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
             AccessPolicy = policy
         }, "search", input);
-
-    private static string[] GetResultPaths(JsonElement result) =>
-        result.GetProperty("results").EnumerateObject().Select(entry => entry.Name).ToArray();
 
     // A device two levels below the root: Items[hidden] holds a group whose Devices[x] holds the device. The
     // property holding the device is readable; the root's Items is not.
@@ -47,12 +38,12 @@ public class SearchAccessTests
         var (root, _) = CreateNestedDevice();
 
         // Act
-        var shown = await SearchAsync(root, policy: null, new { format = "json", types = new[] { nameof(TestDevice) } });
+        var readable = await SearchAsync(root, policy: null, new { format = "json", types = new[] { nameof(TestDevice) } });
         var hidden = await SearchAsync(root, DenyReadOnTheItemsOf(root), new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.Single(GetResultPaths(shown));
-        Assert.Empty(GetResultPaths(hidden));
+        Assert.Single(McpToolCaller.GetResultPaths(readable));
+        Assert.Empty(McpToolCaller.GetResultPaths(hidden));
     }
 
     [Fact]
@@ -68,26 +59,21 @@ public class SearchAccessTests
             new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.Empty(GetResultPaths(result));
+        Assert.Empty(McpToolCaller.GetResultPaths(result));
     }
 
     [Fact]
     public async Task WhenOneParentOfASubjectIsHidden_ThenSearchReturnsItWithAPathThroughTheReadableParent()
     {
         // Arrange
-        // The device got Private first, so a path through Private would be written without a policy.
-        var context = CreateContext();
-        var house = new TestHouse(context) { Address = "Main Street" };
-        var device = new TestDevice(context) { DeviceName = "Camera" };
-        house.Private = device;
-        house.Public = device;
+        var (house, _) = CreateHouseWithSharedDevice();
 
         // Act
         var result = await SearchAsync(house, TestAccessPolicy.DenyRead(nameof(TestHouse.Private)),
             new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.Equal([nameof(TestHouse.Public)], GetResultPaths(result));
+        Assert.Equal([nameof(TestHouse.Public)], McpToolCaller.GetResultPaths(result));
         Assert.DoesNotContain("Private", result.GetRawText());
     }
 
@@ -108,7 +94,7 @@ public class SearchAccessTests
             new { format = "json", where = "IsOn == true" });
 
         // Assert
-        Assert.Empty(GetResultPaths(result));
+        Assert.Empty(McpToolCaller.GetResultPaths(result));
         Assert.Contains("No subject in scope has a property named 'IsOn'.",
             result.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()));
     }
@@ -150,7 +136,7 @@ public class SearchAccessTests
     public async Task WhenASubjectIsMovedWhileSearchChecksIt_ThenItsKeyAndItsPathAreTheSame()
     {
         // Arrange
-        // The policy moves A from the root's A to the root's B while it is asked about S, after S's path is written.
+        // The policy moves A from the root's A to the root's B while it is asked about S, after S's path is built.
         var context = CreateContext();
         var root = new TestNode(context) { Name = "Root" };
         var a = new TestNode(context) { Name = "A" };
