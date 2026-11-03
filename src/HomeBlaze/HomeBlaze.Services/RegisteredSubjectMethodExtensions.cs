@@ -26,6 +26,27 @@ public static class RegisteredSubjectMethodExtensions
     }
 
     /// <summary>
+    /// Gets the delete operation of the subject that is offered to the target: the operation whose purpose is
+    /// <see cref="OperationPurpose.Delete"/>, the one with the lowest position when there are several, or null when it has
+    /// none.
+    /// </summary>
+    public static MethodMetadata? GetDeleteOperation(this RegisteredSubject subject, ExclusionTarget target)
+    {
+        MethodMetadata? deleteOperation = null;
+        foreach (var property in subject.Properties)
+        {
+            if (property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, Purpose: OperationPurpose.Delete } method &&
+                !method.IsExcludedFrom(target) &&
+                (deleteOperation is null || method.Position < deleteOperation.Position))
+            {
+                deleteOperation = method;
+            }
+        }
+
+        return deleteOperation;
+    }
+
+    /// <summary>
     /// Gets whether the operation or query that the method property holds is enabled: the value of its
     /// <see cref="KnownAttributes.IsEnabled"/> attribute, true without one.
     /// </summary>
