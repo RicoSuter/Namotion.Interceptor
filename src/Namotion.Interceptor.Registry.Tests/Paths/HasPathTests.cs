@@ -6,7 +6,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Registry.Tests.Paths;
 
-public class IncludedPathTests
+public class HasPathTests
 {
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create()
@@ -29,17 +29,17 @@ public class IncludedPathTests
     }
 
     [Fact]
-    public void WhenEveryPropertyOnThePathIsIncluded_ThenItHasAnIncludedPath()
+    public void WhenEveryPropertyOnThePathIsIncluded_ThenItHasAPath()
     {
         // Arrange
         var (root, property) = CreateChain();
         var pathProvider = new ExcludingPathProvider(nameof(Person.LastName));
 
         // Act
-        var hasIncludedPath = property.HasIncludedPath(pathProvider, root);
+        var hasPath = property.HasPath(pathProvider, root);
 
         // Assert
-        Assert.True(hasIncludedPath);
+        Assert.True(hasPath);
         Assert.Equal("Father.Mother.FirstName", property.TryGetPath(pathProvider, root));
     }
 
@@ -47,22 +47,22 @@ public class IncludedPathTests
     [InlineData(nameof(Person.Father))]
     [InlineData(nameof(Person.Mother))]
     [InlineData(nameof(Person.FirstName))]
-    public void WhenAPropertyOnThePathIsExcluded_ThenItHasNoIncludedPath(string excludedPropertyName)
+    public void WhenAPropertyOnThePathIsExcluded_ThenItHasNoPath(string excludedPropertyName)
     {
         // Arrange
         var (root, property) = CreateChain();
         var pathProvider = new ExcludingPathProvider(excludedPropertyName);
 
         // Act
-        var hasIncludedPath = property.HasIncludedPath(pathProvider, root);
+        var hasPath = property.HasPath(pathProvider, root);
 
         // Assert
-        Assert.False(hasIncludedPath);
+        Assert.False(hasPath);
         Assert.Null(property.TryGetPath(pathProvider, root));
     }
 
     [Fact]
-    public void WhenTheInlinePathsDictionaryOnThePathIsExcluded_ThenItHasNoIncludedPath()
+    public void WhenTheInlinePathsDictionaryOnThePathIsExcluded_ThenItHasNoPath()
     {
         // Arrange
         var context = CreateContext();
@@ -72,17 +72,17 @@ public class IncludedPathTests
         var property = GetProperty(child, nameof(TestInlineContainer.Name));
 
         // Act
-        var hasIncludedPath = property.HasIncludedPath(new ExcludingPathProvider(nameof(TestInlineContainer.Children)), root);
-        var hasIncludedPathWhenIncluded = property.HasIncludedPath(DefaultPathProvider.Instance, root);
+        var hasPath = property.HasPath(new ExcludingPathProvider(nameof(TestInlineContainer.Children)), root);
+        var hasPathWhenIncluded = property.HasPath(DefaultPathProvider.Instance, root);
 
         // Assert
-        Assert.False(hasIncludedPath);
-        Assert.True(hasIncludedPathWhenIncluded);
+        Assert.False(hasPath);
+        Assert.True(hasPathWhenIncluded);
         Assert.Equal("a.Name", property.TryGetPath(DefaultPathProvider.Instance, root));
     }
 
     [Fact]
-    public void WhenAnotherParentReachesTheRootThroughIncludedProperties_ThenItHasAnIncludedPath()
+    public void WhenAnotherParentReachesTheRootThroughIncludedProperties_ThenItHasAPath()
     {
         // Arrange
         var context = CreateContext();
@@ -94,29 +94,29 @@ public class IncludedPathTests
         var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
 
         // Act
-        var hasIncludedPath = property.HasIncludedPath(pathProvider, root);
+        var hasPath = property.HasPath(pathProvider, root);
 
         // Assert
-        Assert.True(hasIncludedPath);
+        Assert.True(hasPath);
         Assert.Equal("Mother.FirstName", property.TryGetPath(pathProvider, root));
     }
 
     [Fact]
-    public void WhenTheRootIsNotReachable_ThenItHasNoIncludedPath()
+    public void WhenTheRootIsNotReachable_ThenItHasNoPath()
     {
         // Arrange
         var (_, property) = CreateChain();
         var otherRoot = new Person(CreateContext()) { FirstName = "Other" };
 
         // Act
-        var hasIncludedPath = property.HasIncludedPath(DefaultPathProvider.Instance, otherRoot);
+        var hasPath = property.HasPath(DefaultPathProvider.Instance, otherRoot);
 
         // Assert
-        Assert.False(hasIncludedPath);
+        Assert.False(hasPath);
     }
 
     [Fact]
-    public void WhenTheParentChainHasACycle_ThenItHasNoIncludedPath()
+    public void WhenTheParentChainHasACycle_ThenItHasNoPath()
     {
         // Arrange
         var context = CreateContext();
@@ -124,29 +124,24 @@ public class IncludedPathTests
         var b = new Person(context) { FirstName = "B" };
         a.Father = b;
         b.Father = a;
+        var root = new Person(context) { FirstName = "Root" };
         var property = GetProperty(a, nameof(Person.FirstName));
 
         // Act
-        var hasIncludedPath = property.HasIncludedPath(DefaultPathProvider.Instance, null);
+        var hasPath = property.HasPath(DefaultPathProvider.Instance, root);
 
         // Assert
-        Assert.False(hasIncludedPath);
+        Assert.False(hasPath);
     }
 
     [Theory]
-    [InlineData(null, null)]
-    [InlineData(nameof(Person.Father), null)]
-    [InlineData(nameof(Person.Mother), null)]
-    [InlineData(nameof(Person.Children), null)]
-    [InlineData(nameof(Person.FirstName), null)]
-    [InlineData(nameof(Person.FirstName_MaxLength), null)]
-    [InlineData(null, "root")]
-    [InlineData(nameof(Person.Father), "root")]
-    [InlineData(nameof(Person.Mother), "root")]
-    [InlineData(nameof(Person.Children), "root")]
-    [InlineData(nameof(Person.FirstName), "root")]
-    [InlineData(nameof(Person.FirstName_MaxLength), "root")]
-    public void WhenAPathIsBuiltWithTheSameProviderAndRoot_ThenItExistsExactlyWhenThereIsAnIncludedPath(string? excludedPropertyName, string? root)
+    [InlineData(null)]
+    [InlineData(nameof(Person.Father))]
+    [InlineData(nameof(Person.Mother))]
+    [InlineData(nameof(Person.Children))]
+    [InlineData(nameof(Person.FirstName))]
+    [InlineData(nameof(Person.FirstName_MaxLength))]
+    public void WhenAPathIsBuiltWithTheSameProviderAndRoot_ThenItExistsExactlyWhenItHasAPath(string? excludedPropertyName)
     {
         // Arrange
         // The shared subject is held through Father.Mother and Mother.Children, so a root search has two parents to
@@ -162,7 +157,6 @@ public class IncludedPathTests
         father.Mother = shared;
         mother.Children = [new Person(context) { FirstName = "Child" }, shared];
         outside.Father = new Person(context) { FirstName = "OutsideFather" };
-        var rootSubject = root is null ? null : rootPerson;
         var pathProvider = new ExcludingPathProvider(excludedPropertyName ?? "");
         var properties = new List<RegisteredSubjectProperty>();
         foreach (var subject in new IInterceptorSubject[] { rootPerson, father, mother, shared, outside, outside.Father })
@@ -174,8 +168,8 @@ public class IncludedPathTests
         foreach (var property in properties)
         {
             Assert.Equal(
-                property.TryGetPath(pathProvider, rootSubject) is not null,
-                property.HasIncludedPath(pathProvider, rootSubject));
+                property.TryGetPath(pathProvider, rootPerson) is not null,
+                property.HasPath(pathProvider, rootPerson));
         }
     }
 
