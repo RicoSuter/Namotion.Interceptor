@@ -122,10 +122,31 @@ public class InlinePathKeyTests
         Assert.Same(child, resolved?.Property.Subject);
     }
 
-    [Theory]
-    [InlineData("CNC01", "CNC01.name")]
-    [InlineData("a.b", null)]
-    public void WhenInlinePropertySegmentIsShadowed_ThenKeyNeedingExplicitFormHasNoPath(string key, string? expectedPath)
+    [Fact]
+    public void WhenInlinePropertySegmentIsShadowed_ThenBareKeyRoundTrips()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestShadowedInlineContainer(context) { Name = "child", Label = "label" };
+        var root = new TestShadowedInlineContainer(context)
+        {
+            Name = "root",
+            Label = "label",
+            Children = new Dictionary<string, TestShadowedInlineContainer> { ["CNC01"] = child }
+        };
+
+        // Act
+        var path = GetNameProperty(child).TryGetPath(pathProvider, null);
+        var resolved = pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
+
+        // Assert
+        Assert.Equal("CNC01.name", path);
+        Assert.Same(GetNameProperty(child), resolved?.Property);
+    }
+
+    [Fact]
+    public void WhenInlinePropertySegmentIsShadowed_ThenKeyNeedingExplicitFormHasNoPath()
     {
         // Arrange
         var context = CreateContext();
@@ -135,14 +156,14 @@ public class InlinePathKeyTests
         {
             Name = "root",
             Label = "label",
-            Children = new Dictionary<string, TestShadowedInlineContainer> { [key] = child }
+            Children = new Dictionary<string, TestShadowedInlineContainer> { ["a.b"] = child }
         };
 
         // Act
         var path = GetNameProperty(child).TryGetPath(pathProvider, null);
 
         // Assert
-        Assert.Equal(expectedPath, path);
+        Assert.Null(path);
     }
 
     [Fact]
@@ -164,10 +185,8 @@ public class InlinePathKeyTests
         Assert.Null(resolved?.Index);
     }
 
-    [Theory]
-    [InlineData("CNC01", "CNC01.name")]
-    [InlineData("a.b", null)]
-    public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenKeyNeedingExplicitFormHasNoPath(string key, string? expectedPath)
+    [Fact]
+    public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenBareKeyRoundTrips()
     {
         // Arrange
         var context = CreateContext();
@@ -177,15 +196,36 @@ public class InlinePathKeyTests
         {
             Name = "root",
             Label = "label",
-            Children = new Dictionary<string, TestLateShadowedInlineContainer> { [key] = child }
+            Children = new Dictionary<string, TestLateShadowedInlineContainer> { ["CNC01"] = child }
         };
 
         // Act
         var path = GetNameProperty(child).TryGetPath(pathProvider, null);
-        var resolved = path is null ? null : pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path);
+        var resolved = pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
 
         // Assert
-        Assert.Equal(expectedPath, path);
-        Assert.True(path is null || resolved?.Property.Subject == child);
+        Assert.Equal("CNC01.name", path);
+        Assert.Same(GetNameProperty(child), resolved?.Property);
+    }
+
+    [Fact]
+    public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenKeyNeedingExplicitFormHasNoPath()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestLateShadowedInlineContainer(context) { Name = "child", Label = "label" };
+        _ = new TestLateShadowedInlineContainer(context)
+        {
+            Name = "root",
+            Label = "label",
+            Children = new Dictionary<string, TestLateShadowedInlineContainer> { ["a.b"] = child }
+        };
+
+        // Act
+        var path = GetNameProperty(child).TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Null(path);
     }
 }
