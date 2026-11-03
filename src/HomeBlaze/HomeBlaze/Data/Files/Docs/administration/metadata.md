@@ -225,7 +225,7 @@ Agents read metadata with the MCP tools. `browse` and `search` show the metadata
 | Method | On | Description |
 |--------|----|-------------|
 | `SetMetadata` | A storage, such as the root `/` | Merges `values`, a JSON object, into the metadata of the subject at `path`, or of its property `property`. A key with a value is set, replacing a nested value as a whole, a key with `null` is removed, and every other key stays |
-| `GetOrder` | A folder or a storage | Returns the names of the children in the order they are shown. The names include children that are hidden from agents |
+| `GetOrder` | A folder or a storage | Returns the names of the children in the order they are shown. Through the MCP tools, the names leave out the children that the tools do not list |
 | `SetOrder` | A folder or a storage | Puts the given `names` first, in that order, then the other children in the order they are shown. A name that is not a child, or that is given twice, is refused |
 | `SearchMetadata` | A storage | Returns the subjects and properties whose metadata matches every filter that is given, see below |
 
