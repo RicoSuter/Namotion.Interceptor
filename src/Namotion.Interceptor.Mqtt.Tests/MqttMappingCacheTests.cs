@@ -206,7 +206,7 @@ public class MqttMappingCacheTests
     [Fact]
     public async Task WhenLookupInsertsWhileSubjectIsDetaching_ThenTheServerPathCacheDoesNotRetainIt()
     {
-        // Arrange: the server is never started, so its own eviction scan is not subscribed and
+        // Arrange: the server is never started, so its own detach cleanup is not subscribed and
         // the insert-time guard is the only thing that can drop the entry again.
         var mapper = new CountingMapper(CreateMapper());
         var subject = CreateRootSubject();
@@ -231,7 +231,7 @@ public class MqttMappingCacheTests
     [Fact]
     public async Task WhenLookupInsertsWhileSubjectIsDetaching_ThenTheServerTopicCacheDoesNotRetainIt()
     {
-        // Arrange: the server is never started, so its own eviction scan is not subscribed and
+        // Arrange: the server is never started, so its own detach cleanup is not subscribed and
         // the insert-time guard is the only thing that can drop the entry again.
         var subject = CreateRootSubject();
         await using var server = CreateServer(subject, CreateMapper());
@@ -955,7 +955,7 @@ public class MqttMappingCacheTests
     /// <summary>
     /// Attaches a child, then detaches it while <paramref name="insert"/> runs from a SubjectDetaching
     /// subscriber added after the connector's own. That is the deterministic stand-in for a publish or
-    /// an inbound message whose lookup lands between the connector's eviction scan and the registry
+    /// an inbound message whose lookup lands between the connector's detach cleanup and the registry
     /// deregistration that follows it. Returns the child's now stale registration together with what
     /// the insert observed, which proves the registry was still intact at that point.
     /// </summary>
