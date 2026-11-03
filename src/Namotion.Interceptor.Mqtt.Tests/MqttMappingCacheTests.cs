@@ -158,6 +158,27 @@ public class MqttMappingCacheTests
     }
 
     [Fact]
+    public async Task WhenASubjectIsDetached_ThenTheClientCachesHoldNoEntryOfIt()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        await using var client = CreateClient(subject, CreateMapper());
+        subject.Child = new MqttCacheTestChild();
+        var property = subject.Child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        client.TryGetTopicForProperty(property.Reference, property);
+        await client.TryGetPropertyForTopicAsync("child/value");
+        var cachedBeforeDetach = client.HasCachedTopic(property.Reference) && client.HasCachedProperty("child/value");
+
+        // Act
+        subject.Child = null;
+
+        // Assert
+        Assert.True(cachedBeforeDetach);
+        Assert.False(client.HasCachedTopic(property.Reference));
+        Assert.False(client.HasCachedProperty("child/value"));
+    }
+
+    [Fact]
     public async Task WhenLookupInsertsWhileSubjectIsDetaching_ThenTheClientPropertyCacheDoesNotRetainIt()
     {
         // Arrange

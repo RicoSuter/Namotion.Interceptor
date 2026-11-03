@@ -558,7 +558,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     /// <summary>
     /// Whether a cache entry for a property of <paramref name="subject"/> may stay. The reference count
-    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the eviction scan runs, and the registry
+    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the caches are cleared, and the registry
     /// deregisters only after that. Only the count catches a lookup that inserts in between. The connector root is
     /// exempt: it is anchored to the context rather than to a property, so its count is zero for its whole life.
     /// </summary>
@@ -810,24 +810,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
-        // TODO(perf): O(n) scan over all cached entries per detached subject.
-        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
-        // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
-        foreach (var kvp in _propertyToTopic)
-        {
-            if (kvp.Key.Subject == change.Subject)
-            {
-                _propertyToTopic.TryRemove(kvp.Key, out _);
-            }
-        }
-
-        foreach (var kvp in _pathToProperty)
-        {
-            if (kvp.Value.Property.Subject == change.Subject)
-            {
-                _pathToProperty.TryRemove(kvp.Key, out _);
-            }
-        }
+        // Every detach raises the registry's structure version, so every entry is stale anyway. Clearing lets the
+        // detached subject be collected without an O(n) scan under the lifecycle lock.
+        _propertyToTopic.Clear();
+        _pathToProperty.Clear();
     }
 
     /// <inheritdoc />
