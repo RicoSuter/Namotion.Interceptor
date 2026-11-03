@@ -151,7 +151,7 @@ else
                 .Subscribe(
                     onNext: change =>
                     {
-                        if (change.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() == true)
+                        if (change.Property.TryGetRegisteredProperty()?.IsEditableConfigurationProperty() == true)
                         {
                             _externalChangeDetected = true;
                             InvokeAsync(StateHasChanged);

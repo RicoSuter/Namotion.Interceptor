@@ -1,4 +1,5 @@
 using HomeBlaze.Services;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Authorization.Internal;
 
@@ -11,6 +12,8 @@ internal static class RoleEdits
 {
     public const string DetachedMessage = "The role is not part of an Authorization subject. It may have been deleted, or its file reloaded.";
 
+    public const string DetachedAuthorizationMessage = "The Authorization subject is not part of the graph. It may have been deleted.";
+
     public static async Task AddAsync(
         Authorization authorization, string name, AuthorizationService authorizationService, RootManager rootManager)
     {
@@ -21,6 +24,11 @@ internal static class RoleEdits
         var roleName = name.Trim();
         lock (AuthorizationEditLock.Instance)
         {
+            if (authorization.TryGetRegisteredSubject() is not { IsAttached: true })
+            {
+                throw new InvalidOperationException(DetachedAuthorizationMessage);
+            }
+
             var roles = authorization.Roles;
             ThrowIfInvalid(roleName, roles, except: null);
             var changed = CopyRoles(roles, except: null);
@@ -45,11 +53,12 @@ internal static class RoleEdits
         lock (AuthorizationEditLock.Instance)
         {
             (authorization, var oldName, var roles) = GetHolder(role);
-            ThrowIfInvalid(newName, roles, except: role);
             if (string.Equals(oldName, newName, StringComparison.Ordinal))
             {
                 return;
             }
+
+            ThrowIfInvalid(newName, roles, except: role);
 
             var kept = CopyRoles(roles, except: role);
             var renamed = new Dictionary<string, Role>(kept, StringComparer.OrdinalIgnoreCase) { [newName] = role };
@@ -134,7 +143,7 @@ internal static class RoleEdits
         }
 
         var roles = authorization.Roles;
-        if (!roles.TryGetValue(name, out var heldRole) || !ReferenceEquals(heldRole, role))
+        if (roles is null || !roles.TryGetValue(name, out var heldRole) || !ReferenceEquals(heldRole, role))
         {
             throw new InvalidOperationException(DetachedMessage);
         }
@@ -146,7 +155,17 @@ internal static class RoleEdits
     // also when nothing was written. The owner is the Authorization, as a deleted role has no parents to find a writer by.
     private static async Task PersistAsync(Authorization authorization, RootManager rootManager, string change)
     {
-        var isWritten = await rootManager.GetConfigurationWriter(authorization).WriteConfigurationAsync(authorization, CancellationToken.None);
+        bool isWritten;
+        try
+        {
+            isWritten = await rootManager.GetConfigurationWriter(authorization).WriteConfigurationAsync(authorization, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"{change}, but the configuration could not be saved ({exception.Message}) and will be lost on restart.", exception);
+        }
+
         await authorization.ApplyConfigurationAsync(CancellationToken.None);
         if (!isWritten)
         {

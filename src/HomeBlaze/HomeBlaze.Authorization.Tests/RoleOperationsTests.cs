@@ -15,6 +15,7 @@ namespace HomeBlaze.Authorization.Tests;
 public sealed class RoleOperationsTests : IDisposable
 {
     private const string DetachedMessage = "The role is not part of an Authorization subject. It may have been deleted, or its file reloaded.";
+    private const string DetachedAuthorizationMessage = "The Authorization subject is not part of the graph. It may have been deleted.";
 
     private readonly IInterceptorSubjectContext _context = TestContext.Create();
     private readonly ServiceProvider _serializerServices = new ServiceCollection().BuildServiceProvider();
@@ -111,14 +112,35 @@ public sealed class RoleOperationsTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheWriteFails_ThenItsErrorIsTheErrorOfTheOperation()
+    public async Task WhenTheWriteFails_ThenAddingThrowsWithItsErrorAndTheRoleStaysAdded()
     {
         // Arrange
-        _writer.WriteException = new IOException("The disk is full.");
+        var writeException = new IOException("The disk is full.");
+        _writer.WriteException = writeException;
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<IOException>(() => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
-        Assert.Equal("The disk is full.", exception.Message);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
+        Assert.Equal(
+            "The role 'Pantry' was added, but the configuration could not be saved (The disk is full.) and will be lost on restart.",
+            exception.Message);
+        Assert.Same(writeException, exception.InnerException);
+        Assert.True(_authorization.Roles.ContainsKey("Pantry"));
+    }
+
+    [Fact]
+    public async Task WhenTheAuthorizationIsNotInTheGraph_ThenAddingThrowsAndChangesAndWritesNothing()
+    {
+        // Arrange
+        var previousRoles = _authorization.Roles;
+        _writer.Children = new Dictionary<string, IInterceptorSubject> { ["Device"] = _writer.Children["Device"] };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _authorization.AddRoleAsync("Pantry", _service, _rootManager));
+        Assert.Equal(DetachedAuthorizationMessage, exception.Message);
+        Assert.Same(previousRoles, _authorization.Roles);
+        Assert.Empty(_writer.Writes);
     }
 
     [Fact]
@@ -239,6 +261,51 @@ public sealed class RoleOperationsTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheNameIsUnchangedAndAnotherRoleHasItInAnotherCase_ThenRenamingAssignsAndWritesNothing()
+    {
+        // Arrange
+        _authorization.Roles = new Dictionary<string, Role>(StringComparer.Ordinal) { ["Kitchen"] = new Role(), ["KITCHEN"] = new Role() };
+        var previousRoles = _authorization.Roles;
+
+        // Act
+        await _authorization.Roles["Kitchen"].RenameAsync("Kitchen", _service, _rootManager);
+
+        // Assert
+        Assert.Same(previousRoles, _authorization.Roles);
+        Assert.Empty(_writer.Writes);
+    }
+
+    [Fact]
+    public async Task WhenTheWriterWritesNothing_ThenRenamingThrowsAndTheRoleStaysRenamed()
+    {
+        // Arrange
+        var kitchen = _authorization.Roles["Kitchen"];
+        _writer.IsWriting = false;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("Pantry", _service, _rootManager));
+        Assert.Equal("The role was renamed to 'Pantry', but the configuration was not saved and will be lost on restart.", exception.Message);
+        Assert.Same(kitchen, _authorization.Roles["Pantry"]);
+    }
+
+    [Fact]
+    public async Task WhenTheWriteFails_ThenRenamingThrowsWithItsErrorAndTheRoleStaysRenamed()
+    {
+        // Arrange
+        var kitchen = _authorization.Roles["Kitchen"];
+        var writeException = new IOException("The disk is full.");
+        _writer.WriteException = writeException;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.RenameAsync("Pantry", _service, _rootManager));
+        Assert.Equal(
+            "The role was renamed to 'Pantry', but the configuration could not be saved (The disk is full.) and will be lost on restart.",
+            exception.Message);
+        Assert.Same(writeException, exception.InnerException);
+        Assert.Same(kitchen, _authorization.Roles["Pantry"]);
+    }
+
+    [Fact]
     public async Task WhenARoleIsRenamed_ThenBothAssignmentsOfTheRolesAreMadeUnderTheEditLock()
     {
         // Arrange
@@ -295,6 +362,36 @@ public sealed class RoleOperationsTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheWriterWritesNothing_ThenDeletingThrowsAndTheRoleStaysDeleted()
+    {
+        // Arrange
+        _writer.IsWriting = false;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _authorization.Roles["Garden"].DeleteAsync(_service, _rootManager));
+        Assert.Equal("The role 'Garden' was deleted, but the configuration was not saved and will be lost on restart.", exception.Message);
+        Assert.Equal(["Kitchen"], _authorization.Roles.Keys);
+    }
+
+    [Fact]
+    public async Task WhenTheWriteFails_ThenDeletingThrowsWithItsErrorAndTheRoleStaysDeleted()
+    {
+        // Arrange
+        var writeException = new IOException("The disk is full.");
+        _writer.WriteException = writeException;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _authorization.Roles["Garden"].DeleteAsync(_service, _rootManager));
+        Assert.Equal(
+            "The role 'Garden' was deleted, but the configuration could not be saved (The disk is full.) and will be lost on restart.",
+            exception.Message);
+        Assert.Same(writeException, exception.InnerException);
+        Assert.Equal(["Kitchen"], _authorization.Roles.Keys);
+    }
+
+    [Fact]
     public async Task WhenARoleThatAgentsNameIsDeleted_ThenTheirPolicyReportsItAsUnknown()
     {
         // Act
@@ -307,7 +404,7 @@ public sealed class RoleOperationsTests : IDisposable
     }
 
     [Fact]
-    public void WhenTheOperationsAreRegistered_ThenTheyAreNamedWithoutAsyncAndOnlyDeleteRequiresConfirmation()
+    public void WhenTheOperationsAreRegistered_ThenTheyAreNamedWithoutAsyncAndRenameAndDeleteRequireConfirmation()
     {
         // Arrange
         var authorization = _authorization.TryGetRegisteredSubject()!;
@@ -320,9 +417,14 @@ public sealed class RoleOperationsTests : IDisposable
 
         // Assert
         Assert.False(addRole!.RequiresConfirmation);
-        Assert.False(rename!.RequiresConfirmation);
+        Assert.True(rename!.RequiresConfirmation);
         Assert.True(delete!.RequiresConfirmation);
         Assert.Equal("Add Role", addRole.Title);
+        Assert.Equal("Add", addRole.Icon);
+        Assert.Equal("Rename", rename.Title);
+        Assert.Equal("DriveFileRenameOutline", rename.Icon);
+        Assert.Equal("Delete", delete.Title);
+        Assert.Equal("Delete", delete.Icon);
     }
 
     private RegisteredSubjectProperty PlainMember() =>

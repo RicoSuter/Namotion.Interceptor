@@ -470,6 +470,34 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
+    public void WhenAConfigurationPropertyIsASlot_ThenItIsNotEditable()
+    {
+        // Arrange
+        var subject = new NotEditableConfigurationTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(NotEditableConfigurationTestSubject.SlotText))!;
+
+        // Act
+        var isEditable = property.IsEditableConfigurationProperty();
+
+        // Assert
+        Assert.False(isEditable);
+    }
+
+    [Fact]
+    public void WhenAConfigurationPropertyHasNoSetter_ThenItIsNotEditable()
+    {
+        // Arrange
+        var subject = new NotEditableConfigurationTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(NotEditableConfigurationTestSubject.InitOnlyText))!;
+
+        // Act
+        var isEditable = property.IsEditableConfigurationProperty();
+
+        // Assert
+        Assert.False(isEditable);
+    }
+
+    [Fact]
     public void WhenAPropertyIsNoConfiguration_ThenItIsNotEditable()
     {
         // Arrange
@@ -613,6 +641,17 @@ public partial class ConfigurationOwnerTestParent : IConfigurable
     public partial IInterceptorSubject? StateChild { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class NotEditableConfigurationTestSubject
+{
+    [Configuration]
+    [Slot]
+    public partial string? SlotText { get; set; }
+
+    [Configuration]
+    public partial string? InitOnlyText { get; init; }
 }
 
 [InterceptorSubject]

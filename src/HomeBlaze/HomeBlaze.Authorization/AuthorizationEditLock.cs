@@ -13,6 +13,6 @@ namespace HomeBlaze.Authorization;
 /// </remarks>
 public static class AuthorizationEditLock
 {
-    /// <summary>The lock.</summary>
+    /// <summary>Taken around the check and the assignment of a role change.</summary>
     public static readonly Lock Instance = new();
 }

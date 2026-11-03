@@ -104,10 +104,10 @@ public partial class Role : IConfigurable, ITitleProvider, IIconProvider
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// No <see cref="Authorization"/> holds the role; the name is empty, cannot name a custom role or names another role,
-    /// ignoring case; two other roles have the same name, ignoring case; or the configuration was not written, in which
-    /// case the role stays renamed.
+    /// ignoring case; two other roles have the same name, ignoring case; or the configuration was not or could not be
+    /// written, in which case the role stays renamed.
     /// </exception>
-    [Operation(Title = "Rename", Description = "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name.", Icon = "DriveFileRenameOutline")]
+    [Operation(Title = "Rename", Description = "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name. Agents and roles that name the new name already get its rules.", Icon = "DriveFileRenameOutline", RequiresConfirmation = true)]
     public Task RenameAsync(string name, [FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
         RoleEdits.RenameAsync(this, name, authorizationService, rootManager);
 
@@ -116,7 +116,7 @@ public partial class Role : IConfigurable, ITitleProvider, IIconProvider
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// No <see cref="Authorization"/> holds the role; two other roles have the same name, ignoring case; or the
-    /// configuration was not written, in which case the role stays deleted.
+    /// configuration was not or could not be written, in which case the role stays deleted.
     /// </exception>
     [Operation(Title = "Delete", Description = "Deletes the role. Agents and roles that name it report it as unknown afterwards.", Icon = "Delete", RequiresConfirmation = true)]
     public Task DeleteAsync([FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
