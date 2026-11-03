@@ -249,7 +249,7 @@ public static class PathExtensions
         bool resolved;
         if (segment.HasIndex)
         {
-            // The writer never emits a bare inline key followed by an index, so a wrong name is not accepted.
+            // Path building never emits a bare inline key followed by an index, so a wrong name is not accepted.
             resolved = !isInlinePathsKey &&
                 PathIndexResolver.TryResolve(property, segment.Index, null, resolveChild, out key, out child);
         }
@@ -449,7 +449,7 @@ public static class PathExtensions
             builder.Append(characters.Separator);
         }
 
-        if (CanWriteBareInlineKey(pathProvider, characters, property, text, ownSegment))
+        if (CanBuildBareInlineKey(pathProvider, characters, property, text, ownSegment))
         {
             builder.Append(text);
             return true;
@@ -475,10 +475,10 @@ public static class PathExtensions
            ownProperty.Name == property.Name;
 
     /// <summary>
-    /// Mirrors <see cref="IsInlinePathsKey"/>: the reader takes the bare text as this key only when the text is one
+    /// Mirrors <see cref="IsInlinePathsKey"/>: resolving takes the bare text as this key only when the text is one
     /// non-empty name, resolves to the inline property and is not that property's own segment.
     /// </summary>
-    private static bool CanWriteBareInlineKey(
+    private static bool CanBuildBareInlineKey(
         PathProviderBase pathProvider, PathCharacters characters, RegisteredSubjectProperty property, string text, string ownSegment)
         => text.Length > 0 &&
            text.AsSpan().IndexOfAny(characters.Separator, characters.IndexOpen) < 0 &&

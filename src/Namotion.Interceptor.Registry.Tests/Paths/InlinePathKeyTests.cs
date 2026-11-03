@@ -23,7 +23,7 @@ public class InlinePathKeyTests
     [InlineData("Report [2024]", "Children['Report [2024]'].Name")]
     [InlineData("a.b]", "Children['a.b]'].Name")]
     [InlineData("", "Children[''].Name")]
-    public void WhenInlineKeyIsWritten_ThenPathRoundTrips(string key, string expectedPath)
+    public void WhenInlineKeyIsBuilt_ThenPathRoundTrips(string key, string expectedPath)
     {
         // Arrange
         var context = CreateContext();
