@@ -47,7 +47,8 @@
             <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                 @{
                     var canEdit = CanEdit();
-                    var canDelete = Subject is IStorageFile or IConfigurable;
+                    var deleteOperation = _registeredSubject?.GetDeleteOperation(ExclusionTarget.UserInterface);
+                    var isDeleteEnabled = deleteOperation is not null && (_registeredSubject?.TryGetProperty(deleteOperation.PropertyName)?.IsMethodEnabled() ?? true);
                     var showsMetadataButton = _metadataStore is not null || hasNotesLinksOrTags;
                 }
 
@@ -96,19 +97,21 @@
                                        data-testid="reorder-children-button" />
                     </MudTooltip>
                 }
-                @if (canDelete)
+                @if (deleteOperation is not null)
                 {
-                    <MudTooltip Text="Delete">
-                        <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
+                    <MudTooltip Text="@deleteOperation.Title">
+                        <MudIconButton OnClick="@(() => OnDelete.InvokeAsync(deleteOperation))"
                                        Icon="@Icons.Material.Filled.Delete"
                                        Variant="Variant.Text"
                                        Size="Size.Small"
-                                       aria-label="Delete" />
+                                       Disabled="@(!isDeleteEnabled)"
+                                       aria-label="Delete"
+                                       data-testid="delete-subject-button" />
                     </MudTooltip>
                 }
                 @if (CanClose)
                 {
-                    @if (canEdit || canDelete || showsMetadataButton || reorderContainer is not null)
+                    @if (canEdit || deleteOperation is not null || showsMetadataButton || reorderContainer is not null)
                     {
                         <MudDivider Vertical="true" FlexItem="true" Class="mx-1 my-1" />
                     }
@@ -506,7 +509,7 @@
     public EventCallback OnClose { get; set; }
 
     [Parameter]
-    public EventCallback OnDelete { get; set; }
+    public EventCallback<MethodMetadata> OnDelete { get; set; }
 
     /// <summary>The name of the property whose row is highlighted, such as the target of a link.</summary>
     [Parameter]
@@ -1073,12 +1076,13 @@
         await PropertyHistoryDialog.ShowAsync(DialogService, SubjectRegistry, PathResolver, property, property.Name);
     }
 
+    // An operation with a purpose is shown as its built-in control, such as the Delete button, instead.
     private SubjectMemberGroups<RegisteredSubjectProperty, MethodMetadata> GetMemberGroups() =>
         SubjectMemberGrouping.Group(
             GetPrimitiveProperties().ToList(),
             static property => property.GetStateMetadata()?.Category,
             static property => property.GetDisplayPosition(),
-            _registeredSubject?.GetAllMethods(ExclusionTarget.UserInterface) ?? [],
+            _registeredSubject?.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true) ?? [],
             static method => method.Category,
             static method => method.Position);
 

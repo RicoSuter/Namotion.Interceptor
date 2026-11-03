@@ -73,7 +73,7 @@ public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
     [Category("Assemblies")]
     public partial string[] HostDependencies { get; internal set; }
 
-    [Operation(Title = "Remove Plugin", RequiresConfirmation = true)]
+    [Operation(Title = "Remove Plugin", RequiresConfirmation = true, Purpose = OperationPurpose.Delete)]
     public void RemovePlugin()
     {
         _manager.RemovePlugin(Name);

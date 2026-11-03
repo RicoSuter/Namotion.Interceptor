@@ -59,7 +59,7 @@ internal sealed class StorageConnection : IDisposable
         _timeProvider = timeProvider;
         Index = new StorageIndex();
         Reconciler = new StorageReconciler(
-            _client, storage, subjectFactory, serializer, Index, timeProvider, logger, isOnDisk: storageDirectory is not null, _endedSource.Token);
+            _client, storage, subjectFactory, serializer, Index, timeProvider, logger, isOnDisk: IsOnDisk, _endedSource.Token);
         // On the worker, which is the only one that reads the index, and after its last item: nothing places
         // the subjects of an ended connection any more.
         Worker = new StorageWorker(logger, Reconciler.ReleaseUnplacedSubjects, _endedSource.Token);
@@ -67,6 +67,9 @@ internal sealed class StorageConnection : IDisposable
     }
 
     public StorageConnectionSettings Settings { get; }
+
+    /// <summary>True when the storage is a directory on disk, which is known without a call to it.</summary>
+    public bool IsOnDisk => _storageDirectory is not null;
 
     /// <summary>The storage. Every call on it returns within <see cref="StorageCallTimeout.Limit"/>.</summary>
     public IStore Client => _client;
