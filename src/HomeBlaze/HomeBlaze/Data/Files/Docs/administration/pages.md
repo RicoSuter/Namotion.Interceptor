@@ -142,7 +142,7 @@ graph LR
 
 - **Size**: a diagram is never wider than its place.
 - **Theme**: a diagram takes the dark or light theme that is active when it is shown. After a switch, it changes on the next visit of the page.
-- **Not shown**: a diagram with an error, or one on a browser that cannot load Mermaid, appears as its source in a code block.
+- **Not shown**: a diagram with an error, or one on a browser that cannot load Mermaid, appears as its source in a code block. Mermaid only accepts ASCII characters in the labels of a `sankey` diagram, so a label with a letter such as `ä`, `ß` or `é` is an error there; write it in ASCII instead, such as `ae` for `ä`.
 - **No interaction**: `click` lines, links and HTML in labels are ignored, and an `init` directive or frontmatter of a diagram cannot change these settings.
 
 ---
