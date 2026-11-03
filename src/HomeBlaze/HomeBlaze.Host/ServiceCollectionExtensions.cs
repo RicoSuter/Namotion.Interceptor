@@ -1,10 +1,10 @@
 using HomeBlaze.Components.Controls;
 using HomeBlaze.History.Blazor;
-using HomeBlaze.Host.Clients;
 using HomeBlaze.Host.Preferences;
 using HomeBlaze.Host.Services;
 using HomeBlaze.Host.TimeZones;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Clients;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
