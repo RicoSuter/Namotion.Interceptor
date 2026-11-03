@@ -29,6 +29,12 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
 
+    // Raised only after the change it reports is complete, so that a reader who sees the new number also sees the change.
+    private long _structureVersion;
+
+    /// <inheritdoc />
+    public long StructureVersion => Volatile.Read(ref _structureVersion);
+
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
@@ -172,6 +178,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     });
                 }
 
+                Interlocked.Increment(ref _structureVersion);
                 return;
             }
 
@@ -225,12 +232,20 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         }
                     }
                 }
+
+                Interlocked.Increment(ref _structureVersion);
             }
         }
     }
 
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
+        // Every other property is attached with its subject, whose attach raises the version already.
+        if (change.Property.Metadata.IsDynamic)
+        {
+            Interlocked.Increment(ref _structureVersion);
+        }
+
         var property = TryGetRegisteredProperty(change.Property);
         if (property is not null)
         {
@@ -268,6 +283,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 .GetValueOrDefault(property.Subject)?
                 .TryGetProperty(property.Name)?
                 .UpdateChildIndices(children, _knownSubjects);
+
+            Interlocked.Increment(ref _structureVersion);
         }
     }
     

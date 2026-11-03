@@ -15,6 +15,7 @@ namespace Namotion.Interceptor.Registry.Abstractions
     public interface ISubjectRegistry
     {
         System.Collections.Generic.IReadOnlyDictionary<Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject> KnownSubjects { get; }
+        long StructureVersion { get; }
         Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject);
     }
     public class RegisteredSubject
@@ -112,6 +113,7 @@ namespace Namotion.Interceptor.Registry
     {
         public SubjectRegistry() { }
         public System.Collections.Generic.IReadOnlyDictionary<Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject> KnownSubjects { get; }
+        public long StructureVersion { get; }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject) { }
         public bool TryGetSubjectById(string subjectId, out Namotion.Interceptor.IInterceptorSubject subject) { }
     }
