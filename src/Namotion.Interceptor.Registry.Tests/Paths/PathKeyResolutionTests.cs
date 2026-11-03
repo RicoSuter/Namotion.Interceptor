@@ -266,6 +266,80 @@ public class PathKeyResolutionTests
         Assert.Null(absent);
     }
 
+    [Fact]
+    public void WhenPropertyHoldsImmutableDictionaryAndKeyIsAbsent_ThenSubjectPathResolvesToNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetSubjectFromPath(rootRegistered, "Items[absent]");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenPropertyHoldsImmutableDictionaryAndNumericKeyIsAbsent_ThenSubjectPathResolvesToNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        // The text "1" is looked up as the string key "1", which is absent.
+        var result = pathProvider.TryGetSubjectFromPath(rootRegistered, "Items[1]");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenPropertyHoldsImmutableDictionaryAndIntermediateKeyIsAbsent_ThenPropertyPathResolvesToNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Items[absent].Value");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenPropertyHoldsImmutableDictionaryAndKeyExists_ThenSubjectPathResolves()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetSubjectFromPath(rootRegistered, "Items[key1]");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Same(item, result.Subject);
+    }
+
     [Theory]
     [InlineData("Sensor [Kitchen]", "Items['Sensor [Kitchen]'].Value")]
     [InlineData("'quoted", "Items['''quoted'].Value")]
