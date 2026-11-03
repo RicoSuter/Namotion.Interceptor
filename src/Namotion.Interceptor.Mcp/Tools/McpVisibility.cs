@@ -158,7 +158,7 @@ internal sealed class McpVisibility
 
         foreach (var parent in subject.Parents)
         {
-            if (parent.Property.HasIncludedPath(_toolPathProvider!, _rootSubject))
+            if (parent.Property.HasPath(_toolPathProvider!, _rootSubject!))
             {
                 return true;
             }
