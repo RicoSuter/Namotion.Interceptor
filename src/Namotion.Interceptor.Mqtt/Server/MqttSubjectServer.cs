@@ -808,7 +808,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         return Task.CompletedTask;
     }
 
-    private void OnSubjectDetaching(SubjectLifecycleChange change)
+    internal void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         // Every detach raises the registry's structure version, so every entry is stale anyway. Clearing lets the
         // detached subject be collected without an O(n) scan under the lifecycle lock.
