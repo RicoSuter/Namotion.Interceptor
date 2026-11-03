@@ -42,10 +42,10 @@ public static class McpServerConfigurationExtensions
         => configuration.TryGetReadableSubject(root, path, McpVisibility.For(configuration, root.Subject));
 
     /// <summary>
-    /// Writes the path of <paramref name="subject"/> from <paramref name="root"/> as search lists it, and browse as its
-    /// <c>$path</c>: after <see cref="McpServerConfiguration.PathPrefix"/>, through the first parent, in parent order,
-    /// from which the path can be written; for <paramref name="root"/> itself the prefix, or null when the prefix is
-    /// empty. Null when no path can be written, the <see cref="McpServerConfiguration.AccessPolicy"/> does not show the
+    /// Writes the path of <paramref name="subject"/> from <paramref name="root"/> that search lists, which is also the
+    /// <c>$path</c> browse writes for a subject it lists: after <see cref="McpServerConfiguration.PathPrefix"/>, through
+    /// the first parent, in parent order, from which the path can be written; for <paramref name="root"/> itself the
+    /// prefix, or null when the prefix is empty. Null when no path can be written, the <see cref="McpServerConfiguration.AccessPolicy"/> does not show the
     /// subject, see "Access Policy" in the MCP documentation, or the subject's type is in
     /// <see cref="McpServerConfiguration.ExcludeTypes"/> or derived from one, so that a subject gets a path exactly when
     /// search can list it. The counterpart of
