@@ -8,9 +8,9 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// Types index text by the container it addresses. A collection reads a canonical position. A dictionary with string,
-/// integer, <see cref="Guid"/> or enum keys parses the text to its key type, accepting only the text the writer
-/// emits. Any other dictionary matches the text against the written text of its registered entries.
+/// Types index text by the container it addresses. A collection resolves only a canonical position. A dictionary with string,
+/// integer, <see cref="Guid"/> or enum keys parses the text to its key type, accepting only the text path building
+/// emits. Any other dictionary matches the text against the built key text of its registered entries.
 /// </summary>
 internal static class PathIndexResolver
 {
@@ -71,7 +71,7 @@ internal static class PathIndexResolver
                     return false;
 
                 default:
-                    key = MatchWrittenKey(property, text, out var matched) ?? textString ?? text.ToString();
+                    key = MatchBuiltKey(property, text, out var matched) ?? textString ?? text.ToString();
                     child = resolveChild ? matched : null;
                     return true;
             }
@@ -89,7 +89,7 @@ internal static class PathIndexResolver
     }
 
     /// <summary>
-    /// Whether <paramref name="text"/> is an integer as the invariant culture writes it: digits without a leading zero
+    /// Whether <paramref name="text"/> is an integer as the invariant culture formats it: digits without a leading zero
     /// (other than "0" itself), preceded by '-' for a negative number when <paramref name="allowSign"/>.
     /// </summary>
     private static bool IsCanonicalInteger(ReadOnlySpan<char> text, bool allowSign)
@@ -108,7 +108,7 @@ internal static class PathIndexResolver
             !text.ContainsAnyExceptInRange('0', '9');
     }
 
-    /// <returns>True when parsed, false when the key type is supported but the text is not its written form, null when the key type is not supported.</returns>
+    /// <returns>True when parsed, false when the key type is supported but the text is not its built form, null when the key type is not supported.</returns>
     private static bool? TryParseKey(Shape shape, ReadOnlySpan<char> text, string? textString, out object? key)
     {
         switch (shape.KeyKind)
@@ -125,7 +125,7 @@ internal static class PathIndexResolver
 
             case KeyKind.Enum:
                 key = null;
-                // The written-form check rejects numeric forms of named values and alias names, which the writer never emits.
+                // The built-form check rejects numeric forms of named values and alias names, which path building never emits.
                 if (Enum.TryParse(shape.KeyType!, text, ignoreCase: false, out var enumValue) && PathSyntax.TextEquals((ISpanFormattable)enumValue!, text))
                 {
                     key = enumValue;
@@ -157,10 +157,10 @@ internal static class PathIndexResolver
             : null;
 
     /// <summary>
-    /// Finds the registered entry whose written key text equals <paramref name="text"/>. Reads the registered children,
+    /// Finds the registered entry whose built key text equals <paramref name="text"/>. Reads the registered children,
     /// which reflect the last assignment of the dictionary.
     /// </summary>
-    private static object? MatchWrittenKey(RegisteredSubjectProperty property, ReadOnlySpan<char> text, out IInterceptorSubject? child)
+    private static object? MatchBuiltKey(RegisteredSubjectProperty property, ReadOnlySpan<char> text, out IInterceptorSubject? child)
     {
         foreach (var entry in property.Children)
         {

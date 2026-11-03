@@ -49,7 +49,7 @@
                 match.Property is not null && subject.TryGetRegisteredSubject()?.TryGetProperty(match.Property)?.IsShownAsValue() != true)
                 continue;
 
-            // Written as the path of a link, the name of a property after the path of its subject.
+            // Built as the path of a link, the name of a property after the path of its subject.
             var subjectPath = $"/{match.Path}";
             var path = match.Property is null ? subjectPath : $"{subjectPath.TrimEnd('/')}/{match.Property}";
             _items.Add((path, LinkResolver.Resolve(subject, match.Property)));

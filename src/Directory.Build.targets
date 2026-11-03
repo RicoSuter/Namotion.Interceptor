@@ -7,4 +7,34 @@
     <AssemblyMetadata Include="Namotion.Build.Time" Value="$(BuildTime)" Condition="'$(BuildTime)' != ''" />
     <AssemblyMetadata Include="Namotion.Build.RunUrl" Value="$(BuildRunUrl)" Condition="'$(BuildRunUrl)' != ''" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../assets/NuGetIcon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <BeforePack>$(BeforePack);WritePackageReadme</BeforePack>
+  </PropertyGroup>
+
+  <!-- nuget.org cannot resolve the repository README's relative links and images, so the packed copy points them
+       at GitHub, pinned to the release tag (BuildTag) or to master for local packs. -->
+  <Target Name="WritePackageReadme">
+    <PropertyGroup>
+      <_PackageReadmeGitRef Condition="'$(BuildTag)' != ''">$(BuildTag)</_PackageReadmeGitRef>
+      <_PackageReadmeGitRef Condition="'$(BuildTag)' == ''">master</_PackageReadmeGitRef>
+      <_PackageReadmeRawUrl>$(RepositoryUrl.Replace('https://github.com/', 'https://raw.githubusercontent.com/'))/$(_PackageReadmeGitRef)/</_PackageReadmeRawUrl>
+      <_PackageReadmeBlobUrl>$(RepositoryUrl)/blob/$(_PackageReadmeGitRef)/</_PackageReadmeBlobUrl>
+      <_PackageReadmePath>$(IntermediateOutputPath)package/README.md</_PackageReadmePath>
+      <_PackageReadmeText>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../README.md'))</_PackageReadmeText>
+      <_PackageReadmeText>$([System.Text.RegularExpressions.Regex]::Replace($(_PackageReadmeText), '(!\[[^\]]*\]\()(?!https?:|#)', '${1}$(_PackageReadmeRawUrl)'))</_PackageReadmeText>
+      <_PackageReadmeText>$([System.Text.RegularExpressions.Regex]::Replace($(_PackageReadmeText), '((?&lt;!!)\[[^\]]*\]\()(?!https?:|#|mailto:)', '${1}$(_PackageReadmeBlobUrl)'))</_PackageReadmeText>
+    </PropertyGroup>
+
+    <!-- Escaped so WriteLinesToFile does not split the text at semicolons. -->
+    <WriteLinesToFile File="$(_PackageReadmePath)" Lines="$([MSBuild]::Escape($(_PackageReadmeText)))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+
+    <ItemGroup>
+      <None Include="$(_PackageReadmePath)" Pack="true" PackagePath="\" Visible="false" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -249,7 +249,7 @@ public static class PathExtensions
         bool resolved;
         if (segment.HasIndex)
         {
-            // The writer never emits a bare inline key followed by an index, so a wrong name is not accepted.
+            // Path building never emits a bare inline key followed by an index, so a wrong name is not accepted.
             resolved = !isInlinePathsKey &&
                 PathIndexResolver.TryResolve(property, segment.Index, null, resolveChild, out key, out child);
         }
@@ -408,6 +408,37 @@ public static class PathExtensions
         }
     }
 
+    /// <summary>
+    /// Gets whether <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
+    /// finds a path from <paramref name="property"/> to <paramref name="rootSubject"/> through properties
+    /// <paramref name="pathProvider"/> effectively includes, without building the path string.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="pathProvider">The path provider.</param>
+    /// <param name="rootSubject">The root subject.</param>
+    /// <returns>True when such a path exists; otherwise, false.</returns>
+    /// <remarks>
+    /// When this returns true, <c>TryGetPath</c> can still return null for a path through an [InlinePaths] property
+    /// whose segment another property has.
+    /// </remarks>
+    public static bool HasPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject rootSubject)
+    {
+        if (!pathProvider.TryGetEffectivelyIncludedSegment(property, out var leafSegment))
+        {
+            return false;
+        }
+
+        var frames = PooledFrames.Rent();
+        try
+        {
+            return TryBuildPathFrames(property, leafSegment, pathProvider, rootSubject, propertyIndex: null, ref frames);
+        }
+        finally
+        {
+            frames.Return();
+        }
+    }
+
     private static bool TryAppendInlineKey(
         StringBuilder builder, PathProviderBase pathProvider, PathCharacters characters,
         RegisteredSubjectProperty property, object index, string ownSegment)
@@ -418,7 +449,7 @@ public static class PathExtensions
             builder.Append(characters.Separator);
         }
 
-        if (CanWriteBareInlineKey(pathProvider, characters, property, text, ownSegment))
+        if (CanBuildBareInlineKey(pathProvider, characters, property, text, ownSegment))
         {
             builder.Append(text);
             return true;
@@ -444,10 +475,10 @@ public static class PathExtensions
            ownProperty.Name == property.Name;
 
     /// <summary>
-    /// Mirrors <see cref="IsInlinePathsKey"/>: the reader takes the bare text as this key only when the text is one
+    /// Mirrors <see cref="IsInlinePathsKey"/>: resolving takes the bare text as this key only when the text is one
     /// non-empty name, resolves to the inline property and is not that property's own segment.
     /// </summary>
-    private static bool CanWriteBareInlineKey(
+    private static bool CanBuildBareInlineKey(
         PathProviderBase pathProvider, PathCharacters characters, RegisteredSubjectProperty property, string text, string ownSegment)
         => text.Length > 0 &&
            text.AsSpan().IndexOfAny(characters.Separator, characters.IndexOpen) < 0 &&
