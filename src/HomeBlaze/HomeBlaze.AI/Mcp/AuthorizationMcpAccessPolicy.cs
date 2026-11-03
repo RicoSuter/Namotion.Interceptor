@@ -79,7 +79,7 @@ public sealed class AuthorizationMcpAccessPolicy : IMcpAccessPolicy
         return false;
     }
 
-    // The path as the tools write it; the member name alone when the subject has no path from a root.
+    // The path as the tools build it; the member name alone when the subject has no path from a root.
     private static string GetPath(RegisteredSubjectProperty member)
     {
         var parents = member.Parent.Parents;

@@ -21,7 +21,7 @@ internal sealed class MarkdownSearchSourceFinder
     private readonly McpServerConfiguration _configuration;
 
     /// <param name="configuration">
-    /// The configuration of the tools: its path provider and path prefix write the paths of the pages, its access policy
+    /// The configuration of the tools: its path provider and path prefix build the paths of the pages, its access policy
     /// decides which pages and notes are found, and the subjects of its excluded types, and the subjects below them, are
     /// left out.
     /// </param>
@@ -33,8 +33,8 @@ internal sealed class MarkdownSearchSourceFinder
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
     /// in order of path, then property and then a page before notes, so that results and truncation are stable; without those of a subject of an
-    /// excluded type or below one, which browse and search do not show. With an access policy, a page is found only when
-    /// the tools show it at its path and the policy allows to read and execute its ReadRawContent, and notes only when
+    /// excluded type or below one, which browse and search do not list. With an access policy, a page is found only when
+    /// it is readable for the tools at its path and the policy allows to read and execute its ReadRawContent, and notes only when
     /// get_property can read them at the path of their metadata.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
@@ -91,12 +91,12 @@ internal sealed class MarkdownSearchSourceFinder
         }
     }
 
-    // As invoke_query would call ReadRawContent: the page is shown at its path and its method is readable and executable.
+    // As invoke_query would call ReadRawContent: the page is readable at its path, and its method readable and executable.
     // The execute check is not logged, as it runs for every page of every search rather than for a call the client made.
     private bool IsPageReadable(RegisteredSubject root, RegisteredSubject page, string path)
     {
-        var shown = path == _configuration.PathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
-        return ReferenceEquals(shown, page) &&
+        var readable = path == _configuration.PathPrefix ? root : _configuration.TryGetReadableSubject(root, path);
+        return ReferenceEquals(readable, page) &&
             page.TryGetProperty(nameof(MarkdownFile.ReadRawContent)) is { } method &&
             _configuration.IsAllowed(method, McpAccessActions.Read) &&
             AuthorizationMcpAccessPolicy.IsAllowedWithoutLogging(_configuration.AccessPolicy, method, AuthorizationActions.Execute.Name);
@@ -136,7 +136,7 @@ internal sealed class MarkdownSearchSourceFinder
     }
 
     // The path as search lists it, null for a subject search does not list and also for one below a subject of an
-    // excluded type, which search lists but browse does not show in the tree.
+    // excluded type, which search lists but browse does not list in the tree.
     private string? TryGetPath(RegisteredSubject subject, RegisteredSubject root)
     {
         if (ReferenceEquals(subject.Subject, root.Subject))

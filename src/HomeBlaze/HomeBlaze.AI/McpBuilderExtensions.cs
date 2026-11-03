@@ -15,7 +15,7 @@ namespace HomeBlaze.AI;
 /// </summary>
 /// <param name="Services">The services of the tools.</param>
 /// <param name="RootSubjectProvider">Resolves the root subject when a tool runs.</param>
-/// <param name="PathProvider">Resolves and writes the paths of the tools.</param>
+/// <param name="PathProvider">Resolves and builds the paths of the tools.</param>
 /// <param name="IsReadOnly">Whether the tools may not change anything.</param>
 /// <param name="Configuration">
 /// The configuration the provider is added to, whose access policy decides per member and action; resolve paths with

@@ -59,10 +59,10 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             pathResolver, configuration, rootSubjectProvider);
     }
 
-    // The address names every property on the canonical path, which may differ from the path the tools write for the
+    // The address names every property on the canonical path, which may differ from the path the tools build for the
     // subject, such as for a subject with several parents. With an access policy, a subject therefore gets an address
-    // only when the canonical path resolves back to it as the tools resolve a path, so the address names nothing the
-    // tools hide.
+    // only when the canonical path resolves back to it as the tools resolve a path, so the address names nothing hidden
+    // from the tools.
     internal static Func<IInterceptorSubject, string?> CreatePageUrlGetter(
         Func<IInterceptorSubject, bool> hasPage,
         ISubjectPathResolver pathResolver,
@@ -71,12 +71,12 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     {
         return subject => hasPage(subject) &&
             pathResolver.GetPath(subject, PathStyle.Canonical) is { } path &&
-            IsShownAtPath(configuration, rootSubjectProvider, subject, path)
+            IsReadableAtPath(configuration, rootSubjectProvider, subject, path)
                 ? string.Concat("/pages", path)
                 : null;
     }
 
-    private static bool IsShownAtPath(
+    private static bool IsReadableAtPath(
         McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider, IInterceptorSubject subject, string path)
     {
         if (configuration.AccessPolicy is null)

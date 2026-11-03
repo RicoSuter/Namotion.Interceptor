@@ -154,17 +154,17 @@ public class HomeBlazeMcpSubjectEnricherTests
     }
 
     [Fact]
-    public void WhenTheSubjectAlsoHasAReadablePath_ThenTheToolsShowItThere()
+    public void WhenTheSubjectAlsoHasAReadablePath_ThenTheToolsResolveItThere()
     {
         // Arrange
         var graph = CreateHolderGraph();
         var configuration = new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = CreateNoSecretPolicy() };
 
         // Act
-        var shown = configuration.TryGetReadableSubject(graph.Root.TryGetRegisteredSubject()!, "/Open/Open");
+        var resolved = configuration.TryGetReadableSubject(graph.Root.TryGetRegisteredSubject()!, "/Open/Open");
 
         // Assert
-        Assert.Same(graph.Device, shown?.Subject);
+        Assert.Same(graph.Device, resolved?.Subject);
     }
 
     [Fact]
@@ -333,7 +333,7 @@ public class HomeBlazeMcpSubjectEnricherTests
                 handler => handler is PropertyAttributeInitializer);
     }
 
-    // The device is attached at /Open/Open first, the path the tools write for it, and then at /Secret, its canonical
+    // The device is attached at /Open/Open first, the path the tools build for it, and then at /Secret, its canonical
     // path as the shallowest one.
     private static HolderGraph CreateHolderGraph()
     {

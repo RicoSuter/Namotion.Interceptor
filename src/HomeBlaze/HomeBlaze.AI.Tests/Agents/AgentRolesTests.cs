@@ -420,7 +420,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenARoleShowsOnlyOneBranch_ThenPageExpressionsRenderItsValuesAndNotThoseOfOtherBranches()
+    public async Task WhenARoleMakesOnlyOneBranchReadable_ThenPageExpressionsRenderItsValuesAndNotThoseOfOtherBranches()
     {
         // Arrange
         var graph = await CreateGraphAsync(

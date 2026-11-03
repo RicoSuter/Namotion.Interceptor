@@ -64,7 +64,7 @@ public class HomeBlazeMarkdownSearchToolProvider : IMcpToolProvider
 
     /// <param name="rootSubjectProvider">Resolves the root subject when the tool runs.</param>
     /// <param name="configuration">
-    /// The configuration the tool is added to. Its path provider and path prefix write the paths of the pages, and the
+    /// The configuration the tool is added to. Its path provider and path prefix build the paths of the pages, and the
     /// pages and notes are searched only when its access policy allows to read them and they are not of a subject of one
     /// of its excluded types or below one through the first parents.
     /// </param>
