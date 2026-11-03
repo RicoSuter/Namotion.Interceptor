@@ -1,25 +1,18 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
-/// A subject is shown through any parent with a readable path, so hiding one link hides only that link, and a reference
-/// to a subject that is not shown reads as null.
+/// A subject is readable through any parent with a readable path, so hiding one link hides only that link, and a reference
+/// to a subject that is not readable reads as null.
 /// </summary>
 public class HiddenSubjectAccessTests
 {
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
     private static McpServerConfiguration CreateConfiguration(IMcpAccessPolicy? policy, bool isReadOnly = false) => new()
     {
         PathProvider = DefaultPathProvider.Instance,
@@ -27,25 +20,11 @@ public class HiddenSubjectAccessTests
         IsReadOnly = isReadOnly
     };
 
-    // The device got Private first, so without a policy its path goes through Private; hiding Private leaves Public.
-    private static (TestHouse House, TestDevice Device) CreateHouse()
-    {
-        var context = CreateContext();
-        var house = new TestHouse(context) { Address = "Main Street" };
-        var device = new TestDevice(context) { DeviceName = "Camera" };
-        house.Private = device;
-        house.Public = device;
-        return (house, device);
-    }
-
-    private static string[] GetResultPaths(JsonElement result) =>
-        result.GetProperty("results").EnumerateObject().Select(entry => entry.Name).ToArray();
-
     [Fact]
     public async Task WhenOneParentOfASubjectIsHidden_ThenGetPropertyAndSetPropertyReachItThroughTheOther()
     {
         // Arrange
-        var (house, device) = CreateHouse();
+        var (house, device) = CreateHouseWithSharedDevice();
         var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private)));
 
         // Act
@@ -64,7 +43,7 @@ public class HiddenSubjectAccessTests
     public void WhenOneParentOfASubjectIsHidden_ThenTheHelpersResolveItThroughTheOther()
     {
         // Arrange
-        var (house, device) = CreateHouse();
+        var (house, device) = CreateHouseWithSharedDevice();
         var root = house.TryGetRegisteredSubject()!;
         var configuration = CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private)));
 
@@ -82,7 +61,7 @@ public class HiddenSubjectAccessTests
     // Search leaves out the root, so the house is held by a group.
     private static (TestMixedGroup Root, TestHouse House, TestDevice Device) CreateHouseInGroup()
     {
-        var (house, device) = CreateHouse();
+        var (house, device) = CreateHouseWithSharedDevice();
         var root = new TestMixedGroup(((IInterceptorSubject)house).Context);
         root.Items = new Dictionary<string, IInterceptorSubject> { ["house"] = house };
         return (root, house, device);
@@ -91,7 +70,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData(false, "Items[house].Private")]
     [InlineData(true, "Items[house].Public")]
-    public async Task WhenTheHelperWritesThePathOfASubject_ThenItIsThePathSearchLists(bool hidesFirstParent, string expectedPath)
+    public async Task WhenTheHelperBuildsThePathOfASubject_ThenItIsThePathSearchLists(bool hidesFirstParent, string expectedPath)
     {
         // Arrange
         var (root, _, device) = CreateHouseInGroup();
@@ -103,13 +82,13 @@ public class HiddenSubjectAccessTests
 
         // Assert
         Assert.Equal(expectedPath, path);
-        Assert.Equal([expectedPath], GetResultPaths(search));
+        Assert.Equal([expectedPath], McpToolCaller.GetResultPaths(search));
     }
 
     [Theory]
     [InlineData(nameof(TestHouse.Private), nameof(TestHouse.Public))]
     [InlineData(nameof(TestDevice.DeviceName), nameof(TestDevice.IsOn))]
-    public async Task WhenThePolicyDoesNotShowASubject_ThenTheHelperWritesNoPathAndSearchDoesNotListIt(params string[] hiddenMembers)
+    public async Task WhenASubjectIsHidden_ThenTheHelperBuildsNoPathAndSearchDoesNotListIt(params string[] hiddenMembers)
     {
         // Arrange
         // Hiding both parents leaves no readable path; hiding every property of the device makes it empty for the policy.
@@ -122,11 +101,11 @@ public class HiddenSubjectAccessTests
 
         // Assert
         Assert.Null(path);
-        Assert.Empty(GetResultPaths(search));
+        Assert.Empty(McpToolCaller.GetResultPaths(search));
     }
 
     [Fact]
-    public async Task WhenASubjectIsOfAnExcludedType_ThenTheHelperWritesNoPathAndSearchDoesNotListIt()
+    public async Task WhenASubjectIsOfAnExcludedType_ThenTheHelperBuildsNoPathAndSearchDoesNotListIt()
     {
         // Arrange
         var (root, house, device) = CreateHouseInGroup();
@@ -145,13 +124,13 @@ public class HiddenSubjectAccessTests
         // Assert
         Assert.Null(devicePath);
         Assert.Equal("Items[house]", housePath);
-        Assert.Equal(["Items[house]"], GetResultPaths(search));
+        Assert.Equal(["Items[house]"], McpToolCaller.GetResultPaths(search));
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void WhenTheHelperWritesThePathOfASubject_ThenTryGetReadableSubjectResolvesItBack(bool hidesFirstParent)
+    public void WhenTheHelperBuildsThePathOfASubject_ThenTryGetReadableSubjectResolvesItBack(bool hidesFirstParent)
     {
         // Arrange
         var (root, house, device) = CreateHouseInGroup();
@@ -170,7 +149,7 @@ public class HiddenSubjectAccessTests
     [Theory]
     [InlineData("", null)]
     [InlineData("/", "/")]
-    public async Task WhenTheHelperWritesThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
+    public async Task WhenTheHelperBuildsThePathOfTheRoot_ThenItIsThePrefixOrNullWhenItIsEmpty(string pathPrefix, string? expectedPath)
     {
         // Arrange
         var (root, _, _) = CreateHouseInGroup();
@@ -188,17 +167,14 @@ public class HiddenSubjectAccessTests
 
         // Assert
         Assert.Equal(expectedPath, path);
-        Assert.Equal(expectedPath is null ? [] : [expectedPath], GetResultPaths(search));
+        Assert.Equal(expectedPath is null ? [] : [expectedPath], McpToolCaller.GetResultPaths(search));
     }
 
     [Fact]
     public async Task WhenOneParentOfASubjectIsHidden_ThenAWherePathThroughTheOtherReadsIt()
     {
         // Arrange
-        // Search leaves out the root, so the house is held by a group.
-        var (house, _) = CreateHouse();
-        var root = new TestMixedGroup(((IInterceptorSubject)house).Context);
-        root.Items = new Dictionary<string, IInterceptorSubject> { ["house"] = house };
+        var (root, _, _) = CreateHouseInGroup();
         var input = new { format = "json", types = new[] { nameof(TestHouse) }, where = "Public.DeviceName == \"Camera\"" };
 
         // Act
@@ -206,8 +182,8 @@ public class HiddenSubjectAccessTests
         var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(TestAccessPolicy.DenyRead(nameof(TestHouse.Private))), "search", input);
 
         // Assert
-        Assert.Equal(["Items[house]"], GetResultPaths(withoutPolicy));
-        Assert.Equal(["Items[house]"], GetResultPaths(withPolicy));
+        Assert.Equal(["Items[house]"], McpToolCaller.GetResultPaths(withoutPolicy));
+        Assert.Equal(["Items[house]"], McpToolCaller.GetResultPaths(withPolicy));
     }
 
     // X got Secret first and is also held by A. G is held by B and by X.Child; H is G's child. A path through A.Child
@@ -336,7 +312,7 @@ public class HiddenSubjectAccessTests
     }
 
     [Fact]
-    public void WhenASubjectsOnlyPathInsideTheRootIsHiddenAndItsOtherParentIsOutside_ThenTheHelpersAndTheVisibilityHideIt()
+    public void WhenASubjectsOnlyPathInsideTheRootIsHiddenAndItsOtherParentIsOutside_ThenTheHelpersAndTheReadabilityHideIt()
     {
         // Arrange
         var (root, device) = CreateHiddenInsideAndHeldOutside();
@@ -346,27 +322,15 @@ public class HiddenSubjectAccessTests
         // Act
         var subject = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Private");
         var property = configuration.TryGetReadableProperty(registeredRoot, "Items[house].Private.DeviceName");
-        var isShown = McpVisibility.For(configuration, root).IsShown(device);
+        var isReadable = McpSubjectReadability.For(configuration, root).IsReadableWithPathCheck(device);
 
         // Assert
         Assert.Null(subject);
         Assert.Null(property);
-        Assert.False(isShown);
+        Assert.False(isReadable);
     }
 
     // The device is held by the house's Private, which the provider excludes, and by its Public, which the policy hides.
-    private static (TestMixedGroup Root, TestDevice Device) CreateHeldThroughExcludedAndHiddenParents()
-    {
-        var context = CreateContext();
-        var device = new TestDevice(context) { DeviceName = "Camera" };
-        var house = new TestHouse(context) { Address = "Main Street" };
-        house.Private = device;
-        house.Public = device;
-        var root = new TestMixedGroup(context);
-        root.Items = new Dictionary<string, IInterceptorSubject> { ["house"] = house };
-        return (root, device);
-    }
-
     private static McpServerConfiguration CreateExcludingAndHidingConfiguration() => new()
     {
         PathProvider = new ExcludingPathProvider(nameof(TestHouse.Private)),
@@ -395,8 +359,8 @@ public class HiddenSubjectAccessTests
     public async Task WhenTheProviderExcludesOneParentOfASubjectAndThePolicyHidesTheOther_ThenEveryToolReadsItAsMissing(string toolName, string input, string expectedTextWithoutRestrictions)
     {
         // Arrange
-        var (rootWithoutRestrictions, _) = CreateHeldThroughExcludedAndHiddenParents();
-        var (rootWithRestrictions, device) = CreateHeldThroughExcludedAndHiddenParents();
+        var (rootWithoutRestrictions, _, _) = CreateHouseInGroup();
+        var (rootWithRestrictions, _, device) = CreateHouseInGroup();
         var request = JsonSerializer.Deserialize<JsonElement>(input);
 
         // Act
@@ -424,10 +388,10 @@ public class HiddenSubjectAccessTests
     }
 
     [Fact]
-    public void WhenTheProviderExcludesOneParentOfASubjectAndThePolicyHidesTheOther_ThenTheHelpersAndTheVisibilityHideIt()
+    public void WhenTheProviderExcludesOneParentOfASubjectAndThePolicyHidesTheOther_ThenTheHelpersAndTheReadabilityHideIt()
     {
         // Arrange
-        var (root, device) = CreateHeldThroughExcludedAndHiddenParents();
+        var (root, _, device) = CreateHouseInGroup();
         var registeredRoot = root.TryGetRegisteredSubject()!;
         var configuration = CreateExcludingAndHidingConfiguration();
 
@@ -435,17 +399,17 @@ public class HiddenSubjectAccessTests
         var throughPublic = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Public");
         var throughPrivate = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Private");
         var property = configuration.TryGetReadableProperty(registeredRoot, "Items[house].Public.DeviceName");
-        var isShown = McpVisibility.For(configuration, root).IsShown(device);
+        var isReadable = McpSubjectReadability.For(configuration, root).IsReadableWithPathCheck(device);
 
         // Assert
         Assert.Null(throughPublic);
         Assert.Null(throughPrivate);
         Assert.Null(property);
-        Assert.False(isShown);
+        Assert.False(isReadable);
     }
 
     [Fact]
-    public void WhenASubjectOtherThanTheRootHasNoParent_ThenItIsNotShown()
+    public void WhenASubjectOtherThanTheRootHasNoParent_ThenItIsNotReadable()
     {
         // Arrange
         var context = CreateContext();
@@ -454,19 +418,40 @@ public class HiddenSubjectAccessTests
         var configuration = CreateConfiguration(new TestAccessPolicy((_, _) => true));
 
         // Act
-        var isShown = McpVisibility.For(configuration, root).IsShown(detached);
-        var isRootShown = McpVisibility.For(configuration, root).IsShown(root);
+        var isReadable = McpSubjectReadability.For(configuration, root).IsReadableWithPathCheck(detached);
+        var isRootReadable = McpSubjectReadability.For(configuration, root).IsReadableWithPathCheck(root);
 
         // Assert
         Assert.Empty(detached.TryGetRegisteredSubject()!.Parents);
-        Assert.False(isShown);
-        Assert.True(isRootShown);
+        Assert.False(isReadable);
+        Assert.True(isRootReadable);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsReachedOnlyThroughADerivedProperty_ThenAnAllowAllPolicyHidesIt()
+    {
+        // Arrange
+        // The registry does not track a derived property as a parent, so the device has no registered parent.
+        var context = CreateContext();
+        var root = new TestDerivedLink(context) { Name = "Link" };
+        var device = new TestDevice(context) { DeviceName = "Derived" };
+        root.Untracked = device;
+        var path = $"{nameof(TestDerivedLink.Device)}.{nameof(TestDevice.DeviceName)}";
+
+        // Act
+        var withoutPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(policy: null), "get_property", new { path });
+        var withPolicy = await McpToolCaller.CallAsync(root, CreateConfiguration(new TestAccessPolicy((_, _) => true)), "get_property", new { path });
+
+        // Assert
+        Assert.Empty(device.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal("Derived", withoutPolicy.GetProperty("value").GetString());
+        Assert.Equal($"Path not found: {path}", withPolicy.GetProperty("error").GetString());
     }
 
     [Theory]
-    [InlineData("Device != null", new[] { "Items[shown]" })]
+    [InlineData("Device != null", new[] { "Items[readable]" })]
     [InlineData("Device == null", new[] { "Items[hidden]", "Items[none]" })]
-    public async Task WhenAReferenceHoldsASubjectThatIsNotShown_ThenAWhereFilterReadsItAsNull(string where, string[] expectedPaths)
+    public async Task WhenAReferenceHoldsASubjectThatIsNotReadable_ThenAWhereFilterReadsItAsNull(string where, string[] expectedPaths)
     {
         // Arrange
         var context = CreateContext();
@@ -474,7 +459,7 @@ public class HiddenSubjectAccessTests
         var root = new TestMixedGroup(context);
         root.Items = new Dictionary<string, IInterceptorSubject>
         {
-            ["shown"] = new TestRoom(context) { Name = "Shown", Device = new TestDevice(context) { DeviceName = "Shown" } },
+            ["readable"] = new TestRoom(context) { Name = "Readable", Device = new TestDevice(context) { DeviceName = "Readable" } },
             ["hidden"] = new TestRoom(context) { Name = "Hidden", Device = hiddenDevice },
             ["none"] = new TestRoom(context) { Name = "None" }
         };
@@ -486,7 +471,7 @@ public class HiddenSubjectAccessTests
             new { format = "json", types = new[] { nameof(TestRoom) }, where });
 
         // Assert
-        Assert.Equal(expectedPaths, GetResultPaths(result).Order().ToArray());
+        Assert.Equal(expectedPaths, McpToolCaller.GetResultPaths(result).Order().ToArray());
     }
 
     [Fact]
@@ -505,7 +490,7 @@ public class HiddenSubjectAccessTests
     }
 
     [Fact]
-    public async Task WhenTheOnlyChildOfAnotherTypeIsHidden_ThenTheCollapsedItemTypeIsThatOfTheShownChildren()
+    public async Task WhenTheOnlyChildOfAnotherTypeIsHidden_ThenTheCollapsedItemTypeIsThatOfTheReadableChildren()
     {
         // Arrange
         var context = CreateContext();
@@ -566,14 +551,45 @@ public class HiddenSubjectAccessTests
         // Assert
         Assert.True(isMoved);
         Assert.DoesNotContain(nameof(TestNode.Secret), result.GetRawText());
+        var node = result.GetProperty("result").GetProperty("properties").GetProperty(nameof(TestNode.A)).GetProperty("child")
+            .GetProperty("properties").GetProperty(nameof(TestNode.Child)).GetProperty("child");
+        Assert.False(node.TryGetProperty("$path", out _));
     }
 
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    [Fact]
+    public async Task WhenASubjectIsMovedBehindAHiddenPropertyWhileItsPathIsBuilt_ThenSearchLeavesItOut()
     {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        // Arrange
+        // The root holds A through A, and A holds S. Search builds the path of S from its holding property, A's Child,
+        // up; when the policy is asked about that property, it moves A behind the hidden Secret before the walk reads
+        // the parents of A.
+        var context = CreateContext();
+        var root = new TestNode(context) { Name = "Root" };
+        var a = new TestNode(context) { Name = "A" };
+        root.A = a;
+        a.Child = new TestNode(context) { Name = "S" };
+
+        var isMoved = false;
+        var policy = new TestAccessPolicy((member, action) =>
         {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
-        }
+            if (!isMoved && member.Parent.Subject == a && member.Name == nameof(TestNode.Child))
+            {
+                isMoved = true;
+                root.Secret = a;
+                root.A = null;
+            }
+
+            return action != McpAccessActions.Read || member.Name != nameof(TestNode.Secret);
+        });
+
+        // Act
+        var result = await McpToolCaller.CallAsync(root, CreateConfiguration(policy), "search",
+            new { format = "json", types = new[] { nameof(TestNode) }, includeProperties = true });
+
+        // Assert
+        Assert.True(isMoved);
+        Assert.DoesNotContain(nameof(TestNode.Secret), result.GetRawText());
+        Assert.DoesNotContain("A.Child", McpToolCaller.GetResultPaths(result));
+        Assert.DoesNotContain("\"S\"", result.GetRawText());
     }
 }

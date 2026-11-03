@@ -12,4 +12,10 @@ internal static class McpToolCaller
         var result = await tool.Handler(JsonSerializer.SerializeToElement(input), CancellationToken.None);
         return JsonSerializer.SerializeToElement(result);
     }
+
+    /// <summary>
+    /// The paths of the subjects a JSON search result lists, in result order.
+    /// </summary>
+    public static string[] GetResultPaths(JsonElement searchResult) =>
+        searchResult.GetProperty("results").EnumerateObject().Select(entry => entry.Name).ToArray();
 }

@@ -3,7 +3,7 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
@@ -205,7 +205,7 @@ public class SubjectFilterExpressionTests
 
         // Assert
         Assert.True(parsed);
-        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance, McpVisibility.Unrestricted));
+        Assert.True(expression!.Matches(room.TryGetRegisteredSubject()!, DefaultPathProvider.Instance, McpSubjectReadability.Unrestricted));
     }
 
     [Fact]
@@ -435,14 +435,11 @@ public class SubjectFilterExpressionTests
         Assert.False(matches);
     }
 
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-
     private static bool Evaluate(string where, IInterceptorSubject subject, PathProviderBase? pathProvider = null)
     {
         pathProvider ??= DefaultPathProvider.Instance;
         Assert.True(SubjectFilterExpression.TryParse(where, pathProvider.PathSeparator, out var expression, out _));
-        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider, McpVisibility.Unrestricted);
+        return expression.Matches(subject.TryGetRegisteredSubject()!, pathProvider, McpSubjectReadability.Unrestricted);
     }
 
     private sealed class SlashPathProvider : PathProviderBase

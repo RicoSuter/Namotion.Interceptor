@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -164,21 +163,36 @@ public class HasPathTests
             properties.AddRange(subject.TryGetRegisteredSubject()!.Properties);
         }
 
-        // Act & Assert
-        foreach (var property in properties)
-        {
-            Assert.Equal(
-                property.TryGetPath(pathProvider, rootPerson) is not null,
-                property.HasPath(pathProvider, rootPerson));
-        }
+        // Act
+        var isBuilt = properties.Select(property => property.TryGetPath(pathProvider, rootPerson) is not null).ToArray();
+        var hasPath = properties.Select(property => property.HasPath(pathProvider, rootPerson)).ToArray();
+
+        // Assert
+        Assert.Equal(isBuilt, hasPath);
     }
 
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    [Fact]
+    public void WhenAPathPassesAnInlinePathsPropertyWhoseSegmentAnotherPropertyHas_ThenItHasAPathThatIsNotBuilt()
     {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        // Arrange
+        // Label has the segment of the [InlinePaths] Children, and the key needs the explicit form Children[a.b].
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestShadowedInlineContainer(context) { Name = "child", Label = "label" };
+        var root = new TestShadowedInlineContainer(context)
         {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
-        }
+            Name = "root",
+            Label = "label",
+            Children = new Dictionary<string, TestShadowedInlineContainer> { ["a.b"] = child }
+        };
+        var property = GetProperty(child, nameof(TestShadowedInlineContainer.Name));
+
+        // Act
+        var hasPath = property.HasPath(pathProvider, root);
+        var path = property.TryGetPath(pathProvider, root);
+
+        // Assert
+        Assert.True(hasPath);
+        Assert.Null(path);
     }
 }

@@ -178,3 +178,22 @@ public partial class TestCyclicAttributes
         Name = string.Empty;
     }
 }
+
+/// <summary>
+/// A subject that returns a device through a derived property, a link the registry does not track as a parent.
+/// </summary>
+[InterceptorSubject]
+public partial class TestDerivedLink
+{
+    public partial string Name { get; set; }
+
+    public TestDevice? Untracked { get; set; }
+
+    [Derived]
+    public TestDevice? Device => Untracked;
+
+    public TestDerivedLink()
+    {
+        Name = string.Empty;
+    }
+}

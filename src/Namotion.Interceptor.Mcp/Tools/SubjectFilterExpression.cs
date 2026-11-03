@@ -74,11 +74,11 @@ internal sealed class SubjectFilterExpression
 
     /// <summary>
     /// Evaluates the filter against the current property values of <paramref name="subject"/>. A path reads as missing
-    /// when its property is on a subject that is not shown, and a reference to a subject that is not shown reads as null.
+    /// when its property is on a subject that is not readable, and a reference to a subject that is not readable reads as null.
     /// </summary>
-    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider, McpVisibility visibility)
+    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
     {
-        var context = new FilterContext(subject, pathProvider, visibility);
+        var context = new FilterContext(subject, pathProvider, readability);
         return _expression.EvaluateCondition(ref context) == true;
     }
 
@@ -184,19 +184,19 @@ internal sealed class SubjectFilterExpression
         return false;
     }
 
-    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider, McpVisibility visibility)
+    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
         : IExpressionContext
     {
         public ExpressionValue ResolvePath(string path)
         {
-            if (McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path, visibility) is not { } property)
+            if (McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path, readability) is not { } property)
             {
                 return ExpressionValue.Missing;
             }
 
-            // Browse leaves out a referenced subject that is not shown, so the filter reads the reference as unset.
+            // Browse leaves out a referenced subject that is not readable, so the filter reads the reference as unset.
             var value = property.GetValue();
-            return property.IsSubjectReference && value is IInterceptorSubject referenced && !visibility.IsShown(referenced)
+            return property.IsSubjectReference && value is IInterceptorSubject referenced && !readability.IsReadableWithPathCheck(referenced)
                 ? ExpressionValue.FromProperty(property, null)
                 : ExpressionValue.FromProperty(property, value);
         }

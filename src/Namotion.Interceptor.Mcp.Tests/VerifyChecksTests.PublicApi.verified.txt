@@ -53,7 +53,7 @@ namespace Namotion.Interceptor.Mcp
         public int MaxDepth { get; init; }
         public int MaxSubjectsPerResponse { get; init; }
         public string PathPrefix { get; init; }
-        public required Namotion.Interceptor.Registry.Paths.IPathProvider PathProvider { get; init; }
+        public required Namotion.Interceptor.Registry.Paths.PathProviderBase PathProvider { get; init; }
         public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpSubjectEnricher> SubjectEnrichers { get; init; }
         public System.Collections.Generic.IDictionary<string, string> ToolDescriptionAdditions { get; init; }
         public System.Collections.Generic.IList<Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider> ToolProviders { get; init; }

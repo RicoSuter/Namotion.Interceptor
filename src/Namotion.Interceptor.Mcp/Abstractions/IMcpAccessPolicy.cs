@@ -10,7 +10,8 @@ namespace Namotion.Interceptor.Mcp.Abstractions;
 public interface IMcpAccessPolicy
 {
     /// <summary>
-    /// Whether the action is allowed on the member. May be called concurrently, so it must be thread-safe.
+    /// Whether the action is allowed on the member. May be called concurrently, so it must be thread-safe. An exception
+    /// it throws fails the tool call.
     /// </summary>
     /// <param name="member">The member.</param>
     /// <param name="action">The action, for example <see cref="McpAccessActions.Read"/>.</param>
