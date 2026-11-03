@@ -41,6 +41,19 @@ public class SubjectPaneDeleteTests
 
         // Assert
         await Assertions.Expect(pane.GetByRole(AriaRole.Heading)).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(pane.GetByTestId("reorder-children-button")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenASubjectInsideAFileIsShown_ThenItHasNoDeleteButton()
+    {
+        // Act
+        var (_, pane) = await OpenPaneAsync("Demo/Layout/Cells/0");
+
+        // Assert
+        await Assertions.Expect(pane.GetByRole(AriaRole.Heading)).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await Assertions.Expect(pane.GetByTestId("edit-metadata-button")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
         await Assertions.Expect(pane.GetByTestId("delete-subject-button")).ToHaveCountAsync(0);
     }
 

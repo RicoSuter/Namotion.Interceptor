@@ -12,15 +12,18 @@ public static class RegisteredSubjectMethodExtensions
 {
     /// <summary>
     /// Gets the methods (operations and queries) of the subject that are offered to the target, so not excluded from
-    /// it, ordered by Position.
+    /// it, ordered by Position. With <paramref name="excludeMethodsWithPurpose"/>, the methods that have a purpose other
+    /// than <see cref="OperationPurpose.None"/> are left out.
     /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject, ExclusionTarget target)
+    public static IReadOnlyList<MethodMetadata> GetAllMethods(
+        this RegisteredSubject subject, ExclusionTarget target, bool excludeMethodsWithPurpose = false)
     {
         return subject.Properties
             .Where(CanContainMethodMetadata)
             .Select(property => property.GetValue())
             .OfType<MethodMetadata>()
-            .Where(method => !method.IsExcludedFrom(target))
+            .Where(method => !method.IsExcludedFrom(target) &&
+                (!excludeMethodsWithPurpose || method.Purpose == OperationPurpose.None))
             .OrderBy(method => method.Position)
             .ToList();
     }

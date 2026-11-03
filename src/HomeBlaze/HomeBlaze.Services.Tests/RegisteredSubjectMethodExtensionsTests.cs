@@ -74,6 +74,24 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Equal("Remove", forAgents?.Title);
     }
 
+    [Fact]
+    public void WhenMethodsWithAPurposeAreExcluded_ThenGetAllMethodsReturnsOnlyTheOtherMethodsInOrder()
+    {
+        // Arrange
+        var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
+        AddOperation(registered, "Second", OperationPurpose.None, position: 2);
+        AddOperation(registered, "Remove", OperationPurpose.Delete, position: 0);
+        AddOperation(registered, "First", OperationPurpose.None, position: 1);
+
+        // Act
+        var all = registered.GetAllMethods(ExclusionTarget.UserInterface);
+        var withoutPurpose = registered.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true);
+
+        // Assert
+        Assert.Equal(new[] { "Remove", "First", "Second" }, all.Select(method => method.Title));
+        Assert.Equal(new[] { "First", "Second" }, withoutPurpose.Select(method => method.Title));
+    }
+
     private static void AddOperation(
         RegisteredSubject registered, string name, OperationPurpose purpose, int position,
         ExclusionTarget excludedFrom = ExclusionTarget.None)

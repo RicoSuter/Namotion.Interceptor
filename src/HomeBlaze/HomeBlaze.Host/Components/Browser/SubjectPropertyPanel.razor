@@ -1082,9 +1082,7 @@
             GetPrimitiveProperties().ToList(),
             static property => property.GetStateMetadata()?.Category,
             static property => property.GetDisplayPosition(),
-            _registeredSubject?.GetAllMethods(ExclusionTarget.UserInterface)
-                .Where(static method => method.Purpose == OperationPurpose.None)
-                .ToList() ?? [],
+            _registeredSubject?.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true) ?? [],
             static method => method.Category,
             static method => method.Position);
 

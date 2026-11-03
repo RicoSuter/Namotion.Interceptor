@@ -78,7 +78,7 @@ internal sealed class TimeLimitedStore : StoreBase
 
     // The base of this store lists and deletes the objects below the folder itself. On a bucket the folder is virtual and
     // the inner store would delete every object below it, so the caller must not call this there (see
-    // FluentStorageContainer.DeleteSubjectAsync).
+    // FluentStorageContainer.DeleteFolderAsync).
     public override Task DeleteDirectory(string folderPath, bool recursive, CancellationToken cancellationToken = default)
         => RunAsync(nameof(DeleteDirectory), folderPath, () => VerifyRoot().DeleteDirectory(folderPath, recursive, cancellationToken), cancellationToken);
 

@@ -19,6 +19,7 @@ Subjects can be managed in two ways, and both produce the same result:
 - **Inspect and operate subjects**: The property panel shows the child subjects of a subject, then its live values and operations, under headings where its type defines [categories](../development/building-subjects.md#categories). Values that are not set are listed in a "No value" line.
 - **Create and edit files**: New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
 - **Manage folders**: Create, rename, and delete folders in the storage tree. A folder can be deleted only while it is empty, and the Delete button of its pane is disabled until then
+- **Delete subjects**: The Delete button of a pane appears only for subjects that something can delete: subjects stored in files, folders of a storage (enabled only while empty), and plugins. The root storage and subjects inside a file have none
 
 **Via files directly:**
 - Edit JSON and Markdown files in the `Files/` folder of the [data folder](configuration.md#data-folder) with any editor

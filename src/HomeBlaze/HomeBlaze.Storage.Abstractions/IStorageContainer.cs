@@ -84,5 +84,4 @@ public interface IStorageContainer
     /// <param name="subject">The subject to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken);
-    // TODO: Do we need to add path in DeleteSubjectAsync as well for symmetry with AddSubjectAsync? will this help delete? or not necessary?
 }
