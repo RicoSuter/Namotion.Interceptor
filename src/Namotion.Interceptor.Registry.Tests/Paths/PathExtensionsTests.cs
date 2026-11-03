@@ -1277,7 +1277,7 @@ public class PathExtensionsTests
     {
         public bool IsMoved { get; private set; }
 
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
         {
             if (!IsMoved && property == trigger)
             {
@@ -1285,7 +1285,8 @@ public class PathExtensionsTests
                 move();
             }
 
-            return property.Name != nameof(Person.Mother);
+            segment = property.Name != nameof(Person.Mother) ? property.BrowseName : null;
+            return segment is not null;
         }
     }
 }

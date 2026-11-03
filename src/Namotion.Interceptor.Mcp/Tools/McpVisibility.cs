@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -174,13 +175,28 @@ internal sealed class McpVisibility
 
         public override char IndexClose => inner.IndexClose;
 
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-            inner.IsPropertyIncluded(property) && visibility.IsShown(property.Parent);
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (inner.TryGetPropertySegment(property, out segment) && visibility.IsShown(property.Parent))
+            {
+                return true;
+            }
 
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
-            inner.TryGetPropertySegment(property);
+            segment = null;
+            return false;
+        }
 
-        public override RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment) =>
-            inner.TryGetPropertyFromSegment(subject, segment);
+        public override bool TryGetPropertyFromSegment(
+            RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
+        {
+            // Every property of a subject that is not shown is excluded.
+            if (inner.TryGetPropertyFromSegment(subject, segment, out property) && visibility.IsShown(subject))
+            {
+                return true;
+            }
+
+            property = null;
+            return false;
+        }
     }
 }
