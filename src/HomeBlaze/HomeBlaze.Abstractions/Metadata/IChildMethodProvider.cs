@@ -10,13 +10,15 @@ public interface IChildMethodProvider
 {
     /// <summary>
     /// Adds the operations and queries that the provider offers for the subject to its registered subject, as
-    /// <see cref="MethodMetadata"/> properties. Called when the subject attaches, with this provider the nearest one among
-    /// its parents, after the subject's own methods are registered. Synchronous and thread-safe.
+    /// <see cref="MethodMetadata"/> properties. Called when the subject attaches or a parent starts to hold it, with this
+    /// provider the nearest one among its parents, after the subject's own methods are registered. Synchronous and
+    /// thread-safe.
     /// </summary>
     /// <remarks>
     /// Runs inside the lifecycle lock of the context while the subject attaches, so it must not block, wait on another
-    /// thread or write properties that hold subjects. It is called again when the same subject instance attaches again,
-    /// and the properties it added before are still there, so it must check for them before it adds them.
+    /// thread or write properties that hold subjects. It is called again each time the subject attaches again or is
+    /// held by another parent, and the properties it added before are still there, so it must check for them before it
+    /// adds them.
     /// </remarks>
     /// <param name="subject">The subject that attached below the provider.</param>
     void AddMethods(IInterceptorSubject subject);

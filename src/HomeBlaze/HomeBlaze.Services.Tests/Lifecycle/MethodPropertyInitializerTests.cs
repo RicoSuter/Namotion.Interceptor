@@ -930,6 +930,23 @@ public class MethodPropertyInitializerTests
         Assert.True(innerCall.HadOwnMethods);
     }
 
+    [Fact]
+    public void WhenASubjectWithAContextIsHeldByAMethodProvider_ThenTheProviderAddsMethodsToIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var provider = new MethodProviderTestSubject(context);
+        var child = new MethodTestSubject(context);
+
+        // Act
+        provider.Child = child;
+
+        // Assert
+        var call = Assert.Single(provider.Calls);
+        Assert.Same(child, call.Subject);
+        Assert.True(call.HadOwnMethods);
+    }
+
     private static MethodMetadata GetMethod(IInterceptorSubject subject, string propertyName)
     {
         return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;
