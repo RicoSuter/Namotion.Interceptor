@@ -24,8 +24,7 @@ public class FluentPathProviderTests
         var property = registered.TryGetProperty("Temperature")!;
 
         // Act
-        var included = provider.IsPropertyIncluded(property);
-        var segment = provider.TryGetPropertySegment(property);
+        var included = provider.TryGetPropertySegment(property, out var segment);
 
         // Assert
         Assert.True(included);
@@ -45,9 +44,10 @@ public class FluentPathProviderTests
         var property = registered.TryGetProperty("Temperature")!;
 
         // Act
-        var segment = provider.TryGetPropertySegment(property);
+        var included = provider.TryGetPropertySegment(property, out var segment);
 
         // Assert
+        Assert.True(included);
         Assert.Equal("Temperature", segment);
     }
 
@@ -63,8 +63,7 @@ public class FluentPathProviderTests
         var property = registered.TryGetProperty("Temperature")!;
 
         // Act
-        var included = provider.IsPropertyIncluded(property);
-        var segment = provider.TryGetPropertySegment(property);
+        var included = provider.TryGetPropertySegment(property, out var segment);
 
         // Assert
         Assert.False(included);

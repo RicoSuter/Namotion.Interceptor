@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Paths;
@@ -25,28 +26,28 @@ public class CamelCasePathProvider : IPathProvider
     public static CamelCasePathProvider Instance { get; } = new(DefaultPathProvider.Instance);
 
     /// <inheritdoc />
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => _inner.IsPropertyIncluded(property);
-
-    /// <inheritdoc />
     /// <remarks>
-    /// Transforms the segment from the inner provider to camelCase.
-    /// Returns null if the inner provider returns null.
+    /// Includes the properties the inner provider includes, with its segment transformed to camelCase.
     /// </remarks>
-    public string? TryGetPropertySegment(RegisteredSubjectProperty property)
+    public bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        var segment = _inner.TryGetPropertySegment(property);
-        return segment is not null ? ToCamelCase(segment) : null;
+        if (!_inner.TryGetPropertySegment(property, out var innerSegment))
+        {
+            segment = null;
+            return false;
+        }
+
+        segment = ToCamelCase(innerSegment);
+        return true;
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Converts the segment from camelCase to PascalCase before looking up
-    /// in the inner provider.
+    /// Converts the segment from camelCase to PascalCase before looking it up in the inner provider.
     /// </remarks>
-    public RegisteredSubjectProperty? TryGetPropertyFromSegment(
-        RegisteredSubject subject, string segment)
-        => _inner.TryGetPropertyFromSegment(subject, ToPascalCase(segment));
+    public bool TryGetPropertyFromSegment(
+        RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
+        => _inner.TryGetPropertyFromSegment(subject, ToPascalCase(segment), out property);
 
     private static string ToCamelCase(string value) =>
         value.Length > 1 ? char.ToLowerInvariant(value[0]) + value[1..] : value.ToLowerInvariant();
