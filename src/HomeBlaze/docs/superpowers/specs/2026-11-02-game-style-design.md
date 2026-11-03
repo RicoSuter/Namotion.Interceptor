@@ -34,18 +34,18 @@ Not goals: more than one art style to choose from, realistic rendering, new obje
 - Labels and faded objects stay out of the geometry buffer, so names get no outline and a wall faded for the sightline leaves no ghost outline.
 - Light bands and tilt-shift are not part of the style.
 
-### Quality
+### Graphics
 
-A dropdown in the game panel offers Low, Medium, High and Auto. The choice is stored per browser in `localStorage` (it depends on the device, not the player) and defaults to Auto.
+A Graphics button in the game panel opens a dialog with the presets Auto, Low, Medium and High on top and every setting below: resolution, frame cap, shadows (off, hard, soft), outlines, corner shading (off, half, full), multisampling, sharpen, wind and sightline fade, each with a short caption of its cost. A preset fills the settings, and a changed setting makes the choice Custom. Changes apply live. The choice is stored per browser in the `homeblaze.game-graphics` cookie (it depends on the device, not the player), which the page reads at prerender, and defaults to Auto.
 
-| Preset | Resolution | Frame cap | Corner shading |
-|---|---|---|---|
-| Low | 1x | 30 FPS | off |
-| Medium | 1.5x, at most the device pixel ratio | 60 FPS | half resolution |
-| High | 2x, at most the device pixel ratio | 60 FPS | full resolution |
+| Preset | Resolution | Frame cap | Shadows | Corner shading |
+|---|---|---|---|---|
+| Low | 1x | 30 FPS | hard | off |
+| Medium | 1.5x, at most the device pixel ratio | 60 FPS | soft | half resolution |
+| High | 2x, at most the device pixel ratio | 60 FPS | soft | full resolution |
 
-- Outlines, drawn lines and shadows stay on in every preset, so the game looks the same everywhere, only sharper or softer.
-- Auto starts with Low on a touch device (coarse pointer) and Medium elsewhere, and drops one level after the frame time stays above the cap's budget for five seconds. It never raises the level by itself during a session.
+- Outlines, multisampling, sharpen, wind and the sightline fade stay on in every preset, so the game looks the same everywhere, only sharper or softer.
+- Auto starts with Low on a touch device (coarse pointer) and Medium elsewhere, and drops one level after the frame time stays above the cap's budget for five seconds. It never raises the level by itself during a session, and a changed setting ends it.
 
 ### Rendering only when needed
 
@@ -96,12 +96,12 @@ A dropdown in the game panel offers Low, Medium, High and Auto. The choice is st
 
 - `game.js` owns the scene setup, so lights, shadows, the post-processing chain, quality presets and the render loop pause live there, split into a new `game-render.js` module for the quality and pipeline code if `game.js` grows past what reads well.
 - `game-entities.js` keeps building entities; it registers shadow casters and keeps labels and faded meshes out of the geometry buffer through a small interface the render module provides.
-- Server side: `GamePlayer` gains the two properties, `PlayerEntity` the appearance and emote fields, `GameViewPayloads` the new payload fields, `Game.Players.cs` the edit method, `Game.World.cs` `PlayAnimation`, `HomeBlaze.Game.Abstractions` the new `IGameWorld` method (public API snapshot updated), a new `EmoteTool`, `GamePage.Panel.cs` the quality dropdown, and `GameNameDialog` becomes `GamePlayerDialog`.
+- Server side: `GamePlayer` gains the two properties, `PlayerEntity` the appearance and emote fields, `GameViewPayloads` the new payload fields, `Game.Players.cs` the edit method, `Game.World.cs` `PlayAnimation`, `HomeBlaze.Game.Abstractions` the new `IGameWorld` method (public API snapshot updated), a new `EmoteTool`, `GamePage.Panel.cs` the graphics button and dialog, and `GameNameDialog` becomes `GamePlayerDialog`.
 
 ## Testing
 
 - Unit tests: default person and color per client id, fallback for invalid values, animation state (sequence, cleared after the upper bound or the next step, `Loop` until the next step, cleared on disconnect, refused outside writes of `GamePlayer.Animation`, reserved names), `EmoteTool` operations, payload fields.
-- E2E tests: the quality dropdown persists across a reload; the edit dialog changes person and color and both survive a reload; a clap through the emote tool on one page shows on another page's player (asserted through the canvas data attributes the tests already use); the render loop pauses while the tab is hidden.
+- E2E tests: the graphics dialog's choice persists across a reload; the edit dialog changes person and color and both survive a reload; a clap through the emote tool on one page shows on another page's player (asserted through the canvas data attributes the tests already use); the render loop pauses while the tab is hidden.
 - The existing E2E tests keep passing, including the one that checks a prefilled dialog.
 - A before and after screenshot of the demo world goes into the pull request.
 
@@ -113,6 +113,6 @@ A dropdown in the game panel offers Low, Medium, High and Auto. The choice is st
 
 ## Documentation
 
-- The game README describes the look, the quality presets, the render pause, the people and the emotes.
+- The game README describes the look, the graphics settings, the render pause, the people and the emotes.
 - The abstractions README documents `PlayAnimation` with the emote tool as the example.
 - The abstractions README tells object authors that surfaces should use flat pastel colors or drawn textures and that the outline and shading come from the core.

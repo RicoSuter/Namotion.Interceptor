@@ -372,12 +372,12 @@ The game validates every visual before it sends it to a browser. An object whose
 
 ## Look
 
-The core gives every object the same look: low poly shapes, a warm pastel palette, soft sun shadows, shading where surfaces meet and thin dark outlines. The outlines, the shadows and the corner shading come from the core and apply to every box and model of every object, so an object needs nothing for them. What the object supplies is shape and surface:
+The core draws the outlines, the shadows and the corner shading of every box and model of every object, so an object needs nothing for them; [Look and rendering](../HomeBlaze.Game/README.md#look-and-rendering) describes them. What the object supplies is shape and surface:
 
 - Use flat pastel colors, or textures that are drawn, not photographed: a pastel fill with faint darker lines, as `HomeBlaze.Game.Buildings/wwwroot/textures/` has for bricks, planks and concrete. The core's own drawing script is `HomeBlaze.Game/tools/make-textures.js`.
-- Avoid photo textures. Their noise fights with the flat shading and the outlines, and they look out of place next to the other objects.
+- Avoid photo textures.
 - Prefer low poly models with vertex colors or flat colored materials, like the trees and animals. Keep the shape simple enough that an outline reads well.
-- A visual that fades for the sightline (the core does this for every object that hides the own player) keeps its shadow but loses its outline while it is see-through, which needs nothing from the object either.
+- Fading for the sightline needs nothing from the object either.
 
 ## Assets and licenses
 
