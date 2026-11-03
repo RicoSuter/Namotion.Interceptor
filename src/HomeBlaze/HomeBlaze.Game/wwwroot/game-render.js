@@ -3,7 +3,6 @@
 // frame cap that decide how much of it each frame costs.
 const SKY_COLOR = '#f3e6d3';
 const SUN_COLOR = '#fff1d6';
-const SHADOW_MAP_SIZE = 2048;
 // The shadow map covers this many tiles around its center, so its resolution does not spread over the view radius. The
 // center lies this many tiles north of the camera target, in the middle of the ground the camera sees.
 const SHADOW_EXTENT = 120;
@@ -15,13 +14,15 @@ const OUTLINE_WIDTH = 1.5;
 const INK_DARKNESS = 0.6;
 
 /**
- * The render resolution in device pixels per CSS pixel (capped at the device's ratio), the frame cap, and the resolution of
- * the corner shading relative to the render (0 turns it off). Outlines, shadows and multisampling stay on in every preset.
+ * The settings of each preset: the render resolution in device pixels per CSS pixel (capped at the device's ratio), the
+ * frame cap, the resolution of the corner shading relative to the render (0 turns it off), the size of the shadow map in
+ * pixels, the filter of the shadow edges ('low' or 'medium'), and the samples of the multisampling. Outlines, shadows and
+ * multisampling stay on in every preset.
  */
 export const QUALITY_PRESETS = {
-    low: { resolution: 1, frameCap: 30, ambientOcclusion: 0 },
-    medium: { resolution: 1.5, frameCap: 60, ambientOcclusion: 0.5 },
-    high: { resolution: 2, frameCap: 60, ambientOcclusion: 1 },
+    low: { resolution: 1, frameCap: 30, ambientOcclusion: 0, shadowMapSize: 2048, shadowFilter: 'low', multisampling: 4 },
+    medium: { resolution: 1.5, frameCap: 60, ambientOcclusion: 0.5, shadowMapSize: 2048, shadowFilter: 'medium', multisampling: 4 },
+    high: { resolution: 2, frameCap: 60, ambientOcclusion: 1, shadowMapSize: 2048, shadowFilter: 'medium', multisampling: 4 },
 };
 const AUTO = 'auto';
 const QUALITY_KEY = 'homeblaze.game.quality';
@@ -161,9 +162,9 @@ export function createRenderer(scene, camera, quality = AUTO) {
     sun.shadowMinZ = 1;
     sun.shadowMaxZ = SUN_DISTANCE * 2;
 
-    const shadows = new BABYLON.ShadowGenerator(SHADOW_MAP_SIZE, sun);
+    const shadows = new BABYLON.ShadowGenerator(QUALITY_PRESETS.high.shadowMapSize, sun);
     shadows.usePercentageCloserFiltering = true;
-    shadows.filteringQuality = BABYLON.ShadowGenerator.QUALITY_MEDIUM;
+    const shadowFilters = { low: BABYLON.ShadowGenerator.QUALITY_LOW, medium: BABYLON.ShadowGenerator.QUALITY_MEDIUM };
     shadows.darkness = 0.35;
     shadows.bias = 0.002;
     // A faded wall keeps its shadow.
@@ -171,7 +172,7 @@ export function createRenderer(scene, camera, quality = AUTO) {
 
     // The axes of the shadow map in world space, to which follow snaps the sun, so that shadow edges do not shimmer while
     // the camera glides.
-    const shadowTexel = SHADOW_EXTENT / SHADOW_MAP_SIZE;
+    let shadowTexel = SHADOW_EXTENT / shadows.mapSize;
     const shadowRight = BABYLON.Vector3.Cross(BABYLON.Vector3.Up(), sun.direction).normalize();
     const shadowUp = BABYLON.Vector3.Cross(sun.direction, shadowRight).normalize();
     const shadowCenter = new BABYLON.Vector3();
@@ -183,8 +184,6 @@ export function createRenderer(scene, camera, quality = AUTO) {
     BABYLON.Effect.ShadersStore.gameOutlineFragmentShader = OUTLINE_SHADER;
     const outline = new BABYLON.PostProcess('outline', 'gameOutline', ['texel', 'thickness', 'strength', 'inkColor'],
         ['depthSampler', 'normalSampler'], 1.0, camera);
-    // The first pass of the chain receives the scene, so this multisamples the scene itself.
-    outline.samples = 4;
     const ink = [0.25 + (0.06 - 0.25) * INK_DARKNESS, 0.16 + (0.05 - 0.16) * INK_DARKNESS, 0.12 + (0.05 - 0.12) * INK_DARKNESS];
     outline.onApply = effect => {
         const buffer = geometry.getGBuffer();
@@ -295,6 +294,29 @@ export function createRenderer(scene, camera, quality = AUTO) {
         }
     };
 
+    // Every setting of the look changes here, so that a preset and a single setting take the same path. Only what differs
+    // from the settings in effect is touched, because a new shadow map size recreates the map.
+    const applySettings = (settings, isAuto) => {
+        current = { isAuto, ...settings };
+        slowSince = 0;
+        applyResolution();
+        buildPipelines(settings.ambientOcclusion);
+        if (shadows.mapSize !== settings.shadowMapSize) {
+            shadows.mapSize = settings.shadowMapSize;
+            shadowTexel = SHADOW_EXTENT / settings.shadowMapSize;
+        }
+
+        shadows.filteringQuality = shadowFilters[settings.shadowFilter];
+        // The outline is the first pass of the chain and receives the scene, so its samples multisample the scene itself.
+        if (outline.samples !== settings.multisampling) {
+            outline.samples = settings.multisampling;
+        }
+
+        if (canvas) {
+            canvas.dataset.gameAmbientOcclusion = String(settings.ambientOcclusion);
+        }
+    };
+
     const api = {
         sun,
         shadowGenerator: shadows,
@@ -303,14 +325,9 @@ export function createRenderer(scene, camera, quality = AUTO) {
         setQuality(choice) {
             const isPreset = Object.hasOwn(QUALITY_PRESETS, choice);
             const level = isPreset ? choice : autoLevel;
-            const preset = QUALITY_PRESETS[level];
-            current = { isAuto: !isPreset, ...preset };
-            slowSince = 0;
-            applyResolution();
-            buildPipelines(preset.ambientOcclusion);
+            applySettings(QUALITY_PRESETS[level], !isPreset);
             if (canvas) {
                 canvas.dataset.gameQuality = level;
-                canvas.dataset.gameAmbientOcclusion = String(preset.ambientOcclusion);
             }
         },
         /** Whether the frame of this animation frame time renders, by the frame cap; call once per animation frame. */
