@@ -67,7 +67,7 @@ public static class McpServerConfigurationExtensions
         return path is not null &&
             configuration.AccessPolicy is { } policy &&
             subject.Subject != root.Subject &&
-            McpVisibility.IsEmptyForPolicy(policy, (PathProviderBase)configuration.PathProvider, subject)
+            McpVisibility.IsEmptyForPolicy(policy, configuration.PathProvider, subject)
                 ? null
                 : path;
     }

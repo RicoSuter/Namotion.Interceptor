@@ -26,14 +26,8 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     /// <paramref name="pathProvider"/> restricted to what <paramref name="policy"/> allows to read, or
     /// <paramref name="pathProvider"/> itself without a policy.
     /// </summary>
-    /// <exception cref="InvalidOperationException"><paramref name="pathProvider"/> does not extend <see cref="PathProviderBase"/>.</exception>
-    public static PathProviderBase Create(IPathProvider pathProvider, IMcpAccessPolicy? policy)
-    {
-        var basePathProvider = pathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
-
-        return policy is null ? basePathProvider : new McpAccessPathProvider(basePathProvider, policy);
-    }
+    public static PathProviderBase Create(PathProviderBase pathProvider, IMcpAccessPolicy? policy)
+        => policy is null ? pathProvider : new McpAccessPathProvider(pathProvider, policy);
 
     /// <summary>
     /// Whether the policy allows to read the member and, for an attribute, the property it belongs to, recursively up

@@ -31,9 +31,7 @@ internal sealed class McpVisibility
         _policy = policy;
         _rootSubject = rootSubject;
         _toolPathProvider = configuration.ToolPathProvider;
-
-        // ToolPathProvider has checked that the configured provider extends PathProviderBase.
-        _pathProvider = (PathProviderBase)configuration.PathProvider;
+        _pathProvider = configuration.PathProvider;
     }
 
     /// <summary>

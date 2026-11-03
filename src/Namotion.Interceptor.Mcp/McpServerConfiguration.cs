@@ -11,11 +11,10 @@ namespace Namotion.Interceptor.Mcp;
 public class McpServerConfiguration
 {
     /// <summary>
-    /// Property filtering and path resolution. Reuses existing IPathProvider from Registry. The tools list, filter on,
-    /// resolve and build paths only through the properties it effectively includes (see
-    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>).
+    /// Property filtering and path resolution. The tools list, filter on, resolve and build paths only through the
+    /// properties it effectively includes (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>).
     /// </summary>
-    public required IPathProvider PathProvider { get; init; }
+    public required PathProviderBase PathProvider { get; init; }
 
     /// <summary>
     /// Subject-level JSON enrichment for query responses (e.g., $title, $icon, $type).
@@ -77,8 +76,7 @@ public class McpServerConfiguration
 
     /// <summary>
     /// The path provider the tools list, select, filter and resolve through and build the paths they return with:
-    /// <see cref="PathProvider"/>, which must extend <see cref="PathProviderBase"/>, restricted to what
-    /// <see cref="AccessPolicy"/> allows to read.
+    /// <see cref="PathProvider"/> restricted to what <see cref="AccessPolicy"/> allows to read.
     /// </summary>
     // Racing first calls create equal providers, so whichever one is kept is correct.
     internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy);
