@@ -1,11 +1,12 @@
 @using Microsoft.AspNetCore.WebUtilities
-@using HomeBlaze.Storage.Abstractions
+@using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Attributes
 @using Namotion.Interceptor.Registry.Paths
 
 @inherits HomeBlazorComponentBase
 
 @inject NavigationManager NavigationManager
+@inject IServiceProvider ServiceProvider
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
 @inject PropertyRowLayoutService RowLayout
@@ -65,7 +66,7 @@
                                           CanClose="@(!isFirst)"
                                           OnPropertyClick="@((args) => OnPropertyClick(pane, args.PropertyName, args.Index, args.Subject))"
                                           OnClose="@(() => OnPaneClose(pane))"
-                                          OnDelete="@(() => OnPaneDelete(pane))"
+                                          OnDelete="@((MethodMetadata deleteOperation) => OnPaneDelete(pane, deleteOperation))"
                                           HighlightedProperty="@highlightedProperty" />
                 </MudPaper>
             </div>
@@ -429,43 +430,17 @@
         ScrollToLastPaneAfterRender();
     }
 
-    private async Task OnPaneDelete(SubjectPane pane)
+    private async Task OnPaneDelete(SubjectPane pane, MethodMetadata deleteOperation)
     {
-        // Get subject name for confirmation dialog
-        string subjectName;
-        IStorageContainer? storage = null;
-
-        if (pane.Subject is IStorageFile storageFile)
-        {
-            subjectName = storageFile.Name;
-            storage = storageFile.Storage;
-        }
-        else if (pane.Subject is IConfigurable configurableSubject)
-        {
-            subjectName = SubjectDisplayExtensions.GetIdentifyingDisplayName(pane.DisplayName, pane.Index);
-
-            // Find the parent IStorageContainer by traversing up the pane hierarchy
-            for (int i = _panes.IndexOf(pane) - 1; i >= 0; i--)
-            {
-                if (_panes[i].Subject is IStorageContainer container)
-                {
-                    storage = container;
-                    break;
-                }
-            }
-
-            if (storage == null)
-                return;
-        }
-        else
-        {
+        if (pane.Subject.TryGetRegisteredSubject()?.TryGetProperty(deleteOperation.PropertyName)?.IsMethodEnabled() == false)
             return;
-        }
 
-        // Show confirmation dialog
+        var subjectName = SubjectDisplayExtensions.GetIdentifyingDisplayName(pane.DisplayName, pane.Index);
+
+        // The one confirmation of the delete, also for an operation that requires confirmation.
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Delete Subject",
-            $"Are you sure you want to delete '{subjectName}'?",
+            "Delete",
+            $"Delete '{subjectName}'?",
             yesText: "Delete",
             cancelText: "Cancel");
 
@@ -474,8 +449,7 @@
 
         try
         {
-            // Delete the subject from storage
-            await storage.DeleteSubjectAsync(pane.Subject, CancellationToken.None);
+            await deleteOperation.InvokeAsync(null, ServiceProvider, CancellationToken.None);
 
             // Close this pane and any after it
             var paneIndex = _panes.IndexOf(pane);
