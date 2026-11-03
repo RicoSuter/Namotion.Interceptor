@@ -16,14 +16,14 @@ const INK_DARKNESS = 0.6;
 /**
  * The settings of each preset: the render resolution in device pixels per CSS pixel (capped at the device's ratio), the
  * frame cap, the resolution of the corner shading relative to the render (0 turns it off), the size of the shadow map in
- * pixels, the filter of the shadow edges ('low' or 'medium'), and the samples of the multisampling. Outlines, shadows and
- * multisampling stay on in every preset.
+ * pixels, the filter of the shadow edges ('low' or 'medium'), the samples of the multisampling, and whether the light
+ * sharpen runs. Outlines, shadows and multisampling stay on in every preset.
  */
-export const QUALITY_PRESETS = {
-    low: { resolution: 1, frameCap: 30, ambientOcclusion: 0, shadowMapSize: 2048, shadowFilter: 'low', multisampling: 4 },
-    medium: { resolution: 1.5, frameCap: 60, ambientOcclusion: 0.5, shadowMapSize: 2048, shadowFilter: 'medium', multisampling: 4 },
-    high: { resolution: 2, frameCap: 60, ambientOcclusion: 1, shadowMapSize: 2048, shadowFilter: 'medium', multisampling: 4 },
-};
+export const QUALITY_PRESETS = Object.freeze({
+    low: Object.freeze({ resolution: 1, frameCap: 30, ambientOcclusion: 0, shadowMapSize: 2048, shadowFilter: 'low', multisampling: 4, sharpen: true }),
+    medium: Object.freeze({ resolution: 1.5, frameCap: 60, ambientOcclusion: 0.5, shadowMapSize: 2048, shadowFilter: 'medium', multisampling: 4, sharpen: true }),
+    high: Object.freeze({ resolution: 2, frameCap: 60, ambientOcclusion: 1, shadowMapSize: 2048, shadowFilter: 'medium', multisampling: 4, sharpen: true }),
+});
 const AUTO = 'auto';
 const QUALITY_KEY = 'homeblaze.game.quality';
 const UNFOCUSED_FRAME_CAP = 10;
@@ -127,16 +127,17 @@ export function createFramePacer() {
 }
 
 // The outline and the corner shading read one channel of depth and three of normals. Depth keeps the 32-bit float that
-// Babylon picks where the device can filter it, and normals take half floats, which halves the bytes per pixel of the
-// buffer at the same look; a device without filterable half floats keeps Babylon's defaults.
+// Babylon picks where the device can render and filter it, and normals take half floats, which takes less than half the
+// bytes per pixel of the buffer at the same look. WebGL1 has no one-channel format, and a device without renderable,
+// filterable half floats keeps Babylon's defaults too.
 function getGeometryFormats(engine) {
     const BABYLON = window.BABYLON;
     const caps = engine.getCaps();
-    if (!caps.textureHalfFloat || !caps.textureHalfFloatLinearFiltering) {
+    if (engine.webGLVersion < 2 || !caps.textureHalfFloatRender || !caps.textureHalfFloatLinearFiltering) {
         return undefined;
     }
 
-    const depthType = caps.textureFloat && caps.textureFloatLinearFiltering
+    const depthType = caps.textureFloatRender && caps.textureFloatLinearFiltering
         ? BABYLON.Constants.TEXTURETYPE_FLOAT
         : BABYLON.Constants.TEXTURETYPE_HALF_FLOAT;
     return {
@@ -162,7 +163,11 @@ export function createRenderer(scene, camera, quality = AUTO) {
     sun.shadowMinZ = 1;
     sun.shadowMaxZ = SUN_DISTANCE * 2;
 
-    const shadows = new BABYLON.ShadowGenerator(QUALITY_PRESETS.high.shadowMapSize, sun);
+    let autoLevel = matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';
+    const getLevel = choice => (Object.hasOwn(QUALITY_PRESETS, choice) ? choice : autoLevel);
+
+    // Created at the size of the first settings, so that applying them does not recreate the map at once.
+    const shadows = new BABYLON.ShadowGenerator(QUALITY_PRESETS[getLevel(quality)].shadowMapSize, sun);
     shadows.usePercentageCloserFiltering = true;
     const shadowFilters = { low: BABYLON.ShadowGenerator.QUALITY_LOW, medium: BABYLON.ShadowGenerator.QUALITY_MEDIUM };
     shadows.darkness = 0.35;
@@ -222,7 +227,7 @@ export function createRenderer(scene, camera, quality = AUTO) {
 
         pipeline = new BABYLON.DefaultRenderingPipeline('look', true, scene, [camera]);
         pipeline.fxaaEnabled = false;
-        pipeline.sharpenEnabled = true;
+        pipeline.sharpenEnabled = current.sharpen;
         pipeline.sharpen.edgeAmount = 0.35;
         pipeline.imageProcessingEnabled = true;
         pipeline.imageProcessing.contrast = 1.1;
@@ -257,7 +262,6 @@ export function createRenderer(scene, camera, quality = AUTO) {
     const canvas = engine.getRenderingCanvas();
     const pacer = createFramePacer();
     let current = null;
-    let autoLevel = matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';
     let slowSince = 0;
 
     // The engine does not adapt to the device pixel ratio, so the resolution follows it here: on a preset change, a
@@ -297,16 +301,25 @@ export function createRenderer(scene, camera, quality = AUTO) {
     // Every setting of the look changes here, so that a preset and a single setting take the same path. Only what differs
     // from the settings in effect is touched, because a new shadow map size recreates the map.
     const applySettings = (settings, isAuto) => {
+        const shadowFilter = shadowFilters[settings.shadowFilter];
+        if (shadowFilter === undefined) {
+            throw new Error(`The shadow filter ${settings.shadowFilter} is unknown.`);
+        }
+
         current = { isAuto, ...settings };
         slowSince = 0;
         applyResolution();
         buildPipelines(settings.ambientOcclusion);
+        if (pipeline.sharpenEnabled !== settings.sharpen) {
+            pipeline.sharpenEnabled = settings.sharpen;
+        }
+
         if (shadows.mapSize !== settings.shadowMapSize) {
             shadows.mapSize = settings.shadowMapSize;
             shadowTexel = SHADOW_EXTENT / settings.shadowMapSize;
         }
 
-        shadows.filteringQuality = shadowFilters[settings.shadowFilter];
+        shadows.filteringQuality = shadowFilter;
         // The outline is the first pass of the chain and receives the scene, so its samples multisample the scene itself.
         if (outline.samples !== settings.multisampling) {
             outline.samples = settings.multisampling;
@@ -323,9 +336,8 @@ export function createRenderer(scene, camera, quality = AUTO) {
         geometryBuffer: geometry,
         /** Applies a preset name or 'auto', which starts low on touch devices and medium elsewhere; anything else is auto. */
         setQuality(choice) {
-            const isPreset = Object.hasOwn(QUALITY_PRESETS, choice);
-            const level = isPreset ? choice : autoLevel;
-            applySettings(QUALITY_PRESETS[level], !isPreset);
+            const level = getLevel(choice);
+            applySettings(QUALITY_PRESETS[level], level !== choice);
             if (canvas) {
                 canvas.dataset.gameQuality = level;
             }

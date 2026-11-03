@@ -207,10 +207,20 @@ function addWindToShadows(shadowGenerator) {
             defines.push(WIND_DEFINE);
         }
     };
+    // The generator announces the mesh before the effect of each submesh, so a wind mesh that draws without the wind shows,
+    // as when a Babylon update stops calling the defines hook.
+    let renderingMesh = null;
+    let hasWarnedMissingWind = false;
+    shadowGenerator.onBeforeShadowMapRenderMeshObservable.add(mesh => {
+        renderingMesh = mesh;
+    });
     shadowGenerator.onBeforeShadowMapRenderObservable.add(effect => {
         effect.gameWindShadow ??= effect.defines.includes(WIND_DEFINE);
         if (effect.gameWindShadow) {
             bindWind(effect);
+        } else if (!hasWarnedMissingWind && renderingMesh?.material?.gameWind && patchedShaders.get('shadowMapVertexShader') !== false) {
+            hasWarnedMissingWind = true;
+            console.warn('The shadow map draws a wind mesh without the wind, so shadows do not sway.');
         }
     });
 }
