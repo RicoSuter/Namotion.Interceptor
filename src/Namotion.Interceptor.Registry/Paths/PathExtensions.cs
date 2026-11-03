@@ -318,7 +318,7 @@ public static class PathExtensions
     /// Optional root to make the path relative to. When <c>null</c>, the canonical absolute path is returned;
     /// when provided, <c>null</c> is returned if the property is not reachable from that root.
     /// </param>
-    /// <returns>The path, or <c>null</c> when a given root is not reachable or the parent chain has a cycle.</returns>
+    /// <returns>The path, or <c>null</c> when a given root is not reachable, the parent chain has a cycle, or an attribute takes the segment of an [InlinePaths] property the path would name, see <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>.</returns>
     public static string? TryGetPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null)
         => property.TryGetPath(DefaultPathProvider.Instance, rootSubject);
 
@@ -331,13 +331,14 @@ public static class PathExtensions
     /// <param name="propertyIndex">Optional index for the property (e.g., dictionary key or collection index).
     /// When provided, the property path includes this index, which is useful for computing
     /// the path to a child subject held at a specific index within this property.</param>
-    /// <returns>The path, or null when paths may not pass the property or a property holding it up to the root (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
+    /// <returns>The path, or null when paths may not pass the property or a property holding it up to the root (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), a given root is not reachable, the parent chain has a cycle, or another included property of its subject has the segment of an [InlinePaths] property the path would name, as the property itself or with a key that needs the explicit form.</returns>
     /// <remarks>
     /// A built path passes only properties the provider includes, and <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> with the
     /// same provider resolves it back to the same property when the provider resolves the segments it gives. This does
     /// not hold for attributes whose segment is the bare attribute name, as with <see cref="DefaultPathProvider"/>: two
     /// attributes with the same name on one subject, or an attribute named like a property, share a segment and resolve
-    /// to the first of them. When a
+    /// to the first of them in property order. The [InlinePaths] property instead yields its segment to such an
+    /// attribute wherever it is declared and then has no path itself. When a
     /// subject on the way has several parents and <paramref name="rootSubject"/> is given, the path is the first path,
     /// in parent order, that reaches the root through properties the provider includes; without a root it follows
     /// the first parent of each subject. Keys are formatted with their invariant text, quoted when the text is empty,
@@ -368,15 +369,23 @@ public static class PathExtensions
             {
                 var (frameProperty, index, segment) = frames[i];
 
-                // [InlinePaths] frames emit just the key where it resolves back as that key.
-                if (index is not null && frameProperty.IsInlinePathsProperty)
+                if (frameProperty.IsInlinePathsProperty)
                 {
-                    if (!TryAppendInlineKey(builder, pathProvider, characters, frameProperty, index, segment))
+                    // [InlinePaths] frames emit just the key where it resolves back as that key.
+                    if (index is not null)
+                    {
+                        if (!TryAppendInlineKey(builder, pathProvider, characters, frameProperty, index, segment))
+                        {
+                            return null;
+                        }
+
+                        continue;
+                    }
+
+                    if (!IsOwnSegmentOfInlineProperty(pathProvider, frameProperty, segment))
                     {
                         return null;
                     }
-
-                    continue;
                 }
 
                 if (builder.Length > 0)
@@ -415,9 +424,7 @@ public static class PathExtensions
             return true;
         }
 
-        // The explicit form only reads back while the own segment still resolves to this property.
-        if (!pathProvider.TryGetPropertyFromSegment(property.Parent, ownSegment, out var ownProperty) ||
-            ownProperty.Name != property.Name)
+        if (!IsOwnSegmentOfInlineProperty(pathProvider, property, ownSegment))
         {
             return false;
         }
@@ -426,6 +433,15 @@ public static class PathExtensions
         PathSyntax.AppendIndexText(builder, text, characters);
         return true;
     }
+
+    /// <summary>
+    /// Whether <paramref name="ownSegment"/> still resolves to the [InlinePaths] <paramref name="property"/>, which yields
+    /// it to any other included property of its subject with that segment.
+    /// </summary>
+    private static bool IsOwnSegmentOfInlineProperty(
+        PathProviderBase pathProvider, RegisteredSubjectProperty property, string ownSegment)
+        => pathProvider.TryGetPropertyFromSegment(property.Parent, ownSegment, out var ownProperty) &&
+           ownProperty.Name == property.Name;
 
     /// <summary>
     /// Mirrors <see cref="IsInlinePathsKey"/>: the reader takes the bare text as this key only when the text is one
