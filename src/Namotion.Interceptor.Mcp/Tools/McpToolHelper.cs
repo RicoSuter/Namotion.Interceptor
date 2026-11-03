@@ -173,27 +173,9 @@ internal static class McpToolHelper
     /// attribute, a property holding subjects or one the path provider excludes.
     /// </summary>
     internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
-        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
-            ? null
-            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-
-    /// <summary>
-    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
-    /// exposes, or null when there is none.
-    /// </summary>
-    internal static RegisteredSubjectProperty? TryGetScalarProperty(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        string segment)
-    {
-        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
-        return property is null ||
-               property.IsAttribute ||
-               property.CanContainSubjects ||
-               !pathProvider.IsPropertyIncluded(property)
-            ? null
-            : property;
-    }
+        !property.IsAttribute && !property.CanContainSubjects && pathProvider.TryGetPropertySegment(property, out var segment)
+            ? segment
+            : null;
 
     /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
@@ -221,7 +203,7 @@ internal static class McpToolHelper
     /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty. Any other
     /// subject's path is the first, in parent order, that reaches the root only through properties
     /// <see cref="McpServerConfiguration.ToolPathProvider"/> effectively includes (see
-    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), the holding property too, as get_property and
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), the holding property too, as get_property and
     /// browse resolve; null when there is none.
     /// </summary>
     internal static string? TryGetSubjectPath(

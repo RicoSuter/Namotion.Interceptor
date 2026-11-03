@@ -62,10 +62,7 @@ public class SourcePathProviderBenchmark
     public void TryGetPropertyFromSegment()
     {
         var subject = _car.TryGetRegisteredSubject();
-        var property = _pathProvider
-            .TryGetPropertyFromSegment(subject ?? throw new InvalidOperationException(), "Name");
-
-        if (property is null)
+        if (!_pathProvider.TryGetPropertyFromSegment(subject ?? throw new InvalidOperationException(), "Name", out _))
         {
             throw new InvalidOperationException();
         }
