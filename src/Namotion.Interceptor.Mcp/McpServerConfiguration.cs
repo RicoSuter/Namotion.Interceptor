@@ -76,8 +76,11 @@ public class McpServerConfiguration
 
     /// <summary>
     /// The path provider the tools list, select, filter and resolve through and build the paths they return with:
-    /// <see cref="PathProvider"/> restricted to what <see cref="AccessPolicy"/> allows to read.
+    /// <see cref="PathProvider"/> restricted to what <see cref="AccessPolicy"/> allows to read, or
+    /// <see cref="PathProvider"/> itself without a policy.
     /// </summary>
     // Racing first calls create equal providers, so whichever one is kept is correct.
-    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= McpAccessPathProvider.Create(PathProvider, AccessPolicy);
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= AccessPolicy is { } policy
+        ? new McpAccessPathProvider(PathProvider, policy)
+        : PathProvider;
 }

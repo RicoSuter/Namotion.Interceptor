@@ -16,18 +16,14 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     private readonly PathProviderBase _inner;
     private readonly IMcpAccessPolicy _policy;
 
-    private McpAccessPathProvider(PathProviderBase inner, IMcpAccessPolicy policy)
+    /// <summary>
+    /// <paramref name="inner"/> restricted to what <paramref name="policy"/> allows to read.
+    /// </summary>
+    internal McpAccessPathProvider(PathProviderBase inner, IMcpAccessPolicy policy)
     {
         _inner = inner;
         _policy = policy;
     }
-
-    /// <summary>
-    /// <paramref name="pathProvider"/> restricted to what <paramref name="policy"/> allows to read, or
-    /// <paramref name="pathProvider"/> itself without a policy.
-    /// </summary>
-    public static PathProviderBase Create(PathProviderBase pathProvider, IMcpAccessPolicy? policy)
-        => policy is null ? pathProvider : new McpAccessPathProvider(pathProvider, policy);
 
     /// <summary>
     /// Whether the policy allows to read the member and, for an attribute, the property it belongs to, recursively up
