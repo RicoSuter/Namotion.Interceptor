@@ -58,7 +58,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenTheRoleIsLoaded_ThenItsNameIncludesAndRulesAreShown()
+    public void WhenTheRoleIsLoaded_ThenItsIncludesAndRulesAreShownWithoutANameLine()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
@@ -70,7 +70,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var component = RenderEditor(role);
 
         // Assert
-        Assert.Equal("Kitchen", component.Find("[data-testid='role-edit-name']").TextContent.Trim());
+        Assert.Empty(component.FindAll("[data-testid='role-edit-name']"));
         Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='role-edit-include-Reader']").TextContent.Trim());
 
         var allowCard = Assert.Single(GetCards(component, "allow"));
@@ -98,6 +98,81 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
             component.Find("[data-testid='role-edit-builtin-role-Operator']").TextContent.Trim());
         Assert.Equal("Everything: Allows every action on every member.",
             component.Find("[data-testid='role-edit-builtin-role-Everything']").TextContent.Trim());
+    }
+
+    [Fact]
+    public void WhenTheRoleIsLoaded_ThenTheTabsAreRolesAllowAndDenyWithTheirCountsAndPreview()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow =
+        [
+            new PermissionRule { Actions = [PermissionAction.Read] },
+            new PermissionRule { Actions = [PermissionAction.Write] }
+        ];
+        role.Deny = [new PermissionRule { Actions = [PermissionAction.Read] }];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Equal("Roles", component.Find("[data-testid='role-edit-tab-roles']").TextContent.Trim());
+        Assert.Equal("Allow (2)", component.Find("[data-testid='role-edit-tab-allow']").TextContent.Trim());
+        Assert.Equal("Deny (1)", component.Find("[data-testid='role-edit-tab-deny']").TextContent.Trim());
+        Assert.Equal("Preview", component.Find("[data-testid='role-edit-tab-preview']").TextContent.Trim());
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-allow-error']"));
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-deny-error']"));
+    }
+
+    [Fact]
+    public async Task WhenARuleBecomesInvalid_ThenOnlyTheTabOfItsListShowsTheErrorMarker()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await SetActionAsync(component, 0, "read", false);
+
+        // Assert
+        Assert.Single(component.FindAll("[data-testid='role-edit-tab-allow-error']"));
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-deny-error']"));
+    }
+
+    [Fact]
+    public async Task WhenAListHasNoRules_ThenItsTabSaysSoUntilARuleIsAdded()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+        Assert.Equal("No allow rules yet", component.Find("[data-testid='role-edit-allow-empty']").TextContent.Trim());
+        Assert.Equal("No deny rules yet", component.Find("[data-testid='role-edit-deny-empty']").TextContent.Trim());
+
+        // Act
+        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='role-edit-allow-empty']"));
+        Assert.Single(component.FindAll("[data-testid='role-edit-deny-empty']"));
+    }
+
+    [Fact]
+    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleHintIsAboveTheTabs()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow =
+        [
+            new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] },
+            new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }
+        ];
+
+        // Act
+        var component = RenderEditor(role);
+
+        // Assert
+        Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']"));
+        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
     }
 
     [Fact]
@@ -741,7 +816,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void WhenAgentsUseTheRole_ThenTheirCountIsShown()
+    public void WhenAgentsUseTheRole_ThenTheirCountIsShownInTheTabBar()
     {
         // Arrange
         _graph.Service.SetPrincipalRoles(new object(), ["kitchen"]);
@@ -752,6 +827,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal("Used by 2 agents", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim());
+        Assert.NotNull(component.Find(".mud-tabs-header-after").QuerySelector("[data-testid='role-edit-used-by']"));
     }
 
     [Fact]
@@ -920,13 +996,13 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var garden = _graph.GetRole("Garden");
         var component = RenderEditor(role);
 
-        // Act: renamed as the Authorization dialog does, left out once so that it is attached again under its new key.
+        // Act: renamed as the Rename operation does, left out once so that it is attached again under its new key.
         _graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Garden"] = garden };
         _graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Pantry"] = role, ["Garden"] = garden };
         component.Render();
 
         // Assert
-        Assert.Equal("Pantry", component.Find("[data-testid='role-edit-name']").TextContent.Trim());
+        Assert.Equal("Pantry", role.Title);
         Assert.Equal("Pantry", component.Instance.GetEditedRole().Name);
         Assert.Equal(["Pantry"], component.FindComponent<RoleSelector>().Instance.Excluded!);
 

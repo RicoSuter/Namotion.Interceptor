@@ -14,6 +14,8 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 {
     private const string Allowed = "allowed";
     private const string Denied = "denied";
+    private const int AllowTabIndex = 1;
+    private const int PreviewTabIndex = 3;
 
     private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen");
 
@@ -171,10 +173,10 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         Assert.Equal([Allowed, Denied, null, Denied], GetCellStates(component, "Temperature"));
 
         // Act
-        await ActivateTabAsync(component, 0);
+        await ActivateTabAsync(component, AllowTabIndex);
         var box = component.FindComponents<RuleCard>()[0].FindComponents<MudCheckBox<bool>>().Single(box => box.Instance.Label == "write");
         await component.InvokeAsync(() => box.Instance.ValueChanged.InvokeAsync(true));
-        await ActivateTabAsync(component, 1);
+        await ActivateTabAsync(component, PreviewTabIndex);
 
         // Assert
         Assert.Equal("/Devices", component.Find("[data-testid='role-preview-path'] input").GetAttribute("value"));
@@ -252,7 +254,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
 
     private static async Task ChoosePathAsync(IRenderedComponent<RoleEditComponent> component, string path)
     {
-        await ActivateTabAsync(component, 1);
+        await ActivateTabAsync(component, PreviewTabIndex);
         await component.Find("[data-testid='role-preview-path'] input").InputAsync(new ChangeEventArgs { Value = path });
     }
 

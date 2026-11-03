@@ -8,54 +8,71 @@
 
 @if (Role is { } role)
 {
-    <MudStack Row="true" AlignItems="AlignItems.Baseline" Justify="Justify.SpaceBetween">
-        <MudText Typo="Typo.h6" data-testid="role-edit-name">@(UpdateName() ?? "Role")</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
-            Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
-        </MudText>
-    </MudStack>
-    @if (role.Status is { } status)
-    {
-        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" data-testid="role-edit-status">@status</MudAlert>
-    }
-    @if (role.Warning is { } warning)
-    {
-        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="role-edit-warning">@warning</MudAlert>
-    }
+    var executeWithoutRead = GetExecuteWithoutRead();
+    <div class="role-edit">
+        @if (role.Status is { } status)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-status">@status</MudAlert>
+        }
+        @if (role.Warning is { } warning)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-warning">@warning</MudAlert>
+        }
+        @if (executeWithoutRead is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-execute-without-read">@executeWithoutRead.Describe()</MudAlert>
+        }
 
-    @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. *@
-    <MudTabs Elevation="0" TabPanelsClass="pt-4" KeepPanelsAlive="true" data-testid="role-edit-tabs">
-        <MudTabPanel Text="Rules">
-            <MudForm>
-                @if (GetExecuteWithoutRead() is { } executeWithoutRead)
-                {
-                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4" data-testid="role-edit-execute-without-read">@executeWithoutRead.Describe()</MudAlert>
-                }
-                <MudText Typo="Typo.subtitle2">Includes</MudText>
-                <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
-                <div data-testid="role-edit-includes">
-                    <RoleSelector @bind-Selected="_includes" @bind-Selected:after="OnChanged" Excluded="@_excluded"
-                                  Label="Includes" TestId="role-edit-include" HelperText="Optional." />
-                </div>
-                @RenderBuiltInRoles()
-
-                <MudText Typo="Typo.subtitle2" Class="mt-6">Allow</MudText>
-                <MudText Typo="Typo.body2" Class="mb-2">
-                    What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
+        @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. *@
+        <MudTabs Elevation="0" KeepPanelsAlive="true" Class="role-edit-tabs" TabPanelsClass="role-edit-panels" data-testid="role-edit-tabs">
+            <Header>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
+                    Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
                 </MudText>
-                @RenderRules(_allow, "allow")
-
-                <MudText Typo="Typo.subtitle2" Class="mt-6">Deny</MudText>
-                <MudText Typo="Typo.body2" Class="mb-2">
-                    What the role takes away again, whichever role granted it.
-                </MudText>
-                @RenderRules(_deny, "deny")
-            </MudForm>
-        </MudTabPanel>
-        <MudTabPanel Text="Preview">
-            <RolePreview Role="@GetEditedRole()" />
-        </MudTabPanel>
-    </MudTabs>
+            </Header>
+            <ChildContent>
+                <MudTabPanel>
+                    <TabContent><span data-testid="role-edit-tab-roles">Roles</span></TabContent>
+                    <ChildContent>
+                        <MudForm>
+                            <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
+                            <div data-testid="role-edit-includes">
+                                <RoleSelector @bind-Selected="_includes" @bind-Selected:after="OnChanged" Excluded="@_excluded"
+                                              Label="Includes" TestId="role-edit-include" HelperText="Optional." />
+                            </div>
+                            @RenderBuiltInRoles()
+                        </MudForm>
+                    </ChildContent>
+                </MudTabPanel>
+                <MudTabPanel>
+                    <TabContent>@RenderTabLabel("Allow", _allow, "allow")</TabContent>
+                    <ChildContent>
+                        <MudForm>
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
+                            </MudText>
+                            @RenderRules(_allow, "allow", executeWithoutRead)
+                        </MudForm>
+                    </ChildContent>
+                </MudTabPanel>
+                <MudTabPanel>
+                    <TabContent>@RenderTabLabel("Deny", _deny, "deny")</TabContent>
+                    <ChildContent>
+                        <MudForm>
+                            <MudText Typo="Typo.body2" Class="mb-2">What the role takes away again, whichever role granted it.</MudText>
+                            @RenderRules(_deny, "deny", null)
+                        </MudForm>
+                    </ChildContent>
+                </MudTabPanel>
+                <MudTabPanel>
+                    <TabContent><span data-testid="role-edit-tab-preview">Preview</span></TabContent>
+                    <ChildContent>
+                        <RolePreview Role="@GetEditedRole()" />
+                    </ChildContent>
+                </MudTabPanel>
+            </ChildContent>
+        </MudTabs>
+    </div>
 }
 
 @code {
@@ -189,16 +206,14 @@
     }
 
     // Reads the name again, as the role can be renamed while this dialog is open.
-    private string? UpdateName()
+    private void UpdateName()
     {
-        if (Role?.FindParent().Name is { } name && !string.Equals(name, _name, StringComparison.Ordinal))
+        if (Role?.Title is { } name && !string.Equals(name, _name, StringComparison.Ordinal))
         {
             _name = name;
             _excluded = [name];
             _editedRole = null;
         }
-
-        return _name;
     }
 
     // Checked again for each edited role, so that the hint follows unsaved changes. The preview of the same instance is
@@ -220,9 +235,20 @@
         return _executeWithoutRead;
     }
 
-    private RenderFragment RenderRules(List<RuleEntry> rules, string section) => __builder =>
+    private RenderFragment RenderTabLabel(string title, List<RuleEntry> rules, string section) => __builder =>
     {
-        var executeWithoutRead = section == "allow" ? GetExecuteWithoutRead() : null;
+        <span data-testid="@($"role-edit-tab-{section}")">@title (@rules.Count)</span>
+        @if (!rules.TrueForAll(IsValidEntry))
+        {
+            <span role="img" aria-label="Has an invalid rule" title="Has an invalid rule" class="ml-1"
+                  data-testid="@($"role-edit-tab-{section}-error")">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Small" Style="vertical-align: middle;" />
+            </span>
+        }
+    };
+
+    private RenderFragment RenderRules(List<RuleEntry> rules, string section, ExecuteWithoutReadFindings? executeWithoutRead) => __builder =>
+    {
         <MudStack Spacing="2">
             @for (var index = 0; index < rules.Count; index++)
             {
@@ -234,8 +260,14 @@
                           TestId="@($"role-edit-{section}-rule-{index}")" />
             }
         </MudStack>
-        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
-                   OnClick="@(() => AddRule(rules))" data-testid="@($"role-edit-add-{section}")">Add rule</MudButton>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2">
+            <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Text" Color="Color.Primary"
+                       OnClick="@(() => AddRule(rules))" data-testid="@($"role-edit-add-{section}")">Add rule</MudButton>
+            @if (rules.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="@($"role-edit-{section}-empty")">No @section rules yet</MudText>
+            }
+        </MudStack>
     };
 
     private static RenderFragment RenderBuiltInRoles() => __builder =>
