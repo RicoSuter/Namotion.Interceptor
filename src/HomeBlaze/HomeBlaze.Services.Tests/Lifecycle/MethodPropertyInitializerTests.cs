@@ -947,6 +947,24 @@ public class MethodPropertyInitializerTests
         Assert.True(call.HadOwnMethods);
     }
 
+    [Fact]
+    public void WhenASubjectIsHeldByTwoParents_ThenOnlyTheProviderOfTheFirstParentIsAsked()
+    {
+        // Arrange
+        var context = CreateContext();
+        var first = new MethodProviderTestSubject(context);
+        var second = new MethodProviderTestSubject(context);
+        var child = new MethodTestSubject(context);
+
+        // Act
+        first.Child = child;
+        second.Child = child;
+
+        // Assert
+        Assert.Same(child, Assert.Single(first.Calls).Subject);
+        Assert.Empty(second.Calls);
+    }
+
     private static MethodMetadata GetMethod(IInterceptorSubject subject, string propertyName)
     {
         return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;

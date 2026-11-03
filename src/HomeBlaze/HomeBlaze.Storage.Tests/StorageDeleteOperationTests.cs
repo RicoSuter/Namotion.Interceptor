@@ -112,4 +112,44 @@ public class StorageDeleteOperationTests : StorageTestBase
         Assert.False(File.Exists(GetFullPath("Motor.json")));
         Assert.False(storage.Children.ContainsKey("Motor"));
     }
+
+    [Fact]
+    public async Task WhenASubjectIsAddedToNewNestedFolders_ThenItsDeleteOperationDeletesItsFile()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var motor = CreateMotor();
+        await storage.AddSubjectAsync("demo/motors/motor1.json", motor, CancellationToken.None);
+        var deleteOperation = GetDeleteOperation(motor);
+
+        // Act
+        Assert.NotNull(deleteOperation);
+        await deleteOperation.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("demo/motors/motor1.json")));
+    }
+
+    [Fact]
+    public async Task WhenAStoredSubjectIsMovedToAnotherFolder_ThenItsDeleteOperationDeletesTheMovedFile()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = storage.Children["Motor"];
+        Directory.CreateDirectory(GetFullPath("Devices"));
+        File.Move(GetFullPath("Motor.json"), GetFullPath("Devices/Engine.json"));
+        await storage.ReconcileAsync();
+        var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
+        Assert.Same(motor, devices.Children["Engine"]);
+        var deleteOperation = GetDeleteOperation(motor);
+
+        // Act
+        Assert.NotNull(deleteOperation);
+        await deleteOperation.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(GetFullPath("Devices/Engine.json")));
+        Assert.False(devices.Children.ContainsKey("Engine"));
+    }
 }

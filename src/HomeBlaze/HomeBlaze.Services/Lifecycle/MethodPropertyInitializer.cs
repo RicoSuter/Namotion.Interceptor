@@ -50,9 +50,15 @@ public class MethodPropertyInitializer : ILifecycleHandler
             // After the own methods, so that a provider sees them.
             AddProvidedMethods(registeredSubject);
         }
-        else if (change.IsPropertyReferenceAdded && change.Subject.TryGetRegisteredSubject() is { } referencedSubject)
+        else if (change.IsPropertyReferenceAdded &&
+                 change.Property is { } addedProperty &&
+                 change.Subject.TryGetRegisteredSubject() is { } referencedSubject &&
+                 referencedSubject.Parents is [var firstParent, ..] &&
+                 firstParent.Property.Reference.Equals(addedProperty) &&
+                 Equals(firstParent.Index, change.Index))
         {
             // A subject created with a context attaches to it before a parent holds it, so the parent is known only now.
+            // Only the first parent counts, as the chain of parents follows no other.
             AddProvidedMethods(referencedSubject);
         }
     }

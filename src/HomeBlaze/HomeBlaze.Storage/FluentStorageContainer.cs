@@ -46,6 +46,9 @@ public partial class FluentStorageContainer :
 {
     private const string DeleteOperationName = "Delete";
 
+    private static readonly MethodParameter[] DeleteParameters =
+        [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }];
+
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
@@ -1009,9 +1012,9 @@ public partial class FluentStorageContainer :
     {
         if (subject is VirtualFolder ||
             subject.TryGetRegisteredSubject() is not { } registered ||
+            registered.TryGetProperty(DeleteOperationName) is not null ||
             !MetadataStore.Applier.TryFindStoredSubject(registered, out var stored) ||
             !ReferenceEquals(stored, registered) ||
-            registered.TryGetProperty(DeleteOperationName) is not null ||
             registered.GetDeleteOperation(ExclusionTarget.None) is not null)
         {
             return;
@@ -1026,7 +1029,7 @@ public partial class FluentStorageContainer :
             Description = "Deletes the file of this subject from the storage.",
             Icon = "Delete",
             RequiresConfirmation = true,
-            Parameters = [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }],
+            Parameters = DeleteParameters,
         };
 
         registered.AddProperty(DeleteOperationName, typeof(MethodMetadata), _ => operation, null);
