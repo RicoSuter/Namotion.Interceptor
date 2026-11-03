@@ -84,9 +84,9 @@ internal static class AgentMetadataAccess
 
     /// <summary>
     /// Gets why SetMetadata of the storage may not set the metadata at <paramref name="path"/>, or null when it may. The
-    /// target is resolved as the tools resolve a path, so that a subject or property the tools do not list, by an excluded
-    /// type, the path provider or the access policy, is refused as a missing one; then the access policy must allow to write
-    /// its metadata member.
+    /// target is resolved as the tools resolve a path, so that a subject or property the tools do not list, because of an
+    /// excluded type, the path provider or the access policy, is refused as a missing one; then the access policy must
+    /// allow to write its metadata member.
     /// </summary>
     public static string? GetSetMetadataError(
         RegisteredSubject storage, string path, string? propertyName, McpServerConfiguration configuration, PathProviderBase pathProvider)
