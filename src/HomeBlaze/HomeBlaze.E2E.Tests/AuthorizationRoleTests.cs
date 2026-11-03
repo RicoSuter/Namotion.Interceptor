@@ -16,8 +16,8 @@ using Xunit.Abstractions;
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for editing the custom roles in the dialogs of the Authorization subject and its roles, picking a path into
-/// a rule, and for giving a role to an agent and renaming it.
+/// E2E tests for adding, renaming and deleting a custom role with the operations of the Authorization subject and its
+/// roles, editing its rules in its dialog, picking a path into a rule, and giving the role to an agent.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
@@ -41,7 +41,7 @@ public class AuthorizationRoleTests
     }
 
     [Fact]
-    public async Task WhenARoleIsCreatedGivenToAnAgentAndRenamedInTheUi_ThenTheFileHoldsItsRuleAndTheAgentReportsInvalidRoles()
+    public async Task WhenARoleIsAddedEditedGivenToAnAgentRenamedAndDeletedInTheUi_ThenTheFileFollowsAndTheAgentReportsInvalidRoles()
     {
         // Arrange
         var registry = _fixture.ServerServices.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
@@ -77,15 +77,11 @@ public class AuthorizationRoleTests
                 TimeSpan.FromSeconds(30),
                 message: "The created Authorization subject is not in the graph or not stored.");
 
-            // Act: add the role in the dialog of the Authorization subject.
-            var authorizationDialog = await OpenEditDialogAsync("Authorization");
-            await authorizationDialog.GetByTestId("authorization-add-role").ClickAsync();
-            await authorizationDialog.GetByTestId("authorization-role-name").Locator("input").FillAsync(RoleName);
-            var confirmName = authorizationDialog.GetByTestId("authorization-role-name-confirm");
-            await Assertions.Expect(confirmName).ToBeEnabledAsync(new() { Timeout = Timeout });
-            await confirmName.ClickAsync();
-            await Assertions.Expect(authorizationDialog.GetByTestId($"authorization-role-row-{RoleName}")).ToContainTextAsync("(new)");
-            await SaveAsync(authorizationDialog);
+            // Act: add the role with the operation of the Authorization subject, which has no edit dialog.
+            var authorizationPane = await OpenPaneAsync("Authorization");
+            await Assertions.Expect(Method(authorizationPane, "Add Role")).ToBeEnabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(authorizationPane.GetByTestId("edit-subject-button")).ToHaveCountAsync(0);
+            await RunOperationAsync(authorizationPane, "Add Role", RoleName, "Adds a custom role without rules");
 
             // Assert
             await WaitForAuthorizationFileAsync(
@@ -93,10 +89,20 @@ public class AuthorizationRoleTests
                 roles => roles[RoleName] is not null,
                 "The added role was not written to Authorization.json.");
 
-            // Act: add an allow rule in the dialog of the role.
+            // Act: add an allow rule in the dialog of the role, which is titled after it and scrolls only its tabs.
             var roleDialog = await OpenEditDialogAsync($"Authorization/{RoleName}");
-            await Assertions.Expect(roleDialog.GetByTestId("role-edit-name")).ToHaveTextAsync(RoleName, new() { Timeout = Timeout });
+            await Assertions.Expect(roleDialog).ToContainTextAsync($"Edit {RoleName}", new() { Timeout = Timeout });
+            await Assertions.Expect(roleDialog.Locator(".role-edit-panels")).ToHaveCSSAsync("overflow-y", "auto");
+            var allowTab = roleDialog.GetByTestId("role-edit-tab-allow");
+            await Assertions.Expect(allowTab).ToHaveTextAsync("Allow (0)", new() { Timeout = Timeout });
+            await allowTab.ClickAsync();
+            await Assertions.Expect(roleDialog.GetByTestId("role-edit-allow-empty")).ToBeVisibleAsync(new() { Timeout = Timeout });
             await roleDialog.GetByTestId("role-edit-add-allow").ClickAsync();
+
+            // A new rule has no action yet, which the tab marks as invalid until one is checked.
+            await Assertions.Expect(allowTab).ToHaveTextAsync("Allow (1)", new() { Timeout = Timeout });
+            await Assertions.Expect(roleDialog.GetByTestId("role-edit-tab-allow-error")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(roleDialog.GetByTestId("role-edit-allow-empty")).ToHaveCountAsync(0);
             var rule = roleDialog.GetByTestId("role-edit-allow-rule-0");
             await rule.GetByTestId("rule-tags").Locator("input").FillAsync(MemberTags.State);
             await rule.Page.Locator(".mud-popover-open .mud-list-item")
@@ -105,6 +111,7 @@ public class AuthorizationRoleTests
                 .ClickAsync();
             await Assertions.Expect(rule.GetByTestId("rule-tags-chip")).ToHaveTextAsync(MemberTags.State, new() { Timeout = Timeout });
             await rule.GetByTestId("rule-action-read").CheckAsync();
+            await Assertions.Expect(roleDialog.GetByTestId("role-edit-tab-allow-error")).ToHaveCountAsync(0, new() { Timeout = Timeout });
 
             // A path picked in the dialog goes into the field, to be edited there and added with its button.
             var paths = rule.GetByTestId("rule-paths");
@@ -160,20 +167,9 @@ public class AuthorizationRoleTests
             var authorizationFile = JsonNode.Parse(await _fixture.ReadFileAsync(authorizationFilePath))!;
             Assert.True(IsStateReadRule(authorizationFile["roles"]?[RoleName]?["allow"]?.AsArray().SingleOrDefault()));
 
-            // Act: rename the role the agent uses.
-            authorizationDialog = await OpenEditDialogAsync("Authorization");
-            await authorizationDialog.GetByTestId($"authorization-role-rename-{RoleName}").ClickAsync();
-            await authorizationDialog.GetByTestId("authorization-role-name").Locator("input").FillAsync(RenamedRoleName);
-
-            // Assert
-            await Assertions.Expect(authorizationDialog.GetByTestId("authorization-role-rename-warning"))
-                .ToContainTextAsync("1 agent uses this role under its old name.", new() { Timeout = Timeout });
-
-            // Act
-            await authorizationDialog.GetByTestId("authorization-role-name-confirm").ClickAsync();
-            await Assertions.Expect(authorizationDialog.GetByTestId($"authorization-role-row-{RenamedRoleName}"))
-                .ToContainTextAsync($"(was {RoleName})", new() { Timeout = Timeout });
-            await SaveAsync(authorizationDialog);
+            // Act: rename the role the agent uses with the operation of the role, whose dialog warns about the names in use.
+            var rolePane = await OpenPaneAsync($"Authorization/{RoleName}");
+            await RunOperationAsync(rolePane, "Rename", RenamedRoleName, "Agents and roles that name the new name already get its rules.");
 
             // Assert
             await WaitForAuthorizationFileAsync(
@@ -193,6 +189,24 @@ public class AuthorizationRoleTests
             await settingsTab.ClickAsync();
             await Assertions.Expect(agentPage.GetByTestId("agent-settings-roles-error"))
                 .ToContainTextAsync($"Role '{RoleName}' is not defined.", new() { Timeout = Timeout });
+
+            // Act: delete the renamed role with its operation, which takes the place of the Delete button of the pane.
+            rolePane = await OpenPaneAsync($"Authorization/{RenamedRoleName}");
+            var delete = Method(rolePane, "Delete");
+            await Assertions.Expect(delete).ToBeEnabledAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(delete).ToHaveCountAsync(1);
+            await Assertions.Expect(rolePane.Locator("button[aria-label='Delete']")).ToHaveCountAsync(0);
+            await delete.ClickAsync();
+            var confirmation = rolePane.Page.GetByRole(AriaRole.Dialog);
+            await Assertions.Expect(confirmation).ToContainTextAsync("Confirm: Delete", new() { Timeout = Timeout });
+            await Assertions.Expect(confirmation).ToContainTextAsync("report it as unknown afterwards");
+            await confirmation.GetByRole(AriaRole.Button, new() { Name = "Execute", Exact = true }).ClickAsync();
+
+            // Assert
+            await WaitForAuthorizationFileAsync(
+                authorizationFilePath,
+                roles => roles.AsObject().Count == 0,
+                "The deleted role was not removed from Authorization.json.");
             isCompleted = true;
         }
         finally
@@ -227,23 +241,54 @@ public class AuthorizationRoleTests
         JsonNode.DeepEquals(rule["tags"], new JsonArray(MemberTags.State)) &&
         JsonNode.DeepEquals(rule["actions"], new JsonArray("read"));
 
-    /// <summary>Opens the edit dialog of the subject at the path from its pane in the subject browser.</summary>
-    private async Task<ILocator> OpenEditDialogAsync(string path)
+    /// <summary>Opens the subject at the path in the subject browser and returns its pane, the last one.</summary>
+    private async Task<ILocator> OpenPaneAsync(string path)
     {
         var page = await SubjectBrowserPage.OpenAsync(_fixture, path);
 
-        // A path that does not resolve ends at an earlier pane, whose edit button would open the dialog of another subject.
+        // A path that does not resolve ends at an earlier pane, whose buttons belong to another subject.
         var paneCount = path.Split('/', StringSplitOptions.RemoveEmptyEntries).Length + 1;
-        await Assertions.Expect(page.Locator("#scrollContainer [data-testid='subject-pane']"))
-            .ToHaveCountAsync(paneCount, new() { Timeout = Timeout });
+        var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
+        await Assertions.Expect(panes).ToHaveCountAsync(paneCount, new() { Timeout = Timeout });
+        return panes.Last;
+    }
 
-        var editButton = page.Locator("#scrollContainer [data-testid='edit-subject-button']").Last;
+    /// <summary>Opens the edit dialog of the subject at the path from its pane in the subject browser.</summary>
+    private async Task<ILocator> OpenEditDialogAsync(string path)
+    {
+        var pane = await OpenPaneAsync(path);
+        var editButton = pane.GetByTestId("edit-subject-button");
         await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = Timeout });
         await editButton.ClickAsync();
 
-        var dialog = page.GetByRole(AriaRole.Dialog);
+        var dialog = pane.Page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = Timeout });
         return dialog;
+    }
+
+    private static ILocator Method(ILocator pane, string title) =>
+        pane.Locator(".subject-pane-method").Filter(new() { HasTextString = title });
+
+    /// <summary>
+    /// Runs the operation of the pane that takes one text: checks that its dialog shows the description, enters the text,
+    /// and waits until the dialog closed.
+    /// </summary>
+    private static async Task RunOperationAsync(ILocator pane, string title, string text, string description)
+    {
+        var operation = Method(pane, title);
+        await Assertions.Expect(operation).ToBeEnabledAsync(new() { Timeout = Timeout });
+        await operation.ClickAsync();
+
+        var dialog = pane.Page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(dialog).ToContainTextAsync(title, new() { Timeout = Timeout });
+        await Assertions.Expect(dialog).ToContainTextAsync(description);
+        await dialog.Locator("input").First.FillAsync(text);
+        var execute = dialog.GetByRole(AriaRole.Button, new() { Name = "Execute", Exact = true });
+        await Assertions.Expect(execute).ToBeEnabledAsync(new() { Timeout = Timeout });
+        await execute.ClickAsync();
+
+        // A failing operation opens its error dialog instead, which this then reports.
+        await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 
     private static async Task SaveAsync(ILocator dialog)
