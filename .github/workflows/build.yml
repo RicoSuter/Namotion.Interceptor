@@ -607,7 +607,7 @@ jobs:
             -p:SourceCommitDate=${{ steps.build.outputs.SOURCE_COMMIT_DATE }} `
             -p:ContinuousIntegrationBuild=true
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }} -p:BuildTag=${{ github.event.release.tag_name }}
 
       - name: Remove non-library packages
         run: Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Include *.nupkg -Recurse | Where-Object { $_.Name -notlike "Namotion.Interceptor*" } | Remove-Item -Force
@@ -639,7 +639,7 @@ jobs:
         run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global --version 1.0.46
 
       - name: Validate package
-        run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
+        run: meziantou.validate-nuget-package --excluded-rules Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
 
   deploy:
     timeout-minutes: 15
