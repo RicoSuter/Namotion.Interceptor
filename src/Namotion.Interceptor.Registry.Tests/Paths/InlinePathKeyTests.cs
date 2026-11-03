@@ -167,6 +167,24 @@ public class InlinePathKeyTests
     }
 
     [Fact]
+    public void WhenInlinePropertySegmentIsShadowed_ThenInlinePropertyHasNoPath()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var root = new TestShadowedInlineContainer(context) { Name = "root", Label = "label" };
+        var children = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestShadowedInlineContainer.Children))!;
+
+        // Act
+        var path = children.TryGetPath(pathProvider, null);
+        var pathFromRoot = children.TryGetPath(pathProvider, root);
+
+        // Assert
+        Assert.Null(path);
+        Assert.Null(pathFromRoot);
+    }
+
+    [Fact]
     public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenThatPropertyRoundTrips()
     {
         // Arrange
@@ -227,5 +245,103 @@ public class InlinePathKeyTests
 
         // Assert
         Assert.Null(path);
+    }
+
+    [Fact]
+    public void WhenAPropertyDeclaredAfterTheInlinePropertyHasItsSegment_ThenInlinePropertyHasNoPath()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var root = new TestLateShadowedInlineContainer(context) { Name = "root", Label = "label" };
+        var children = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestLateShadowedInlineContainer.Children))!;
+
+        // Act
+        var path = children.TryGetPath(pathProvider, null);
+        var pathFromRoot = children.TryGetPath(pathProvider, root);
+
+        // Assert
+        Assert.Null(path);
+        Assert.Null(pathFromRoot);
+    }
+
+    [Fact]
+    public void WhenAnAttributeIsNamedLikeTheInlineProperty_ThenTheAttributeTakesTheSegment()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "child" };
+        var root = new TestInlineContainer(context)
+        {
+            Name = "root",
+            Children = new Dictionary<string, TestInlineContainer> { ["CNC01"] = child }
+        };
+        var registered = root.TryGetRegisteredSubject()!;
+        var attribute = GetNameProperty(root).AddAttribute<string>(nameof(TestInlineContainer.Children), _ => "value");
+        var children = registered.TryGetProperty(nameof(TestInlineContainer.Children))!;
+
+        // Act
+        var attributePath = attribute.TryGetPath(DefaultPathProvider.Instance, null);
+        var resolvedAttribute = DefaultPathProvider.Instance.TryGetPropertyFromPath(registered, attributePath!);
+        var childrenPath = children.TryGetPath(DefaultPathProvider.Instance, null);
+        var keyPath = GetNameProperty(child).TryGetPath(DefaultPathProvider.Instance, null);
+        var resolvedKey = DefaultPathProvider.Instance.TryGetPropertyFromPath(registered, keyPath!);
+
+        // Assert
+        Assert.Equal("Children", attributePath);
+        Assert.Same(attribute, resolvedAttribute?.Property);
+        Assert.Null(childrenPath);
+        Assert.Equal("CNC01.Name", keyPath);
+        Assert.Same(GetNameProperty(child), resolvedKey?.Property);
+    }
+
+    [Fact]
+    public void WhenInlinePropertySegmentIsNotShadowed_ThenInlinePropertyPathRoundTrips()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "child" };
+        var root = new TestInlineContainer(context)
+        {
+            Name = "root",
+            Children = new Dictionary<string, TestInlineContainer> { ["CNC01"] = child }
+        };
+        var registered = root.TryGetRegisteredSubject()!;
+        var rootChildren = registered.TryGetProperty(nameof(TestInlineContainer.Children))!;
+        var childChildren = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestInlineContainer.Children))!;
+
+        // Act
+        var rootPath = rootChildren.TryGetPath(DefaultPathProvider.Instance, null);
+        var resolvedRoot = DefaultPathProvider.Instance.TryGetPropertyFromPath(registered, rootPath!);
+        var childPath = childChildren.TryGetPath(DefaultPathProvider.Instance, null);
+        var resolvedChild = DefaultPathProvider.Instance.TryGetPropertyFromPath(registered, childPath!);
+
+        // Assert
+        Assert.Equal("Children", rootPath);
+        Assert.Same(rootChildren, resolvedRoot?.Property);
+        Assert.Null(resolvedRoot?.Index);
+        Assert.Equal("CNC01.Children", childPath);
+        Assert.Same(childChildren, resolvedChild?.Property);
+        Assert.Null(resolvedChild?.Index);
+    }
+
+    [Fact]
+    public void WhenInlinePropertyIsMappedByAttributeProvider_ThenInlinePropertyPathRoundTrips()
+    {
+        // Arrange
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var root = new TestMappedInlineContainer(context) { Name = "root" };
+        var registered = root.TryGetRegisteredSubject()!;
+        var children = registered.TryGetProperty(nameof(TestMappedInlineContainer.Children))!;
+
+        // Act
+        var path = children.TryGetPath(pathProvider, null);
+        var resolved = pathProvider.TryGetPropertyFromPath(registered, path!);
+
+        // Assert
+        Assert.Equal("Children", path);
+        Assert.Same(children, resolved?.Property);
+        Assert.Null(resolved?.Index);
     }
 }
