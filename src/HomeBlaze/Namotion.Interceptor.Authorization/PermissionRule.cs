@@ -20,7 +20,7 @@ public sealed record PermissionRule
     /// </summary>
     /// <remarks>
     /// A subject reachable by several paths matches when any of them does. When the paths of a subject cannot all be
-    /// listed (a path cannot be written, the subject has parents but no path to a root, the subject or one on a path
+    /// listed (a path cannot be built, the subject has parents but no path to a root, the subject or one on a path
     /// is no longer attached, as during and after a detach, or it has more than 64 paths or too densely connected
     /// parents), an allow rule matches only through the paths that were listed, at most the first 64, and every deny
     /// rule with paths matches.
