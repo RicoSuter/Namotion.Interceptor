@@ -15,7 +15,7 @@ internal static class SubjectPaths
     private const int CycleDetectionDepthThreshold = 256;
 
     /// <summary>
-    /// The segment of the property as the registry's path writer spells it: the provider's segment of an included
+    /// The segment of the property as the registry spells it when it builds a path: the provider's segment of an included
     /// property, or the browse name of one the provider excludes. An attribute is spelled the same way, so attribute
     /// paths follow the registry's syntax. A member paths may not pass still has a segment a deny can match.
     /// </summary>
@@ -32,14 +32,14 @@ internal static class SubjectPaths
     /// excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
     /// subject without parents and has a path, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
-    /// writes for the subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
+    /// builds for the subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="pathProvider">The path provider.</param>
-    /// <param name="paths">Receives the paths that could be written, each as its links in root-to-subject order.</param>
-    /// <param name="maxPaths">The most paths to write; positive.</param>
+    /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order.</param>
+    /// <param name="maxPaths">The most paths to build; positive.</param>
     /// <returns>
-    /// True when every chain was written; false when a chain could not be written (it passes a property paths may not
+    /// True when every chain was built; false when a chain could not be built (it passes a property paths may not
     /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, or
     /// the chain passes a subject that is no longer attached), more than <paramref name="maxPaths"/> chains exist, or
     /// the search took more than 64 parent links per allowed path before every chain was found. A subject without
@@ -55,23 +55,23 @@ internal static class SubjectPaths
             return true;
         }
 
-        var writer = new ChainWriter(pathProvider, paths, maxPaths);
+        var builder = new ChainBuilder(pathProvider, paths, maxPaths);
         var frames = new List<SubjectPropertyParent>(8);
-        if (!TryWriteSingleParentChain(subject, parents, frames, ref writer))
+        if (!TryBuildSingleParentChain(subject, parents, frames, ref builder))
         {
             frames.Clear();
-            WriteChains(subject, parents, (long)maxPaths * ParentLinksPerPath, frames, ref writer);
+            BuildChains(subject, parents, (long)maxPaths * ParentLinksPerPath, frames, ref builder);
         }
 
-        return writer.IsComplete;
+        return builder.IsComplete;
     }
 
     /// <summary>
-    /// Follows the only parent at every level without a search and writes the one chain. False at the first subject
+    /// Follows the only parent at every level without a search and builds the one chain. False at the first subject
     /// with several parents, where the full search has to take over.
     /// </summary>
-    private static bool TryWriteSingleParentChain(
-        RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, List<SubjectPropertyParent> frames, ref ChainWriter writer)
+    private static bool TryBuildSingleParentChain(
+        RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, List<SubjectPropertyParent> frames, ref ChainBuilder builder)
     {
         var current = subject;
         HashSet<RegisteredSubject>? visited = null;
@@ -92,13 +92,13 @@ internal static class SubjectPaths
             // Read after the parents: the registry clears it before it removes the last parent.
             if (!current.IsAttached)
             {
-                writer.MarkIncomplete();
+                builder.MarkIncomplete();
                 return true;
             }
 
             if (parents.Length == 0)
             {
-                writer.TryWrite(frames);
+                builder.TryBuild(frames);
                 return true;
             }
         }
@@ -108,13 +108,13 @@ internal static class SubjectPaths
 
     /// <summary>
     /// Iterative depth-first search over every chain of parents from <paramref name="subject"/> to a subject without
-    /// parents, handing each complete chain (leaf-first in <paramref name="frames"/>) to <paramref name="writer"/>.
+    /// parents, handing each complete chain (leaf-first in <paramref name="frames"/>) to <paramref name="builder"/>.
     /// Cycles are pruned per branch. Owners are not memoized, because every chain is wanted, so the number of parent
     /// links taken is bounded by <paramref name="budget"/> instead.
     /// </summary>
-    private static void WriteChains(
+    private static void BuildChains(
         RegisteredSubject subject, ImmutableArray<SubjectPropertyParent> parents, long budget,
-        List<SubjectPropertyParent> frames, ref ChainWriter writer)
+        List<SubjectPropertyParent> frames, ref ChainBuilder builder)
     {
         var visiting = new HashSet<RegisteredSubject> { subject };
 
@@ -130,13 +130,13 @@ internal static class SubjectPaths
             }
             else if (--budget < 0)
             {
-                writer.MarkIncomplete();
+                builder.MarkIncomplete();
                 return;
             }
             else
             {
                 stack[topIndex] = top with { NextParentIndex = top.NextParentIndex + 1 };
-                if (!TryTake(top.Parents[top.NextParentIndex], stack, frames, visiting, ref writer))
+                if (!TryTake(top.Parents[top.NextParentIndex], stack, frames, visiting, ref builder))
                 {
                     return;
                 }
@@ -156,12 +156,12 @@ internal static class SubjectPaths
     }
 
     /// <summary>
-    /// Takes one parent link: writes the chain when it reaches a subject without parents, otherwise descends into the
+    /// Takes one parent link: builds the chain when it reaches a subject without parents, otherwise descends into the
     /// owner unless it is already on the branch. False when the result is settled and the search can stop.
     /// </summary>
     private static bool TryTake(
         SubjectPropertyParent parent, List<SearchFrame> stack, List<SubjectPropertyParent> frames,
-        HashSet<RegisteredSubject> visiting, ref ChainWriter writer)
+        HashSet<RegisteredSubject> visiting, ref ChainBuilder builder)
     {
         var owner = parent.Property.Parent;
         var ownerParents = owner.Parents;
@@ -169,14 +169,14 @@ internal static class SubjectPaths
         // Read after the parents: the registry clears it before it removes the last parent.
         if (!owner.IsAttached)
         {
-            writer.MarkIncomplete();
+            builder.MarkIncomplete();
             return true;
         }
 
         if (ownerParents.Length == 0)
         {
             frames.Add(parent);
-            var proceed = writer.TryWrite(frames);
+            var proceed = builder.TryBuild(frames);
             frames.RemoveAt(frames.Count - 1);
             return proceed;
         }
@@ -193,26 +193,26 @@ internal static class SubjectPaths
     private readonly record struct SearchFrame(RegisteredSubject Owner, ImmutableArray<SubjectPropertyParent> Parents, int NextParentIndex = 0);
 
     /// <summary>
-    /// Collects the paths of complete chains and tracks whether every chain was written. A mutable struct, so it is
+    /// Collects the paths of complete chains and tracks whether every chain was built. A mutable struct, so it is
     /// passed by reference.
     /// </summary>
-    private struct ChainWriter
+    private struct ChainBuilder
     {
         private readonly PathProviderBase _pathProvider;
         private readonly char _separator;
         private readonly char _indexOpen;
         private readonly List<PathLink[]> _paths;
         private readonly int _maxPaths;
-        private int _written;
+        private int _built;
 
-        public ChainWriter(PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths)
+        public ChainBuilder(PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths)
         {
             _pathProvider = pathProvider;
             _separator = pathProvider.PathSeparator;
             _indexOpen = pathProvider.IndexOpen;
             _paths = paths;
             _maxPaths = maxPaths;
-            _written = 0;
+            _built = 0;
             IsComplete = true;
         }
 
@@ -220,10 +220,10 @@ internal static class SubjectPaths
 
         public void MarkIncomplete() => IsComplete = false;
 
-        /// <summary>Writes the chain in <paramref name="frames"/> (leaf-first); false when the result is settled and the search can stop.</summary>
-        public bool TryWrite(List<SubjectPropertyParent> frames)
+        /// <summary>Builds the chain in <paramref name="frames"/> (leaf-first); false when the result is settled and the search can stop.</summary>
+        public bool TryBuild(List<SubjectPropertyParent> frames)
         {
-            if (_written == _maxPaths)
+            if (_built == _maxPaths)
             {
                 IsComplete = false;
                 return false;
@@ -237,13 +237,13 @@ internal static class SubjectPaths
             else
             {
                 _paths.Add(path);
-                _written++;
+                _built++;
             }
 
-            return IsComplete || _written < _maxPaths;
+            return IsComplete || _built < _maxPaths;
         }
 
-        /// <summary>The links of the chain root first; null when paths may not pass a property on it or a link is unwritable.</summary>
+        /// <summary>The links of the chain root first; null when paths may not pass a property on it or a link cannot be built.</summary>
         private readonly PathLink[]? TryGetLinks(List<SubjectPropertyParent> frames)
         {
             // The registry builds and resolves no path through such a property, nor through an attribute of an excluded property.
