@@ -676,6 +676,19 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     }
 
     /// <summary>
+    /// Resolves the topic like <see cref="TryGetPropertyForTopicAsync"/>, and returns the property only when this source owns it.
+    /// </summary>
+    internal async ValueTask<PropertyReference?> TryGetOwnedPropertyForTopicAsync(string topic)
+    {
+        // After a structural change a topic can resolve to a property this client never claimed, and the client writes only properties it claimed.
+        return await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is { } property &&
+            property.TryGetSource(out var owner) &&
+            ReferenceEquals(owner, this)
+            ? property
+            : null;
+    }
+
+    /// <summary>
     /// Whether a cache entry for a property of <paramref name="subject"/> may stay. The reference count
     /// drops before LifecycleInterceptor.SubjectDetaching fires, where the eviction scan runs, and the registry
     /// deregisters only after that. Only the count catches a lookup that inserts in between. The connector root is
@@ -699,7 +712,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         // down the subscription. No cancellation token flows in, so every failure is logged and skipped.
         try
         {
-            if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
+            if (await TryGetOwnedPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
             {
                 return;
             }

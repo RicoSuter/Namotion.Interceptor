@@ -837,6 +837,47 @@ public class MqttMappingCacheTests
         Assert.Null(resolved);
     }
 
+    [Fact]
+    public async Task WhenATopicResolvesToAPropertyTheClientOwns_ThenItIsApplied()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var client = CreateClient(subject, CreateMapper());
+        var property = new PropertyReference(child, nameof(MqttCacheTestChild.Value));
+        client.Ownership.ClaimSource(property);
+
+        // Act
+        var resolved = await client.TryGetOwnedPropertyForTopicAsync("child/value");
+
+        // Assert
+        Assert.Equal(property, resolved);
+    }
+
+    [Fact]
+    public async Task WhenATopicResolvesToAPropertyTheClientDoesNotOwn_ThenItIsNotApplied()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var client = CreateClient(subject, CreateMapper());
+        client.Ownership.ClaimSource(new PropertyReference(child, nameof(MqttCacheTestChild.Value)));
+        subject.Other = child;
+        subject.Child = null;
+        var newChild = new MqttCacheTestChild();
+        subject.Child = newChild;
+
+        // Act
+        var resolved = await client.TryGetPropertyForTopicAsync("child/value");
+        var owned = await client.TryGetOwnedPropertyForTopicAsync("child/value");
+
+        // Assert
+        Assert.Same(newChild, resolved?.Subject);
+        Assert.Null(owned);
+    }
+
     private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')
     {
         private long _version;
