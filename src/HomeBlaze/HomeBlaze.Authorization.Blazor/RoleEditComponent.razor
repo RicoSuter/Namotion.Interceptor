@@ -75,6 +75,39 @@
     </div>
 }
 
+<style>
+    /* A fixed height, so that switching tabs does not resize the dialog, which leaves room for its title and buttons. */
+    .role-edit {
+        display: flex;
+        flex-direction: column;
+        height: clamp(320px, calc(100vh - 240px), 760px);
+        height: clamp(320px, calc(100dvh - 240px), 760px);
+    }
+
+    .role-edit > * {
+        flex: 0 0 auto;
+    }
+
+    .role-edit > .role-edit-tabs {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    .role-edit-tabs .mud-tabs-header-after {
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+        white-space: nowrap;
+    }
+
+    .role-edit-tabs > .role-edit-panels {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding-top: 16px;
+    }
+</style>
+
 @code {
     internal const string ConcurrentChangeMessage = "The roles changed while this dialog was open. Close it and open it again.";
 

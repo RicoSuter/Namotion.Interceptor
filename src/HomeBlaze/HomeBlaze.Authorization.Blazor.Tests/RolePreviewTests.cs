@@ -162,6 +162,26 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnActionDoesNotApplyToAMember_ThenItsCellShowsADimDashUnderAStickyHeader()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = [BuiltInRoles.ReaderName];
+        var component = RenderEditor(role);
+
+        // Act
+        await ChoosePathAsync(component, "/Devices");
+
+        // Assert
+        var notApplicable = component.Find("[data-testid='role-preview-cell-Temperature-execute']");
+        Assert.Null(notApplicable.GetAttribute("data-decision"));
+        Assert.Equal("–", notApplicable.TextContent.Trim());
+        Assert.NotNull(notApplicable.QuerySelector(".role-preview-not-applicable"));
+        Assert.Null(component.Find("[data-testid='role-preview-cell-Temperature-read']").QuerySelector(".role-preview-not-applicable"));
+        Assert.Contains("mud-table-sticky-header", component.Find("[data-testid='role-preview-matrix']").ClassName);
+    }
+
+    [Fact]
     public async Task WhenAnUnsavedRuleChanges_ThenTheMatrixChangesAndTheRoleIsNotWritten()
     {
         // Arrange

@@ -5,8 +5,8 @@
 @inject IDialogService DialogService
 @inject SubjectPathResolver PathResolver
 
-<MudPaper Outlined="true" Class="pa-3" data-testid="@TestId">
-    <MudGrid Spacing="2">
+<MudPaper Outlined="true" Class="pa-2" data-testid="@TestId">
+    <MudGrid Spacing="1">
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. Separate several with commas; press Enter, click Add or leave the field to add."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
@@ -28,7 +28,7 @@
                            Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
         </MudItem>
     </MudGrid>
-    <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-2">
+    <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
         <MudText Typo="Typo.body2" Class="mr-2">Actions</MudText>
         @foreach (var action in AuthorizationActions.All)
         {
@@ -53,16 +53,16 @@
     @if (_rule.Paths.IsEmpty && _rule.Types.IsEmpty && _rule.Members.IsEmpty && _rule.Tags.IsEmpty)
     {
         @* A warning, not an error: a rule for every member is valid, but an allow rule should never be one by accident. *@
-        <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Icon="@Icons.Material.Filled.Warning" Dense="true" Class="mt-2"
+        <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Icon="@Icons.Material.Filled.Warning" Dense="true" Class="mt-1"
                   data-testid="rule-any-member-warning">This rule applies to every member.</MudAlert>
     }
     @if (ExecuteWithoutReadExample is { } executeExample)
     {
-        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="rule-execute-without-read-hint">@ExecuteWithoutRead.DescribeRule(executeExample)</MudAlert>
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1" data-testid="rule-execute-without-read-hint">@ExecuteWithoutRead.DescribeRule(executeExample)</MudAlert>
     }
     @if (IsDeny && GetSingleMemberPaths() is { Count: > 0 } singleMemberPaths)
     {
-        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2" data-testid="rule-single-member-hint">
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1" data-testid="rule-single-member-hint">
             @DescribeSingleMemberPaths(singleMemberPaths)
         </MudAlert>
     }

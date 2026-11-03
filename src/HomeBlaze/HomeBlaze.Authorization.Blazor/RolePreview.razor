@@ -8,87 +8,120 @@
 @inject AuthorizationService AuthorizationService
 @inject SubjectPathResolver PathResolver
 
-<div data-testid="role-preview-path">
-    <SubjectPathField Value="@_path" ValueChanged="@OnPathChanged" Label="Subject" Placeholder="/Devices/Kitchen"
-                      IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" />
-</div>
-<MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
-    What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the system rules.
-</MudText>
+<div class="role-preview">
+    <div data-testid="role-preview-path">
+        <SubjectPathField Value="@_path" ValueChanged="@OnPathChanged" Label="Subject" Placeholder="/Devices/Kitchen"
+                          IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" />
+    </div>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+        What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the system rules.
+    </MudText>
 
-@if (_error is not null)
-{
-    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" data-testid="role-preview-error">@_error</MudAlert>
-}
-else if (_subject is null)
-{
-    @if (!string.IsNullOrWhiteSpace(_path))
+    @if (_error is not null)
     {
-        <MudText Typo="Typo.body2" Class="mt-4" data-testid="role-preview-not-found">No subject has this path.</MudText>
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" data-testid="role-preview-error">@_error</MudAlert>
     }
-}
-else
-{
-    <MudAlert Severity="@(_subjectDecision.IsReadable ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-4"
-              data-testid="role-preview-readable" data-readable="@(_subjectDecision.IsReadable ? "true" : "false")">@_subjectText</MudAlert>
+    else if (_subject is null)
+    {
+        @if (!string.IsNullOrWhiteSpace(_path))
+        {
+            <MudText Typo="Typo.body2" Class="mt-4" data-testid="role-preview-not-found">No subject has this path.</MudText>
+        }
+    }
+    else
+    {
+        <MudAlert Severity="@(_subjectDecision.IsReadable ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-4"
+                  data-testid="role-preview-readable" data-readable="@(_subjectDecision.IsReadable ? "true" : "false")">@_subjectText</MudAlert>
 
-    <MudSimpleTable Dense="true" Hover="true" Class="mt-4" data-testid="role-preview-matrix">
-        <thead>
-            <tr>
-                <th>Member</th>
-                @foreach (var action in AuthorizationActions.All)
-                {
-                    <th class="text-center">@action.Name</th>
-                }
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var row in _rows)
-            {
-                <tr data-member="@row.Name">
-                    <td>
-                        @row.Name
-                        @* Selected as a whole with one click, to be copied into a rule. *@
-                        @if (row.Path is { } path)
-                        {
-                            <div class="mud-text-secondary role-preview-member-path" title="The path a rule matches this member by"
-                                 data-testid="@($"role-preview-path-{row.Name}")">@path</div>
-                        }
-                    </td>
-                    @for (var index = 0; index < row.Cells.Length; index++)
+        <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Class="role-preview-matrix mt-4" data-testid="role-preview-matrix">
+            <thead>
+                <tr>
+                    <th>Member</th>
+                    @foreach (var action in AuthorizationActions.All)
                     {
-                        var action = AuthorizationActions.All[index];
-                        <td class="text-center" data-testid="@($"role-preview-cell-{row.Name}-{action.Name}")"
-                            data-decision="@row.Cells[index]?.Decision" data-note="@(row.Cells[index]?.IsUnusable == true ? "execute-without-read" : null)">
-                            @if (row.Cells[index] is { } cell)
-                            {
-                                <MudTooltip Text="@cell.Explanation">
-                                    <MudIconButton Size="Size.Small" Icon="@(cell.IsAllowed ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
-                                                   Color="@cell.Color"
-                                                   aria-label="@($"{row.Name}, {action.Name}: {cell.Decision}")"
-                                                   OnClick="@(() => Select(row.Name, action))" />
-                                </MudTooltip>
-                            }
-                        </td>
+                        <th class="text-center">@action.Name</th>
                     }
                 </tr>
-            }
-        </tbody>
-    </MudSimpleTable>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr data-member="@row.Name">
+                        <td>
+                            @row.Name
+                            @* Selected as a whole with one click, to be copied into a rule. *@
+                            @if (row.Path is { } path)
+                            {
+                                <div class="mud-text-secondary role-preview-member-path" title="The path a rule matches this member by"
+                                     data-testid="@($"role-preview-path-{row.Name}")">@path</div>
+                            }
+                        </td>
+                        @for (var index = 0; index < row.Cells.Length; index++)
+                        {
+                            var action = AuthorizationActions.All[index];
+                            <td class="text-center" data-testid="@($"role-preview-cell-{row.Name}-{action.Name}")"
+                                data-decision="@row.Cells[index]?.Decision" data-note="@(row.Cells[index]?.IsUnusable == true ? "execute-without-read" : null)">
+                                @if (row.Cells[index] is { } cell)
+                                {
+                                    <MudTooltip Text="@cell.Explanation">
+                                        <MudIconButton Size="Size.Small" Icon="@(cell.IsAllowed ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
+                                                       Color="@cell.Color"
+                                                       aria-label="@($"{row.Name}, {action.Name}: {cell.Decision}")"
+                                                       OnClick="@(() => Select(row.Name, action))" />
+                                    </MudTooltip>
+                                }
+                                else
+                                {
+                                    <span class="role-preview-not-applicable" title="Does not apply to this member">–</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
 
-    @if (GetSelectedCell() is { } selected)
-    {
-        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2" data-testid="role-preview-explanation">
-            <b>@_selectedMember, @_selectedAction?.Name:</b> @selected.Explanation
-        </MudAlert>
+        @if (GetSelectedCell() is { } selected)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2" data-testid="role-preview-explanation">
+                <b>@_selectedMember, @_selectedAction?.Name:</b> @selected.Explanation
+            </MudAlert>
+        }
     }
-}
+</div>
 
 <style>
+    /* The field, the readability line and the explanation keep their height; only the matrix scrolls, below its header. */
+    .role-preview {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .role-preview > * {
+        flex: 0 0 auto;
+    }
+
+    .role-preview > .role-preview-matrix {
+        flex: 0 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .role-preview-matrix > .mud-table-container {
+        min-height: 0;
+    }
+
     .role-preview-member-path {
-        font-size: 0.75rem;
+        font-family: monospace;
+        font-size: 0.7rem;
         user-select: all;
         word-break: break-all;
+    }
+
+    .role-preview-not-applicable {
+        color: var(--mud-palette-text-disabled);
     }
 </style>
 
