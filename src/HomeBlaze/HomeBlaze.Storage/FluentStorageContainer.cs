@@ -6,6 +6,7 @@ using FluentStorage;
 using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
@@ -18,6 +19,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
@@ -39,8 +41,11 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore,
+    IChildMethodProvider
 {
+    private const string DeleteOperationName = "Delete";
+
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
@@ -992,6 +997,39 @@ public partial class FluentStorageContainer :
 
             return DeleteEntryAsync(connection, entry, token);
         }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Adds <c>Delete</c>, which requires confirmation and deletes through <see cref="DeleteSubjectAsync"/>, to each
+    /// subject that this storage holds in a file, unless it has a delete operation or a property of that name already.
+    /// A subject that keeps its <c>Delete</c> when it moves to another storage deletes through the storage that added it.
+    /// </remarks>
+    public void AddMethods(IInterceptorSubject subject)
+    {
+        if (subject is VirtualFolder ||
+            subject.TryGetRegisteredSubject() is not { } registered ||
+            !MetadataStore.Applier.TryFindStoredSubject(registered, out var stored) ||
+            !ReferenceEquals(stored, registered) ||
+            registered.TryGetProperty(DeleteOperationName) is not null ||
+            registered.GetDeleteOperation(ExclusionTarget.None) is not null)
+        {
+            return;
+        }
+
+        var operation = new MethodMetadata(arguments => DeleteSubjectAsync(subject, (CancellationToken)arguments![0]!))
+        {
+            Kind = MethodKind.Operation,
+            Purpose = OperationPurpose.Delete,
+            PropertyName = DeleteOperationName,
+            Title = "Delete",
+            Description = "Deletes the file of this subject from the storage.",
+            Icon = "Delete",
+            RequiresConfirmation = true,
+            Parameters = [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }],
+        };
+
+        registered.AddProperty(DeleteOperationName, typeof(MethodMetadata), _ => operation, null);
     }
 
     private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
