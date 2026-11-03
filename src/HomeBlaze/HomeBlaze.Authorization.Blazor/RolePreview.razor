@@ -72,7 +72,7 @@
                                 }
                                 else
                                 {
-                                    <span class="role-preview-not-applicable" title="Does not apply to this member">–</span>
+                                    <span class="role-preview-not-applicable" role="img" aria-label="Does not apply" title="Does not apply to this member">–</span>
                                 }
                             </td>
                         }
@@ -104,13 +104,14 @@
 
     .role-preview > .role-preview-matrix {
         flex: 0 1 auto;
-        min-height: 0;
+        min-height: 120px;
         display: flex;
         flex-direction: column;
     }
 
     .role-preview-matrix > .mud-table-container {
         min-height: 0;
+        overflow-y: auto;
     }
 
     .role-preview-member-path {
@@ -121,7 +122,7 @@
     }
 
     .role-preview-not-applicable {
-        color: var(--mud-palette-text-disabled);
+        color: var(--mud-palette-text-secondary);
     }
 </style>
 

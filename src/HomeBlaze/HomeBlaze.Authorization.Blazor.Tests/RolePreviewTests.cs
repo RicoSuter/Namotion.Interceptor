@@ -162,7 +162,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenAnActionDoesNotApplyToAMember_ThenItsCellShowsADimDashUnderAStickyHeader()
+    public async Task WhenAnActionDoesNotApplyToAMember_ThenItsCellShowsADashLabeledAsNotApplyingUnderAStickyHeader()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
@@ -176,7 +176,9 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         var notApplicable = component.Find("[data-testid='role-preview-cell-Temperature-execute']");
         Assert.Null(notApplicable.GetAttribute("data-decision"));
         Assert.Equal("–", notApplicable.TextContent.Trim());
-        Assert.NotNull(notApplicable.QuerySelector(".role-preview-not-applicable"));
+        var dash = notApplicable.QuerySelector(".role-preview-not-applicable");
+        Assert.Equal("img", dash?.GetAttribute("role"));
+        Assert.Equal("Does not apply", dash?.GetAttribute("aria-label"));
         Assert.Null(component.Find("[data-testid='role-preview-cell-Temperature-read']").QuerySelector(".role-preview-not-applicable"));
         Assert.Contains("mud-table-sticky-header", component.Find("[data-testid='role-preview-matrix']").ClassName);
     }

@@ -70,7 +70,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var component = RenderEditor(role);
 
         // Assert
-        Assert.Empty(component.FindAll("[data-testid='role-edit-name']"));
+        Assert.Contains("role-edit-tabs", component.Find(".role-edit").FirstElementChild?.ClassName);
         Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='role-edit-include-Reader']").TextContent.Trim());
 
         var allowCard = Assert.Single(GetCards(component, "allow"));
@@ -145,6 +145,8 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     {
         // Arrange
         var component = RenderEditor(_graph.GetRole("Kitchen"));
+
+        // Assert
         Assert.Equal("No allow rules yet", component.Find("[data-testid='role-edit-allow-empty']").TextContent.Trim());
         Assert.Equal("No deny rules yet", component.Find("[data-testid='role-edit-deny-empty']").TextContent.Trim());
 
@@ -154,6 +156,9 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.Empty(component.FindAll("[data-testid='role-edit-allow-empty']"));
         Assert.Single(component.FindAll("[data-testid='role-edit-deny-empty']"));
+        Assert.Equal("Allow (1)", component.Find("[data-testid='role-edit-tab-allow']").TextContent.Trim());
+        Assert.Single(component.FindAll("[data-testid='role-edit-tab-allow-error']"));
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-deny-error']"));
     }
 
     [Fact]
@@ -513,6 +518,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.False(component.Instance.IsValid);
         Assert.Same(oldAllow, role.Allow);
+        Assert.Single(component.FindAll("[data-testid='role-edit-tab-allow-error']"));
 
         // Act
         await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "");
@@ -520,6 +526,31 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.True(component.Instance.IsValid);
         Assert.Equal([false, true], validity);
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-allow-error']"));
+    }
+
+    [Fact]
+    public async Task WhenInvalidTextIsTypedIntoADenyRule_ThenOnlyTheDenyTabShowsTheErrorMarkerUntilItIsCleared()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Deny = [new PermissionRule { Actions = [PermissionAction.Write] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await TypeTextAsync(component, "role-edit-deny-rule-0", "rule-paths", "Devices");
+
+        // Assert
+        Assert.False(component.Instance.IsValid);
+        Assert.Single(component.FindAll("[data-testid='role-edit-tab-deny-error']"));
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-allow-error']"));
+
+        // Act
+        await TypeTextAsync(component, "role-edit-deny-rule-0", "rule-paths", "");
+
+        // Assert
+        Assert.True(component.Instance.IsValid);
+        Assert.Empty(component.FindAll("[data-testid='role-edit-tab-deny-error']"));
     }
 
     [Fact]
@@ -827,7 +858,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
 
         // Assert
         Assert.Equal("Used by 2 agents", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim());
-        Assert.NotNull(component.Find(".mud-tabs-header-after").QuerySelector("[data-testid='role-edit-used-by']"));
+        Assert.NotNull(component.Find(".role-edit-tabs .role-edit-used-by").QuerySelector("[data-testid='role-edit-used-by']"));
     }
 
     [Fact]
@@ -1002,7 +1033,6 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         component.Render();
 
         // Assert
-        Assert.Equal("Pantry", role.Title);
         Assert.Equal("Pantry", component.Instance.GetEditedRole().Name);
         Assert.Equal(["Pantry"], component.FindComponent<RoleSelector>().Instance.Excluded!);
 

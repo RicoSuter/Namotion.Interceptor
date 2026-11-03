@@ -26,9 +26,11 @@
         @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. *@
         <MudTabs Elevation="0" KeepPanelsAlive="true" Class="role-edit-tabs" TabPanelsClass="role-edit-panels" data-testid="role-edit-tabs">
             <Header>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
-                    Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
-                </MudText>
+                <div class="role-edit-used-by">
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
+                        Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
+                    </MudText>
+                </div>
             </Header>
             <ChildContent>
                 <MudTabPanel>
@@ -76,35 +78,45 @@
 }
 
 <style>
-    /* A fixed height, so that switching tabs does not resize the dialog, which leaves room for its title and buttons. */
+    /* A fixed height, so that switching tabs does not resize the dialog; 240px of the window height stay free for the dialog's
+       title and buttons. */
     .role-edit {
         display: flex;
         flex-direction: column;
-        height: clamp(320px, calc(100vh - 240px), 760px);
-        height: clamp(320px, calc(100dvh - 240px), 760px);
+        /* 100vh for browsers without dvh */
+        height: clamp(240px, calc(100vh - 240px), 760px);
+        height: clamp(240px, calc(100dvh - 240px), 760px);
     }
 
     .role-edit > * {
         flex: 0 0 auto;
     }
 
+    /* The minimum height keeps the active tab usable under tall alerts, which scroll the dialog content instead. */
     .role-edit > .role-edit-tabs {
         flex: 1 1 auto;
-        min-height: 0;
+        min-height: 200px;
+        display: flex;
+        flex-direction: column;
     }
 
-    .role-edit-tabs .mud-tabs-header-after {
+    .role-edit-used-by {
         display: flex;
         align-items: center;
+        height: 100%;
         padding: 0 8px;
         white-space: nowrap;
     }
 
+    /* Edge-aligned icon buttons, such as the search button of the subject field, reach 12px past the content; the padding
+       keeps them inside the scrolling panels, which would otherwise scroll sideways, and the negative margin keeps the
+       content aligned with the alerts and the tab bar. */
     .role-edit-tabs > .role-edit-panels {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
-        padding-top: 16px;
+        margin: 0 -12px;
+        padding: 16px 12px 0;
     }
 </style>
 

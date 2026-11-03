@@ -52,7 +52,7 @@ public partial class Authorization : IConfigurable, IIconProvider
     /// <see cref="AuthorizationService.GetRoleNameError"/>) or names a role already, ignoring case; two roles have the same
     /// name, ignoring case; or the configuration was not or could not be written, in which case the role stays added.
     /// </exception>
-    [Operation(Title = "Add Role", Description = "Adds a custom role without rules under the given name. Its rules are edited in its own dialog.", Icon = "Add")]
+    [Operation(Title = "Add Role", Description = "Adds a custom role without rules under the given name. Its rules are edited in its own dialog. Agents and roles that already name it get its rules.", Icon = "Add")]
     public Task AddRoleAsync(string name, [FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
         RoleEdits.AddAsync(this, name, authorizationService, rootManager);
 

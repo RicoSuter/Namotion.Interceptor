@@ -92,7 +92,7 @@ Select the `Authorization` subject in the subject browser. Its pane lists the cu
 
 To add a role:
 
-1. Click "Add Role" in the pane of the `Authorization` subject.
+1. Click "Add Role" in the pane of the `Authorization` subject. The dialog says what adding a role does to the names in use: "Adds a custom role without rules under the given name. Its rules are edited in its own dialog. Agents and roles that already name it get its rules.", see [Roles That Agents Use](#roles-that-agents-use).
 2. Type the name into the field "Name".
 3. Click "Execute". The role is saved at once. It has no rules yet, so it allows nothing; open it to add rules, see [Editing a Role](#editing-a-role).
 
