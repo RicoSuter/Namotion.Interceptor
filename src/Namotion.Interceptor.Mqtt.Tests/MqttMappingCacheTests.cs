@@ -562,6 +562,26 @@ public class MqttMappingCacheTests
     }
 
     [Fact]
+    public async Task WhenACollectionIsReordered_ThenTheClientPublishesUnderTheNewPosition()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var first = new MqttCacheTestChild();
+        var second = new MqttCacheTestChild();
+        subject.Items = [first, second];
+        await using var client = CreateClient(subject, CreateMapper());
+        var property = first.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("items[0]/value", client.TryGetTopicForProperty(property.Reference, property).Topic);
+
+        // Act
+        subject.Items = [second, first];
+        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+
+        // Assert
+        Assert.Equal("items[1]/value", topic);
+    }
+
+    [Fact]
     public async Task WhenADictionaryEntryIsReKeyed_ThenTheServerPublishesUnderTheNewKey()
     {
         // Arrange
@@ -575,6 +595,25 @@ public class MqttMappingCacheTests
         // Act
         subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
         var topic = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.Equal("map[b]/value", topic);
+    }
+
+    [Fact]
+    public async Task WhenADictionaryEntryIsReKeyed_ThenTheClientPublishesUnderTheNewKey()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["a"] = child };
+        await using var client = CreateClient(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("map[a]/value", client.TryGetTopicForProperty(property.Reference, property).Topic);
+
+        // Act
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
+        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
 
         // Assert
         Assert.Equal("map[b]/value", topic);
@@ -640,6 +679,25 @@ public class MqttMappingCacheTests
         // Act
         subject.Items = [second, first];
         var resolved = await server.TryGetPropertyForTopicAsync("items[0]/value", CancellationToken.None);
+
+        // Assert
+        Assert.Same(second, resolved?.Subject);
+    }
+
+    [Fact]
+    public async Task WhenACollectionIsReordered_ThenTheClientResolvesThePositionToTheSubjectNowThere()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var first = new MqttCacheTestChild();
+        var second = new MqttCacheTestChild();
+        subject.Items = [first, second];
+        await using var client = CreateClient(subject, CreateMapper());
+        Assert.Same(first, (await client.TryGetPropertyForTopicAsync("items[0]/value"))?.Subject);
+
+        // Act
+        subject.Items = [second, first];
+        var resolved = await client.TryGetPropertyForTopicAsync("items[0]/value");
 
         // Assert
         Assert.Same(second, resolved?.Subject);
@@ -761,6 +819,28 @@ public class MqttMappingCacheTests
         var oldKey = await client.TryGetPropertyForTopicAsync("map[a]/value");
         var oldKeyRetained = client.HasCachedProperty("map[a]/value");
         var newKey = await client.TryGetPropertyForTopicAsync("map[b]/value");
+
+        // Assert
+        Assert.Null(oldKey);
+        Assert.False(oldKeyRetained);
+        Assert.Same(child, newKey?.Subject);
+    }
+
+    [Fact]
+    public async Task WhenADictionaryEntryIsReKeyed_ThenTheServerResolvesTheNewKey()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["a"] = child };
+        await using var server = CreateServer(subject, CreateMapper());
+        Assert.Same(child, (await server.TryGetPropertyForTopicAsync("map[a]/value", CancellationToken.None))?.Subject);
+
+        // Act
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
+        var oldKey = await server.TryGetPropertyForTopicAsync("map[a]/value", CancellationToken.None);
+        var oldKeyRetained = server.HasCachedPath("map[a]/value");
+        var newKey = await server.TryGetPropertyForTopicAsync("map[b]/value", CancellationToken.None);
 
         // Assert
         Assert.Null(oldKey);
