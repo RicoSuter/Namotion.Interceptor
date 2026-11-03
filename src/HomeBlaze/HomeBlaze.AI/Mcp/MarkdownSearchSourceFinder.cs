@@ -114,7 +114,8 @@ internal sealed class MarkdownSearchSourceFinder
     }
 
     // The path as browse and search show it, after the path prefix: through the first parent, in parent order, from
-    // which a path can be written; null for a subject of an excluded type or below one.
+    // which a path can be built; null for a subject of an excluded type or below one. The tools build it with the
+    // path provider restricted to what the access policy allows to read, which here is every property.
     private string? TryGetPath(RegisteredSubject subject, IInterceptorSubject rootSubject)
     {
         if (ReferenceEquals(subject.Subject, rootSubject))

@@ -11,7 +11,7 @@ Temperature > 20 and not (Mode == Away)
 Charging {{ subject/ChargingPower }} kW
 ```
 
-The paths of these samples are written with `/` as the separator.
+The paths of these samples use `/` as the separator.
 
 The package has no opinion on where values come from. The host resolves paths and variables, applies pipes and turns results into text; the language decides how to parse an expression, how to combine and compare values, and what is unknown. The [MCP server](mcp.md#filtering-by-value) is one host: its `search` tool filters subjects with it.
 
@@ -41,7 +41,7 @@ literal    := number | "text" | 'text' | true | false | null
 
 ## Paths and variables
 
-A path is written in the syntax of the host: its segments are divided by a separator character, and a segment may carry an index in brackets, such as `Devices[a].IsOn`. Indexes are always written with `[` and `]`, whatever the separator. The parser needs the separator to tell a bare word from a path, so every parse names it, and `ParsedExpression.PathSeparator` echoes it:
+A path uses the syntax of the host: its segments are divided by a separator character, and a segment may carry an index in brackets, such as `Devices[a].IsOn`. Indexes always use `[` and `]`, whatever the separator. The parser needs the separator to tell a bare word from a path, so every parse names it, and `ParsedExpression.PathSeparator` echoes it:
 
 ```csharp
 ParsedExpression.TryParse(text, '.', out var expression, out var error);

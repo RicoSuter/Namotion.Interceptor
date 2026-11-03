@@ -30,7 +30,7 @@ public static class SubjectMetadataExtensions
 
     /// <summary>
     /// Gets the store that keeps the metadata of the subject: the subject itself when it is a
-    /// <see cref="IMetadataStore"/>, else the nearest one up the first parent of each subject, as the registry writes
+    /// <see cref="IMetadataStore"/>, else the nearest one up the first parent of each subject, as the registry builds
     /// the path of the subject; null without one.
     /// </summary>
     public static IMetadataStore? FindMetadataStore(this IInterceptorSubject subject)
