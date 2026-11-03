@@ -192,6 +192,8 @@ The simple DI overloads (`AddMqttSubjectClientSource<T>(brokerHost, connectorNam
 
 `MqttAttributeMapper` contributes only QoS and Retain; it relies on `MqttPathProviderMapper` to resolve the topic in both directions, so it must always be paired with one (the default composite does this). On its own it resolves no topics. This differs from the OPC UA attribute mapper, which is self-sufficient because OPC UA browses hierarchically and matches each node against a single level, whereas MQTT resolves a flat topic that needs full-path composition by the path provider.
 
+A custom mapper or path provider whose answers change while the connector runs raises its `Version` after each change, see [Property Mappers](connectors.md#property-mappers); otherwise the topic caches keep using its earlier answers.
+
 ## Topic Mapping
 
 ### [Path] attribute
@@ -260,6 +262,8 @@ var fluentMapper = new MqttFluentMapperBuilder<Plant>()
 Because `Motor` is configured once at the type level, all motors in the graph (direct properties, collection elements, nested references) resolve the same topic segments without repeating configuration. As with attributes, every property holding a subject on the way needs a segment, such as `Pump.Motor` and `Plant.Motors` above; a property below a holding property whose declaring type maps no segment for it is neither published nor subscribed.
 
 `ForType<T>()` registrations apply to all types derived from `T` and all types implementing `T` when `T` is an interface. The most specific registration wins.
+
+Register every mapping before the mapper is used: the registrations are not safe to change while a connector reads them.
 
 #### Composing with the connector
 
@@ -378,18 +382,10 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 
 ### Automatic Cleanup on Subject Detach
 
-**Client behavior:**
-- Cache entries in `_topicToProperty` and `_propertyToTopic` are removed for detached subjects
-- Cleanup happens both proactively (on detach event) and lazily (when stale entries are accessed)
+The client and the server cache the topic of each property and the property of each topic. Every entry carries the registry's `StructureVersion` and the mapper's `Version` from before it was computed and is used only while both are current. A lookup after a structural change (attach, detach, another parent, a new position or key, a property added at run time) or after a mapper change computes the entry again, so a change is published under the topic its property has at that moment and an inbound topic that no longer maps to a property is not applied. The server's change filter and its publish share one cache, so they always agree.
 
-**Server behavior:**
-- Cache entries in `_pathToProperty` are removed for detached subjects, and an entry for a subject that is detached or detaching (no references left) is dropped right after it is added
-- Outbound topics are not cached: the change filter and the publish ask the configured mapper for every change, so a change is published under the topic its property has at that moment, also after its subject moved to another holding property without a detach or after the mapper's answers changed
-
-**Race condition prevention:**
-- Cache lookups validate subject attachment AFTER cache access
-- Stale entries are detected and removed even if the detach event already fired
-- This ensures we never return stale data even with concurrent attach/detach
+- Entries of a detached subject are removed on the detach event, and an entry for a subject that is detached or detaching (no references left) is dropped right after it is added, so the caches hold no detached subject.
+- A value change or an inbound message concurrent with a structural change may be handled as if it came just before it.
 
 ## Known Limitations
 
@@ -402,7 +398,7 @@ The library includes optimizations:
 - Batched message publishing with configurable buffer time
 - Object pooling for change buffers and user property lists
 - Fast path for retained message handling
-- Efficient topic-to-property caching with lazy cleanup
+- Efficient topic-to-property caching, validated against the registry's structure version and the mapper's version
 
 ## Benchmark Results
 

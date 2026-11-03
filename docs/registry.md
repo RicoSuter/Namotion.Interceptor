@@ -58,6 +58,8 @@ var child = garage.TryGetRegisteredProperty(g => g.Cars)!.Children[0]; // Subjec
 - Both entries follow the assigned value, and paths written afterwards use the new index. The rules, including a subject held more than once and a value mutated in place, are in [Child Index Changes](tracking.md#child-index-changes).
 - `Children` of a collection is in position order. A property declared as a dictionary is not reordered by key, so its children stay in the order they were attached, also when its value enumerates as positions. A property declared more broadly, such as `object`, that holds a dictionary with `int` keys has its children ordered by key.
 
+`ISubjectRegistry.StructureVersion` increases after every change to the registered subjects, their parents, children and child indices, and after a property is added at run time, and never decreases. A cache of anything computed from the registry, such as paths, reads it before computing and serves an entry only while it is unchanged.
+
 ## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:
@@ -305,6 +307,8 @@ public class StatePathProvider : PathProviderBase
     }
 }
 ```
+
+A provider whose answers change while it is in use overrides `PathProviderBase.Version` and raises it after each change. Caches of paths, such as the MQTT topic caches, serve an entry only while it and the registry's `StructureVersion` are unchanged. The built-in providers return 0, which means their answers never change.
 
 ### Included properties
 
