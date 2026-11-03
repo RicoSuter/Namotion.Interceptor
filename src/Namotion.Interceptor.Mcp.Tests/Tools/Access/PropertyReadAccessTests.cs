@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
@@ -165,7 +166,11 @@ public class PropertyReadAccessTests
 
     private sealed class PropertiesWithoutAttributesPathProvider : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => !property.IsAttribute;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = !property.IsAttribute ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 
     public static TheoryData<string, string> CyclicAttributeCalls => new()
