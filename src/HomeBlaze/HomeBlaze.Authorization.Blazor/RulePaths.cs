@@ -18,12 +18,14 @@ internal static class RulePaths
     /// </summary>
     public static string? GetMemberPath(RegisteredSubjectProperty member, PathProviderBase pathProvider)
     {
-        var subjectPath = GetSubjectPathPrefix(member.Parent, pathProvider);
+        if (GetSubjectPathPrefix(member.Parent, pathProvider) is not { } subjectPath)
+        {
+            return null;
+        }
 
-        // As the policy names a member: the provider's segment, or the browse name when the provider gives none.
-        return subjectPath is null
-            ? null
-            : string.Concat(subjectPath, pathProvider.PathSeparator.ToString(), pathProvider.TryGetPropertySegment(member) ?? member.BrowseName);
+        // As the policy names a member: the provider's segment, or the browse name when the provider excludes it.
+        var segment = pathProvider.TryGetPropertySegment(member, out var providerSegment) ? providerSegment : member.BrowseName;
+        return string.Concat(subjectPath, pathProvider.PathSeparator.ToString(), segment);
     }
 
     /// <summary>
