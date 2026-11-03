@@ -74,7 +74,9 @@ internal static partial class AgentMarkdownRenderer
     // Mermaid lays a diagram out in the page, so a CSS function, an image shape, a link target or an escape that could
     // spell one would load its address before the SVG can be cleaned. A %%{...}%% directive counts as such an escape:
     // Mermaid removes it anywhere in a line before parsing, which joins the text around it, such as u%%{x}%%rl.
-    [GeneratedRegex(@"url|image|img|src|href|@\{|%%\{|\\|#\w+;", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // A CSS function only loads when its name is directly followed by the parenthesis, so url and image match with it
+    // and words such as Curl or Imagery stay diagrams; the escapes are what keep url( from being spelled otherwise.
+    [GeneratedRegex(@"url\(|image(?:-set)?\(|img|src|href|@\{|%%\{|\\|#\w+;", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CouldLoadAnAddress();
 
     /// <summary>

@@ -181,6 +181,8 @@ public class AgentMarkdownRendererTests
     [InlineData("stateDiagram-v2\n  style S mask-image:#117;rl(//evil.test/x)")]
     [InlineData("flowchart TD\n  A --> B\n  click A href \"https://evil.test\"")]
     [InlineData("stateDiagram-v2\n  style S mask:u%%{wrap}%%rl(//evil.test/x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:-webkit-image-set(\"//evil.test/x\" 1x)")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:image(\"//evil.test/x\")")]
     public void WhenMermaidFenceCouldLoadAnAddress_ThenItIsRenderedAsCode(string source)
     {
         // Act
@@ -189,6 +191,21 @@ public class AgentMarkdownRendererTests
         // Assert
         Assert.Contains("<pre><code>", html);
         Assert.DoesNotContain("class=", html);
+    }
+
+    [Theory]
+    [InlineData("sankey-beta\n\nSolar,Burlington plant,10")]
+    [InlineData("sankey-beta\n\nCURL (Linux),Grid,10")]
+    [InlineData("sankey-beta\n\nImagery lab,Grid,10")]
+    [InlineData("stateDiagram-v2\n  style S mask-image:url (//evil.test/x)")]
+    public void WhenMermaidFenceOnlyNamesACssFunction_ThenItIsRenderedAsDiagram(string source)
+    {
+        // Act
+        var html = AgentMarkdownRenderer.ToHtml("```mermaid\n" + source + "\n```");
+
+        // Assert
+        Assert.Contains("<pre class=\"mermaid\">", html);
+        Assert.DoesNotContain("<code", html);
     }
 
     [Fact]
