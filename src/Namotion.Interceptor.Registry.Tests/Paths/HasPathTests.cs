@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -170,15 +169,6 @@ public class HasPathTests
             Assert.Equal(
                 property.TryGetPath(pathProvider, rootPerson) is not null,
                 property.HasPath(pathProvider, rootPerson));
-        }
-    }
-
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
-    {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
-        {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
         }
     }
 }
