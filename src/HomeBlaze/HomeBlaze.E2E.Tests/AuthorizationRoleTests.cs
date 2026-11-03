@@ -169,7 +169,7 @@ public class AuthorizationRoleTests
 
             // Act: rename the role the agent uses with the operation of the role, whose dialog warns about the names in use.
             var rolePane = await OpenPaneAsync($"Authorization/{RoleName}");
-            await RunOperationAsync(rolePane, "Rename", RenamedRoleName, "Agents and roles that name the new name already get its rules.");
+            await RunOperationAsync(rolePane, "Rename", RenamedRoleName, "Agents and roles that already name the new name get its rules.");
 
             // Assert
             await WaitForAuthorizationFileAsync(
@@ -287,7 +287,7 @@ public class AuthorizationRoleTests
         await Assertions.Expect(execute).ToBeEnabledAsync(new() { Timeout = Timeout });
         await execute.ClickAsync();
 
-        // A failing operation opens its error dialog instead, which this then reports.
+        // A failing operation opens its error dialog after this one closes; the wait for the file that follows then fails.
         await Assertions.Expect(dialog).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 

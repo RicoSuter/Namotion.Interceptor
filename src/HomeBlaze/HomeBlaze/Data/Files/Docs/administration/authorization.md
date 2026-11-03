@@ -98,7 +98,7 @@ To add a role:
 
 To rename a role:
 
-1. Click "Rename" in its pane. The dialog first says what a rename does to the names in use: "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name. Agents and roles that name the new name already get its rules.", see [Roles That Agents Use](#roles-that-agents-use).
+1. Click "Rename" in its pane. The dialog first says what a rename does to the names in use: "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name. Agents and roles that already name the new name get its rules.", see [Roles That Agents Use](#roles-that-agents-use).
 2. Type the new name into the field "Name".
 3. Click "Execute" to rename the role, or "Cancel" to keep it. The role keeps its rules and is saved at once.
 
@@ -124,7 +124,7 @@ Agents and the custom roles that include a role name it, so a rename or deletion
 
 - **Agents**: the agents keep the old name in their `Roles`. They show the status "Invalid roles: Role 'LightOperator' is not defined." and every tool call of theirs is denied, not only the calls the role allowed, see [Invalid Roles](#invalid-roles). Their edit dialog shows the old name as a red chip with the tooltip "Unknown role". Remove it there and select the new name or another role, then save the agent. A rename that changes only the case of the name changes nothing for them, as names compare ignoring case.
 - **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." and cannot be used until its includes are changed as well, so the agents that use it are denied everything until then.
-- **Names still in use**: a role added or renamed under a name that agents or other roles still name, such as the name of a deleted role, takes over where that name is used, and those agents and roles get its rules. A rename can therefore grant access, which is why it asks first.
+- **Names still in use**: a role added or renamed under a name that agents or other roles still name, such as the name of a deleted role, takes over where that name is used, and those agents and roles get its rules. A rename can therefore grant access, which its dialog says before "Execute" is clicked.
 
 ### Status and Usage
 
@@ -209,7 +209,7 @@ The line below the field reads:
 
 A path that names no subject shows "No subject has this path.", and a role that does not compile shows its error instead, such as "Role 'LightOperator' includes 'Readers', which is not defined.".
 
-The table has a row per member: the properties, then the methods, then the attributes, named `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata`. Below its name, a row shows the path a [path pattern](#path-patterns) matches the member by, in a smaller monospace font, such as `/Devices/Sonos/Play`; a click selects the whole path, to copy it into the field "Paths" of a rule. The columns are the [actions](#actions) "read", "write", "execute" and "history". A cell is a green tick when the action is allowed, a red cross when it is denied, and a dim "–" where the action does not apply: a method has "read" and "execute", a property or attribute "read", "write" and "history".
+The table has a row per member: the properties, then the methods, then the attributes, named `Property@Attribute`, such as `Temperature@HomeBlaze:Metadata`. Below its name, a row shows the path a [path pattern](#path-patterns) matches the member by, in a smaller monospace font, such as `/Devices/Sonos/Play`; a click selects the whole path, to copy it into the field "Paths" of a rule. The columns are the [actions](#actions) "read", "write", "execute" and "history". A cell is a green tick when the action is allowed, a red cross when it is denied, and a gray "–" where the action does not apply: a method has "read" and "execute", a property or attribute "read", "write" and "history".
 
 Hovering over a cell shows its explanation, and clicking it shows the explanation below the table, starting with the member and the action. An explanation names the role and the rule that decided:
 

@@ -107,7 +107,7 @@ public partial class Role : IConfigurable, ITitleProvider, IIconProvider
     /// ignoring case; two other roles have the same name, ignoring case; or the configuration was not or could not be
     /// written, in which case the role stays renamed.
     /// </exception>
-    [Operation(Title = "Rename", Description = "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name. Agents and roles that name the new name already get its rules.", Icon = "DriveFileRenameOutline", RequiresConfirmation = true)]
+    [Operation(Title = "Rename", Description = "Gives the role another name and keeps its rules. Agents and roles that name it by its old name report it as unknown until they are given the new name. Agents and roles that already name the new name get its rules.", Icon = "DriveFileRenameOutline", RequiresConfirmation = true)]
     public Task RenameAsync(string name, [FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
         RoleEdits.RenameAsync(this, name, authorizationService, rootManager);
 

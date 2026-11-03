@@ -160,7 +160,7 @@ internal static class RoleEdits
         {
             isWritten = await rootManager.GetConfigurationWriter(authorization).WriteConfigurationAsync(authorization, CancellationToken.None);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
         {
             throw new InvalidOperationException(
                 $"{change}, but the configuration could not be saved ({exception.Message}) and will be lost on restart.", exception);
