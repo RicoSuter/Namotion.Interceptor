@@ -125,6 +125,25 @@ export function createFramePacer() {
     return pacer;
 }
 
+// The outline and the corner shading read one channel of depth and three of normals. Depth keeps the 32-bit float that
+// Babylon picks where the device can filter it, and normals take half floats, which halves the bytes per pixel of the
+// buffer at the same look; a device without filterable half floats keeps Babylon's defaults.
+function getGeometryFormats(engine) {
+    const BABYLON = window.BABYLON;
+    const caps = engine.getCaps();
+    if (!caps.textureHalfFloat || !caps.textureHalfFloatLinearFiltering) {
+        return undefined;
+    }
+
+    const depthType = caps.textureFloat && caps.textureFloatLinearFiltering
+        ? BABYLON.Constants.TEXTURETYPE_FLOAT
+        : BABYLON.Constants.TEXTURETYPE_HALF_FLOAT;
+    return {
+        [BABYLON.GeometryBufferRenderer.DEPTH_TEXTURE_TYPE]: { textureType: depthType, textureFormat: BABYLON.Constants.TEXTUREFORMAT_R },
+        [BABYLON.GeometryBufferRenderer.NORMAL_TEXTURE_TYPE]: { textureType: BABYLON.Constants.TEXTURETYPE_HALF_FLOAT, textureFormat: BABYLON.Constants.TEXTUREFORMAT_RGBA },
+    };
+}
+
 /** Sets up the look for the camera's scene at the quality choice, a preset name or 'auto'. */
 export function createRenderer(scene, camera, quality = AUTO) {
     const BABYLON = window.BABYLON;
@@ -157,7 +176,7 @@ export function createRenderer(scene, camera, quality = AUTO) {
     const shadowUp = BABYLON.Vector3.Cross(sun.direction, shadowRight).normalize();
     const shadowCenter = new BABYLON.Vector3();
 
-    const geometry = scene.enableGeometryBufferRenderer();
+    const geometry = scene.enableGeometryBufferRenderer(1, BABYLON.Constants.TEXTUREFORMAT_DEPTH16, getGeometryFormats(scene.getEngine()));
     const depthIndex = geometry.getTextureIndex(BABYLON.GeometryBufferRenderer.DEPTH_TEXTURE_TYPE);
     const normalIndex = geometry.getTextureIndex(BABYLON.GeometryBufferRenderer.NORMAL_TEXTURE_TYPE);
 
