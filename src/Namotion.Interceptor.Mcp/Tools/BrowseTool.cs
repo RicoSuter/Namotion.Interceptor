@@ -86,7 +86,7 @@ internal class BrowseTool
 
         depth = Math.Min(depth, _configuration.MaxDepth);
 
-        var visibility = McpVisibility.For(_configuration, rootSubject);
+        var visibility = McpSubjectVisibility.For(_configuration, rootSubject);
 
         // Resolve starting subject
         RegisteredSubject startSubject;
@@ -328,7 +328,7 @@ internal class BrowseTool
     // Expanded and collapsed properties list the same children, so a collapsed count matches the expanded list.
     private bool IsListed(RegisteredSubject child, in NodeOptions options) =>
         !McpToolHelper.ShouldExcludeByType(child, _configuration.ExcludeTypes, options.ExcludeTypes) &&
-        options.Visibility.IsShown(child);
+        options.Visibility.IsVisibleWithPathCheck(child);
 
     // The request's options, unchanged through the recursion.
     private readonly record struct NodeOptions(
@@ -338,5 +338,5 @@ internal class BrowseTool
         bool IncludeInterfaces,
         IReadOnlySet<string>? PropertyNames,
         string[]? ExcludeTypes,
-        McpVisibility Visibility);
+        McpSubjectVisibility Visibility);
 }

@@ -31,10 +31,10 @@ internal sealed class UnseenPropertyNames
 
     /// <summary>
     /// Marks as seen every <c>where</c> path that leads from <paramref name="subject"/> to a property the path provider
-    /// exposes on a shown subject, also one that holds subjects but not an attribute, and every selected name that is a
+    /// exposes on a visible subject, also one that holds subjects but not an attribute, and every selected name that is a
     /// scalar property of it.
     /// </summary>
-    public void Observe(RegisteredSubject subject, PathProviderBase pathProvider, McpVisibility visibility)
+    public void Observe(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectVisibility visibility)
     {
         for (var index = _wherePaths.Count - 1; index >= 0; index--)
         {

@@ -27,8 +27,8 @@ public static class McpServerConfigurationExtensions
     /// <returns>The property and the key of its last segment, as <see cref="PathExtensions.TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> returns them, or null.</returns>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetReadableProperty(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
-        => McpVisibility.For(configuration, root.Subject)
-            .GetPathProvider(configuration.ToolPathProvider)
+        => McpSubjectVisibility.For(configuration, root.Subject)
+            .GetVisibleSubjectsPathProvider(configuration.ToolPathProvider)
             .TryGetPropertyFromPath(root, path);
 
     /// <summary>
@@ -39,13 +39,13 @@ public static class McpServerConfigurationExtensions
     /// <returns>The subject, or null.</returns>
     public static RegisteredSubject? TryGetReadableSubject(
         this McpServerConfiguration configuration, RegisteredSubject root, string path)
-        => configuration.TryGetReadableSubject(root, path, McpVisibility.For(configuration, root.Subject));
+        => configuration.TryGetReadableSubject(root, path, McpSubjectVisibility.For(configuration, root.Subject));
 
     /// <summary>
-    /// Writes the path of <paramref name="subject"/> from <paramref name="root"/> that search lists, which is also the
-    /// <c>$path</c> browse writes for a subject it lists: after <see cref="McpServerConfiguration.PathPrefix"/>, through
-    /// the first parent, in parent order, from which the path can be written; for <paramref name="root"/> itself the
-    /// prefix, or null when the prefix is empty. Null when no path can be written, the <see cref="McpServerConfiguration.AccessPolicy"/> does not show the
+    /// Builds the path of <paramref name="subject"/> from <paramref name="root"/> that search lists, which is also the
+    /// <c>$path</c> browse returns for a subject it lists: after <see cref="McpServerConfiguration.PathPrefix"/>, through
+    /// the first parent, in parent order, from which the path can be built; for <paramref name="root"/> itself the
+    /// prefix, or null when the prefix is empty. Null when no path can be built, the <see cref="McpServerConfiguration.AccessPolicy"/> hides the
     /// subject, see "Access Policy" in the MCP documentation, or the subject's type is in
     /// <see cref="McpServerConfiguration.ExcludeTypes"/> or derived from one, so that a subject gets a path exactly when
     /// search can list it. The counterpart of
@@ -63,11 +63,11 @@ public static class McpServerConfigurationExtensions
 
         var path = McpToolHelper.TryGetSubjectPath(subject, configuration, root.Subject);
 
-        // A written path is a readable one, so whether the subject is empty for the policy is left, as search checks it.
+        // A built path is a readable one, so whether the subject is empty for the policy is left, as search checks it.
         return path is not null &&
             configuration.AccessPolicy is { } policy &&
             subject.Subject != root.Subject &&
-            McpVisibility.IsEmptyForPolicy(policy, configuration.PathProvider, subject)
+            McpSubjectVisibility.IsEmptyForPolicy(policy, configuration.PathProvider, subject)
                 ? null
                 : path;
     }
@@ -77,21 +77,21 @@ public static class McpServerConfigurationExtensions
     /// the current call, whose root is <paramref name="root"/>.
     /// </summary>
     internal static RegisteredSubject? TryGetReadableSubject(
-        this McpServerConfiguration configuration, RegisteredSubject root, string path, McpVisibility visibility)
+        this McpServerConfiguration configuration, RegisteredSubject root, string path, McpSubjectVisibility visibility)
     {
         if (configuration.AccessPolicy is null)
         {
             return configuration.ToolPathProvider.TryGetSubjectFromPath(root, path);
         }
 
-        var pathProvider = visibility.GetPathProvider(configuration.ToolPathProvider);
+        var pathProvider = visibility.GetVisibleSubjectsPathProvider(configuration.ToolPathProvider);
         var subject = TryResolveReadableSubject(pathProvider, visibility, root, path);
-        return subject is not null && visibility.IsShown(subject) ? subject : null;
+        return subject is not null && visibility.IsVisibleWithPathCheck(subject) ? subject : null;
     }
 
     // Resolves through the properties the provider includes to a subject that is not empty for the policy.
     private static RegisteredSubject? TryResolveReadableSubject(
-        PathProviderBase pathProvider, McpVisibility visibility, RegisteredSubject root, string path)
+        PathProviderBase pathProvider, McpSubjectVisibility visibility, RegisteredSubject root, string path)
     {
         if (pathProvider.TryGetPropertyFromPath(root, path) is not
             { } resolved)

@@ -47,11 +47,11 @@ public class SearchAccessTests
         var (root, _) = CreateNestedDevice();
 
         // Act
-        var shown = await SearchAsync(root, policy: null, new { format = "json", types = new[] { nameof(TestDevice) } });
+        var visible = await SearchAsync(root, policy: null, new { format = "json", types = new[] { nameof(TestDevice) } });
         var hidden = await SearchAsync(root, DenyReadOnTheItemsOf(root), new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.Single(GetResultPaths(shown));
+        Assert.Single(GetResultPaths(visible));
         Assert.Empty(GetResultPaths(hidden));
     }
 
@@ -75,7 +75,7 @@ public class SearchAccessTests
     public async Task WhenOneParentOfASubjectIsHidden_ThenSearchReturnsItWithAPathThroughTheReadableParent()
     {
         // Arrange
-        // The device got Private first, so a path through Private would be written without a policy.
+        // The device got Private first, so a path through Private would be built without a policy.
         var context = CreateContext();
         var house = new TestHouse(context) { Address = "Main Street" };
         var device = new TestDevice(context) { DeviceName = "Camera" };
@@ -150,7 +150,7 @@ public class SearchAccessTests
     public async Task WhenASubjectIsMovedWhileSearchChecksIt_ThenItsKeyAndItsPathAreTheSame()
     {
         // Arrange
-        // The policy moves A from the root's A to the root's B while it is asked about S, after S's path is written.
+        // The policy moves A from the root's A to the root's B while it is asked about S, after S's path is built.
         var context = CreateContext();
         var root = new TestNode(context) { Name = "Root" };
         var a = new TestNode(context) { Name = "A" };

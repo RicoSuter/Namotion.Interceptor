@@ -10,8 +10,8 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
-/// A subject is shown through any parent with a readable path, so hiding one link hides only that link, and a reference
-/// to a subject that is not shown reads as null.
+/// A subject is visible through any parent with a readable path, so hiding one link hides only that link, and a reference
+/// to a subject that is not visible reads as null.
 /// </summary>
 public class HiddenSubjectAccessTests
 {
@@ -346,12 +346,12 @@ public class HiddenSubjectAccessTests
         // Act
         var subject = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Private");
         var property = configuration.TryGetReadableProperty(registeredRoot, "Items[house].Private.DeviceName");
-        var isShown = McpVisibility.For(configuration, root).IsShown(device);
+        var isVisible = McpSubjectVisibility.For(configuration, root).IsVisibleWithPathCheck(device);
 
         // Assert
         Assert.Null(subject);
         Assert.Null(property);
-        Assert.False(isShown);
+        Assert.False(isVisible);
     }
 
     // The device is held by the house's Private, which the provider excludes, and by its Public, which the policy hides.
@@ -435,17 +435,17 @@ public class HiddenSubjectAccessTests
         var throughPublic = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Public");
         var throughPrivate = configuration.TryGetReadableSubject(registeredRoot, "Items[house].Private");
         var property = configuration.TryGetReadableProperty(registeredRoot, "Items[house].Public.DeviceName");
-        var isShown = McpVisibility.For(configuration, root).IsShown(device);
+        var isVisible = McpSubjectVisibility.For(configuration, root).IsVisibleWithPathCheck(device);
 
         // Assert
         Assert.Null(throughPublic);
         Assert.Null(throughPrivate);
         Assert.Null(property);
-        Assert.False(isShown);
+        Assert.False(isVisible);
     }
 
     [Fact]
-    public void WhenASubjectOtherThanTheRootHasNoParent_ThenItIsNotShown()
+    public void WhenASubjectOtherThanTheRootHasNoParent_ThenItIsNotVisible()
     {
         // Arrange
         var context = CreateContext();
@@ -454,19 +454,19 @@ public class HiddenSubjectAccessTests
         var configuration = CreateConfiguration(new TestAccessPolicy((_, _) => true));
 
         // Act
-        var isShown = McpVisibility.For(configuration, root).IsShown(detached);
-        var isRootShown = McpVisibility.For(configuration, root).IsShown(root);
+        var isVisible = McpSubjectVisibility.For(configuration, root).IsVisibleWithPathCheck(detached);
+        var isRootVisible = McpSubjectVisibility.For(configuration, root).IsVisibleWithPathCheck(root);
 
         // Assert
         Assert.Empty(detached.TryGetRegisteredSubject()!.Parents);
-        Assert.False(isShown);
-        Assert.True(isRootShown);
+        Assert.False(isVisible);
+        Assert.True(isRootVisible);
     }
 
     [Theory]
-    [InlineData("Device != null", new[] { "Items[shown]" })]
+    [InlineData("Device != null", new[] { "Items[visible]" })]
     [InlineData("Device == null", new[] { "Items[hidden]", "Items[none]" })]
-    public async Task WhenAReferenceHoldsASubjectThatIsNotShown_ThenAWhereFilterReadsItAsNull(string where, string[] expectedPaths)
+    public async Task WhenAReferenceHoldsASubjectThatIsNotVisible_ThenAWhereFilterReadsItAsNull(string where, string[] expectedPaths)
     {
         // Arrange
         var context = CreateContext();
@@ -474,7 +474,7 @@ public class HiddenSubjectAccessTests
         var root = new TestMixedGroup(context);
         root.Items = new Dictionary<string, IInterceptorSubject>
         {
-            ["shown"] = new TestRoom(context) { Name = "Shown", Device = new TestDevice(context) { DeviceName = "Shown" } },
+            ["visible"] = new TestRoom(context) { Name = "Visible", Device = new TestDevice(context) { DeviceName = "Visible" } },
             ["hidden"] = new TestRoom(context) { Name = "Hidden", Device = hiddenDevice },
             ["none"] = new TestRoom(context) { Name = "None" }
         };
@@ -505,7 +505,7 @@ public class HiddenSubjectAccessTests
     }
 
     [Fact]
-    public async Task WhenTheOnlyChildOfAnotherTypeIsHidden_ThenTheCollapsedItemTypeIsThatOfTheShownChildren()
+    public async Task WhenTheOnlyChildOfAnotherTypeIsHidden_ThenTheCollapsedItemTypeIsThatOfTheVisibleChildren()
     {
         // Arrange
         var context = CreateContext();

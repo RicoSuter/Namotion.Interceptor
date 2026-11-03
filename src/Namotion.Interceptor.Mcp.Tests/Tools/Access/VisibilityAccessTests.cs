@@ -74,12 +74,12 @@ public class VisibilityAccessTests
         var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
 
         // Act
-        var first = McpVisibility.For(configuration, room);
-        var second = McpVisibility.For(configuration, new TestRoom(context));
+        var first = McpSubjectVisibility.For(configuration, room);
+        var second = McpSubjectVisibility.For(configuration, new TestRoom(context));
 
         // Assert
         Assert.Same(first, second);
-        Assert.True(first.IsShown(room.Device.TryGetRegisteredSubject()!));
+        Assert.True(first.IsVisibleWithPathCheck(room.Device.TryGetRegisteredSubject()!));
     }
 
     [Fact]
@@ -93,11 +93,11 @@ public class VisibilityAccessTests
             PathProvider = DefaultPathProvider.Instance,
             AccessPolicy = new TestAccessPolicy((_, _) => true)
         };
-        var visibility = McpVisibility.For(configuration, room);
+        var visibility = McpSubjectVisibility.For(configuration, room);
 
         // Act
-        var first = visibility.GetPathProvider(configuration.ToolPathProvider);
-        var again = visibility.GetPathProvider(configuration.ToolPathProvider);
+        var first = visibility.GetVisibleSubjectsPathProvider(configuration.ToolPathProvider);
+        var again = visibility.GetVisibleSubjectsPathProvider(configuration.ToolPathProvider);
 
         // Assert
         Assert.Same(first, again);
@@ -122,12 +122,12 @@ public class VisibilityAccessTests
         };
 
         // Act
-        var isShown = McpVisibility.For(configuration, room).IsShown(room.Device.TryGetRegisteredSubject()!);
+        var isVisible = McpSubjectVisibility.For(configuration, room).IsVisibleWithPathCheck(room.Device.TryGetRegisteredSubject()!);
         var subject = configuration.TryGetReadableSubject(room.TryGetRegisteredSubject()!, nameof(TestRoom.Device));
         var result = await McpToolCaller.CallAsync(room, configuration, "search", new { format = "json", types = new[] { nameof(TestDevice) } });
 
         // Assert
-        Assert.False(isShown);
+        Assert.False(isVisible);
         Assert.Null(subject);
         Assert.Empty(result.GetProperty("results").EnumerateObject());
     }

@@ -7,26 +7,26 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
-/// Whether the tools show a subject, for one tool call. Without an access policy every subject is shown. With one, a
-/// subject is shown when it is the root, or when it is not empty for the policy and has a readable path: a path from the
-/// root, through one of its parents, that passes only properties the configuration's tool path provider effectively
-/// includes, which are ones the path provider effectively includes and the policy allows to read.
+/// Whether a subject is visible to the tools, for one tool call. Without an access policy every subject is visible.
+/// With one, a subject is visible when it is the root, or when it is not empty for the policy and has a readable path:
+/// a path from the root, through one of its parents, that passes only properties the configuration's tool path
+/// provider effectively includes, which are ones the path provider effectively includes and the policy allows to read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
-internal sealed class McpVisibility
+internal sealed class McpSubjectVisibility
 {
     private readonly IMcpAccessPolicy? _policy;
     private readonly IInterceptorSubject? _rootSubject;
     private readonly PathProviderBase? _pathProvider;
     private readonly PathProviderBase? _toolPathProvider;
-    private Dictionary<RegisteredSubject, bool>? _isShown;
-    private ShownSubjectsPathProvider? _shownSubjectsPathProvider;
+    private Dictionary<RegisteredSubject, bool>? _isVisible;
+    private VisibleSubjectsPathProvider? _visibleSubjectsPathProvider;
 
-    private McpVisibility()
+    private McpSubjectVisibility()
     {
     }
 
-    private McpVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, McpServerConfiguration configuration)
+    private McpSubjectVisibility(IMcpAccessPolicy policy, IInterceptorSubject rootSubject, McpServerConfiguration configuration)
     {
         _policy = policy;
         _rootSubject = rootSubject;
@@ -35,29 +35,29 @@ internal sealed class McpVisibility
     }
 
     /// <summary>
-    /// The visibility without a policy, shared by every call: every subject is shown.
+    /// The visibility without a policy, shared by every call: every subject is visible.
     /// </summary>
-    public static McpVisibility Unrestricted { get; } = new();
+    public static McpSubjectVisibility Unrestricted { get; } = new();
 
     /// <summary>
     /// The visibility for one call from <paramref name="rootSubject"/>. Without a policy it is the shared
     /// <see cref="Unrestricted"/> instance.
     /// </summary>
-    public static McpVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
+    public static McpSubjectVisibility For(McpServerConfiguration configuration, IInterceptorSubject rootSubject) =>
         configuration.AccessPolicy is { } policy
-            ? new McpVisibility(policy, rootSubject, configuration)
+            ? new McpSubjectVisibility(policy, rootSubject, configuration)
             : Unrestricted;
 
     /// <summary>
     /// The configuration's tool path provider, <paramref name="toolPathProvider"/>, restricted with a policy to
-    /// properties whose owner is shown, so a path resolved with it passes shown subjects only. Without a policy,
+    /// properties whose owner is visible, so a path resolved with it passes visible subjects only. Without a policy,
     /// <paramref name="toolPathProvider"/> itself.
     /// </summary>
     /// <param name="toolPathProvider">The <see cref="McpServerConfiguration.ToolPathProvider"/> of the configuration this visibility is for.</param>
-    public PathProviderBase GetPathProvider(PathProviderBase toolPathProvider) =>
+    public PathProviderBase GetVisibleSubjectsPathProvider(PathProviderBase toolPathProvider) =>
         _policy is null
             ? toolPathProvider
-            : _shownSubjectsPathProvider ??= new ShownSubjectsPathProvider(toolPathProvider, this);
+            : _visibleSubjectsPathProvider ??= new VisibleSubjectsPathProvider(toolPathProvider, this);
 
     /// <summary>
     /// Whether the subject is empty for the policy: it has at least one property other than an attribute that the
@@ -75,7 +75,7 @@ internal sealed class McpVisibility
     /// <param name="subject">The subject.</param>
     internal static bool IsEmptyForPolicy(IMcpAccessPolicy policy, PathProviderBase pathProvider, RegisteredSubject subject)
     {
-        // Attributes are listed only on a listed property, so they make a subject neither shown nor empty.
+        // Attributes are listed only on a listed property, so they make a subject neither visible nor empty.
         var hasProperty = false;
         foreach (var property in subject.Properties)
         {
@@ -96,57 +96,63 @@ internal sealed class McpVisibility
     }
 
     /// <summary>
-    /// Whether the subject is shown. Always true without a policy; with one, false for a subject that is not
-    /// registered.
+    /// <see cref="IsVisibleWithPathCheck(RegisteredSubject)"/> for the registered subject. Always true without a policy;
+    /// with one, false for a subject that is not registered.
     /// </summary>
-    public bool IsShown(IInterceptorSubject subject) =>
-        _policy is null || subject.TryGetRegisteredSubject() is { } registered && IsShown(registered);
+    public bool IsVisibleWithPathCheck(IInterceptorSubject subject) =>
+        _policy is null || subject.TryGetRegisteredSubject() is { } registered && IsVisibleWithPathCheck(registered);
 
     /// <summary>
-    /// Whether the subject is shown. Always true without a policy.
+    /// Whether the subject is visible, checking both conditions: it is the root, or it has a readable path from the root
+    /// through one of its parents and is not empty for the policy. Always true without a policy. The result is cached
+    /// for the call, in the cache <see cref="IsVisibleWithoutPathCheck"/> shares.
     /// </summary>
-    public bool IsShown(RegisteredSubject subject)
+    public bool IsVisibleWithPathCheck(RegisteredSubject subject)
     {
         if (_policy is null || subject.Subject == _rootSubject)
         {
             return true;
         }
 
-        _isShown ??= [];
-        if (!_isShown.TryGetValue(subject, out var isShown))
+        _isVisible ??= [];
+        if (!_isVisible.TryGetValue(subject, out var isVisible))
         {
-            isShown = Evaluate(subject);
-            _isShown[subject] = isShown;
+            isVisible = Evaluate(subject);
+            _isVisible[subject] = isVisible;
         }
 
-        return isShown;
+        return isVisible;
     }
 
     /// <summary>
-    /// <see cref="IsShown(RegisteredSubject)"/> for a subject whose path <see cref="McpToolHelper.TryGetSubjectPath"/>
-    /// has written from the root this visibility is for, which is a readable path, so only whether the subject is empty
-    /// for the policy is left to check.
+    /// Whether the subject is visible, without the path check of
+    /// <see cref="IsVisibleWithPathCheck(RegisteredSubject)"/>. The caller must already have built the subject's path
+    /// with the configuration's <see cref="McpServerConfiguration.ToolPathProvider"/> from the root this visibility is
+    /// for, as <see cref="McpToolHelper.TryGetSubjectPath"/> does, so only whether the subject is empty for the policy
+    /// is checked. Always true without a policy and for the root. The result is cached for the call, in the cache
+    /// <see cref="IsVisibleWithPathCheck(RegisteredSubject)"/> shares.
     /// </summary>
-    public bool IsShownWithWrittenPath(RegisteredSubject subject)
+    public bool IsVisibleWithoutPathCheck(RegisteredSubject subject)
     {
         if (_policy is null || subject.Subject == _rootSubject)
         {
             return true;
         }
 
-        // Seeds the cache that IsShown reads, as a where filter of the same call may ask about this subject again.
-        _isShown ??= [];
-        if (!_isShown.TryGetValue(subject, out var isShown))
+        // Seeds the cache that IsVisibleWithPathCheck reads, as a where filter of the same call may ask about this
+        // subject again.
+        _isVisible ??= [];
+        if (!_isVisible.TryGetValue(subject, out var isVisible))
         {
-            isShown = !IsEmptyForPolicy(subject);
-            _isShown[subject] = isShown;
+            isVisible = !IsEmptyForPolicy(subject);
+            _isVisible[subject] = isVisible;
         }
 
-        return isShown;
+        return isVisible;
     }
 
-    // A subject with several parents is shown through any of them, so hiding one link hides only that link. A subject
-    // without a readable path from the root is not shown, also when no path reaches the root at all.
+    // A subject with several parents is visible through any of them, so hiding one link hides only that link. A subject
+    // without a readable path from the root is not visible, also when no path reaches the root at all.
     private bool Evaluate(RegisteredSubject subject)
     {
         if (IsEmptyForPolicy(subject))
@@ -165,7 +171,7 @@ internal sealed class McpVisibility
         return false;
     }
 
-    private sealed class ShownSubjectsPathProvider(PathProviderBase inner, McpVisibility visibility) : PathProviderBase
+    private sealed class VisibleSubjectsPathProvider(PathProviderBase inner, McpSubjectVisibility visibility) : PathProviderBase
     {
         public override char PathSeparator => inner.PathSeparator;
 
@@ -175,7 +181,7 @@ internal sealed class McpVisibility
 
         public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
         {
-            if (inner.TryGetPropertySegment(property, out segment) && visibility.IsShown(property.Parent))
+            if (inner.TryGetPropertySegment(property, out segment) && visibility.IsVisibleWithPathCheck(property.Parent))
             {
                 return true;
             }
@@ -187,8 +193,8 @@ internal sealed class McpVisibility
         public override bool TryGetPropertyFromSegment(
             RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
         {
-            // Every property of a subject that is not shown is excluded.
-            if (inner.TryGetPropertyFromSegment(subject, segment, out property) && visibility.IsShown(subject))
+            // Every property of a subject that is not visible is excluded.
+            if (inner.TryGetPropertyFromSegment(subject, segment, out property) && visibility.IsVisibleWithPathCheck(subject))
             {
                 return true;
             }

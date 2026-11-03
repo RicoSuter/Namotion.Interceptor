@@ -9,7 +9,7 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
-/// A policy that allows every read changes nothing about what the tools show or resolve, also when the path provider
+/// A policy that allows every read changes nothing about what the tools make visible or resolve, also when the path provider
 /// includes only some properties.
 /// </summary>
 public class ReadInvariantAccessTests
@@ -99,7 +99,7 @@ public class ReadInvariantAccessTests
         Assert.Same(room.Device, subject!.Subject);
     }
 
-    // The text the answer without a policy contains, so the case shows the device.
+    // The text the answer without a policy contains, so the case checks that the device is visible.
     public static TheoryData<string, string, string> SubtreeCalls => new()
     {
         { "browse", JsonSerializer.Serialize(new { format = "json", depth = 3, includeProperties = true }), "Light" },
@@ -115,8 +115,8 @@ public class ReadInvariantAccessTests
     public async Task WhenASharedSubjectWasFirstAttachedOutsideTheRoot_ThenADenyWritesPolicyAnswersAsWithoutAPolicy(string toolName, string input, string expectedText)
     {
         // Arrange
-        // The device's first parent is outside the tool root. The tools write its path through the first parent from
-        // which the registry writes one, the room's Device.
+        // The device's first parent is outside the tool root. The tools build its path through the first parent from
+        // which the registry builds one, the room's Device.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -183,10 +183,10 @@ public class ReadInvariantAccessTests
     [Theory]
     [InlineData(1)]
     [InlineData(0)]
-    public async Task WhenTheWrittenPathOfASubjectWithSeveralParentsDoesNotResolveBack_ThenADenyWritesPolicyBrowsesAsWithoutAPolicy(int depth)
+    public async Task WhenTheBuiltPathOfASubjectWithSeveralParentsDoesNotResolveBack_ThenADenyWritesPolicyBrowsesAsWithoutAPolicy(int depth)
     {
         // Arrange
-        // The device is written through Private, whose segment contains the separator, so the text does not resolve.
+        // The device's path is built through Private, whose segment contains the separator, so the text does not resolve.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();

@@ -111,7 +111,7 @@ internal class SearchTool
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
-        var visibility = McpVisibility.For(_configuration, rootSubject);
+        var visibility = McpSubjectVisibility.For(_configuration, rootSubject);
 
         foreach (var (_, registered) in registry.KnownSubjects)
         {
@@ -143,7 +143,7 @@ internal class SearchTool
                 continue;
             }
 
-            if (!visibility.IsShownWithWrittenPath(registered))
+            if (!visibility.IsVisibleWithoutPathCheck(registered))
             {
                 continue;
             }

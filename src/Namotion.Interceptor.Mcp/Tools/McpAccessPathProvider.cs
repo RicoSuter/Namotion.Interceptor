@@ -102,7 +102,7 @@ internal sealed class McpAccessPathProvider : PathProviderBase
         }
 
         // As for a name that does not exist, the segment is a key of the [InlinePaths] dictionary, so a client cannot
-        // tell the hidden property from a missing one and the registry writes the key without the explicit form.
+        // tell the hidden property from a missing one and the registry builds the key without the explicit form.
         if (inlinePathsPropertyName is not null &&
             subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
             TryGetPropertySegment(inlinePathsProperty, out _))

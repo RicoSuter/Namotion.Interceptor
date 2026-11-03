@@ -61,7 +61,7 @@ public class McpServerConfiguration
     public Type[] ExcludeTypes { get; init; } = [];
 
     /// <summary>
-    /// Decides per member and action what the tools show and change, see "Access Policy" in the MCP documentation. A
+    /// Decides per member and action what the tools make visible and change, see "Access Policy" in the MCP documentation. A
     /// member the policy does not allow to read reads as missing, and set_property refuses a member it does not allow
     /// to write. Null (the default) allows every action. Applies in addition to <see cref="IsReadOnly"/>.
     /// </summary>

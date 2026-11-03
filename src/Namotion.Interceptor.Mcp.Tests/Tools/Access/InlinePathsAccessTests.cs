@@ -53,7 +53,7 @@ public class InlinePathsAccessTests
     }
 
     [Fact]
-    public async Task WhenAChildIsStoredAtTheNameOfAHiddenProperty_ThenItsPathIsWrittenAsForAnyOtherKey()
+    public async Task WhenAChildIsStoredAtTheNameOfAHiddenProperty_ThenItsPathIsBuiltAsForAnyOtherKey()
     {
         // Arrange
         var (root, folder) = CreateFolders();

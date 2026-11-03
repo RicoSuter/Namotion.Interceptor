@@ -1244,10 +1244,10 @@ public class PathExtensionsTests
         }
     }
 
-    // --- Writing only through included properties ---
+    // --- Building only through included properties ---
 
     [Fact]
-    public void WhenASubjectOnTheChainMovesBehindAnExcludedPropertyWhileItIsChecked_ThenNoPathIsWrittenThroughIt()
+    public void WhenASubjectOnTheChainMovesBehindAnExcludedPropertyWhileItIsChecked_ThenNoPathIsBuiltThroughIt()
     {
         // Arrange
         // On its first check of father.Father the provider moves the father behind the excluded Mother, which the walk

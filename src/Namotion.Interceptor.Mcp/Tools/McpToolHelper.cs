@@ -179,7 +179,7 @@ internal static class McpToolHelper
 
     /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
-    /// on the way is one the provider includes and is owned by a shown subject, and the last one is no attribute and has
+    /// on the way is one the provider includes and is owned by a visible subject, and the last one is no attribute and has
     /// no index. A property that holds subjects is one a filter can read, and its value is the subject,
     /// the collection or the dictionary, or null.
     /// </summary>
@@ -187,9 +187,9 @@ internal static class McpToolHelper
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         string path,
-        McpVisibility visibility)
+        McpSubjectVisibility visibility)
     {
-        if (visibility.GetPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
+        if (visibility.GetVisibleSubjectsPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;
@@ -199,7 +199,7 @@ internal static class McpToolHelper
     }
 
     /// <summary>
-    /// The path the tools write for the subject from <paramref name="rootSubject"/>, after the configuration's
+    /// The path the tools build for the subject from <paramref name="rootSubject"/>, after the configuration's
     /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty. Any other
     /// subject's path is the first, in parent order, that reaches the root only through properties
     /// <see cref="McpServerConfiguration.ToolPathProvider"/> effectively includes (see
@@ -215,7 +215,7 @@ internal static class McpToolHelper
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        // The registry checks inclusion in the walk that writes the text, so a subject moved on it while a call runs
+        // The registry checks inclusion in the walk that builds the text, so a subject moved on it while a call runs
         // cannot put the name of a hidden property into the text.
         var pathProvider = configuration.ToolPathProvider;
         foreach (var parent in subject.Parents)
