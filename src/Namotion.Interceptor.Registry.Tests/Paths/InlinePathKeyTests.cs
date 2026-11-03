@@ -326,7 +326,7 @@ public class InlinePathKeyTests
     }
 
     [Fact]
-    public void WhenInlinePropertyIsMappedByAttributeProvider_ThenInlinePropertyPathRoundTrips()
+    public void WhenInlinePropertyIsUnmappedForAttributeProvider_ThenInlinePropertyPathRoundTrips()
     {
         // Arrange
         var context = CreateContext();
