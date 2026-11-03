@@ -108,18 +108,18 @@
         }
 
         _resetPreset = preset;
-        return ApplyAsync(view => view.SetGraphicsAsync(preset));
+        return ApplyAsync(preset);
     }
 
     // Only the changed setting goes to the view, which merges it into the settings in effect, so a change that was sent
     // before the previous one answered does not undo it.
-    private Task ChangeAsync(string setting, object value) => ApplyAsync(view => view.SetGraphicsAsync(GameGraphics.Custom, setting, value));
+    private Task ChangeAsync(string setting, object value) => ApplyAsync(GameGraphics.Custom, setting, value);
 
-    private Task ResetAsync() => ApplyAsync(view => view.SetGraphicsAsync(_resetPreset));
+    private Task ResetAsync() => ApplyAsync(_resetPreset);
 
-    private async Task ApplyAsync(Func<GameViewConnection, Task<GameGraphics?>> apply)
+    private async Task ApplyAsync(string preset, string? setting = null, object? value = null)
     {
-        if (await apply(Target.View) is { } graphics)
+        if (await Target.View.SetGraphicsAsync(preset, setting, value) is { } graphics)
         {
             _graphics = graphics;
             await Preferences.SetAsync(GameGraphics.PreferenceKey, graphics.ToPreference());
