@@ -307,34 +307,6 @@ public class PathProviderInclusionTests
         }
     }
 
-    private static bool IsChainIncluded(RegisteredSubjectProperty property, IInterceptorSubject root, PathProviderBase pathProvider)
-    {
-        while (true)
-        {
-            if (!pathProvider.IsPropertyIncluded(property) ||
-                (property.IsAttribute && !IsPropertyOfAttributeIncluded(property, pathProvider)))
-            {
-                return false;
-            }
-
-            if (property.Subject == root)
-            {
-                return true;
-            }
-
-            property = property.Parent.Parents[0].Property;
-        }
-    }
-
-    private static bool IsPropertyOfAttributeIncluded(RegisteredSubjectProperty attribute, PathProviderBase pathProvider)
-    {
-        var property = attribute.GetAttributedProperty();
-        return pathProvider.IsPropertyIncluded(property) &&
-            (!property.IsAttribute || IsPropertyOfAttributeIncluded(property, pathProvider));
-    }
-
-    // --- Building only through included properties ---
-
     [Fact]
     public void WhenASubjectOnTheChainMovesBehindAnExcludedPropertyWhileItIsChecked_ThenNoPathIsBuiltThroughIt()
     {
@@ -360,6 +332,32 @@ public class PathProviderInclusionTests
         // Assert
         Assert.True(pathProvider.IsMoved);
         Assert.Null(path);
+    }
+
+    private static bool IsChainIncluded(RegisteredSubjectProperty property, IInterceptorSubject root, PathProviderBase pathProvider)
+    {
+        while (true)
+        {
+            if (!pathProvider.IsPropertyIncluded(property) ||
+                (property.IsAttribute && !IsPropertyOfAttributeIncluded(property, pathProvider)))
+            {
+                return false;
+            }
+
+            if (property.Subject == root)
+            {
+                return true;
+            }
+
+            property = property.Parent.Parents[0].Property;
+        }
+    }
+
+    private static bool IsPropertyOfAttributeIncluded(RegisteredSubjectProperty attribute, PathProviderBase pathProvider)
+    {
+        var property = attribute.GetAttributedProperty();
+        return pathProvider.IsPropertyIncluded(property) &&
+            (!property.IsAttribute || IsPropertyOfAttributeIncluded(property, pathProvider));
     }
 
     private sealed class MovingPathProvider(RegisteredSubjectProperty trigger, Action move) : PathProviderBase
