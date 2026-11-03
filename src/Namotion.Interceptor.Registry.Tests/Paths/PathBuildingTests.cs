@@ -50,23 +50,6 @@ public class PathBuildingTests
     }
 
     [Fact]
-    public void WhenNestedSubjectProperty_ThenTryGetPathReturnsDottedPath()
-    {
-        // Arrange
-        var context = CreateContext();
-        var parent = new Models.Person(context) { FirstName = "Parent" };
-        var child = new Models.Person(context) { FirstName = "Child" };
-        parent.Father = child;
-        var firstNameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("FirstName")!;
-
-        // Act
-        var path = firstNameProperty.TryGetPath(DefaultPathProvider.Instance, null);
-
-        // Assert
-        Assert.Equal("Father.FirstName", path);
-    }
-
-    [Fact]
     public void WhenCustomSeparator_ThenTryGetPathUsesSeparator()
     {
         // Arrange

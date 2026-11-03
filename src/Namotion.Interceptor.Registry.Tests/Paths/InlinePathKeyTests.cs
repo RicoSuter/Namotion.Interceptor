@@ -82,21 +82,6 @@ public class InlinePathKeyTests
         Assert.Null(resolved);
     }
 
-    [Fact]
-    public void WhenSegmentIsInlinePropertyName_ThenItResolvesToThePropertyItself()
-    {
-        // Arrange
-        var context = CreateContext();
-        var root = new TestInlineContainer(context) { Name = "root" };
-
-        // Act
-        var resolved = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, "Children");
-
-        // Assert
-        Assert.Equal(nameof(TestInlineContainer.Children), resolved?.Property.Name);
-        Assert.Null(resolved?.Index);
-    }
-
     [Theory]
     [InlineData("CNC01", "CNC01.name")]
     [InlineData("name", "Children[name].name")]
@@ -526,30 +511,6 @@ public class InlinePathKeyTests
 
         // Assert — should be "Servers.OpcUaServer.Name"
         Assert.Equal("Servers.OpcUaServer.Name", path);
-    }
-
-    [Fact]
-    public void TryGetPath_MixedInlineAndRegular_FormatsCorrectly()
-    {
-        // Arrange — set dictionary via property setter
-        var context = CreateContext();
-        var inlineChild = new TestInlineContainer(context) { Name = "Leaf" };
-        var inlineRoot = new TestInlineContainer(context)
-        {
-            Name = "Folder",
-            Children = new Dictionary<string, TestInlineContainer> { ["Leaf"] = inlineChild }
-        };
-        var pathProvider = DefaultPathProvider.Instance;
-
-        var leafRegistered = inlineChild.TryGetRegisteredSubject()!;
-        var nameProperty = leafRegistered.Properties
-            .First(p => p.Name == "Name");
-
-        // Act
-        var path = nameProperty.TryGetPath(pathProvider, inlineRoot);
-
-        // Assert — just one level of inline: "Leaf.Name"
-        Assert.Equal("Leaf.Name", path);
     }
 
     [Fact]

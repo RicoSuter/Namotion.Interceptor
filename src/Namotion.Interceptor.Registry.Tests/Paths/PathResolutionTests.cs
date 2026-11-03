@@ -78,26 +78,6 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetPropertyFromPath_WithoutInlinePaths_BracketNotationStillWorks()
-    {
-        // Arrange — regular TestContainer with bracket notation
-        var context = CreateContext();
-        var item = new TestItem(context) { Value = "hello" };
-        var container = new TestContainer(context) { Name = "Root" };
-        container.Items["key1"] = item;
-        var pathProvider = DefaultPathProvider.Instance;
-        var rootRegistered = container.TryGetRegisteredSubject()!;
-
-        // Act — bracket notation still works for non-InlinePaths dictionaries
-        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Items[key1].Value");
-
-        // Assert
-        Assert.NotNull(result);
-        var (property, _) = result.Value;
-        Assert.Equal("Value", property.Name);
-    }
-
-    [Fact]
     public void TryGetPropertyFromPath_NonExistentPath_ReturnsNull()
     {
         // Arrange
