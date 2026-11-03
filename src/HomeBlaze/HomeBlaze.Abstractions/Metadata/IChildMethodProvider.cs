@@ -1,0 +1,18 @@
+using Namotion.Interceptor;
+
+namespace HomeBlaze.Abstractions.Metadata;
+
+/// <summary>
+/// Gives the subjects below it methods of its own, such as a storage that offers to delete the subjects stored in its
+/// files.
+/// </summary>
+public interface IChildMethodProvider
+{
+    /// <summary>
+    /// Adds the operations and queries that the provider offers for the subject to its registered subject, as
+    /// <see cref="MethodMetadata"/> properties. Called when the subject attaches, with this provider the nearest one among
+    /// its parents, after the subject's own methods are registered. Synchronous and thread-safe.
+    /// </summary>
+    /// <param name="subject">The subject that attached below the provider.</param>
+    void AddMethods(IInterceptorSubject subject);
+}

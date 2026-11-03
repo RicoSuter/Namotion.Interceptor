@@ -82,6 +82,12 @@ public class MethodMetadata
     public bool RequiresConfirmation { get; init; }
 
     /// <summary>
+    /// What the operation is for, see <see cref="OperationPurpose"/>; <see cref="OperationPurpose.None"/> for a query and
+    /// for an operation with a parameter that requires input.
+    /// </summary>
+    public OperationPurpose Purpose { get; init; }
+
+    /// <summary>
     /// The targets the method is excluded from, from its <see cref="ExcludeFromAttribute"/>; none by default.
     /// </summary>
     public ExclusionTarget ExcludedFrom { get; init; }

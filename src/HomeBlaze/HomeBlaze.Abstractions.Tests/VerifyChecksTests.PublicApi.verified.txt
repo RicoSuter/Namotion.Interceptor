@@ -56,6 +56,7 @@ namespace HomeBlaze.Abstractions.Attributes
     public class OperationAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
     {
         public OperationAttribute() { }
+        public HomeBlaze.Abstractions.Attributes.OperationPurpose Purpose { get; set; }
         public bool RequiresConfirmation { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Parameter, Inherited=true)]
@@ -63,6 +64,11 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public OperationParameterAttribute() { }
         public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
+    }
+    public enum OperationPurpose
+    {
+        None = 0,
+        Delete = 1,
     }
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
     public sealed class PageLayoutAttribute : System.Attribute
@@ -808,6 +814,10 @@ namespace HomeBlaze.Abstractions.Metadata
         public ConfigurationMetadata() { }
         public bool IsSecret { get; init; }
     }
+    public interface IChildMethodProvider
+    {
+        void AddMethods(Namotion.Interceptor.IInterceptorSubject subject);
+    }
     public enum MethodKind
     {
         Operation = 0,
@@ -825,6 +835,7 @@ namespace HomeBlaze.Abstractions.Metadata
         public HomeBlaze.Abstractions.Metadata.MethodParameter[] Parameters { get; init; }
         public int Position { get; init; }
         public string PropertyName { get; init; }
+        public HomeBlaze.Abstractions.Attributes.OperationPurpose Purpose { get; init; }
         public bool RequiresConfirmation { get; init; }
         public System.Type? ResultType { get; init; }
         public string Title { get; init; }
