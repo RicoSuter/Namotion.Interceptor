@@ -94,3 +94,22 @@ public partial class TestEqualItem
 
     public override int GetHashCode() => 0;
 }
+
+/// <summary>
+/// A subject holding one device through an attribute of <see cref="Name"/> and another through a property.
+/// </summary>
+[InterceptorSubject]
+public partial class TestAttributedRoom
+{
+    public partial string Name { get; set; }
+
+    [Namotion.Interceptor.Registry.Attributes.PropertyAttribute(nameof(Name), "Spare")]
+    public partial TestDevice? Name_Spare { get; set; }
+
+    public partial TestDevice? Device { get; set; }
+
+    public TestAttributedRoom()
+    {
+        Name = string.Empty;
+    }
+}

@@ -47,7 +47,6 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     // re-publishes client-originated values to all subscribers (server-authoritative relay).
     private readonly object _mqttClientSource = new();
 
-    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
 
     private List<Task>? _runningInitialStateTasks;
@@ -94,9 +93,12 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         configuration.Validate();
     }
 
-    private bool IsPropertyIncluded(PropertyReference propertyReference) =>
-        propertyReference.TryGetRegisteredProperty() is { } property &&
-        _configuration.Mapper.TryGetMapping(property, _subject, out _);
+    /// <summary>
+    /// Whether a change of the property is published: it holds no subjects and the current mapper gives it a topic.
+    /// </summary>
+    internal bool IsPropertyIncluded(PropertyReference propertyReference) =>
+        propertyReference.TryGetRegisteredProperty() is { CanContainSubjects: false } property &&
+        _configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null;
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -367,7 +369,6 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             _currentClientCounter = null;
         }
 
-        _propertyToTopic.Clear();
         _pathToProperty.Clear();
         Metrics.MarkNotOperational();
         shutdownCts.Dispose();
@@ -403,7 +404,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                         continue;
                     }
 
-                    var (topic, mapping) = TryGetTopicForProperty(change.Property, registeredProperty);
+                    var (topic, mapping) = TryGetTopicForProperty(registeredProperty);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -468,30 +469,18 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         }
     }
 
-    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    /// <summary>
+    /// Gets the topic, with the configured prefix, and the mapping the current mapper gives the property, or a null
+    /// topic when it has none.
+    /// </summary>
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(RegisteredSubjectProperty property)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
-        {
-            return cached;
-        }
-
-        string? topic = null;
-        MqttPropertyMapping? resolvedMapping = null;
         if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
         {
-            topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
-            resolvedMapping = mapping;
+            return (MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix), mapping);
         }
 
-        var entry = (topic, resolvedMapping);
-
-        // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
-        {
-            _propertyToTopic.TryRemove(propertyReference, out _);
-        }
-
-        return entry;
+        return (null, null);
     }
 
     internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(
@@ -775,16 +764,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         // TODO(perf): O(n) scan over all cached entries per detached subject.
-        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
+        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<string>>) for O(1) cleanup
         // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
-        foreach (var kvp in _propertyToTopic)
-        {
-            if (kvp.Key.Subject == change.Subject)
-            {
-                _propertyToTopic.TryRemove(kvp.Key, out _);
-            }
-        }
-
         foreach (var kvp in _pathToProperty)
         {
             if (kvp.Value?.Subject == change.Subject)
@@ -804,8 +785,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
 
-        // Clear caches to allow GC of subject references
-        _propertyToTopic.Clear();
+        // Clear the cache to allow GC of subject references
         _pathToProperty.Clear();
 
         _publishSemaphore.Dispose();

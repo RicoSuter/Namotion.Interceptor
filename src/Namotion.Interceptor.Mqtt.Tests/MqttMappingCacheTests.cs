@@ -17,13 +17,14 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 /// <summary>
 /// A connector's own root subject is anchored to the context rather than held by a parent property,
 /// so nothing increments its reference count and it permanently reports zero. These pin that its
-/// properties still reach the topic and path caches, that a subject which has left the graph does
-/// not, and that a lookup landing in the middle of a detach evicts its own entry.
+/// properties still reach the client's caches and the server's path cache, that a subject which has
+/// left the graph does not, and that a lookup landing in the middle of a detach evicts its own entry.
+/// They also pin that the server's change filter and publish follow the current mapping.
 /// </summary>
 public class MqttMappingCacheTests
 {
     [Fact]
-    public async Task WhenRootSubjectPropertyIsMappedTwice_ThenTheServerTopicCacheServesTheSecondLookup()
+    public async Task WhenTheServerLooksUpTheTopicOfAPropertyTwice_ThenItAsksTheMapperBothTimes()
     {
         // Arrange
         var mapper = new CountingMapper(CreateMapper());
@@ -32,13 +33,13 @@ public class MqttMappingCacheTests
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
 
         // Act
-        var first = server.TryGetTopicForProperty(property.Reference, property);
-        var second = server.TryGetTopicForProperty(property.Reference, property);
+        var first = server.TryGetTopicForProperty(property);
+        var second = server.TryGetTopicForProperty(property);
 
         // Assert
         Assert.Equal("name", first.Topic);
         Assert.Equal("name", second.Topic);
-        Assert.Equal(1, mapper.MappingLookupCount);
+        Assert.Equal(2, mapper.MappingLookupCount);
     }
 
     [Fact]
@@ -94,23 +95,6 @@ public class MqttMappingCacheTests
         Assert.Equal(nameof(MqttCacheTestRoot.Name), first?.Name);
         Assert.Equal(nameof(MqttCacheTestRoot.Name), second?.Name);
         Assert.Equal(1, mapper.PropertyLookupCount);
-    }
-
-    [Fact]
-    public async Task WhenSubjectHasLeftTheRegistry_ThenTheServerTopicCacheDoesNotRetainIt()
-    {
-        // Arrange
-        var mapper = new CountingMapper(CreateMapper());
-        var subject = CreateRootSubject();
-        await using var server = CreateServer(subject, mapper);
-        var detachedProperty = DetachChildAndReturnStaleProperty(subject);
-
-        // Act
-        server.TryGetTopicForProperty(detachedProperty.Reference, detachedProperty);
-        server.TryGetTopicForProperty(detachedProperty.Reference, detachedProperty);
-
-        // Assert
-        Assert.Equal(2, mapper.MappingLookupCount);
     }
 
     [Fact]
@@ -191,25 +175,6 @@ public class MqttMappingCacheTests
     }
 
     [Fact]
-    public async Task WhenLookupInsertsWhileSubjectIsDetaching_ThenTheServerTopicCacheDoesNotRetainIt()
-    {
-        // Arrange: the server is never started, so its own eviction scan is not subscribed and
-        // the insert-time guard is the only thing that can drop the entry again.
-        var mapper = new CountingMapper(CreateMapper());
-        var subject = CreateRootSubject();
-        await using var server = CreateServer(subject, mapper);
-
-        // Act
-        var (property, topicSeenDuringDetach) = DetachChildWhileInserting(
-            subject, p => server.TryGetTopicForProperty(p.Reference, p).Topic);
-        var after = server.TryGetTopicForProperty(property.Reference, property);
-
-        // Assert
-        Assert.Equal("child/value", topicSeenDuringDetach);
-        Assert.Null(after.Topic);
-    }
-
-    [Fact]
     public async Task WhenLookupInsertsWhileSubjectIsDetaching_ThenTheServerPathCacheDoesNotRetainIt()
     {
         // Arrange: the server is never started, so its own eviction scan is not subscribed and
@@ -272,6 +237,216 @@ public class MqttMappingCacheTests
         Assert.Equal(nameof(MqttCacheTestChild.Value), resolved?.Name);
         Assert.Equal(resolved, cached);
         Assert.Equal(2, mapper.PropertyLookupCount);
+    }
+
+    [Fact]
+    public async Task WhenTheServerFiltersChanges_ThenItAdmitsOnlyScalarPropertiesWithATopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        subject.Child = new MqttCacheTestChild();
+        await using var server = CreateServer(subject, CreateMapper());
+        var registered = subject.TryGetRegisteredSubject()!;
+        var name = registered.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+        var comment = registered.TryGetProperty(nameof(MqttCacheTestRoot.Comment))!;
+        var child = registered.TryGetProperty(nameof(MqttCacheTestRoot.Child))!;
+
+        // Act
+        var nameIncluded = server.IsPropertyIncluded(name.Reference);
+        var commentIncluded = server.IsPropertyIncluded(comment.Reference);
+        var childIncluded = server.IsPropertyIncluded(child.Reference);
+
+        // Assert
+        Assert.True(nameIncluded);
+        Assert.False(commentIncluded);
+        Assert.False(childIncluded);
+    }
+
+    [Fact]
+    public async Task WhenProviderExcludesAPublishedProperty_ThenTheServerFilterAndPublishDropItsChangesUntilIncludedAgain()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var pathProvider = new MutablePathProvider();
+        await using var server = CreateServer(subject, new MqttPathProviderMapper(pathProvider));
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+        Assert.Equal("name", server.TryGetTopicForProperty(property).Topic);
+        Assert.True(server.IsPropertyIncluded(property.Reference));
+
+        // Act
+        pathProvider.Included = false;
+        var includedWhileExcluded = server.IsPropertyIncluded(property.Reference);
+        var topicWhileExcluded = server.TryGetTopicForProperty(property).Topic;
+        pathProvider.Included = true;
+        var includedAgain = server.IsPropertyIncluded(property.Reference);
+        var topicAgain = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.False(includedWhileExcluded);
+        Assert.Null(topicWhileExcluded);
+        Assert.True(includedAgain);
+        Assert.Equal("name", topicAgain);
+    }
+
+    [Fact]
+    public async Task WhenAPublishedSubjectMovesUnderAnUnmappedPropertyWithoutADetach_ThenTheServerFilterAndPublishDropItsChanges()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("child/value", server.TryGetTopicForProperty(property).Topic);
+        Assert.True(server.IsPropertyIncluded(property.Reference));
+
+        // Act
+        subject.Hidden = child;
+        subject.Child = null;
+        var included = server.IsPropertyIncluded(property.Reference);
+        var topic = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.NotNull(child.TryGetRegisteredSubject());
+        Assert.False(included);
+        Assert.Null(topic);
+    }
+
+    [Fact]
+    public async Task WhenAPublishedSubjectMovesToAnotherMappedPropertyWithoutADetach_ThenTheServerPublishesItUnderItsNewTopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        subject.Other = child;
+        await using var server = CreateServer(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("child/value", server.TryGetTopicForProperty(property).Topic);
+
+        // Act
+        subject.Child = null;
+        var included = server.IsPropertyIncluded(property.Reference);
+        var topic = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.NotNull(child.TryGetRegisteredSubject());
+        Assert.True(included);
+        Assert.Equal("other/value", topic);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsDetachedAndAttachedAgain_ThenTheServerFilterAndPublishFollowIt()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, mapper);
+        var value = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var includedBeforeDetach = server.IsPropertyIncluded(value.Reference);
+
+        // Act
+        subject.Child = null;
+        var includedAfterDetach = server.IsPropertyIncluded(value.Reference);
+        subject.Child = child;
+        var includedAfterAttach = server.IsPropertyIncluded(value.Reference);
+        var attachedValue = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var topicAfterAttach = server.TryGetTopicForProperty(attachedValue).Topic;
+
+        // Assert
+        Assert.True(includedBeforeDetach);
+        Assert.False(includedAfterDetach);
+        Assert.True(includedAfterAttach);
+        Assert.Equal("child/value", topicAfterAttach);
+    }
+
+    [Fact]
+    public async Task WhenASubjectMovesFromAnUnmappedToAMappedPropertyWithoutADetach_ThenTheServerFilterAdmitsItsProperty()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Hidden = child;
+        await using var server = CreateServer(subject, mapper);
+        var value = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var includedWhileUnmapped = server.IsPropertyIncluded(value.Reference);
+
+        // Act
+        subject.Child = child;
+        subject.Hidden = null;
+        var includedWhileMapped = server.IsPropertyIncluded(value.Reference);
+
+        // Assert
+        Assert.False(includedWhileUnmapped);
+        Assert.True(includedWhileMapped);
+        Assert.Equal("child/value", server.TryGetTopicForProperty(value).Topic);
+    }
+
+    [Fact]
+    public async Task WhenAHolderMovesFromAnUnmappedToAMappedPropertyWithoutADetach_ThenTheServerFilterAdmitsThePropertiesBelowIt()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var leaf = new MqttCacheTestChild();
+        var holder = new MqttCacheTestChild { Inner = leaf };
+        subject.Hidden = holder;
+        await using var server = CreateServer(subject, mapper);
+        var value = leaf.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        var includedWhileUnmapped = server.IsPropertyIncluded(value.Reference);
+
+        // Act
+        subject.Child = holder;
+        subject.Hidden = null;
+        var includedWhileMapped = server.IsPropertyIncluded(value.Reference);
+
+        // Assert
+        Assert.False(includedWhileUnmapped);
+        Assert.True(includedWhileMapped);
+        Assert.Equal("child/inner/value", server.TryGetTopicForProperty(value).Topic);
+    }
+
+    [Fact]
+    public async Task WhenTheServerFiltersAChangeOfAPropertyWithoutATopic_ThenNothingIsAllocated()
+    {
+        // Arrange: a property without a topic is looked up again on every change, so the lookup must not allocate.
+        var subject = CreateRootSubject();
+        await using var server = CreateServer(subject, CreateMapper());
+        var comment = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Comment))!.Reference;
+
+        // Warm up: the JIT and the provider's per-type caches are one-time costs.
+        for (var warmup = 0; warmup < 100; warmup++)
+        {
+            server.IsPropertyIncluded(comment);
+        }
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var included = server.IsPropertyIncluded(comment);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.False(included);
+        Assert.Equal(0, allocated);
+    }
+
+    private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')
+    {
+        public bool Included { get; set; } = true;
+
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (!Included)
+            {
+                segment = null;
+                return false;
+            }
+
+            return base.TryGetPropertySegment(property, out segment);
+        }
     }
 
     private static MqttCacheTestRoot CreateRootSubject()
@@ -426,6 +601,13 @@ public partial class MqttCacheTestRoot
     [Path("mqtt", "child")]
     public partial MqttCacheTestChild? Child { get; set; }
 
+    [Path("mqtt", "other")]
+    public partial MqttCacheTestChild? Other { get; set; }
+
+    public partial string? Comment { get; set; }
+
+    public partial MqttCacheTestChild? Hidden { get; set; }
+
     public MqttCacheTestRoot()
     {
         Name = string.Empty;
@@ -437,6 +619,9 @@ public partial class MqttCacheTestChild
 {
     [Path("mqtt", "value")]
     public partial string Value { get; set; }
+
+    [Path("mqtt", "inner")]
+    public partial MqttCacheTestChild? Inner { get; set; }
 
     public MqttCacheTestChild()
     {

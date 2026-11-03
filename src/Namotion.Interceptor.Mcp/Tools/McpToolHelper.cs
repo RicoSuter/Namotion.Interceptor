@@ -171,27 +171,9 @@ internal static class McpToolHelper
     /// attribute, a property holding subjects or one the path provider excludes.
     /// </summary>
     internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
-        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
-            ? null
-            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-
-    /// <summary>
-    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
-    /// exposes, or null when there is none.
-    /// </summary>
-    internal static RegisteredSubjectProperty? TryGetScalarProperty(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        string segment)
-    {
-        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
-        return property is null ||
-               property.IsAttribute ||
-               property.CanContainSubjects ||
-               !pathProvider.IsPropertyIncluded(property)
-            ? null
-            : property;
-    }
+        !property.IsAttribute && !property.CanContainSubjects && pathProvider.TryGetPropertySegment(property, out var segment)
+            ? segment
+            : null;
 
     /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
@@ -203,7 +185,7 @@ internal static class McpToolHelper
         PathProviderBase pathProvider,
         string path)
     {
-        if (pathProvider.TryGetPropertyFromPath(subject, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+        if (pathProvider.TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;
@@ -212,22 +194,29 @@ internal static class McpToolHelper
         return property.IsAttribute ? null : property;
     }
 
+    /// <summary>
+    /// The path of the subject with <paramref name="pathPrefix"/>: for the root the prefix, or null when it is empty.
+    /// Any other subject's path is the first, in parent order, that reaches the root only through properties
+    /// <paramref name="pathProvider"/> effectively includes (see <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>),
+    /// the holding property too; null when there is none.
+    /// </summary>
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         IInterceptorSubject rootSubject,
-        string pathPrefix = "")
+        string pathPrefix)
     {
         if (subject.Subject == rootSubject)
         {
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        if (subject.Parents.Length > 0)
+        foreach (var parent in subject.Parents)
         {
-            var parent = subject.Parents[0];
-            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            return path is not null ? $"{pathPrefix}{path}" : null;
+            if (parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index) is { } path)
+            {
+                return $"{pathPrefix}{path}";
+            }
         }
 
         return null;

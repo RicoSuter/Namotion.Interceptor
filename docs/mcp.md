@@ -20,7 +20,7 @@ services.AddMcpServer()
         sp => resolveRootSubject(sp),
         sp => new McpServerConfiguration
         {
-            PathProvider = new DefaultPathProvider()
+            PathProvider = DefaultPathProvider.Instance
         });
 
 // 2. Map the MCP endpoint
@@ -89,6 +89,8 @@ Folder/SubFolder/Device/Status   (property path)
 ```
 
 Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are written and read, including keys that need the bracket form. A path that does not resolve is answered with `Path not found: <path>`, or with `Invalid path syntax: <reason>` when it is malformed.
+
+The tools see the graph only through the properties the path provider effectively includes, see [Included properties](registry.md#included-properties). `browse` shows only those properties, `search` returns a subject only when it has a path through them, and the paths `get_property`, `set_property`, `browse` and `where` take resolve only through them, so a path through an excluded property is answered as one that does not exist. A subject with several parents gets the path through the first parent, in parent order, from which such a path reaches the root, so a path a tool returns resolves back in the other tools within the limits described there.
 
 ### `browse`
 
@@ -276,7 +278,7 @@ Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Sc
 var config = new McpServerConfiguration
 {
     // Required: property filtering and path resolution
-    PathProvider = new DefaultPathProvider(),
+    PathProvider = DefaultPathProvider.Instance,
 
     // Optional: subject-level metadata enrichment
     SubjectEnrichers = { new MySubjectEnricher() },
