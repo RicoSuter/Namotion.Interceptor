@@ -66,9 +66,9 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 | `invoke_query`, `invoke_operation`, Markdown tools | Subject resolved with `TryGetReadableSubject`, else "Subject not found."; `read` on the method, else "Method not found"; `execute`, else "Operation 'Name' is not permitted. The access policy does not allow it." |
 | `get_property_history` | Path resolved with `TryGetReadableProperty`, else "Path not found"; then `history`, else "History is not available: path. The access policy does not allow it."; the store is queried with the recorded path of the resolved property (`GetHistoryPath`), whichever spelling the client used |
 | `search_markdown` | Pages readable at their path with `read` and `execute` on `ReadRawContent`; notes whose metadata member is readable |
-| `SetMetadata` | A target readable for the tools, and `write` on its metadata member; a target without metadata gets its member registered with a null value first, which is the same as no metadata |
-| `SearchMetadata` | Matches whose subject is readable and whose metadata member is readable |
-| `GetOrder`, `SetOrder` | `GetOrder` names only the children that are readable at their path. `SetOrder` needs `write` on the metadata member of the folder, as `SetMetadata` does. An order in `SetOrder` or in the `order` of `SetMetadata` that names a hidden child is refused with the storage's text for a name that is no child, listing only readable children, so hidden and missing cannot be told apart |
+| `SetMetadata` | A target that the tools list, and `write` on its metadata member; a target without metadata gets its member registered with a null value first, which is the same as no metadata |
+| `SearchMetadata` | Matches whose subject the tools list and whose metadata member is readable |
+| `GetOrder`, `SetOrder` | `GetOrder` names only the children that the tools list at their path. `SetOrder` needs `write` on the metadata member of the folder, as `SetMetadata` does. An order in `SetOrder` or in the `order` of `SetMetadata` that names a child the tools do not list is refused with the storage's text for a name that is no child, which names only the children they list, so hidden and missing cannot be told apart |
 
 Denied `execute` and `history` are logged at debug level with the agent and the member; reads and writes are asked for every listed member and are not logged.
 

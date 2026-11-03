@@ -33,11 +33,11 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// <see cref="McpToolProviderRegistration"/>. The method tools and the Markdown tools find only the subjects and methods
     /// <paramref name="accessPolicy"/> allows to read and invoke only the methods it allows to execute. invoke_operation and
     /// the Markdown tools refuse SetMetadata of a storage with arguments of another shape, for a subject or property that
-    /// is hidden from the tools, which is refused as a missing one, and for metadata that the policy does not allow to write.
+    /// the tools do not list, which is refused as a missing one, and for metadata that the policy does not allow to write.
     /// SearchMetadata of a storage and search_markdown leave out the metadata and notes of the subjects and properties that
-    /// are hidden from the tools and those that the policy does not allow to read. GetOrder of a folder names only the
-    /// children that are readable for the tools, SetOrder needs write access to the metadata of the folder, and an order
-    /// that names a child hidden from the tools is refused as one naming a child that does not exist.
+    /// the tools do not list and those that the policy does not allow to read. GetOrder of a folder names only the children
+    /// that the tools list, SetOrder needs write access to the metadata of the folder, and an order that names a child the
+    /// tools do not list is refused as one naming a child that does not exist.
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>

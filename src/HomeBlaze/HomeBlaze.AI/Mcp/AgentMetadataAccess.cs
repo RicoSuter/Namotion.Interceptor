@@ -15,8 +15,8 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The metadata that the tools let their clients find and change: SearchMetadata of a storage finds only the subjects
-/// and properties that are readable for the tools and whose metadata the access policy allows to read, and SetMetadata
-/// changes only metadata of a subject or property that is readable for the tools and that the access policy allows to write.
+/// and properties that the tools list and whose metadata the access policy allows to read, and SetMetadata changes only
+/// metadata of a subject or property that the tools list and that the access policy allows to write.
 /// </summary>
 internal static class AgentMetadataAccess
 {
@@ -25,7 +25,7 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage that are readable for the tools and whose metadata member the access
+    /// Gets the first 100 matches of SearchMetadata of a storage that the tools list and whose metadata member the access
     /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and no match for a
     /// result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
     /// </summary>
@@ -69,7 +69,7 @@ internal static class AgentMetadataAccess
         }
 
         // The input parameters in declaration order, empty when they could not be read. Any other shape is refused
-        // without looking at the path, so that a subject hidden from the tools reads as a missing one.
+        // without looking at the path, so that a subject the tools do not list reads as a missing one.
         if (arguments is not [string path, string or null, JsonElement { ValueKind: JsonValueKind.Object } values, ..])
         {
             return HomeBlazeMcpConfigurationFactory.SetMetadataArgumentsMessage;
@@ -90,7 +90,7 @@ internal static class AgentMetadataAccess
     public static string? GetSetMetadataError(
         RegisteredSubject storage, string path, string? propertyName, McpServerConfiguration configuration, PathProviderBase pathProvider)
     {
-        if (TryGetReadableTarget(storage, path, configuration) is not { } target)
+        if (TryGetListedTarget(storage, path, configuration) is not { } target)
         {
             return FluentStorageContainer.GetNoSubjectMessage(path);
         }
@@ -114,7 +114,7 @@ internal static class AgentMetadataAccess
     private static string? GetWriteError(RegisteredSubject target, string path, string? propertyName, McpServerConfiguration configuration)
     {
         // A member that is added here and then refused keeps null, which is the same as no metadata: the tools do not
-        // show it and the next write sets it.
+        // list it and the next write sets it.
         if (FluentStorageContainer.GetOrAddMetadataMember(target, propertyName) is { } member)
         {
             return configuration.IsAllowed(member, McpAccessActions.Write) ? null : GetNotWritableMessage(path, propertyName);
@@ -127,10 +127,10 @@ internal static class AgentMetadataAccess
             : GetNotWritableMessage(path, propertyName);
     }
 
-    // The match is readable for the tools, and so is its metadata member at the path at which get_property resolves it.
+    // The match is listed by the tools, and its metadata member is readable at the path at which get_property resolves it.
     private static bool IsReadable(RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration, PathProviderBase pathProvider)
     {
-        if (TryGetReadableTarget(storage, match.Path, configuration) is not { } target ||
+        if (TryGetListedTarget(storage, match.Path, configuration) is not { } target ||
             (match.Property is not null && IsPropertyChecked(target.Subject) && !IsPropertyReadable(target, match.Property, configuration, pathProvider)))
         {
             return false;
@@ -143,7 +143,7 @@ internal static class AgentMetadataAccess
     /// <summary>
     /// Gets whether the metadata path of <paramref name="path"/> and <paramref name="propertyName"/>, see
     /// <see cref="HomeBlazeMarkdownSearchToolProvider.GetMetadataPath"/>, resolves from <paramref name="root"/> as
-    /// get_property resolves it to a readable member of <paramref name="subject"/> itself. It is not readable when the path
+    /// get_property does to a readable member of <paramref name="subject"/> itself. It is not readable when the path
     /// resolves to a member of another subject or to a dictionary entry, as it can when the policy hides the member.
     /// </summary>
     internal static bool IsMetadataReadable(
@@ -152,14 +152,14 @@ internal static class AgentMetadataAccess
             { Index: null } resolved &&
             ReferenceEquals(resolved.Property.Parent.Subject, subject.Subject);
 
-    // The subject at the path of the storage when the tools resolve the path to it and it is readable for them, else null.
-    private static RegisteredSubject? TryGetReadableTarget(RegisteredSubject storage, string path, McpServerConfiguration configuration)
+    // The subject at the path of the storage when the tools resolve the path to it and list it, else null.
+    private static RegisteredSubject? TryGetListedTarget(RegisteredSubject storage, string path, McpServerConfiguration configuration)
     {
         var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);
         var trimmedPath = path.Trim();
-        var readableTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : configuration.TryGetReadableSubject(storage, trimmedPath);
-        return target is not null && ReferenceEquals(readableTarget?.Subject, target) && !IsOfExcludedType(readableTarget, storage.Subject, configuration.ExcludeTypes)
-            ? readableTarget
+        var listedTarget = trimmedPath.AsSpan().TrimStart('/').IsEmpty ? storage : configuration.TryGetReadableSubject(storage, trimmedPath);
+        return target is not null && ReferenceEquals(listedTarget?.Subject, target) && !IsOfExcludedType(listedTarget, storage.Subject, configuration.ExcludeTypes)
+            ? listedTarget
             : null;
     }
 

@@ -13,8 +13,8 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The order of the children of a folder or of the root of a storage that the tools let their clients read and change:
-/// GetOrder names only the children that are readable for the tools, SetOrder needs write access to the metadata of the
-/// folder, and an order that names a child hidden from the tools is refused as one naming a child that does not exist.
+/// GetOrder names only the children that the tools list, SetOrder needs write access to the metadata of the folder, and
+/// an order that names a child the tools do not list is refused as one naming a child that does not exist.
 /// </summary>
 internal static class AgentOrderAccess
 {
@@ -22,8 +22,8 @@ internal static class AgentOrderAccess
     internal const string SetOrderMethodName = "SetOrder";
 
     /// <summary>
-    /// Gets the names of the result of GetOrder of a folder or of the root of a storage that are children readable for
-    /// the tools, in their order; any other result is returned unchanged.
+    /// Gets the names of the result of GetOrder of a folder or of the root of a storage that are children the tools
+    /// list, in their order; any other result is returned unchanged.
     /// </summary>
     public static object? FilterGetOrderResult(
         RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration,
@@ -34,13 +34,13 @@ internal static class AgentOrderAccess
             return result;
         }
 
-        var readableNames = GetReadableChildNames(subject, configuration, pathProvider, root);
-        return names.Where(readableNames.Contains).ToArray();
+        var listedNames = GetListedChildNames(subject, configuration, pathProvider, root);
+        return names.Where(listedNames.Contains).ToArray();
     }
 
     /// <summary>
     /// Gets why SetOrder of a folder or of the root of a storage is refused, or null when it is not: the access policy
-    /// must allow to write the metadata of the folder, and every name must be a child that is readable for the tools.
+    /// must allow to write the metadata of the folder, and every name must be a child that the tools list.
     /// </summary>
     /// <param name="folder">The folder or storage.</param>
     /// <param name="arguments">The input arguments of SetOrder, empty when they could not be read.</param>
@@ -58,13 +58,13 @@ internal static class AgentOrderAccess
 
         // Names of another shape are refused by the method.
         return arguments is [string[] names, ..] && Array.TrueForAll(names, static name => name is not null)
-            ? FluentStorageContainer.GetOrderNamesError(names, GetReadableChildNames(folder, configuration, pathProvider, root))
+            ? FluentStorageContainer.GetOrderNamesError(names, GetListedChildNames(folder, configuration, pathProvider, root))
             : null;
     }
 
     /// <summary>
     /// Gets why the order in metadata values that SetMetadata writes to <paramref name="target"/> is refused because it
-    /// names a child that is hidden from the tools, or null when it is not, also when the target is no folder or storage
+    /// names a child that the tools do not list, or null when it is not, also when the target is no folder or storage
     /// or the values have no order of names, which the method checks itself.
     /// </summary>
     public static string? GetMetadataOrderError(
@@ -89,11 +89,11 @@ internal static class AgentOrderAccess
             names.Add(item.GetString()!);
         }
 
-        return FluentStorageContainer.GetOrderNamesError(names, GetReadableChildNames(folder, configuration, pathProvider, root));
+        return FluentStorageContainer.GetOrderNamesError(names, GetListedChildNames(folder, configuration, pathProvider, root));
     }
 
-    // The names of the children that the tools resolve at their path and that are readable for them, as browse lists them.
-    private static HashSet<string> GetReadableChildNames(
+    // The names of the children that the tools resolve at their path and list, as browse lists them.
+    private static HashSet<string> GetListedChildNames(
         RegisteredSubject folder, McpServerConfiguration configuration, PathProviderBase pathProvider, IInterceptorSubject root)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -105,7 +105,7 @@ internal static class AgentOrderAccess
 
         foreach (var child in childrenProperty.Children)
         {
-            if (child.Index is { } index && IsReadable(child.Subject, childrenProperty.TryGetPath(pathProvider, root, index), folder, registeredRoot, configuration))
+            if (child.Index is { } index && IsListed(child.Subject, childrenProperty.TryGetPath(pathProvider, root, index), folder, registeredRoot, configuration))
             {
                 names.Add(index.ToString() ?? string.Empty);
             }
@@ -114,12 +114,12 @@ internal static class AgentOrderAccess
         return names;
     }
 
-    private static bool IsReadable(
+    private static bool IsListed(
         IInterceptorSubject child, string? path, RegisteredSubject folder, RegisteredSubject root, McpServerConfiguration configuration)
         => path is not null &&
-            configuration.TryGetReadableSubject(root, path) is { } readable &&
-            ReferenceEquals(readable.Subject, child) &&
-            !AgentMetadataAccess.IsOfExcludedType(readable, folder.Subject, configuration.ExcludeTypes);
+            configuration.TryGetReadableSubject(root, path) is { } listed &&
+            ReferenceEquals(listed.Subject, child) &&
+            !AgentMetadataAccess.IsOfExcludedType(listed, folder.Subject, configuration.ExcludeTypes);
 
     // The path that the tools build for the folder.
     private static string GetToolPath(RegisteredSubject folder, PathProviderBase pathProvider, IInterceptorSubject root)
