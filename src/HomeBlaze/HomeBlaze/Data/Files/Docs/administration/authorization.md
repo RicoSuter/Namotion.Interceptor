@@ -192,13 +192,13 @@ The tab "Preview" shows what the role allows on one subject. It uses the role as
 
 1. Click the tab "Preview".
 2. Type the path of a subject into the field "Subject", such as `/Devices/Bedroom/CeilingLight`, or click the search button at its end, pick the subject in "Select Path" and click "OK".
-3. Read the line below the field, whether the subject is shown.
+3. Read the line below the field, whether the subject is readable.
 4. Read the table of its members, and hover over or click a cell to see why.
 5. Change a rule on the tab "Rules" and return; the preview follows the change.
 
 The line below the field reads:
 
-- "Shown: the subject has a readable member and a readable link from the root."
+- "Readable: the subject has a readable member and a chain of readable links from the root."
 - "Hidden: no member is readable."
 - "Hidden: the property Children of /Devices/Cameras is not readable.", naming a property on the way from the root that holds the subject and is not readable, such as for a role that denies `read` on `/Devices/Cameras/**`.
 - "Hidden: no chain of parents leads to the root."

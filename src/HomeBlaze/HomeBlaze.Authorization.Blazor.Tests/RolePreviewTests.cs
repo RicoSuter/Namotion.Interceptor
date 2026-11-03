@@ -41,7 +41,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public async Task WhenASubjectIsChosen_ThenItIsShownWithAMatrixOfItsMembers()
+    public async Task WhenTheRoleIncludesReader_ThenTheChosenSubjectIsReadableWithAMatrixOfItsMembers()
     {
         // Arrange
         var role = _graph.GetRole("Kitchen");
@@ -52,8 +52,8 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         await ChoosePathAsync(component, "/Devices");
 
         // Assert
-        var shown = component.Find("[data-testid='role-preview-shown']");
-        Assert.Equal("true", shown.GetAttribute("data-shown"));
+        var readability = component.Find("[data-testid='role-preview-readable']");
+        Assert.Equal("true", readability.GetAttribute("data-readable"));
         Assert.Equal(
             ["Temperature", "Password", "Child", "Start", "Temperature@Minimum"],
             GetMemberNames(component).ToArray());
@@ -195,9 +195,9 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         await ChoosePathAsync(component, "/Devices/Child");
 
         // Assert
-        var shown = component.Find("[data-testid='role-preview-shown']");
-        Assert.Equal("false", shown.GetAttribute("data-shown"));
-        Assert.Equal("Hidden: the property Child of /Devices is not readable.", shown.TextContent.Trim());
+        var readability = component.Find("[data-testid='role-preview-readable']");
+        Assert.Equal("false", readability.GetAttribute("data-readable"));
+        Assert.Equal("Hidden: the property Child of /Devices is not readable.", readability.TextContent.Trim());
     }
 
     [Fact]
@@ -212,9 +212,9 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         await ChoosePathAsync(component, "/Devices");
 
         // Assert
-        var shown = component.Find("[data-testid='role-preview-shown']");
-        Assert.Equal("false", shown.GetAttribute("data-shown"));
-        Assert.Equal("Hidden: no member is readable.", shown.TextContent.Trim());
+        var readability = component.Find("[data-testid='role-preview-readable']");
+        Assert.Equal("false", readability.GetAttribute("data-readable"));
+        Assert.Equal("Hidden: no member is readable.", readability.TextContent.Trim());
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-@* Shows what a role allows on one subject: whether the subject is shown, and each member against each action with the
+@* Shows what a role allows on one subject: whether the subject is readable, and each member against each action with the
    rule that decided it. Compiles the role through the authorization service and never writes anything. *@
 @using System.Text
 @using HomeBlaze.Abstractions
@@ -30,7 +30,7 @@ else if (_subject is null)
 else
 {
     <MudAlert Severity="@(_subjectDecision.IsReadable ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-4"
-              data-testid="role-preview-shown" data-shown="@(_subjectDecision.IsReadable ? "true" : "false")">@_subjectText</MudAlert>
+              data-testid="role-preview-readable" data-readable="@(_subjectDecision.IsReadable ? "true" : "false")">@_subjectText</MudAlert>
 
     <MudSimpleTable Dense="true" Hover="true" Class="mt-4" data-testid="role-preview-matrix">
         <thead>
@@ -161,7 +161,7 @@ else
     {
         if (decision.IsReadable)
         {
-            return "Shown: the subject has a readable member and a readable link from the root.";
+            return "Readable: the subject has a readable member and a chain of readable links from the root.";
         }
 
         if (!decision.HasReadableMember)
