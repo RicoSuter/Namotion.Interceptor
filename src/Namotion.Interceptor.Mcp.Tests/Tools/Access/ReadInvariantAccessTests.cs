@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
@@ -207,18 +208,28 @@ public class ReadInvariantAccessTests
 
     private sealed class DottedPrivatePathProvider : PathProviderBase
     {
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
-            property.Name == nameof(TestHouse.Private) ? "My.Private" : property.BrowseName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name == nameof(TestHouse.Private) ? "My.Private" : property.BrowseName;
+            return true;
+        }
     }
 
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 
     private sealed class NameAndSubjectsPathProvider : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-            property.CanContainSubjects || property.Name == nameof(TestRoom.Name);
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.CanContainSubjects || property.Name == nameof(TestRoom.Name) ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 }

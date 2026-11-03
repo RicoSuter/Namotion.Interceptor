@@ -411,7 +411,7 @@ public static class PathExtensions
     /// <summary>
     /// Gets whether a path from <paramref name="property"/> up to <paramref name="rootSubject"/>, or to the absolute
     /// top when it is null, passes only properties <paramref name="pathProvider"/> effectively includes (see
-    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>): the property itself and every property holding it,
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>): the property itself and every property holding it,
     /// an [InlinePaths] dictionary included. The path is searched as
     /// <see cref="TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/> searches it:
     /// with a root through any parent of a subject with several parents, without one through the first parent of each
@@ -426,8 +426,9 @@ public static class PathExtensions
     /// </returns>
     /// <remarks>
     /// <c>TryGetPath</c> with the same provider and root returns null whenever this returns false. When this returns
-    /// true it returns the path, except that it also returns null when an [InlinePaths] key needs the explicit form
-    /// while another property's segment shadows the inline property, or when the built text is empty.
+    /// true it returns the path, except that it also returns null when another included property of its subject has the
+    /// segment of an [InlinePaths] property the path would name, as the property itself or with a key that needs the
+    /// explicit form, or when the built text is empty.
     /// </remarks>
     public static bool HasIncludedPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
     {
