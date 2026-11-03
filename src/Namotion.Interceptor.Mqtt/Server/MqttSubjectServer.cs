@@ -510,6 +510,16 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         return (topic, resolvedMapping);
     }
 
+    /// <summary>
+    /// Whether the topic cache holds an entry for the property.
+    /// </summary>
+    internal bool HasCachedTopic(PropertyReference property) => _propertyToTopic.ContainsKey(property);
+
+    /// <summary>
+    /// Whether the path cache holds an entry for the path.
+    /// </summary>
+    internal bool HasCachedPath(string path) => _pathToProperty.ContainsKey(path);
+
     internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(
         string path,
         CancellationToken cancellationToken)

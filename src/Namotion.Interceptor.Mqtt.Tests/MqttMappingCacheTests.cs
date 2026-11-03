@@ -190,11 +190,69 @@ public class MqttMappingCacheTests
             return SyncResult(server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None))?.Name;
         });
         mapper.ResolvedPropertyOverride = null;
+        var retained = server.HasCachedPath("child/value");
         var after = await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
 
         // Assert
         Assert.Equal(nameof(MqttCacheTestChild.Value), resolvedDuringDetach);
+        Assert.False(retained);
         Assert.Null(after);
+    }
+
+    [Fact]
+    public async Task WhenLookupInsertsWhileSubjectIsDetaching_ThenTheServerTopicCacheDoesNotRetainIt()
+    {
+        // Arrange: the server is never started, so its own eviction scan is not subscribed and
+        // the insert-time guard is the only thing that can drop the entry again.
+        var subject = CreateRootSubject();
+        await using var server = CreateServer(subject, CreateMapper());
+
+        // Act
+        var (property, topicSeenDuringDetach) = DetachChildWhileInserting(
+            subject, p => server.TryGetTopicForProperty(p).Topic);
+
+        // Assert
+        Assert.Equal("child/value", topicSeenDuringDetach);
+        Assert.False(server.HasCachedTopic(property.Reference));
+    }
+
+    [Fact]
+    public async Task WhenSubjectHasLeftTheRegistry_ThenTheServerTopicCacheDoesNotRetainIt()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        await using var server = CreateServer(subject, CreateMapper());
+        var detachedProperty = DetachChildAndReturnStaleProperty(subject);
+
+        // Act
+        server.TryGetTopicForProperty(detachedProperty);
+
+        // Assert
+        Assert.False(server.HasCachedTopic(detachedProperty.Reference));
+    }
+
+    [Fact]
+    public async Task WhenTheStructureChangesWhileTheServerResolvesATopic_ThenTheNextLookupResolvesItAgain()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, mapper);
+        mapper.DuringNextPropertyLookup = () =>
+        {
+            subject.Other = child;
+            subject.Child = null;
+        };
+
+        // Act
+        var racing = await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
+        var next = await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(nameof(MqttCacheTestChild.Value), racing?.Name);
+        Assert.Null(next);
     }
 
     [Fact]
@@ -731,6 +789,12 @@ public class MqttMappingCacheTests
         /// </summary>
         public Action? DuringNextMapping { get; set; }
 
+        /// <summary>
+        /// When set, runs once inside the next reverse lookup, after the inner mapper answered: a structural change
+        /// that lands while a cache resolves its entry.
+        /// </summary>
+        public Action? DuringNextPropertyLookup { get; set; }
+
         public long Version => _inner.Version;
 
         public bool TryGetMapping(
@@ -752,9 +816,13 @@ public class MqttMappingCacheTests
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _propertyLookupCount);
-            return ResolvedPropertyOverride is { } property
+            var result = ResolvedPropertyOverride is { } property
                 ? ValueTask.FromResult<RegisteredSubjectProperty?>(property)
                 : _inner.TryGetPropertyAsync(key, subject, cancellationToken);
+            var duringLookup = DuringNextPropertyLookup;
+            DuringNextPropertyLookup = null;
+            duringLookup?.Invoke();
+            return result;
         }
     }
 }
