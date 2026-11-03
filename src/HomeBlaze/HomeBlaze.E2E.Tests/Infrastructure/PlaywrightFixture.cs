@@ -187,6 +187,29 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// Stores a new motor as a JSON file of the root storage, as the create dialog does.
+    /// </summary>
+    /// <returns>The name of the motor under the root, which is its path, the path of its file and the motor.</returns>
+    public async Task<(string Name, string FilePath, IInterceptorSubject Subject)> AddStoredMotorAsync()
+    {
+        var name = $"Motor{Guid.NewGuid():N}";
+        var motor = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<HomeBlaze.Samples.Motor>();
+        await GetRoot().AddSubjectAsync($"{name}.json", motor, CancellationToken.None);
+        return (name, GetPagePath($"{name}.json"), motor);
+    }
+
+    /// <summary>
+    /// Deletes a subject of <see cref="AddStoredMotorAsync"/> with its file, unless it is gone already.
+    /// </summary>
+    public async Task DeleteStoredSubjectAsync(string filePath, IInterceptorSubject subject)
+    {
+        if (File.Exists(filePath))
+        {
+            await GetRoot().DeleteSubjectAsync(subject, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
     /// Writes a page of the demo folder, given by its file name, through the page like an editor does, which also
     /// loads the page again.
     /// </summary>
