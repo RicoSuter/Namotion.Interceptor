@@ -24,7 +24,7 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 public class MqttMappingCacheTests
 {
     [Fact]
-    public async Task WhenTheServerLooksUpTheTopicOfAPropertyTwice_ThenItAsksTheMapperBothTimes()
+    public async Task WhenTheServerLooksUpTheTopicOfAPropertyTwice_ThenTheSecondLookupIsServedFromTheCache()
     {
         // Arrange
         var mapper = new CountingMapper(CreateMapper());
@@ -39,7 +39,7 @@ public class MqttMappingCacheTests
         // Assert
         Assert.Equal("name", first.Topic);
         Assert.Equal("name", second.Topic);
-        Assert.Equal(2, mapper.MappingLookupCount);
+        Assert.Equal(1, mapper.MappingLookupCount);
     }
 
     [Fact]
@@ -431,6 +431,148 @@ public class MqttMappingCacheTests
         // Assert
         Assert.False(included);
         Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public async Task WhenTheStructureChangesAnywhere_ThenTheServerComputesTheTopicOnceMore()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        await using var server = CreateServer(subject, mapper);
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+        server.TryGetTopicForProperty(property);
+
+        // Act
+        subject.Hidden = new MqttCacheTestChild();
+        var afterChange = server.TryGetTopicForProperty(property).Topic;
+        var cached = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.Equal("name", afterChange);
+        Assert.Equal("name", cached);
+        Assert.Equal(2, mapper.MappingLookupCount);
+    }
+
+    [Fact]
+    public async Task WhenACollectionIsReordered_ThenTheServerPublishesUnderTheNewPosition()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var first = new MqttCacheTestChild();
+        var second = new MqttCacheTestChild();
+        subject.Items = [first, second];
+        await using var server = CreateServer(subject, CreateMapper());
+        var property = first.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("items[0]/value", server.TryGetTopicForProperty(property).Topic);
+
+        // Act
+        subject.Items = [second, first];
+        var topic = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.Equal("items[1]/value", topic);
+    }
+
+    [Fact]
+    public async Task WhenADictionaryEntryIsReKeyed_ThenTheServerPublishesUnderTheNewKey()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["a"] = child };
+        await using var server = CreateServer(subject, CreateMapper());
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        Assert.Equal("map[a]/value", server.TryGetTopicForProperty(property).Topic);
+
+        // Act
+        subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
+        var topic = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.Equal("map[b]/value", topic);
+    }
+
+    [Fact]
+    public async Task WhenTheStructureChangesWhileTheServerComputesATopic_ThenTheNextLookupComputesItAgain()
+    {
+        // Arrange
+        var mapper = new CountingMapper(CreateMapper());
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, mapper);
+        var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
+        mapper.DuringNextMapping = () =>
+        {
+            subject.Other = child;
+            subject.Child = null;
+        };
+
+        // Act
+        var racing = server.TryGetTopicForProperty(property).Topic;
+        var next = server.TryGetTopicForProperty(property).Topic;
+
+        // Assert
+        Assert.Equal("child/value", racing);
+        Assert.Equal("other/value", next);
+    }
+
+    [Fact]
+    public async Task WhenASubjectMovesWithoutADetach_ThenTheServerNoLongerResolvesItsOldTopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, CreateMapper());
+        Assert.Same(child, (await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None))?.Subject);
+
+        // Act
+        subject.Other = child;
+        subject.Child = null;
+        var oldTopic = await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
+        var newTopic = await server.TryGetPropertyForTopicAsync("other/value", CancellationToken.None);
+
+        // Assert
+        Assert.Null(oldTopic);
+        Assert.Same(child, newTopic?.Subject);
+    }
+
+    [Fact]
+    public async Task WhenACollectionIsReordered_ThenTheServerResolvesThePositionToTheSubjectNowThere()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var first = new MqttCacheTestChild();
+        var second = new MqttCacheTestChild();
+        subject.Items = [first, second];
+        await using var server = CreateServer(subject, CreateMapper());
+        Assert.Same(first, (await server.TryGetPropertyForTopicAsync("items[0]/value", CancellationToken.None))?.Subject);
+
+        // Act
+        subject.Items = [second, first];
+        var resolved = await server.TryGetPropertyForTopicAsync("items[0]/value", CancellationToken.None);
+
+        // Assert
+        Assert.Same(second, resolved?.Subject);
+    }
+
+    [Fact]
+    public async Task WhenProviderExcludesAResolvedProperty_ThenTheServerNoLongerResolvesItsTopic()
+    {
+        // Arrange
+        var subject = CreateRootSubject();
+        var pathProvider = new MutablePathProvider();
+        await using var server = CreateServer(subject, new MqttPathProviderMapper(pathProvider));
+        Assert.NotNull(await server.TryGetPropertyForTopicAsync("name", CancellationToken.None));
+
+        // Act
+        pathProvider.Included = false;
+        var resolved = await server.TryGetPropertyForTopicAsync("name", CancellationToken.None);
+
+        // Assert
+        Assert.Null(resolved);
     }
 
     private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')
