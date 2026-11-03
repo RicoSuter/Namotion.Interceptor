@@ -374,7 +374,7 @@ export function createRenderer(scene, camera, choice) {
 
         if (canvas) {
             const data = canvas.dataset;
-            data.gameQuality = next.level;
+            data.gamePreset = next.level;
             data.gameResolution = String(settings.resolution);
             data.gameFrameCap = String(settings.frameCap);
             data.gameShadows = settings.shadows;

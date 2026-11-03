@@ -180,7 +180,7 @@ public class GamePageTests
         // Assert
         var cookie = Assert.Single(cookies, cookie => cookie.Name == "homeblaze.game-graphics");
         Assert.Equal("""{"preset":"low"}""", Uri.UnescapeDataString(cookie.Value));
-        await Expect(canvas).ToHaveAttributeAsync("data-game-quality", "low", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-preset", "low", new() { Timeout = Timeout });
         await WaitForPixelRatioAsync(page, 1);
         await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
         await Expect(GetGraphicsItem(page, "game-graphics-preset", "Low")).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = Timeout });
@@ -204,7 +204,7 @@ public class GamePageTests
 
         // Assert
         Assert.Equal(0, shadowMapRenders);
-        await Expect(canvas).ToHaveAttributeAsync("data-game-quality", "custom", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-preset", "custom", new() { Timeout = Timeout });
         await Expect(GetGraphicsItem(page, "game-graphics-preset", "Custom")).ToHaveAttributeAsync("aria-checked", "true", new() { Timeout = Timeout });
         await page.GetByTestId("game-graphics-reset").ClickAsync();
         await Expect(canvas).ToHaveAttributeAsync("data-game-shadows", "soft", new() { Timeout = Timeout });
@@ -247,7 +247,7 @@ public class GamePageTests
         var canvas = page.GetByTestId("game-canvas");
         await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
         await PickGraphicsAsync(page, "game-graphics-preset", "Medium");
-        await Expect(canvas).ToHaveAttributeAsync("data-game-quality", "medium", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-preset", "medium", new() { Timeout = Timeout });
         var chainWithOutlines = await ReadPassChainAsync(page);
 
         // Act

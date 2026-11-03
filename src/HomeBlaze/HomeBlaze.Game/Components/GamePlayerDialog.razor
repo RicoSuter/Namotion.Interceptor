@@ -78,9 +78,10 @@
     /// or invalid values show the defaults of its client; returns null when canceled.
     /// </summary>
     /// <param name="dialogService">The service that shows the dialog.</param>
+    /// <param name="title">The title of the dialog.</param>
     /// <param name="player">The player to edit.</param>
     /// <param name="name">The name of its client, null while the client is anonymous.</param>
-    internal static async Task<GamePlayerEdit?> ShowAsync(IDialogService dialogService, GamePlayer player, string? name)
+    internal static async Task<GamePlayerEdit?> ShowAsync(IDialogService dialogService, string title, GamePlayer player, string? name)
     {
         var parameters = new DialogParameters<GamePlayerDialog>
         {
@@ -89,7 +90,7 @@
             { x => x.ShirtColor, GameColors.Resolve(player.Color, player.ClientId) },
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseButton = true };
-        var dialog = await dialogService.ShowAsync<GamePlayerDialog>("Edit me", parameters, options);
+        var dialog = await dialogService.ShowAsync<GamePlayerDialog>(title, parameters, options);
         var result = await dialog.Result;
         return result is { Canceled: false, Data: GamePlayerEdit edit } ? edit : null;
     }

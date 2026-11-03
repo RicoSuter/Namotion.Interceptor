@@ -84,6 +84,47 @@ public class GamePlayerAnimationTests
     }
 
     [Fact]
+    public void WhenAPlayerStartsMoreAnimationsThanTheBurst_ThenTheOnesOverTheLimitAreDropped()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var caller = new GameCaller("tab-1");
+        for (var i = 0; i < Game.AnimationBurst; i++)
+        {
+            _context.Game.PlayAnimation(caller, "Clapping", GameVisualAnimationMode.Once);
+        }
+
+        // Act
+        _context.Game.PlayAnimation(caller, "Jump", GameVisualAnimationMode.Once);
+        _context.Publish();
+
+        // Assert
+        Assert.Equal("Clapping", player.Animation);
+    }
+
+    [Fact]
+    public void WhenTheAnimationIntervalPasses_ThenTheNextAnimationStartPlays()
+    {
+        // Arrange
+        var player = _context.AddConnectedPlayer("tab-1");
+        var caller = new GameCaller("tab-1");
+        for (var i = 0; i < Game.AnimationBurst; i++)
+        {
+            _context.Game.PlayAnimation(caller, "Clapping", GameVisualAnimationMode.Once);
+        }
+
+        _context.Tick();
+
+        // Act
+        _context.TimeProvider.Advance(Game.AnimationInterval);
+        _context.Game.PlayAnimation(caller, "Jump", GameVisualAnimationMode.Once);
+        _context.Publish();
+
+        // Assert
+        Assert.Equal("Jump", player.Animation);
+    }
+
+    [Fact]
     public void WhenAOnceAnimationRunsLongerThanTheLimit_ThenItIsCleared()
     {
         // Arrange

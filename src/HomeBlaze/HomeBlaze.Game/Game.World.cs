@@ -20,6 +20,16 @@ public partial class Game
     internal const int StepBurst = 3;
 
     /// <summary>
+    /// The animations a player may start at once after a pause; one more each <see cref="AnimationInterval"/>.
+    /// </summary>
+    internal const int AnimationBurst = 3;
+
+    /// <summary>
+    /// The time a player waits between two animation starts it may make beyond the burst.
+    /// </summary>
+    internal static readonly TimeSpan AnimationInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// The time a player waits between two messages it sends.
     /// </summary>
     internal static readonly TimeSpan MessageInterval = TimeSpan.FromSeconds(1);
@@ -186,6 +196,12 @@ public partial class Game
         {
             if (_world.Players.TryGetValue(clientId, out var player) && player.IsConnected)
             {
+                player.AnimationRateLimiter ??= new RateLimiter(_timeProvider, AnimationInterval, AnimationBurst);
+                if (!player.AnimationRateLimiter.TryTake())
+                {
+                    return;
+                }
+
                 player.StartAnimation(animation, mode, _timeProvider.GetTimestamp());
                 _world.OnAnimationChanged(player);
             }

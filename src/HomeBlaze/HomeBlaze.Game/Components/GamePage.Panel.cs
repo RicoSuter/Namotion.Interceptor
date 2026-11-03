@@ -94,7 +94,7 @@ public partial class GamePage
         try
         {
             var caller = new GameCaller(player.ClientId);
-            var edit = await GamePlayerDialog.ShowAsync(DialogService, player, game.GetClientName(caller));
+            var edit = await GamePlayerDialog.ShowAsync(DialogService, EditTitle, player, game.GetClientName(caller));
             if (edit is not null && !_isDisposed)
             {
                 await game.EditAsync(caller, edit.Name, edit.Character, edit.Color, CancellationToken.None);

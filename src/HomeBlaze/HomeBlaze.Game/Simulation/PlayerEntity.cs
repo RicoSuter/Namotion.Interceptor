@@ -63,6 +63,8 @@ internal sealed class PlayerEntity : GameEntity
 
     public RateLimiter? TurnRateLimiter { get; set; }
 
+    public RateLimiter? AnimationRateLimiter { get; set; }
+
     public long? LastMessageTimestamp { get; set; }
 
     public int? MicrophonePageId { get; set; }

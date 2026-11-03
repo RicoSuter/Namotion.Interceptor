@@ -37,6 +37,10 @@ internal sealed record GameGraphics(
     /// <summary>
     /// The browser preference that stores the choice.
     /// </summary>
+    /// <remarks>
+    /// Needs <c>BrowserPreferences</c> registered, which the host does. The host's own keys live in its
+    /// <c>BrowserPreferenceKeys</c>; each is part of a cookie name, so renaming one, this included, loses what browsers stored.
+    /// </remarks>
     public const string PreferenceKey = "game-graphics";
 
     /// <summary>
