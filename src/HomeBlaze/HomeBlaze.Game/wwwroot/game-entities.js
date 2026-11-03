@@ -46,14 +46,14 @@ const WIND_SHADER = `
     float gameWindHeight = max(worldPos.y - finalWorld[3].y, 0.0);
     float gameWindPhase = finalWorld[3].x * 0.13 + finalWorld[3].z * 0.07;
     float gameWindSway = sin(gameWindSwayPhase + gameWindPhase) * 0.7 + sin(gameWindGustPhase + gameWindPhase * 0.5) * 0.3;
-    float gameWindBend = gameWindHeight * gameWindHeight * ${toGlsl(WIND_STRENGTH)} * gameWindSway;
+    float gameWindBend = gameWindHeight * gameWindHeight * gameWindStrength * gameWindSway;
     worldPos.x += gameWindBend;
     worldPos.z += gameWindBend * 0.4;
 #endif
 `;
 
-const WIND_UNIFORM_NAMES = ['gameWindSwayPhase', 'gameWindGustPhase'];
-const WIND_UNIFORMS = '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\n#endif\n';
+const WIND_UNIFORM_NAMES = ['gameWindSwayPhase', 'gameWindGustPhase', 'gameWindStrength'];
+const WIND_UNIFORMS = '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\nuniform float gameWindStrength;\n#endif\n';
 const WIND_DEFINE = '#define GAME_WIND';
 // Where the wind goes into the vertex shader of the geometry buffer, which draws the outlines and the corner shading:
 // its declarations, the world position and the clip position, which that shader computes without the world position.
@@ -64,17 +64,15 @@ const GEOMETRY_CLIP_POSITION = 'gl_Position=viewProjection*finalWorld*vec4(posit
 // shader computes the clip position.
 const SHADOW_WORLD_POSITION = 'vec4 worldPos=finalWorld*vec4(positionUpdated,1.0);';
 
-// The phases of the sway and the gust in radians, which the wind shader reads; the views of a tab share them. They wrap
-// on the CPU, because a 32-bit float of the raw clock loses precision after hours.
+// The phases of the sway and the gust in radians and the strength, which the wind shader reads; the views of a tab share
+// them. The phases wrap on the CPU, because a 32-bit float of the raw clock loses precision after hours. A strength of 0
+// turns the wind off without compiling a shader.
 let windSwayPhase = 0;
 let windGustPhase = 0;
+let windStrength = WIND_STRENGTH;
 let WindPlugin = null;
 // Per shader name, whether its source took the wind; patched once, on the first wind effect of the shader.
 const patchedShaders = new Map();
-
-function toGlsl(value) {
-    return value.toFixed(6);
-}
 
 // Defined on first use, because Babylon is loaded after this module.
 function getWindPlugin() {
@@ -98,6 +96,7 @@ function getWindPlugin() {
                 ubo: [
                     { name: 'gameWindSwayPhase', size: 1, type: 'float' },
                     { name: 'gameWindGustPhase', size: 1, type: 'float' },
+                    { name: 'gameWindStrength', size: 1, type: 'float' },
                 ],
                 vertex: WIND_UNIFORMS,
             };
@@ -106,6 +105,7 @@ function getWindPlugin() {
         bindForSubMesh(uniformBuffer) {
             uniformBuffer.updateFloat('gameWindSwayPhase', windSwayPhase);
             uniformBuffer.updateFloat('gameWindGustPhase', windGustPhase);
+            uniformBuffer.updateFloat('gameWindStrength', windStrength);
         }
 
         getCustomCode(shaderType) {
@@ -228,6 +228,7 @@ function addWindToShadows(shadowGenerator) {
 function bindWind(effect) {
     effect.setFloat('gameWindSwayPhase', windSwayPhase);
     effect.setFloat('gameWindGustPhase', windGustPhase);
+    effect.setFloat('gameWindStrength', windStrength);
 }
 
 export async function createEntities(scene, options) {
@@ -257,6 +258,9 @@ export async function createEntities(scene, options) {
     let isViewDisposed = false;
     let lastFadeFrame = 0;
     let lastSightlineCheck = -Infinity;
+    let isFadeEnabled = true;
+    // Whether every object is fully visible while the fade is off, so the frames skip the objects.
+    let isFadeSettled = false;
     // Counts the renders; a mesh's world matrix and bounds are computed when the scene renders.
     let frame = 0;
     const sightline = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, 1), 1);
@@ -1214,8 +1218,11 @@ export async function createEntities(scene, options) {
         animate(now) {
             frame++;
             const seconds = now / 1000;
-            windSwayPhase = (seconds * WIND_SPEED) % TWO_PI;
-            windGustPhase = (seconds * GUST_SPEED) % TWO_PI;
+            if (windStrength > 0) {
+                windSwayPhase = (seconds * WIND_SPEED) % TWO_PI;
+                windGustPhase = (seconds * GUST_SPEED) % TWO_PI;
+            }
+
             for (const entity of entities.values()) {
                 for (const node of entity.partNodes) {
                     if (node.glide) {
@@ -1259,15 +1266,43 @@ export async function createEntities(scene, options) {
 
             const elapsed = Math.min(FADE_MS, Math.max(0, now - lastFadeFrame));
             lastFadeFrame = now;
-            if (now - lastSightlineCheck >= SIGHTLINE_CHECK_MS) {
+            if (!isFadeEnabled && isFadeSettled) {
+                return;
+            }
+
+            if (isFadeEnabled && now - lastSightlineCheck >= SIGHTLINE_CHECK_MS) {
                 lastSightlineCheck = now;
                 checkSightline(camera.position, self, now);
             }
 
+            let isSettled = true;
             for (const entity of entities.values()) {
                 if (entity.view.kind !== 'player') {
                     setFaded(entity, now - entity.lastHitAt < FADE_HOLD_MS);
                     glideVisibility(entity, elapsed);
+                    isSettled &&= entity.visibility === 1;
+                }
+            }
+
+            isFadeSettled = isSettled;
+        },
+
+        /** Lets trees and other wind parts sway, or stands them still. */
+        setWind(isEnabled) {
+            windStrength = isEnabled ? WIND_STRENGTH : 0;
+        },
+
+        /** Fades the objects between the camera and the own player, or stops testing the sightline and shows them all. */
+        setFade(isEnabled) {
+            if (isFadeEnabled === isEnabled) {
+                return;
+            }
+
+            isFadeEnabled = isEnabled;
+            isFadeSettled = false;
+            if (!isEnabled) {
+                for (const entity of entities.values()) {
+                    entity.lastHitAt = -Infinity;
                 }
             }
         },

@@ -1,6 +1,6 @@
 import { createEntities } from './game-entities.js';
 import { createInput } from './game-input.js';
-import { createRenderer, readQuality, writeQuality } from './game-render.js';
+import { createRenderer } from './game-render.js';
 
 // The pages of a tab share this module, so each one owns its view by the id it passes.
 const views = new Map();
@@ -55,6 +55,15 @@ async function ensureBabylon(baseUrl) {
     await babylonLoading;
 }
 
+// A stored choice that does not parse is Auto.
+function parseGraphics(json) {
+    try {
+        return json ? JSON.parse(json) : null;
+    } catch {
+        return null;
+    }
+}
+
 function hasWebGl() {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('webgl2') || canvas.getContext('webgl');
@@ -63,7 +72,11 @@ function hasWebGl() {
     return Boolean(context);
 }
 
-/** Starts the view with the id in options.viewId; a dispose of that id while starting releases it and returns not started without error. */
+/**
+ * Starts the view with the id in options.viewId at the graphics choice in options.graphics, a JSON string as
+ * expandGraphics in game-render.js takes it, or null for Auto. A dispose of that id while starting releases it and
+ * returns not started without error.
+ */
 export async function start(canvas, dotNet, options) {
     const viewId = options.viewId;
     dispose(viewId);
@@ -107,17 +120,24 @@ async function startView(handle, canvas, dotNet, options) {
     }
 
     handle.view = view;
-    return { isStarted: true, error: null, quality: readQuality() };
+    return { isStarted: true, error: null };
 }
 
 export function applyUpdate(viewId, update) {
     views.get(viewId)?.view?.applyUpdate(update);
 }
 
-/** Applies and stores the quality choice of this browser, a preset name or 'auto'. */
-export function setQuality(viewId, choice) {
-    writeQuality(choice);
-    views.get(viewId)?.view?.renderer.setQuality(choice);
+/**
+ * Applies the graphics choice, as expandGraphics in game-render.js takes it, merging custom settings into those in effect;
+ * returns the graphics in effect, { preset, level, ...settings }, or null without a started view.
+ */
+export function setGraphics(viewId, choice) {
+    return views.get(viewId)?.view?.setGraphics(choice) ?? null;
+}
+
+/** The graphics in effect, { preset, level, ...settings }, or null without a started view. */
+export function getGraphics(viewId) {
+    return views.get(viewId)?.view?.renderer.getGraphics() ?? null;
 }
 
 export function dispose(viewId) {
@@ -173,7 +193,7 @@ class GameView {
 
     async initialize() {
         const BABYLON = window.BABYLON;
-        // The renderer sets the resolution from the device pixel ratio and the quality preset.
+        // The renderer sets the resolution from the device pixel ratio and the graphics settings.
         this.engine = new BABYLON.Engine(this.canvas, true, { stencil: true, loseContextOnDispose: true }, false);
         this.cameraTarget = new BABYLON.Vector3();
         this.desiredCameraTarget = new BABYLON.Vector3();
@@ -190,10 +210,11 @@ class GameView {
         this.camera.maxZ = 500;
         this.camera.setTarget(BABYLON.Vector3.Zero());
 
-        this.renderer = createRenderer(this.scene, this.camera, readQuality());
+        this.renderer = createRenderer(this.scene, this.camera, parseGraphics(this.options.graphics));
 
         // The canvas carries the part and model counts for tests and diagnosis.
         this.entities = await createEntities(this.scene, { ...this.options, renderer: this.renderer, statsElement: this.canvas });
+        this.applyEntityGraphics(this.renderer.getGraphics());
         this.input = createInput(this.dotNet, this.options, this.entities);
 
         window.addEventListener('focus', this.onFocus);
@@ -205,6 +226,18 @@ class GameView {
             this.renderer.applyResolution();
         });
         this.resizeObserver.observe(this.canvas);
+    }
+
+    setGraphics(choice) {
+        const graphics = this.renderer.setGraphics(choice);
+        this.applyEntityGraphics(graphics);
+        return graphics;
+    }
+
+    // The entities draw the wind and the fade, the renderer everything else.
+    applyEntityGraphics(graphics) {
+        this.entities.setWind(graphics.wind);
+        this.entities.setFade(graphics.fade);
     }
 
     applyUpdate(update) {
