@@ -14,7 +14,7 @@ internal static class McpAuthorization
 
     /// <summary>
     /// The path provider the authorization matches rule paths with: one like that of the tools, so that a rule path
-    /// matches the paths the tools show.
+    /// matches the paths the tools build.
     /// </summary>
     public static StateAttributePathProvider PathProvider { get; } = new();
 

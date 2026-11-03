@@ -10,7 +10,7 @@ namespace HomeBlaze.AI.Mcp;
 /// <summary>
 /// The read check of page expressions under the access policy of a tool configuration: a property may be read when
 /// its path from the root resolves back to it through the readable resolution of the tools, so every property on the
-/// path must be readable and every subject it passes shown, as for get_property. Unlike the tools, every member is
+/// path must be readable and every subject it passes readable as well, as for get_property. Unlike the tools, every member is
 /// named on a path, so that an expression may read a member the tools do not list, such as a derived title.
 /// </summary>
 internal sealed class McpPageReadAccess
@@ -47,7 +47,7 @@ internal sealed class McpPageReadAccess
 
     private bool CanRead(RegisteredSubjectProperty property, IInterceptorSubject root)
     {
-        // A property without a written path cannot be resolved, so it fails closed.
+        // A property for which no path is built cannot be resolved, so it fails closed.
         return root.TryGetRegisteredSubject() is { } registeredRoot &&
             property.TryGetPath(_pathProvider, root) is { } path &&
             _configuration.TryGetReadableProperty(registeredRoot, path) is { Index: null } resolved &&

@@ -32,7 +32,7 @@ internal sealed class McpMethodInvoker
 
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
     /// <param name="configuration">
-    /// The configuration of the tools, whose access policy decides which subjects and methods are shown and which
+    /// The configuration of the tools, whose access policy decides which subjects and methods are readable and which
     /// methods may be invoked.
     /// </param>
     /// <param name="serviceProvider">Resolves the services that the methods take.</param>
@@ -61,7 +61,7 @@ internal sealed class McpMethodInvoker
 
     /// <summary>
     /// Resolves the subject whose path is the string argument <paramref name="pathArgument"/> of the tool input: the root
-    /// for an empty path or "/". A subject the access policy does not show is not found.
+    /// for an empty path or "/". A subject the access policy hides is not found.
     /// </summary>
     /// <param name="input">The tool input.</param>
     /// <param name="pathArgument">The name of the argument that holds the path.</param>
