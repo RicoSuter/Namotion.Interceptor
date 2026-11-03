@@ -301,7 +301,7 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var suggestions = await search("o", CancellationToken.None)!;
 
         // Assert
-        Assert.Equal(["o", nameof(HomeBlaze.Abstractions.IConfigurable), "Role", "TestRoot"], suggestions);
+        Assert.Equal(["o", nameof(HomeBlaze.Abstractions.IConfigurable), nameof(HomeBlaze.Abstractions.IIconProvider), nameof(HomeBlaze.Abstractions.ITitleProvider), "Role", "TestRoot"], suggestions);
     }
 
     [Fact]

@@ -18,7 +18,7 @@ namespace HomeBlaze.Authorization;
 [SubjectIcon("AdminPanelSettings")]
 [SingleInstance]
 [InterceptorSubject]
-public partial class Authorization : IConfigurable
+public partial class Authorization : IConfigurable, IIconProvider
 {
     /// <summary>
     /// The custom roles by name, each reachable at the path of this subject followed by its name. Role names compare
@@ -33,6 +33,9 @@ public partial class Authorization : IConfigurable
     /// </summary>
     [State]
     public partial string? Status { get; internal set; }
+
+    /// <inheritdoc />
+    public string IconName => "AdminPanelSettings";
 
     public Authorization()
     {

@@ -11,14 +11,14 @@ namespace HomeBlaze.Authorization;
 
 /// <summary>
 /// A custom role of an <see cref="Authorization"/>: rules that allow, rules that deny, and the roles it includes.
-/// Its name is its key in <see cref="Authorization.Roles"/>.
+/// Its name is its key in <see cref="Authorization.Roles"/>, see <see cref="Title"/>.
 /// </summary>
 [Description("Custom role with the rules it allows and denies")]
 [DisplayName("Role")]
 [SubjectIcon("Badge")]
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class Role : IConfigurable
+public partial class Role : IConfigurable, ITitleProvider, IIconProvider
 {
     /// <summary>
     /// The names of the built-in or custom roles whose rules this role includes.
@@ -56,6 +56,14 @@ public partial class Role : IConfigurable
     /// </summary>
     [State]
     public partial int UsedByAgents { get; internal set; }
+
+    /// <summary>
+    /// The name of the role, its key in <see cref="Authorization.Roles"/>, or null while no <see cref="Authorization"/> holds it.
+    /// </summary>
+    public string? Title => FindParent().Name;
+
+    /// <inheritdoc />
+    public string IconName => "Badge";
 
     public Role()
     {
