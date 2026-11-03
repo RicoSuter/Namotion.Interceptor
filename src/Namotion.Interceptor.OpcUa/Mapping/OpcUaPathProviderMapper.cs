@@ -24,13 +24,12 @@ public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMappi
         IInterceptorSubject rootSubject,
         [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
     {
-        if (!_pathProvider.IsPropertyIncluded(property))
+        if (!_pathProvider.TryGetPropertySegment(property, out var browseName))
         {
             mapping = null;
             return false;
         }
 
-        var browseName = _pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
         var referenceType = property.IsAttribute ? "HasProperty" : null;
 
         mapping = new OpcUaPropertyMapping
@@ -54,11 +53,7 @@ public class OpcUaPathProviderMapper : IReversePropertyMapper<OpcUaPropertyMappi
             if (property.IsAttribute)
                 continue;
 
-            if (!_pathProvider.IsPropertyIncluded(property))
-                continue;
-
-            var segment = _pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-            if (segment == browseName)
+            if (_pathProvider.TryGetPropertySegment(property, out var segment) && segment == browseName)
             {
                 return new ValueTask<RegisteredSubjectProperty?>(property);
             }

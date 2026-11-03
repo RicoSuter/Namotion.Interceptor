@@ -182,3 +182,21 @@ public partial class TestShadowedInlineContainer
         Children = new Dictionary<string, TestShadowedInlineContainer>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestLateShadowedInlineContainer
+{
+    [Path("test", "name")]
+    public partial string Name { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestLateShadowedInlineContainer> Children { get; set; }
+
+    [Path("test", "Children")]
+    public partial string Label { get; set; }
+
+    public TestLateShadowedInlineContainer()
+    {
+        Children = new Dictionary<string, TestLateShadowedInlineContainer>();
+    }
+}

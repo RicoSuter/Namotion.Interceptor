@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -8,5 +9,9 @@ internal sealed class ExcludingPathProvider(string excludedPropertyName, char pa
 {
     public override char PathSeparator => pathSeparator;
 
-    public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    {
+        segment = property.Name != excludedPropertyName ? property.BrowseName : null;
+        return segment is not null;
+    }
 }
