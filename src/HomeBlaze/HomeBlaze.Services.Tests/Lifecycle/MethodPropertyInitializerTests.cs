@@ -879,6 +879,57 @@ public class MethodPropertyInitializerTests
         Assert.Equal("Sound", withClassCategory.Category);
     }
 
+    [Fact]
+    public void WhenAnOperationHasTheDeletePurpose_ThenTheMetadataHasItAndKeepsItsConfirmation()
+    {
+        // Arrange
+        var registered = new PurposeMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var remove = registered.TryGetProperty("Remove")?.GetValue() as MethodMetadata;
+        var uninstall = registered.TryGetProperty("Uninstall")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal(OperationPurpose.Delete, remove?.Purpose);
+        Assert.False(remove?.RequiresConfirmation);
+        Assert.Equal(OperationPurpose.Delete, uninstall?.Purpose);
+        Assert.True(uninstall?.RequiresConfirmation);
+    }
+
+    [Fact]
+    public void WhenAnOperationWithTheDeletePurposeTakesInput_ThenItsPurposeIsNone()
+    {
+        // Arrange
+        var registered = new PurposeMethodSubject(CreateContext()).TryGetRegisteredSubject()!;
+
+        // Act
+        var removeWithReason = registered.TryGetProperty("RemoveWithReason")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.NotNull(removeWithReason);
+        Assert.Equal(OperationPurpose.None, removeWithReason.Purpose);
+    }
+
+    [Fact]
+    public void WhenASubjectAttachesBelowMethodProviders_ThenOnlyTheNearestOneAddsMethodsAfterTheOwnOnes()
+    {
+        // Arrange
+        var outer = new MethodProviderTestSubject(CreateContext());
+        var inner = new MethodProviderTestSubject();
+        var child = new MethodTestSubject();
+        inner.Child = child;
+
+        // Act
+        outer.Child = inner;
+
+        // Assert
+        var outerCall = Assert.Single(outer.Calls);
+        Assert.Same(inner, outerCall.Subject);
+        var innerCall = Assert.Single(inner.Calls);
+        Assert.Same(child, innerCall.Subject);
+        Assert.True(innerCall.HadOwnMethods);
+    }
+
     private static MethodMetadata GetMethod(IInterceptorSubject subject, string propertyName)
     {
         return (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!.GetValue()!;
@@ -1248,4 +1299,35 @@ public partial class FurtherGenericOperationOverrideSubject : ConfirmedGenericOp
 {
     [Operation(Title = "Apply now")]
     public override Task ApplyAsync<TValue>(TValue value) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class PurposeMethodSubject
+{
+    [Operation(Purpose = OperationPurpose.Delete)]
+    public Task RemoveAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [Operation(Purpose = OperationPurpose.Delete)]
+    public void RemoveWithReason(string reason)
+    {
+    }
+
+    [Operation(Purpose = OperationPurpose.Delete, RequiresConfirmation = true)]
+    public void Uninstall()
+    {
+    }
+}
+
+[InterceptorSubject]
+public partial class MethodProviderTestSubject : IChildMethodProvider
+{
+    public List<(IInterceptorSubject Subject, bool HadOwnMethods)> Calls { get; } = [];
+
+    public partial IInterceptorSubject? Child { get; set; }
+
+    public void AddMethods(IInterceptorSubject subject)
+    {
+        // MethodTestSubject has its own "Stop" operation, which must be registered before the provider runs.
+        Calls.Add((subject, subject.TryGetRegisteredSubject()!.TryGetProperty("Stop") is not null));
+    }
 }

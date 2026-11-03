@@ -4,7 +4,9 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Lifecycle;
@@ -44,6 +46,9 @@ public class MethodPropertyInitializer : ILifecycleHandler
                     TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods, typeMethods);
                 }
             }
+
+            // After the own methods, so that a provider sees them.
+            AddProvidedMethods(registeredSubject);
         }
     }
 
@@ -105,6 +110,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = traits.Category,
             RequiresConfirmation = traits.RequiresConfirmation,
+            Purpose = GetPurpose(operationAttribute, traits.Parameters),
             ExcludedFrom = traits.ExcludedFrom,
             Parameters = traits.Parameters,
             ResultType = resultType,
@@ -116,6 +122,24 @@ public class MethodPropertyInitializer : ILifecycleHandler
             _ => metadata,
             null,
             [.. method.GetCustomAttributes<Attribute>()]);
+    }
+
+    // The purpose maps to a control without an input dialog, so an operation that takes input has none.
+    private static OperationPurpose GetPurpose(OperationAttribute? attribute, MethodParameter[] parameters) =>
+        attribute is not null && !Array.Exists(parameters, parameter => parameter.RequiresInput)
+            ? attribute.Purpose
+            : OperationPurpose.None;
+
+    private static void AddProvidedMethods(RegisteredSubject registeredSubject)
+    {
+        foreach (var current in new FirstParentChain(registeredSubject))
+        {
+            if (!ReferenceEquals(current, registeredSubject) && current.Subject is IChildMethodProvider provider)
+            {
+                provider.AddMethods(registeredSubject.Subject);
+                return;
+            }
+        }
     }
 
     private static Type? GetUnwrappedResultType(Type returnType)
