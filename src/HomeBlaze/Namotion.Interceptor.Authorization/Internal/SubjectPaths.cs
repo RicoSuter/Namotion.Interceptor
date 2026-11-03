@@ -15,12 +15,12 @@ internal static class SubjectPaths
     private const int CycleDetectionDepthThreshold = 256;
 
     /// <summary>
-    /// The segment of the property as the registry's path writer spells it: the provider's segment, or the browse name
-    /// when the provider gives none. An attribute is spelled the same way, so attribute paths follow the registry's syntax.
-    /// Inclusion is not checked: a member paths may not pass still has a segment a deny can match.
+    /// The segment of the property as the registry's path writer spells it: the provider's segment of an included
+    /// property, or the browse name of one the provider excludes. An attribute is spelled the same way, so attribute
+    /// paths follow the registry's syntax. A member paths may not pass still has a segment a deny can match.
     /// </summary>
     public static string GetSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
-        => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+        => pathProvider.TryGetPropertySegment(property, out var segment) ? segment : property.BrowseName;
 
     /// <summary>
     /// Gets every path of the subject: one per chain of parents from the subject up to a subject without parents, a
@@ -28,7 +28,7 @@ internal static class SubjectPaths
     /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
     /// it. A path is its links from the root's property down to the property holding the subject, each in every
     /// spelling the path reader resolves. A chain passes only properties the path provider effectively includes (see
-    /// <see cref="PathProviderBase.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain through an
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain through an
     /// excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
     /// subject without parents and has a path, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
@@ -301,6 +301,6 @@ internal static class SubjectPaths
                ResolvesTo(property, text);
 
         private readonly bool ResolvesTo(RegisteredSubjectProperty property, string segment)
-            => _pathProvider.TryGetPropertyFromSegment(property.Parent, segment)?.Name == property.Name;
+            => _pathProvider.TryGetPropertyFromSegment(property.Parent, segment, out var resolved) && resolved.Name == property.Name;
     }
 }

@@ -22,6 +22,9 @@ public class RegisteredSubjectProperty
     // 0: not computed yet, 1: no public setter, 2: public setter. Computed on first read because it reflects over the setter.
     private byte _hasPublicSetter;
 
+    // 0: not computed yet, 1: no, 2: yes. Cached because segment lookups ask it for every matching property.
+    private byte _isInlinePathsProperty;
+
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
@@ -175,6 +178,24 @@ public class RegisteredSubjectProperty
             }
 
             return hasPublicSetter == 2;
+        }
+    }
+
+    /// <summary>
+    /// Gets whether this is the [InlinePaths] property of its subject's type.
+    /// </summary>
+    internal bool IsInlinePathsProperty
+    {
+        get
+        {
+            var isInlinePathsProperty = _isInlinePathsProperty;
+            if (isInlinePathsProperty == 0)
+            {
+                isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(Subject.GetType(), Name) ? (byte)2 : (byte)1;
+                _isInlinePathsProperty = isInlinePathsProperty;
+            }
+
+            return isInlinePathsProperty == 2;
         }
     }
 

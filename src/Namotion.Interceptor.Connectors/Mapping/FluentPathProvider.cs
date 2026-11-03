@@ -31,26 +31,11 @@ public sealed class FluentPathProvider<TMetadata> : PathProviderBase
     public override char PathSeparator => _pathSeparator;
 
     /// <inheritdoc />
-    public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        if (_registry.TryGetSegment(property.Subject.GetType(), property.Name, out _))
-            return true;
-
-        // An unmapped [InlinePaths] property is still included, because its keys are written and read as path segments.
-        return InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name);
-    }
-
-    /// <inheritdoc />
-    public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-    {
-        if (_registry.TryGetSegment(property.Subject.GetType(), property.Name, out var segment))
-            return segment ?? property.BrowseName;
-
-        return null;
-    }
-
-    /// <inheritdoc />
-    protected override bool TryGetIncludedPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+    /// <remarks>
+    /// Includes a property the registry maps, with its mapped segment or its BrowseName when the mapping has none, and
+    /// an unmapped [InlinePaths] property with its BrowseName, because its keys are built and resolved as path segments.
+    /// </remarks>
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
         var subjectType = property.Subject.GetType();
         if (_registry.TryGetSegment(subjectType, property.Name, out segment))

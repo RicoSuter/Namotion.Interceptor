@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -876,7 +877,11 @@ public class PathExtensionsTests
 
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 
     [Fact]
@@ -1272,7 +1277,7 @@ public class PathExtensionsTests
     {
         public bool IsMoved { get; private set; }
 
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
         {
             if (!IsMoved && property == trigger)
             {
@@ -1280,7 +1285,8 @@ public class PathExtensionsTests
                 move();
             }
 
-            return property.Name != nameof(Person.Mother);
+            segment = property.Name != nameof(Person.Mother) ? property.BrowseName : null;
+            return segment is not null;
         }
     }
 }

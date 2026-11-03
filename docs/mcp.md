@@ -333,7 +333,7 @@ With a policy, the tools apply these rules. A policy that allows every read chan
 
 Without a policy nothing of this is evaluated or allocated.
 
-`list_types` is not filtered, because types are schema rather than data. Enrichments such as `$methods` come from the `IMcpSubjectEnricher` of the application, which filters them itself. A custom tool resolves paths the way the tools do with `configuration.TryGetReadableProperty(root, path)` and `configuration.TryGetReadableSubject(root, path)`, which return null for what is hidden. It writes the path of a subject the way `search` lists it, and `browse` writes its `$path`, with `configuration.TryGetSubjectPath(root, subject)`, which returns null for a subject that has no path, is not shown or is of a type in `ExcludeTypes`, so it lists exactly the subjects `search` can list. `TryGetReadableSubject` resolves a path it returns, for any subject but the root, back to that subject.
+`list_types` is not filtered, because types are schema rather than data. Enrichments such as `$methods` come from the `IMcpSubjectEnricher` of the application, which filters them itself. A custom tool resolves paths the way the tools do with `configuration.TryGetReadableProperty(root, path)` and `configuration.TryGetReadableSubject(root, path)`, which return null for what is hidden. It writes the path `search` lists for a subject, which is also the `$path` `browse` writes for a subject it lists, with `configuration.TryGetSubjectPath(root, subject)`, which returns null for a subject that has no path, is not shown or is of a type in `ExcludeTypes`, so it lists exactly the subjects `search` can list. `TryGetReadableSubject` resolves a path it returns, for any subject but the root, back to that subject.
 
 ## Extension Points
 

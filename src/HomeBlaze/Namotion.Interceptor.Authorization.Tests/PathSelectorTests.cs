@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Authorization.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -261,13 +262,13 @@ public class PathSelectorTests
     }
 
     [Fact]
-    public void WhenTheProviderGivesAMemberNoSegment_ThenItIsMatchedByItsName()
+    public void WhenTheProviderExcludesAMember_ThenItIsMatchedByItsName()
     {
         // Arrange
         var home = Create();
         var policy = AuthorizationPolicy.Compile(
             [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Spare"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, new SpareWithoutSegmentPathProvider());
+            KnownActions, TestTags.Default, new SpareExcludingPathProvider());
 
         // Act & Assert
         Assert.False(policy.CanRead(Member(home, nameof(Home.Spare))));
@@ -379,14 +380,20 @@ public class PathSelectorTests
         return door;
     }
 
-    private sealed class SpareWithoutSegmentPathProvider : PathProviderBase
+    private sealed class SpareExcludingPathProvider : PathProviderBase
     {
         public override char PathSeparator => '/';
 
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => !IsSpare(property);
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (IsSpare(property))
+            {
+                segment = null;
+                return false;
+            }
 
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-            => IsSpare(property) ? null : base.TryGetPropertySegment(property);
+            return base.TryGetPropertySegment(property, out segment);
+        }
 
         private static bool IsSpare(RegisteredSubjectProperty property)
             => property.Subject is Home && property.Name == nameof(Home.Spare);
@@ -396,7 +403,15 @@ public class PathSelectorTests
     {
         public override char PathSeparator => '/';
 
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-            => property.Subject is Sensor && property.Name == nameof(Sensor.Temperature) ? "temperature" : base.TryGetPropertySegment(property);
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (property.Subject is Sensor && property.Name == nameof(Sensor.Temperature))
+            {
+                segment = "temperature";
+                return true;
+            }
+
+            return base.TryGetPropertySegment(property, out segment);
+        }
     }
 }

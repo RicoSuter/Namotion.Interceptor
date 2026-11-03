@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
@@ -569,6 +570,10 @@ public class HiddenSubjectAccessTests
 
     private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
     {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
+            return segment is not null;
+        }
     }
 }

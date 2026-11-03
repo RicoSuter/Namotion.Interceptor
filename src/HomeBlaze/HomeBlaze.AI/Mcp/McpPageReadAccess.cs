@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Registry;
@@ -90,9 +91,14 @@ internal sealed class McpPageReadAccess
 
         public override char IndexClose => inner.IndexClose;
 
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
+        {
+            if (!inner.TryGetPropertySegment(property, out segment))
+            {
+                segment = property.Name;
+            }
 
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-            => inner.TryGetPropertySegment(property) ?? property.Name;
+            return true;
+        }
     }
 }

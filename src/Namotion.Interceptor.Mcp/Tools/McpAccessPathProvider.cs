@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -66,32 +67,57 @@ internal sealed class McpAccessPathProvider : PathProviderBase
 
     public override char IndexClose => _inner.IndexClose;
 
-    public override bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-        _inner.IsPropertyIncluded(property) && IsReadable(_policy, property);
-
-    public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
-        _inner.TryGetPropertySegment(property);
-
-    public override RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment)
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        var property = _inner.TryGetPropertyFromSegment(subject, segment);
-        if (property is null || IsReadable(_policy, property))
+        if (_inner.TryGetPropertySegment(property, out segment) && IsReadable(_policy, property))
         {
-            return property;
+            return true;
         }
 
-        // A later member with the same segment answers as if the hidden one did not exist.
+        segment = null;
+        return false;
+    }
+
+    public override bool TryGetPropertyFromSegment(
+        RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
+    {
+        if (!_inner.TryGetPropertyFromSegment(subject, segment, out var innerProperty))
+        {
+            property = null;
+            return false;
+        }
+
+        if (IsReadable(_policy, innerProperty))
+        {
+            property = innerProperty;
+            return true;
+        }
+
+        // A later member with the same segment answers as if the hidden one did not exist. The [InlinePaths] property
+        // yields its segment to every other member, so it is matched only below.
+        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
         foreach (var member in subject.Properties)
         {
-            if (member != property && _inner.TryGetPropertySegment(member) == segment && IsReadable(_policy, member))
+            if (member != innerProperty && member.Name != inlinePathsPropertyName &&
+                _inner.TryGetPropertySegment(member, out var memberSegment) && memberSegment == segment &&
+                IsReadable(_policy, member))
             {
-                return member;
+                property = member;
+                return true;
             }
         }
 
         // As for a name that does not exist, the segment is a key of the [InlinePaths] dictionary, so a client cannot
         // tell the hidden property from a missing one and the registry writes the key without the explicit form.
-        var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
-        return inlinePathsPropertyName is not null ? subject.TryGetProperty(inlinePathsPropertyName) : null;
+        if (inlinePathsPropertyName is not null &&
+            subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
+            TryGetPropertySegment(inlinePathsProperty, out _))
+        {
+            property = inlinePathsProperty;
+            return true;
+        }
+
+        property = null;
+        return false;
     }
 }
