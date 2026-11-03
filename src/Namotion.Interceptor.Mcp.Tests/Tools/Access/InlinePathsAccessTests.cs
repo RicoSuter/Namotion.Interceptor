@@ -78,6 +78,26 @@ public class InlinePathsAccessTests
     }
 
     [Fact]
+    public async Task WhenAHiddenMemberHasTheInlinePropertySegment_ThenALaterReadableMemberWithThatSegmentIsResolved()
+    {
+        // Arrange
+        // Both attributes have the segment of the [InlinePaths] property, which is declared before them.
+        var (root, _) = CreateFolders();
+        var registered = root.TryGetRegisteredSubject()!;
+        registered.TryGetProperty(nameof(TestFolder.Name))!
+            .AddAttribute<string>(nameof(TestFolder.Children), _ => "Hidden");
+        registered.TryGetProperty(nameof(TestFolder.Secret))!
+            .AddAttribute<string>(nameof(TestFolder.Children), _ => "Readable");
+        var configuration = CreateConfiguration(TestAccessPolicy.DenyRead($"{nameof(TestFolder.Name)}@{nameof(TestFolder.Children)}"));
+
+        // Act
+        var result = await McpToolCaller.CallAsync(root, configuration, "get_property", new { path = "Children" });
+
+        // Assert
+        Assert.Equal("Readable", result.GetProperty("value").GetString());
+    }
+
+    [Fact]
     public async Task WhenNoPolicyIsSet_ThenAPropertyShadowsTheKeyOfTheSameName()
     {
         // Arrange
