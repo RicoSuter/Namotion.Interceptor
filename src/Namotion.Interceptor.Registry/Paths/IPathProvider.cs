@@ -25,10 +25,11 @@ public interface IPathProvider
     bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment);
 
     /// <summary>
-    /// Finds a property by its path segment, the inverse of <see cref="TryGetPropertySegment"/>: the first included
-    /// property, in the subject's property order, other than the [InlinePaths] property whose segment equals
-    /// <paramref name="segment"/>, otherwise the included [InlinePaths] property, whose own segment or entry key the
-    /// segment is. Never returns an excluded property.
+    /// Finds a property by its path segment, the inverse of <see cref="TryGetPropertySegment"/> except for an
+    /// [InlinePaths] property whose segment another included property has: the first included property, in the
+    /// subject's property order and other than the [InlinePaths] property, whose segment equals
+    /// <paramref name="segment"/>; otherwise the included [InlinePaths] property. The caller checks whether the segment
+    /// is that property's own segment or an entry key. Never returns an excluded property.
     /// </summary>
     /// <param name="subject">The subject to search in.</param>
     /// <param name="segment">The path segment to look up.</param>

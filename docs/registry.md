@@ -283,8 +283,8 @@ public interface IPathProvider
     // False when the property is excluded; true with its segment, never null, when it is included.
     bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment);
 
-    // The inverse: the first included property other than the [InlinePaths] property whose segment matches,
-    // otherwise the included [InlinePaths] property, whose own segment or key the segment is. Never an excluded property.
+    // The first included property, in the subject's property order and other than the [InlinePaths] property, whose
+    // segment equals segment; otherwise the included [InlinePaths] property. Never an excluded property.
     bool TryGetPropertyFromSegment(RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property);
 }
 ```
