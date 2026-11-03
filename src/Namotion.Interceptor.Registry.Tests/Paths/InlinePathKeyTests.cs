@@ -23,7 +23,7 @@ public class InlinePathKeyTests
     [InlineData("Report [2024]", "Children['Report [2024]'].Name")]
     [InlineData("a.b]", "Children['a.b]'].Name")]
     [InlineData("", "Children[''].Name")]
-    public void WhenInlineKeyIsWritten_ThenPathRoundTrips(string key, string expectedPath)
+    public void WhenInlineKeyIsBuilt_ThenPathRoundTrips(string key, string expectedPath)
     {
         // Arrange
         var context = CreateContext();
@@ -80,21 +80,6 @@ public class InlinePathKeyTests
 
         // Assert
         Assert.Null(resolved);
-    }
-
-    [Fact]
-    public void WhenSegmentIsInlinePropertyName_ThenItResolvesToThePropertyItself()
-    {
-        // Arrange
-        var context = CreateContext();
-        var root = new TestInlineContainer(context) { Name = "root" };
-
-        // Act
-        var resolved = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, "Children");
-
-        // Assert
-        Assert.Equal(nameof(TestInlineContainer.Children), resolved?.Property.Name);
-        Assert.Null(resolved?.Index);
     }
 
     [Theory]
@@ -390,5 +375,164 @@ public class InlinePathKeyTests
         // Assert
         Assert.Equal(expectedPath, path);
         Assert.Same(GetNameProperty(child), resolved?.Property);
+    }
+
+    [Fact]
+    public void WhenSegmentIsAnInlineKey_ThenInlinePathsPropertyResolvesWithTheKeyAsIndex()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "Child" };
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        root.Children["Servers"] = child;
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        // "Servers" is the dictionary key, not a property name.
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Servers");
+
+        // Assert
+        Assert.NotNull(result);
+        var (property, index) = result.Value;
+        Assert.Equal("Children", property.Name);
+        Assert.Equal("Servers", index);
+    }
+
+    [Fact]
+    public void WhenPathContinuesThroughAnInlineKey_ThenPropertyOfTheItemResolves()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "OpcUaServer" };
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        root.Children["Servers"] = child;
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        // Navigate through InlinePaths to a property on the child.
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Servers.Name");
+
+        // Assert
+        Assert.NotNull(result);
+        var (property, index) = result.Value;
+        Assert.Equal("Name", property.Name);
+        Assert.Null(index);
+        Assert.Equal("OpcUaServer", property.GetValue());
+    }
+
+    [Fact]
+    public void WhenSubjectPathIsAnInlineKey_ThenItResolvesToTheItem()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "Server" };
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        root.Children["Servers"] = child;
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, "Servers");
+
+        // Assert
+        Assert.NotNull(resolved);
+        Assert.Same(child, resolved.Subject);
+    }
+
+    [Fact]
+    public void WhenSubjectPathPassesNestedInlineKeys_ThenItResolvesToTheInnermostItem()
+    {
+        // Arrange
+        var context = CreateContext();
+        var leaf = new TestInlineContainer(context) { Name = "OpcUaServer" };
+        var middle = new TestInlineContainer(context) { Name = "Servers" };
+        middle.Children["OpcUaServer"] = leaf;
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        root.Children["Servers"] = middle;
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        // Two levels of InlinePaths flattening.
+        var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, "Servers.OpcUaServer");
+
+        // Assert
+        Assert.NotNull(resolved);
+        Assert.Same(leaf, resolved.Subject);
+    }
+
+    [Fact]
+    public void WhenPathIsBuiltThroughAnInlineKey_ThenTheKeyIsAPlainSegment()
+    {
+        // Arrange
+        // Set dictionary via property setter to trigger lifecycle tracking.
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "Server" };
+        var root = new TestInlineContainer(context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestInlineContainer> { ["Servers"] = child }
+        };
+        var pathProvider = DefaultPathProvider.Instance;
+
+        var childRegistered = child.TryGetRegisteredSubject()!;
+        var nameProperty = childRegistered.Properties
+            .First(p => p.Name == "Name");
+
+        // Act
+        var path = nameProperty.TryGetPath(pathProvider, root);
+
+        // Assert
+        // Should be "Servers.Name", not "Children[Servers].Name".
+        Assert.Equal("Servers.Name", path);
+    }
+
+    [Fact]
+    public void WhenPathIsBuiltThroughNestedInlineKeys_ThenEachKeyIsAPlainSegment()
+    {
+        // Arrange
+        // Set dictionaries via property setters.
+        var context = CreateContext();
+        var leaf = new TestInlineContainer(context) { Name = "OpcUaServer" };
+        var middle = new TestInlineContainer(context)
+        {
+            Name = "Servers",
+            Children = new Dictionary<string, TestInlineContainer> { ["OpcUaServer"] = leaf }
+        };
+        var root = new TestInlineContainer(context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestInlineContainer> { ["Servers"] = middle }
+        };
+        var pathProvider = DefaultPathProvider.Instance;
+
+        var leafRegistered = leaf.TryGetRegisteredSubject()!;
+        var nameProperty = leafRegistered.Properties
+            .First(p => p.Name == "Name");
+
+        // Act
+        var path = nameProperty.TryGetPath(pathProvider, root);
+
+        // Assert
+        // Should be "Servers.OpcUaServer.Name".
+        Assert.Equal("Servers.OpcUaServer.Name", path);
+    }
+
+    [Fact]
+    public void WhenPathContinuesThroughAMissingInlineKey_ThenPropertyPathResolvesToNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new TestInlineContainer(context) { Name = "Root" };
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "NonExistent.Name");
+
+        // Assert
+        Assert.Null(result);
     }
 }

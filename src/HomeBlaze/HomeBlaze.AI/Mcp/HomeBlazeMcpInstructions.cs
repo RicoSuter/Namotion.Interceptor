@@ -61,6 +61,10 @@ internal static class HomeBlazeMcpInstructions
     public const string ChangeCaution =
         "Change devices or send something only when the user asked for it, and tell the user what you changed.";
 
+    /// <summary>Appended to the set_property description: where configuration is changed instead.</summary>
+    internal const string ConfigurationWriteHint =
+        "set_property cannot change configuration properties; an operation of the subject may.";
+
     /// <summary>The caution in the descriptions of the tools that change Markdown pages.</summary>
     public const string PageChangeCaution =
         "Change pages only when the user asked for it, and tell the user which pages you changed.";
