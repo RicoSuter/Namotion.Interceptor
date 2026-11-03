@@ -20,7 +20,7 @@ public static class MetadataSearch
     /// metadata matches every filter that is given: a tag in <c>tags</c>, a key that is set, and a value that equals a
     /// string value, or a string in an array, of the key when one is given, else of any key. Keys match exactly, and tags
     /// and values without regard to case. The paths of the matches are relative to <paramref name="root"/>, through the
-    /// first parent that reaches it, as the registry writes them (<c>Pump/Channels[0]</c>); a subject that no path from
+    /// first parent that reaches it, as the registry builds them (<c>Pump/Channels[0]</c>); a subject that no path from
     /// <paramref name="root"/> reaches is not found. The matches are ordered by path and then property, ordinal. A subject
     /// for which <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
     /// </summary>

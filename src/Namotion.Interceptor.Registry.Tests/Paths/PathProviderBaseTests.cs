@@ -311,15 +311,6 @@ public class PathProviderBaseTests
             return true;
         }
     }
-
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
-    {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
-        {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
-        }
-    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]
