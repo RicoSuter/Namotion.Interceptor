@@ -24,8 +24,8 @@ public interface IPropertyMapper<TMapping>
     /// default, means the answers never change.
     /// </summary>
     /// <remarks>
-    /// A mapper whose answers change while a connector uses it raises it after each change: connectors cache mappings
-    /// only while it is unchanged.
+    /// A mapper whose answers change while a connector uses it raises it after each change: connectors that cache mappings
+    /// serve an entry only while it is unchanged.
     /// </remarks>
     long Version => 0;
 }

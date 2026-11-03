@@ -729,7 +729,7 @@ public interface IReversePropertyMapper<TMapping, in TKey> : IPropertyMapper<TMa
 
 `IPropertyMapper<TMapping>` maps a property to its external representation (forward direction). `IReversePropertyMapper<TMapping, TKey>` adds reverse lookup of a property from an external key, which connectors that receive inbound data need (e.g., finding the property for a received MQTT topic or OPC UA node reference).
 
-A mapper whose answers change while a connector uses it raises `Version` after each change, and connectors that cache mappings serve an entry only while it is unchanged. `ReverseCompositeMapper` returns the sum of its mappers' versions, and the path provider mappers return their provider's `PathProviderBase.Version`.
+A mapper whose answers change while a connector uses it raises `Version` after each change, and connectors that cache mappings serve an entry only while it is unchanged. `ReverseCompositeMapper` returns the sum of its mappers' versions, and `MqttPathProviderMapper` (and `MqttFluentMapper`, which derives from it) returns its provider's `PathProviderBase.Version`. The OPC UA mappers return 0.
 
 #### Built-in Generic Implementations
 

@@ -390,6 +390,7 @@ The client and the server cache the topic of each property and the property of e
 ## Known Limitations
 
 - **Client structural changes**: The client subscribes to the topics of the subject graph and claims their properties when it connects, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
+- **Server structural changes**: The server publishes a property's value when it changes, not when its topic changes. After a subject moves to another holding property, or a collection is reordered or a dictionary re-keyed, the new topic has no value until the property changes next, and with retained messages the old topic keeps the last value published there (for a reordered collection, the previous occupant's value). A newly attached subject's values are published when they change.
 
 ## Performance
 
