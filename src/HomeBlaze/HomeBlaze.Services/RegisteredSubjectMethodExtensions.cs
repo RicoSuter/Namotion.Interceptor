@@ -27,8 +27,8 @@ public static class RegisteredSubjectMethodExtensions
 
     /// <summary>
     /// Gets the delete operation of the subject that is offered to the target: the operation whose purpose is
-    /// <see cref="OperationPurpose.Delete"/>, the one with the lowest position when there are several, or null when it has
-    /// none.
+    /// <see cref="OperationPurpose.Delete"/>, the one with the lowest position when there are several (an arbitrary one of
+    /// those with equal positions), or null when it has none.
     /// </summary>
     public static MethodMetadata? GetDeleteOperation(this RegisteredSubject subject, ExclusionTarget target)
     {

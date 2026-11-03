@@ -34,7 +34,7 @@ public class RegisteredSubjectMethodExtensionsTests
     {
         // Arrange
         var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
-        AddDeleteOperation(registered, "Remove", OperationPurpose.None, position: 0);
+        AddOperation(registered, "Remove", OperationPurpose.None, position: 0);
 
         // Act
         var deleteOperation = registered.GetDeleteOperation(ExclusionTarget.UserInterface);
@@ -48,8 +48,8 @@ public class RegisteredSubjectMethodExtensionsTests
     {
         // Arrange
         var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
-        AddDeleteOperation(registered, "Later", OperationPurpose.Delete, position: 5);
-        AddDeleteOperation(registered, "First", OperationPurpose.Delete, position: 1);
+        AddOperation(registered, "Later", OperationPurpose.Delete, position: 5);
+        AddOperation(registered, "First", OperationPurpose.Delete, position: 1);
 
         // Act
         var deleteOperation = registered.GetDeleteOperation(ExclusionTarget.UserInterface);
@@ -63,7 +63,7 @@ public class RegisteredSubjectMethodExtensionsTests
     {
         // Arrange
         var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
-        AddDeleteOperation(registered, "Remove", OperationPurpose.Delete, position: 0, ExclusionTarget.UserInterface);
+        AddOperation(registered, "Remove", OperationPurpose.Delete, position: 0, ExclusionTarget.UserInterface);
 
         // Act
         var forUserInterface = registered.GetDeleteOperation(ExclusionTarget.UserInterface);
@@ -74,7 +74,7 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Equal("Remove", forAgents?.Title);
     }
 
-    private static void AddDeleteOperation(
+    private static void AddOperation(
         RegisteredSubject registered, string name, OperationPurpose purpose, int position,
         ExclusionTarget excludedFrom = ExclusionTarget.None)
     {
