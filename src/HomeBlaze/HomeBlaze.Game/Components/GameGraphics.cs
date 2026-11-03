@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
+using HomeBlaze.Components.Preferences;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Game.Components;
 
@@ -46,6 +48,15 @@ internal sealed record GameGraphics(
     /// The preset the browser uses when it stored none.
     /// </summary>
     public const string Auto = "auto";
+
+    /// <summary>
+    /// The graphics choice the browser stored, as <see cref="ToPreference"/> writes it, or null.
+    /// </summary>
+    /// <remarks>Call it during the first render of a circuit, which resolves its browser preferences while they still hold
+    /// the values of the prerender.</remarks>
+    /// <param name="services">The services of the circuit.</param>
+    public static string? ReadPreference(IServiceProvider services) =>
+        services.GetRequiredService<BrowserPreferences>().Get(PreferenceKey);
 
     /// <summary>
     /// The choice as the browser preference stores it: the preset alone, or all settings for <see cref="Custom"/>.

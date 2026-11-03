@@ -1,9 +1,7 @@
-using HomeBlaze.Components.Preferences;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.View;
 using Microsoft.AspNetCore.Components;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
 namespace HomeBlaze.Game.Components;
@@ -21,7 +19,6 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     private static int _lastViewId;
 
     private readonly IJSRuntime _jsRuntime;
-    private readonly IServiceProvider _services;
     private readonly CancellationTokenSource _lifetime = new();
     // Read from the token source once, so calls that run after the disposal see it canceled rather than disposed.
     private readonly CancellationToken _lifetimeToken;
@@ -43,11 +40,12 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
 
     /// <param name="jsRuntime">The runtime of the page's circuit.</param>
     /// <param name="game">The game the view shows.</param>
-    /// <param name="services">The services of the page's circuit, whose browser preferences hold the graphics choice.</param>
-    public GameViewConnection(IJSRuntime jsRuntime, Game game, IServiceProvider services)
+    /// <param name="graphicsPreference">The graphics choice the view starts with, as <see cref="GameGraphics.ToPreference"/>
+    /// writes it, or null for Auto.</param>
+    public GameViewConnection(IJSRuntime jsRuntime, Game game, string? graphicsPreference)
     {
         _jsRuntime = jsRuntime;
-        _services = services;
+        GraphicsPreference = graphicsPreference;
         Game = game;
         _lifetimeToken = _lifetime.Token;
     }
@@ -63,6 +61,12 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     public Game Game { get; }
 
     /// <summary>
+    /// The graphics choice of the view, as <see cref="GameGraphics.ToPreference"/> writes it: the one it started with, or
+    /// the last one <see cref="SetGraphicsAsync"/> applied.
+    /// </summary>
+    public string? GraphicsPreference { get; private set; }
+
+    /// <summary>
     /// The panel state of the last update the page took from its view session.
     /// </summary>
     public GamePanelState PanelState { get; private set; } = GamePanelState.Empty;
@@ -76,12 +80,11 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     bool IGameViewSink.IsBusy => Volatile.Read(ref _isBusy) == 1 || Volatile.Read(ref _isClosed) == 1;
 
     /// <summary>
-    /// Starts the view in the browser at the graphics choice the browser stored; a disposal meanwhile makes the module
-    /// release the view.
+    /// Starts the view in the browser at <see cref="GraphicsPreference"/>; a disposal meanwhile makes the module release
+    /// the view.
     /// </summary>
     public async Task<StartResult> StartAsync(ElementReference canvas, ElementReference pad, object dotNetReference)
     {
-        var graphics = _services.GetRequiredService<BrowserPreferences>().Get(GameGraphics.PreferenceKey);
         var module = await _jsRuntime.InvokeAsync<IJSObjectReference>("import", _lifetimeToken, ModulePath);
         if (_isDisposed)
         {
@@ -91,7 +94,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
         }
 
         _module = module;
-        var options = new { viewId = ViewId, pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = BaseUrl, graphics };
+        var options = new { viewId = ViewId, pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = BaseUrl, graphics = GraphicsPreference };
         return await module.InvokeAsync<StartResult>("start", _lifetimeToken, canvas, dotNetReference, options);
     }
 
@@ -183,7 +186,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     /// <paramref name="setting"/>, named as in the JSON of <see cref="GameGraphics"/>, to <paramref name="value"/>. Returns
     /// the graphics in effect, or null when the view is gone.
     /// </summary>
-    public Task<GameGraphics?> SetGraphicsAsync(string preset, string? setting = null, object? value = null)
+    public async Task<GameGraphics?> SetGraphicsAsync(string preset, string? setting = null, object? value = null)
     {
         var choice = new Dictionary<string, object?> { ["preset"] = preset };
         if (setting is not null)
@@ -191,7 +194,13 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
             choice[setting] = value;
         }
 
-        return InvokeGraphicsAsync("setGraphics", choice);
+        var graphics = await InvokeGraphicsAsync("setGraphics", choice);
+        if (graphics is not null)
+        {
+            GraphicsPreference = graphics.ToPreference();
+        }
+
+        return graphics;
     }
 
     /// <summary>

@@ -32,6 +32,8 @@ public partial class GamePage
     // The game whose events this page handles, so it unsubscribes from that one also after Subject changed.
     private Game? _subscribedGame;
     private GameViewConnection? _view;
+    // The graphics choice the next view starts with: the browser's, then the one the former view applied last.
+    private string? _graphicsPreference;
     private GameVoiceConnection? _voice;
     // The disposal of the connections the page left, which a start awaits, so the browser dropped the former view first.
     private Task _detaching = Task.CompletedTask;
@@ -65,6 +67,11 @@ public partial class GamePage
     public IInterceptorSubject? Subject { get; set; }
 
     private Game? Game => Subject as Game;
+
+    protected override void OnInitialized()
+    {
+        _graphicsPreference = GameGraphics.ReadPreference(ServiceProvider);
+    }
 
     protected override void OnParametersSet()
     {
@@ -165,7 +172,7 @@ public partial class GamePage
         }
 
         _reference ??= DotNetObjectReference.Create(this);
-        var view = new GameViewConnection(JsRuntime, game, ServiceProvider);
+        var view = new GameViewConnection(JsRuntime, game, _graphicsPreference);
         view.Delivered += OnDelivered;
         _view = view;
         try
@@ -228,6 +235,7 @@ public partial class GamePage
         var voice = _voice;
         _view = null;
         _voice = null;
+        _graphicsPreference = view?.GraphicsPreference ?? _graphicsPreference;
         voice?.StopInGame();
         view?.Close();
         if (view is not null || voice is not null)
