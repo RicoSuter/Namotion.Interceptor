@@ -278,6 +278,7 @@ export function createRenderer(scene, camera, quality = AUTO) {
 
     const api = {
         sun,
+        shadowGenerator: shadows,
         geometryBuffer: geometry,
         /** Applies a preset name or 'auto', which starts low on touch devices and medium elsewhere; anything else is auto. */
         setQuality(choice) {

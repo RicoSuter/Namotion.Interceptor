@@ -52,20 +52,25 @@ const WIND_SHADER = `
 #endif
 `;
 
+const WIND_UNIFORM_NAMES = ['gameWindSwayPhase', 'gameWindGustPhase'];
 const WIND_UNIFORMS = '#ifdef GAME_WIND\nuniform float gameWindSwayPhase;\nuniform float gameWindGustPhase;\n#endif\n';
+const WIND_DEFINE = '#define GAME_WIND';
 // Where the wind goes into the vertex shader of the geometry buffer, which draws the outlines and the corner shading:
 // its declarations, the world position and the clip position, which that shader computes without the world position.
-const GEOMETRY_DEFINITIONS = '#define CUSTOM_VERTEX_DEFINITIONS';
+const VERTEX_DEFINITIONS = '#define CUSTOM_VERTEX_DEFINITIONS';
 const GEOMETRY_WORLD_POSITION = 'vec4 worldPos=vec4(finalWorld*vec4(positionUpdated,1.0));';
 const GEOMETRY_CLIP_POSITION = 'gl_Position=viewProjection*finalWorld*vec4(positionUpdated,1.0);';
+// Where the wind goes into the vertex shader of the shadow map: its declarations and the world position, from which that
+// shader computes the clip position.
+const SHADOW_WORLD_POSITION = 'vec4 worldPos=finalWorld*vec4(positionUpdated,1.0);';
 
 // The phases of the sway and the gust in radians, which the wind shader reads; the views of a tab share them. They wrap
 // on the CPU, because a 32-bit float of the raw clock loses precision after hours.
 let windSwayPhase = 0;
 let windGustPhase = 0;
 let WindPlugin = null;
-// Null until the first wind effect of the geometry buffer, then whether its shader took the wind.
-let isGeometryShaderPatched = null;
+// Per shader name, whether its source took the wind; patched once, on the first wind effect of the shader.
+const patchedShaders = new Map();
 
 function toGlsl(value) {
     return value.toFixed(6);
@@ -110,28 +115,40 @@ function getWindPlugin() {
     return WindPlugin;
 }
 
-// Adds the wind to the shader source of the geometry buffer behind the GAME_WIND define; returns whether the source had
-// every place the wind goes into, which a Babylon update may change.
-function patchGeometryShader() {
-    if (isGeometryShaderPatched !== null) {
-        return isGeometryShaderPatched;
+// Adds the wind behind the GAME_WIND define to the shader source of the name, replacing each place by its replacement;
+// returns whether the source had every place exactly once, which a Babylon update may change, and warns once if not.
+function patchShader(name, replacements, warning) {
+    let isPatched = patchedShaders.get(name);
+    if (isPatched !== undefined) {
+        return isPatched;
     }
 
     const store = window.BABYLON.Effect.ShadersStore;
-    const source = store.geometryVertexShader;
-    const places = [GEOMETRY_DEFINITIONS, GEOMETRY_WORLD_POSITION, GEOMETRY_CLIP_POSITION];
-    if (!source || places.some(place => source.split(place).length !== 2)) {
-        console.warn('The geometry buffer shader of this Babylon version has no place for the wind, so outlines do not sway.');
-        isGeometryShaderPatched = false;
-        return false;
+    const source = store[name];
+    isPatched = Boolean(source) && replacements.every(([place]) => source.split(place).length === 2);
+    if (isPatched) {
+        store[name] = replacements.reduce((patched, [place, replacement]) => patched.replace(place, replacement), source);
+    } else {
+        console.warn(warning);
     }
 
-    store.geometryVertexShader = source
-        .replace(GEOMETRY_DEFINITIONS, WIND_UNIFORMS + GEOMETRY_DEFINITIONS)
-        .replace(GEOMETRY_WORLD_POSITION, GEOMETRY_WORLD_POSITION + WIND_SHADER)
-        .replace(GEOMETRY_CLIP_POSITION, `#ifdef GAME_WIND\ngl_Position=viewProjection*worldPos;\n#else\n${GEOMETRY_CLIP_POSITION}\n#endif\n`);
-    isGeometryShaderPatched = true;
-    return true;
+    patchedShaders.set(name, isPatched);
+    return isPatched;
+}
+
+function patchGeometryShader() {
+    return patchShader('geometryVertexShader', [
+        [VERTEX_DEFINITIONS, WIND_UNIFORMS + VERTEX_DEFINITIONS],
+        [GEOMETRY_WORLD_POSITION, GEOMETRY_WORLD_POSITION + WIND_SHADER],
+        [GEOMETRY_CLIP_POSITION, `#ifdef GAME_WIND\ngl_Position=viewProjection*worldPos;\n#else\n${GEOMETRY_CLIP_POSITION}\n#endif\n`],
+    ], 'The geometry buffer shader of this Babylon version has no place for the wind, so outlines do not sway.');
+}
+
+function patchShadowShader() {
+    return patchShader('shadowMapVertexShader', [
+        [VERTEX_DEFINITIONS, WIND_UNIFORMS + VERTEX_DEFINITIONS],
+        [SHADOW_WORLD_POSITION, SHADOW_WORLD_POSITION + WIND_SHADER],
+    ], 'The shadow map shader of this Babylon version has no place for the wind, so shadows do not sway.');
 }
 
 // The geometry buffer draws with a shader of its own, which the wind plugin does not reach, so the outline and the corner
@@ -158,8 +175,8 @@ function addWindToGeometryBuffer(geometry, engine) {
 
         const windOptions = {
             ...options,
-            defines: `${options.defines}\n#define GAME_WIND`,
-            uniformsNames: [...options.uniformsNames, 'gameWindSwayPhase', 'gameWindGustPhase'],
+            defines: `${options.defines}\n${WIND_DEFINE}`,
+            uniformsNames: [...options.uniformsNames, ...WIND_UNIFORM_NAMES],
         };
         // The engine returns its cached effect for the same defines, so each effect gets the phases bound once.
         const effect = createEffect.call(this, baseName, windOptions, ...rest);
@@ -170,6 +187,32 @@ function addWindToGeometryBuffer(geometry, engine) {
 
         return effect;
     };
+}
+
+// The shadow map draws with Babylon's shadow shader, which the wind plugin does not reach either, so a swaying tree would
+// cast the shadow of a tree at rest. A submesh of a wind material gets the GAME_WIND define among the defines the
+// generator compares, so all wind submeshes share one effect, and a mesh that switches between its wind material and the
+// fade copy of it compiles nothing. The phases are bound before each submesh draws.
+function addWindToShadows(shadowGenerator) {
+    const addCustomDefines = shadowGenerator._isReadyCustomDefines;
+    if (typeof addCustomDefines !== 'function') {
+        console.warn('The shadow generator of this Babylon version takes no custom defines, so shadows do not sway.');
+        return;
+    }
+
+    shadowGenerator.customShaderOptions = { shaderName: 'shadowMap', uniforms: WIND_UNIFORM_NAMES };
+    shadowGenerator._isReadyCustomDefines = function (defines, subMesh, useInstances) {
+        addCustomDefines.call(this, defines, subMesh, useInstances);
+        if (subMesh.getMaterial()?.gameWind && patchShadowShader()) {
+            defines.push(WIND_DEFINE);
+        }
+    };
+    shadowGenerator.onBeforeShadowMapRenderObservable.add(effect => {
+        effect.gameWindShadow ??= effect.defines.includes(WIND_DEFINE);
+        if (effect.gameWindShadow) {
+            bindWind(effect);
+        }
+    });
 }
 
 function bindWind(effect) {
@@ -208,6 +251,7 @@ export async function createEntities(scene, options) {
     let frame = 0;
     const sightline = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 0, 1), 1);
     addWindToGeometryBuffer(options.renderer.geometryBuffer, scene.getEngine());
+    addWindToShadows(options.renderer.shadowGenerator);
 
     const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 600, height: 600 }, scene);
     ground.material = createGroundMaterial();
@@ -330,8 +374,6 @@ export async function createEntities(scene, options) {
         if (!windMaterial) {
             windMaterial = material.clone(`${material.name}-wind`);
             addWind(windMaterial);
-            // The shadow map draws with the material's own shader, so that the shadow sways with the wind.
-            windMaterial.shadowDepthWrapper = new BABYLON.ShadowDepthWrapper(windMaterial, scene);
             windMaterial.gameWindSource = material;
             windMaterials.set(material, windMaterial);
         }
@@ -352,9 +394,6 @@ export async function createEntities(scene, options) {
             // Cloned from the source, because a clone of the wind copy would not carry its plugin reliably.
             const source = material.gameWindSource ?? material;
             fadeMaterial = source.clone(`${material.name}-fade`);
-            // No shadow depth wrapper: Babylon flips the depth pre-pass define twice per frame, each flip creates the
-            // material's effect anew, and the wrapper then compiles a new shadow program for every faded submesh. The
-            // default shadow shader draws the faded shadow instead, which does not sway while the object is faded.
             if (material.gameWindSource) {
                 addWind(fadeMaterial);
             }
@@ -766,16 +805,6 @@ export async function createEntities(scene, options) {
 
         for (const mesh of meshes) {
             mesh.morphTargetManager?.dispose();
-            releaseWindShadow(mesh);
-        }
-    }
-
-    // A ShadowDepthWrapper keeps every mesh it drew in a map that the mesh's dispose does not clean, so a disposed tree
-    // would stay referenced by the wrapper of its wind material.
-    function releaseWindShadow(mesh) {
-        const material = mesh.gameMaterial;
-        if (material?.gameWind) {
-            material.shadowDepthWrapper._meshes?.delete(mesh);
         }
     }
 
