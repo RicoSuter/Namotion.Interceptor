@@ -388,7 +388,8 @@ public class InlinePathKeyTests
         var pathProvider = DefaultPathProvider.Instance;
         var rootRegistered = root.TryGetRegisteredSubject()!;
 
-        // Act — "Servers" is the dictionary key, not a property name
+        // Act
+        // "Servers" is the dictionary key, not a property name.
         var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Servers");
 
         // Assert
@@ -409,7 +410,8 @@ public class InlinePathKeyTests
         var pathProvider = DefaultPathProvider.Instance;
         var rootRegistered = root.TryGetRegisteredSubject()!;
 
-        // Act — navigate through InlinePaths to a property on the child
+        // Act
+        // Navigate through InlinePaths to a property on the child.
         var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Servers.Name");
 
         // Assert
@@ -452,7 +454,8 @@ public class InlinePathKeyTests
         var pathProvider = DefaultPathProvider.Instance;
         var rootRegistered = root.TryGetRegisteredSubject()!;
 
-        // Act — two levels of InlinePaths flattening
+        // Act
+        // Two levels of InlinePaths flattening.
         var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, "Servers.OpcUaServer");
 
         // Assert
@@ -463,7 +466,8 @@ public class InlinePathKeyTests
     [Fact]
     public void WhenPathIsBuiltThroughAnInlineKey_ThenTheKeyIsAPlainSegment()
     {
-        // Arrange — set dictionary via property setter to trigger lifecycle tracking
+        // Arrange
+        // Set dictionary via property setter to trigger lifecycle tracking.
         var context = CreateContext();
         var child = new TestInlineContainer(context) { Name = "Server" };
         var root = new TestInlineContainer(context)
@@ -480,14 +484,16 @@ public class InlinePathKeyTests
         // Act
         var path = nameProperty.TryGetPath(pathProvider, root);
 
-        // Assert — should be "Servers.Name", not "Children[Servers].Name"
+        // Assert
+        // Should be "Servers.Name", not "Children[Servers].Name".
         Assert.Equal("Servers.Name", path);
     }
 
     [Fact]
     public void WhenPathIsBuiltThroughNestedInlineKeys_ThenEachKeyIsAPlainSegment()
     {
-        // Arrange — set dictionaries via property setters
+        // Arrange
+        // Set dictionaries via property setters.
         var context = CreateContext();
         var leaf = new TestInlineContainer(context) { Name = "OpcUaServer" };
         var middle = new TestInlineContainer(context)
@@ -509,7 +515,8 @@ public class InlinePathKeyTests
         // Act
         var path = nameProperty.TryGetPath(pathProvider, root);
 
-        // Assert — should be "Servers.OpcUaServer.Name"
+        // Assert
+        // Should be "Servers.OpcUaServer.Name".
         Assert.Equal("Servers.OpcUaServer.Name", path);
     }
 

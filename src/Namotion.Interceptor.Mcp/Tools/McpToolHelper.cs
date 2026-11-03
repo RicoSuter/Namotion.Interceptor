@@ -260,13 +260,15 @@ internal static class McpToolHelper
     }
 
     /// <summary>
-    /// Whether the tools list the attribute of a listed property, and its value when they do: the policy allows to read
-    /// it, and it has a value or a setter.
+    /// Whether the tools list the attribute of a listed property, and its value when they do: it cannot hold subjects,
+    /// the policy allows to read it, and it has a value or a setter.
     /// </summary>
     internal static bool TryGetListedAttributeValue(
         RegisteredSubjectProperty attribute, McpServerConfiguration configuration, out object? value)
     {
-        if (!configuration.IsAllowed(attribute, McpAccessActions.Read))
+        // A value holding subjects would be serialized with all their properties, past the policy; as for a scalar
+        // property, such a subject is reached through its own path instead.
+        if (attribute.CanContainSubjects || !configuration.IsAllowed(attribute, McpAccessActions.Read))
         {
             value = null;
             return false;

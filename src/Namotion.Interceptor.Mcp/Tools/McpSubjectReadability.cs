@@ -11,6 +11,8 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// With one, a subject is readable when it is the root, or when it is not empty for the policy and has a readable path:
 /// a path from the root, through one of its parents, that passes only properties the configuration's tool path
 /// provider effectively includes, which are ones the path provider effectively includes and the policy allows to read.
+/// A subject reached only through a link the registry does not track as a parent, such as a [Derived] property that
+/// returns it, has no such parent, so with a policy it is not readable, also when the policy allows every read.
 /// </summary>
 /// <remarks>An instance with a policy caches per subject and is not thread-safe, so it serves one call only.</remarks>
 internal sealed class McpSubjectReadability

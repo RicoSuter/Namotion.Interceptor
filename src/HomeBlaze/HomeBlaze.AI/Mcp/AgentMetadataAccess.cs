@@ -13,8 +13,8 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The metadata that the tools let their clients find and agents change: SearchMetadata of a storage finds only the
-/// subjects and properties that the tools show, and for agents only those that SetMetadata lets them change, which no
-/// agent holds.
+/// subjects and properties that are readable for the tools, and for agents only those that SetMetadata lets them
+/// change, which no agent holds.
 /// </summary>
 internal static class AgentMetadataAccess
 {
@@ -46,8 +46,8 @@ internal static class AgentMetadataAccess
     }
 
     /// <summary>
-    /// Gets why the metadata at <paramref name="path"/> of the storage is not visible to the tools, or for agents why an agent
-    /// may not set it, or null when it is visible or may be set. The target is resolved as the tools resolve a path, so that
+    /// Gets why the metadata at <paramref name="path"/> of the storage is hidden from the tools, or for agents why an agent
+    /// may not set it, or null when it is readable or may be set. The target is resolved as the tools resolve a path, so that
     /// a subject or property hidden from them is refused as a missing one; for agents, an agent and a subject that an
     /// agent holds through any parent are refused as well.
     /// </summary>
@@ -72,7 +72,7 @@ internal static class AgentMetadataAccess
         return null;
     }
 
-    // The subject at the path of the storage when the tools resolve the path to it and show it, else null.
+    // The subject at the path of the storage when the tools resolve the path to it and it is readable for them, else null.
     private static RegisteredSubject? TryGetVisibleTarget(RegisteredSubject storage, string path, PathProviderBase pathProvider, Type[] excludeTypes)
     {
         var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, path);

@@ -1,21 +1,16 @@
-using System.Diagnostics.CodeAnalysis;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 public class ReadabilityAccessTests
 {
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
     [Fact]
-    public async Task WhenNoPolicyIsSetAndTheRootIsNotRegistered_ThenSearchAnswersAsBefore()
+    public async Task WhenNoPolicyIsSetAndTheRootIsNotRegistered_ThenSearchListsNoSubject()
     {
         // Arrange
         // The root's context offers the registry of another context but does not register the root itself.
@@ -103,6 +98,40 @@ public class ReadabilityAccessTests
         Assert.Same(first, again);
     }
 
+    [Fact]
+    public async Task WhenAPolicyCallbackMovesASubjectOnThePathBehindAHiddenProperty_ThenTheRestOfThePathDoesNotResolve()
+    {
+        // Arrange
+        // The path passes the root's A and then A's Child. When the policy is asked about A's Child, it moves A behind
+        // the hidden Secret, so A is no longer readable when its Child is looked up.
+        var context = CreateContext();
+        var root = new TestNode(context) { Name = "Root" };
+        var a = new TestNode(context) { Name = "A" };
+        root.A = a;
+        a.Child = new TestNode(context) { Name = "S" };
+
+        var isMoved = false;
+        var policy = new TestAccessPolicy((member, action) =>
+        {
+            if (!isMoved && member.Parent.Subject == a && member.Name == nameof(TestNode.Child))
+            {
+                isMoved = true;
+                root.Secret = a;
+                root.A = null;
+            }
+
+            return action != McpAccessActions.Read || member.Name != nameof(TestNode.Secret);
+        });
+        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance, AccessPolicy = policy };
+
+        // Act
+        var result = await McpToolCaller.CallAsync(root, configuration, "get_property", new { path = "A.Child.Name" });
+
+        // Assert
+        Assert.True(isMoved);
+        Assert.Equal("Path not found: A.Child.Name", result.GetProperty("error").GetString());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -130,14 +159,5 @@ public class ReadabilityAccessTests
         Assert.False(isReadable);
         Assert.Null(subject);
         Assert.Empty(result.GetProperty("results").EnumerateObject());
-    }
-
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
-    {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
-        {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
-        }
     }
 }

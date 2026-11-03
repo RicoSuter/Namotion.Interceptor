@@ -163,12 +163,36 @@ public class HasPathTests
             properties.AddRange(subject.TryGetRegisteredSubject()!.Properties);
         }
 
-        // Act & Assert
-        foreach (var property in properties)
+        // Act
+        var isBuilt = properties.Select(property => property.TryGetPath(pathProvider, rootPerson) is not null).ToArray();
+        var hasPath = properties.Select(property => property.HasPath(pathProvider, rootPerson)).ToArray();
+
+        // Assert
+        Assert.Equal(isBuilt, hasPath);
+    }
+
+    [Fact]
+    public void WhenAPathPassesAnInlinePathsPropertyWhoseSegmentAnotherPropertyHas_ThenItHasAPathThatIsNotBuilt()
+    {
+        // Arrange
+        // Label has the segment of the [InlinePaths] Children, and the key needs the explicit form Children[a.b].
+        var context = CreateContext();
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestShadowedInlineContainer(context) { Name = "child", Label = "label" };
+        var root = new TestShadowedInlineContainer(context)
         {
-            Assert.Equal(
-                property.TryGetPath(pathProvider, rootPerson) is not null,
-                property.HasPath(pathProvider, rootPerson));
-        }
+            Name = "root",
+            Label = "label",
+            Children = new Dictionary<string, TestShadowedInlineContainer> { ["a.b"] = child }
+        };
+        var property = GetProperty(child, nameof(TestShadowedInlineContainer.Name));
+
+        // Act
+        var hasPath = property.HasPath(pathProvider, root);
+        var path = property.TryGetPath(pathProvider, root);
+
+        // Assert
+        Assert.True(hasPath);
+        Assert.Null(path);
     }
 }

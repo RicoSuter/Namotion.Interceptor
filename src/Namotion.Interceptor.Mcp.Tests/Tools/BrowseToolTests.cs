@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
-using Namotion.Interceptor.Mcp.Tests.Tools.Access;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -58,34 +57,6 @@ public class BrowseToolTests
 
         // Assert
         Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
-    }
-
-    [Fact]
-    public async Task WhenThePolicyDeniesWrite_ThenBrowseReportsThePropertyAsNotWritable()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
-        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance,
-            IsReadOnly = false,
-            AccessPolicy = TestAccessPolicy.DenyWrite(nameof(TestDevice.IsOn))
-        };
-        var browseTool = new McpToolFactory(room, config).CreateTools().First(t => t.Name == "browse");
-
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", path = "Device", depth = 0, includeProperties = true });
-        var json = JsonSerializer.SerializeToElement(await browseTool.Handler(input, CancellationToken.None));
-
-        // Assert
-        var properties = json.GetProperty("result").GetProperty("properties");
-        Assert.False(properties.GetProperty("IsOn").TryGetProperty("isWritable", out var isOnWritable) && isOnWritable.GetBoolean());
-        Assert.True(properties.GetProperty("DeviceName").GetProperty("isWritable").GetBoolean());
     }
 
     [Fact]

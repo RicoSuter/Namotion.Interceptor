@@ -1,9 +1,6 @@
-using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Mcp;
 
@@ -22,7 +19,7 @@ public static class McpServerConfigurationExtensions
     /// <summary>
     /// Resolves a property path from <paramref name="root"/> as get_property does: null when the path does not resolve
     /// or the <see cref="McpServerConfiguration.AccessPolicy"/> hides something on it, see "Access Policy" in the MCP
-    /// documentation.
+    /// documentation. <paramref name="root"/> is the tool root: it is readable, and the path is checked from it.
     /// </summary>
     /// <returns>The property and the key of its last segment, as <see cref="PathExtensions.TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> returns them, or null.</returns>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetReadableProperty(
@@ -34,7 +31,8 @@ public static class McpServerConfigurationExtensions
     /// <summary>
     /// Resolves a subject path from <paramref name="root"/> as browse does: null when the path does not resolve or the
     /// <see cref="McpServerConfiguration.AccessPolicy"/> hides the subject or something on the path to it, see "Access
-    /// Policy" in the MCP documentation.
+    /// Policy" in the MCP documentation. <paramref name="root"/> is the tool root: it is readable, and the path is
+    /// checked from it.
     /// </summary>
     /// <returns>The subject, or null.</returns>
     public static RegisteredSubject? TryGetReadableSubject(
@@ -48,9 +46,10 @@ public static class McpServerConfigurationExtensions
     /// prefix, or null when the prefix is empty. Null when no path can be built, the <see cref="McpServerConfiguration.AccessPolicy"/> hides the
     /// subject, see "Access Policy" in the MCP documentation, or the subject's type is in
     /// <see cref="McpServerConfiguration.ExcludeTypes"/> or derived from one, so that a subject gets a path exactly when
-    /// search can list it. The counterpart of
-    /// <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/>, which resolves a path this
-    /// returns for a subject other than <paramref name="root"/> back to the subject.
+    /// search can list it. <paramref name="root"/> is the tool root: it is readable, and the path is built from it. The
+    /// counterpart of <see cref="TryGetReadableSubject(McpServerConfiguration, RegisteredSubject, string)"/>, which
+    /// resolves a path this returns for a subject other than <paramref name="root"/> back to the subject when the path
+    /// provider resolves the path with the prefix, as without a prefix or with the prefix "/" and the separator "/".
     /// </summary>
     /// <returns>The path, or null.</returns>
     public static string? TryGetSubjectPath(
@@ -63,7 +62,7 @@ public static class McpServerConfigurationExtensions
 
         var path = McpToolHelper.TryGetSubjectPath(subject, configuration, root.Subject);
 
-        // A built path is a readable one, so whether the subject is empty for the policy is left, as search checks it.
+        // The built path passes only readable properties, so only emptiness is left to check, as search does.
         return path is not null &&
             configuration.AccessPolicy is { } policy &&
             subject.Subject != root.Subject &&
@@ -78,40 +77,8 @@ public static class McpServerConfigurationExtensions
     /// </summary>
     internal static RegisteredSubject? TryGetReadableSubject(
         this McpServerConfiguration configuration, RegisteredSubject root, string path, McpSubjectReadability readability)
-    {
-        if (configuration.AccessPolicy is null)
-        {
-            return configuration.ToolPathProvider.TryGetSubjectFromPath(root, path);
-        }
-
-        var pathProvider = readability.GetReadableSubjectsPathProvider(configuration.ToolPathProvider);
-        var subject = TryResolveReadableSubject(pathProvider, readability, root, path);
-        return subject is not null && readability.IsReadableWithPathCheck(subject) ? subject : null;
-    }
-
-    // Resolves through the properties the provider includes to a subject that is not empty for the policy.
-    private static RegisteredSubject? TryResolveReadableSubject(
-        PathProviderBase pathProvider, McpSubjectReadability readability, RegisteredSubject root, string path)
-    {
-        if (pathProvider.TryGetPropertyFromPath(root, path) is not
-            { } resolved)
-        {
-            return null;
-        }
-
-        var (property, index) = resolved;
-
-        var value = property.GetValue();
-        var subject = index switch
-        {
-            null => value as IInterceptorSubject,
-            _ when value is null => null,
-            int position when property.IsSubjectCollection => SubjectLookup.FindSubjectInCollection(value, position),
-            _ when property.IsSubjectDictionary => SubjectLookup.FindSubjectInDictionary(value, index),
-            _ => null
-        };
-
-        var registered = subject?.TryGetRegisteredSubject();
-        return registered is not null && !readability.IsEmptyForPolicy(registered) ? registered : null;
-    }
+        => readability.GetReadableSubjectsPathProvider(configuration.ToolPathProvider).TryGetSubjectFromPath(root, path) is { } subject &&
+            readability.IsReadableWithPathCheck(subject)
+                ? subject
+                : null;
 }

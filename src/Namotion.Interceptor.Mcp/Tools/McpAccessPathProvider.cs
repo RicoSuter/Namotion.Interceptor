@@ -31,6 +31,9 @@ internal sealed class McpAccessPathProvider : PathProviderBase
     /// </summary>
     public static bool IsReadable(IMcpAccessPolicy policy, RegisteredSubjectProperty member)
     {
+        // The registry's inclusion rule checks the owner of an attribute only for the member a lookup returns, so the
+        // segment lookup below needs the check itself: an attribute of a hidden property must not take a segment that
+        // a later member or the [InlinePaths] dictionary would answer.
         // Attributes can name each other in a cycle; a chain longer than the subject's properties is one.
         var remainingSteps = member.Parent.Properties.Length;
         var current = member;

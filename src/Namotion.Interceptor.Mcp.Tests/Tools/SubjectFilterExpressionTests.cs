@@ -3,7 +3,7 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
@@ -434,9 +434,6 @@ public class SubjectFilterExpressionTests
         // Assert
         Assert.False(matches);
     }
-
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
 
     private static bool Evaluate(string where, IInterceptorSubject subject, PathProviderBase? pathProvider = null)
     {

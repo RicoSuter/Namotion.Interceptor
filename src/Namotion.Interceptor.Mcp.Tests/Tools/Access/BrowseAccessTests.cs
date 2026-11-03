@@ -2,17 +2,12 @@ using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
+using static Namotion.Interceptor.Mcp.Tests.TestGraphs;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 public class BrowseAccessTests
 {
-    private static IInterceptorSubjectContext CreateContext() =>
-        InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
     private static TestRoom CreateRoom()
     {
         var context = CreateContext();
@@ -173,15 +168,10 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenOneParentOfASubjectIsHidden_ThenBrowseShowsItUnderTheReadableParentWithAPathThroughIt()
+    public async Task WhenOneParentOfASubjectIsHidden_ThenBrowseListsItUnderTheReadableParentWithAPathThroughIt()
     {
         // Arrange
-        // The device got Private first, so a path through Private would be built without a policy.
-        var context = CreateContext();
-        var house = new TestHouse(context) { Address = "Main Street" };
-        var device = new TestDevice(context) { DeviceName = "Camera" };
-        house.Private = device;
-        house.Public = device;
+        var (house, _) = CreateHouseWithSharedDevice();
 
         // Act
         var result = await BrowseAsync(house, TestAccessPolicy.DenyRead(nameof(TestHouse.Private)),
@@ -218,7 +208,7 @@ public class BrowseAccessTests
     }
 
     [Fact]
-    public async Task WhenTheRootHasNoReadableProperty_ThenBrowseStillShowsTheRoot()
+    public async Task WhenTheRootHasNoReadableProperty_ThenBrowseStillListsTheRoot()
     {
         // Arrange
         var room = CreateRoom();

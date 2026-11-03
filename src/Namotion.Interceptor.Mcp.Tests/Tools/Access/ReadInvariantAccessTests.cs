@@ -4,12 +4,11 @@ using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools.Access;
 
 /// <summary>
-/// A policy that allows every read changes nothing about what the tools show or resolve, also when the path provider
+/// A policy that allows every read changes nothing about what the tools list or resolve, also when the path provider
 /// includes only some properties.
 /// </summary>
 public class ReadInvariantAccessTests
@@ -20,9 +19,7 @@ public class ReadInvariantAccessTests
     // excluded by the provider while the device is still reachable.
     private static TestRoom CreateRoom()
     {
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
+        var context = TestGraphs.CreateContext();
 
         var room = new TestRoom(context) { Name = "Kitchen", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
@@ -117,9 +114,7 @@ public class ReadInvariantAccessTests
         // Arrange
         // The device's first parent is outside the tool root. The tools build its path through the first parent from
         // which the registry builds one, the room's Device.
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
+        var context = TestGraphs.CreateContext();
         var device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
         var outside = new TestRoom(context) { Name = "Outside" };
         outside.Device = device;
@@ -156,9 +151,7 @@ public class ReadInvariantAccessTests
     public async Task WhenTheProviderExcludesTheFirstParentOfASubject_ThenADenyWritesPolicyAnswersAsWithoutAPolicy(string toolName, string input, string expectedText)
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
+        var context = TestGraphs.CreateContext();
         var room = new TestRoom(context) { Name = "Kitchen" };
         var group = new TestDeviceGroup(context);
         var root = new TestMixedGroup(context)
@@ -187,13 +180,7 @@ public class ReadInvariantAccessTests
     {
         // Arrange
         // The device's path is built through Private, whose segment contains the separator, so the text does not resolve.
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-        var house = new TestHouse(context) { Address = "Main Street" };
-        var device = new TestDevice(context) { DeviceName = "Camera" };
-        house.Private = device;
-        house.Public = device;
+        var (house, _) = TestGraphs.CreateHouseWithSharedDevice();
         var pathProvider = new DottedPrivatePathProvider();
         var request = JsonSerializer.SerializeToElement(new { format = "json", depth, includeProperties = true });
 
@@ -212,15 +199,6 @@ public class ReadInvariantAccessTests
         {
             segment = property.Name == nameof(TestHouse.Private) ? "My.Private" : property.BrowseName;
             return true;
-        }
-    }
-
-    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
-    {
-        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
-        {
-            segment = property.Name != excludedPropertyName ? property.BrowseName : null;
-            return segment is not null;
         }
     }
 
