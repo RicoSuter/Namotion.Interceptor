@@ -47,7 +47,9 @@
             <MudListSubheader Class="d-flex align-center gap-1" Style="flex-shrink: 0;">
                 @{
                     var canEdit = CanEdit();
-                    var canDelete = Subject is IStorageFile or IConfigurable;
+                    // A subject held in a [Configuration] property of another subject is part of that subject's file, which
+                    // the storage cannot delete it from.
+                    var canDelete = Subject is IStorageFile || (Subject is IConfigurable && !Subject.IsHeldInConfiguration());
                     var showsMetadataButton = _metadataStore is not null || hasNotesLinksOrTags;
                 }
 
@@ -1003,12 +1005,11 @@
     {
         if (Subject == null) return false;
 
-        // Can edit if there's a custom edit component or configuration properties
         var hasEditComponent = ComponentRegistry.HasComponent(
             Subject.GetType(),
             SubjectComponentType.Edit);
 
-        return hasEditComponent || Subject.HasConfigurationProperties();
+        return hasEditComponent || Subject.HasEditableConfigurationProperties();
     }
 
     private async Task OpenEditDialog()

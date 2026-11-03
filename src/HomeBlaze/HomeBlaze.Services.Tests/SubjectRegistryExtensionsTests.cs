@@ -440,6 +440,97 @@ public class SubjectRegistryExtensionsTests
         // Assert
         Assert.Equal("Sound", category);
     }
+
+    [Fact]
+    public void WhenAConfigurationPropertyHoldsAValue_ThenItIsEditable()
+    {
+        // Arrange
+        var subject = new ExtensionsTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(ExtensionsTestSubject.Config))!;
+
+        // Act
+        var isEditable = property.IsEditableConfigurationProperty();
+
+        // Assert
+        Assert.True(isEditable);
+    }
+
+    [Fact]
+    public void WhenAConfigurationPropertyHoldsSubjects_ThenItIsNotEditable()
+    {
+        // Arrange
+        var subject = new ConfigurationOwnerTestParent(CreateContext());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(ConfigurationOwnerTestParent.ConfigurationChildren))!;
+
+        // Act
+        var isEditable = property.IsEditableConfigurationProperty();
+
+        // Assert
+        Assert.False(isEditable);
+    }
+
+    [Fact]
+    public void WhenAPropertyIsNoConfiguration_ThenItIsNotEditable()
+    {
+        // Arrange
+        var subject = new ExtensionsTestSubject(CreateContext());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(ExtensionsTestSubject.Temperature))!;
+
+        // Act
+        var isEditable = property.IsEditableConfigurationProperty();
+
+        // Assert
+        Assert.False(isEditable);
+    }
+
+    [Fact]
+    public void WhenEveryConfigurationPropertyHoldsSubjects_ThenTheSubjectHasNoEditableConfigurationProperties()
+    {
+        // Arrange
+        var context = CreateContext();
+        var holder = new ConfigurationOwnerTestParent(context);
+        var valued = new ExtensionsTestSubject(context);
+
+        // Act
+        var holderHasEditable = holder.HasEditableConfigurationProperties();
+        var valuedHasEditable = valued.HasEditableConfigurationProperties();
+
+        // Assert
+        Assert.False(holderHasEditable);
+        Assert.True(valuedHasEditable);
+    }
+
+    [Fact]
+    public void WhenAConfigurationPropertyOfAParentHoldsTheSubject_ThenItIsHeldInConfiguration()
+    {
+        // Arrange
+        var parent = new ConfigurationOwnerTestParent(CreateContext());
+        var child = new ConfigurationOwnerTestChild();
+        parent.ConfigurationChildren = [child];
+
+        // Act
+        var isHeldInConfiguration = child.IsHeldInConfiguration();
+
+        // Assert
+        Assert.True(isHeldInConfiguration);
+    }
+
+    [Fact]
+    public void WhenOnlyAStatePropertyOfAParentHoldsTheSubject_ThenItIsNotHeldInConfiguration()
+    {
+        // Arrange
+        var parent = new ConfigurationOwnerTestParent(CreateContext());
+        var child = new ConfigurationOwnerTestChild();
+        parent.StateChild = child;
+
+        // Act
+        var isChildHeldInConfiguration = child.IsHeldInConfiguration();
+        var isParentHeldInConfiguration = parent.IsHeldInConfiguration();
+
+        // Assert
+        Assert.False(isChildHeldInConfiguration);
+        Assert.False(isParentHeldInConfiguration);
+    }
 }
 
 public interface ICategorizedTestInterface
