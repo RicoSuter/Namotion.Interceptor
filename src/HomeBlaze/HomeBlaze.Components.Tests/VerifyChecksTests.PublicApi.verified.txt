@@ -1899,3 +1899,13 @@ namespace HomeBlaze.Components.Operations
         Failed = 2,
     }
 }
+namespace HomeBlaze.Components.Preferences
+{
+    public sealed class BrowserPreferences : System.IAsyncDisposable
+    {
+        public BrowserPreferences(Microsoft.AspNetCore.Components.PersistentComponentState applicationState, Microsoft.AspNetCore.Http.IHttpContextAccessor httpContextAccessor, Microsoft.JSInterop.IJSRuntime jsRuntime, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Components.Preferences.BrowserPreferences> logger) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public string? Get(string key) { }
+        public System.Threading.Tasks.ValueTask SetAsync(string key, string value) { }
+    }
+}
