@@ -203,6 +203,45 @@ public sealed class TimeLimitedStoreTests : IDisposable
         Assert.Equal(cancellation.Token, canceled.CancellationToken);
     }
 
+    [Fact]
+    public async Task WhenTheClientIsAFileSystem_ThenTheStoreIsOneAndDeletesAnEmptyDirectoryOnly()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-limited-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(directory.FullName, "Empty"));
+            Directory.CreateDirectory(Path.Combine(directory.FullName, "Full"));
+            File.WriteAllText(Path.Combine(directory.FullName, "Full", "Notes.md"), "content");
+            using var store = new TimeLimitedStore(StorageFactory.Disk(directory.FullName), _timeProvider, _logger);
+
+            // Act
+            var isFileSystem = await store.IsFileSystem();
+            await store.DeleteDirectory("Empty", recursive: false);
+            var exception = await Record.ExceptionAsync(() => store.DeleteDirectory("Full", recursive: false));
+
+            // Assert
+            Assert.True(isFileSystem);
+            Assert.False(Directory.Exists(Path.Combine(directory.FullName, "Empty")));
+            Assert.IsAssignableFrom<IOException>(exception);
+            Assert.True(File.Exists(Path.Combine(directory.FullName, "Full", "Notes.md")));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheClientIsNotAFileSystem_ThenTheStoreIsNone()
+    {
+        // Arrange & Act
+        var isFileSystem = await _storage.IsFileSystem();
+
+        // Assert
+        Assert.False(isFileSystem);
+    }
+
     public void Dispose() => _storage.Dispose();
 
     private async Task LetHangingCallTimeOutAsync()

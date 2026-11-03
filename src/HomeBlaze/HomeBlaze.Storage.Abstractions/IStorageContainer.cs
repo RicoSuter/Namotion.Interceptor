@@ -79,6 +79,7 @@ public interface IStorageContainer
     /// <summary>
     /// Deletes a subject from storage. Removes the file and unregisters it from the hierarchy.
     /// The path is resolved from the internal registry - subjects must be registered before deletion.
+    /// A folder is deleted as well, but only an empty one.
     /// </summary>
     /// <param name="subject">The subject to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -988,30 +988,75 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is not the subject of a file in this storage.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not the subject of a file or folder in this storage, or it is a folder that is not empty.
+    /// </exception>
     public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = Connection;
         await RunOperationAsync(connection, token =>
         {
-            // A folder has an entry too, but no file that could be deleted.
-            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder)
+            if (!connection.Index.TryGetEntry(subject, out var entry))
                 throw new InvalidOperationException("Subject not found in storage registry");
 
-            return DeleteEntryAsync(connection, entry, token);
+            return entry.IsFolder
+                ? DeleteFolderAsync(connection, entry, token)
+                : DeleteEntryAsync(connection, entry, token);
         }, cancellationToken);
+    }
+
+    // Only an empty folder, which has at most its own metadata file. Never recursive, so that a file that appeared since
+    // the last pass makes the delete fail instead of being lost. Called on the worker.
+    private async Task DeleteFolderAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
+    {
+        var folderPrefix = entry.Path + "/";
+        var metadataPath = StorageMetadataPath.GetFolderFilePath(entry.Path);
+        foreach (var other in connection.Index.Entries)
+        {
+            if (other.Path.StartsWith(folderPrefix, StringComparison.Ordinal) &&
+                !string.Equals(other.Path, metadataPath, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"'{StoragePath.GetName(entry.Path)}' cannot be deleted: the folder is not empty.");
+            }
+        }
+
+        await MetadataStore.DeleteFolderMetadataFileAsync(connection, entry.Path, cancellationToken);
+
+        // Only a file system has folders as such. On a bucket the folder is virtual and ends with its last object, and
+        // deleting it there deletes every object below it.
+        if (await connection.Client.IsFileSystem())
+        {
+            try
+            {
+                await connection.Client.DeleteDirectory(entry.Path, recursive: false, cancellationToken);
+            }
+            catch (Exception exception) when (CanHaveReachedStorage(exception))
+            {
+                connection.NotifyChanged(entry.Path);
+                throw;
+            }
+        }
+
+        connection.Index.Remove(entry.Path);
+        connection.Reconciler.Apply();
+        _subjectFactory.Release(entry.Subject);
+
+        // The key is free now, and an entry that waited for it is only loaded by a pass.
+        connection.NotifyChanged(entry.Path);
+
+        _logger?.LogDebug("Deleted folder from storage: {Path}", entry.Path);
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// Adds <c>Delete</c>, which requires confirmation and deletes through <see cref="DeleteSubjectAsync"/>, to each
-    /// subject that this storage holds in a file, unless it has a delete operation or a property of that name already.
+    /// subject that this storage holds in a file and to each of its folders, unless it has a delete operation or a property
+    /// of that name already. The operation of a folder is enabled only while the folder is empty.
     /// A subject that keeps its <c>Delete</c> when it moves to another storage deletes through the storage that added it.
     /// </remarks>
     public void AddMethods(IInterceptorSubject subject)
     {
-        if (subject is VirtualFolder ||
-            subject.TryGetRegisteredSubject() is not { } registered ||
+        if (subject.TryGetRegisteredSubject() is not { } registered ||
             registered.TryGetProperty(DeleteOperationName) is not null ||
             !MetadataStore.Applier.TryFindStoredSubject(registered, out var stored) ||
             !ReferenceEquals(stored, registered) ||
@@ -1026,13 +1071,21 @@ public partial class FluentStorageContainer :
             Purpose = OperationPurpose.Delete,
             PropertyName = DeleteOperationName,
             Title = "Delete",
-            Description = "Deletes the file of this subject from the storage.",
+            Description = subject is VirtualFolder
+                ? "Deletes the folder from the storage, which only an empty folder allows."
+                : "Deletes the file of this subject from the storage.",
             Icon = "Delete",
             RequiresConfirmation = true,
             Parameters = DeleteParameters,
         };
 
-        registered.AddProperty(DeleteOperationName, typeof(MethodMetadata), _ => operation, null);
+        var property = registered.AddProperty(DeleteOperationName, typeof(MethodMetadata), _ => operation, null);
+
+        // A folder with something in it cannot be deleted, so the operation is offered only while it is empty.
+        if (subject is VirtualFolder folder)
+        {
+            property.AddAttribute<bool>(KnownAttributes.IsEnabled, _ => folder.Children.Count == 0);
+        }
     }
 
     private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)

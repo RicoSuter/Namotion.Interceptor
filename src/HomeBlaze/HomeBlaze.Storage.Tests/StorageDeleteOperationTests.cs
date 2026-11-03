@@ -47,7 +47,7 @@ public class StorageDeleteOperationTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenTheStorageHoldsFoldersAndSubjectsInsideFiles_ThenOnlyTheStoredSubjectsHaveADeleteOperation()
+    public async Task WhenTheStorageHoldsFoldersAndSubjectsInsideFiles_ThenOnlyTheStoredSubjectsAndFoldersHaveADeleteOperation()
     {
         // Arrange
         WriteFile("House/Motor.json", SerializeMotor("Motor"));
@@ -60,7 +60,7 @@ public class StorageDeleteOperationTests : StorageTestBase
         var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
         var device = Assert.IsType<MetadataTestDevice>(storage.Children["Shelly"]);
         Assert.Null(GetDeleteOperation(storage));
-        Assert.Null(GetDeleteOperation(house));
+        Assert.NotNull(GetDeleteOperation(house));
         Assert.NotNull(GetDeleteOperation(house.Children["Motor"]));
         Assert.NotNull(GetDeleteOperation(device));
         Assert.Null(GetDeleteOperation(device.Channel!));
@@ -151,5 +151,86 @@ public class StorageDeleteOperationTests : StorageTestBase
         // Assert
         Assert.False(File.Exists(GetFullPath("Devices/Engine.json")));
         Assert.False(devices.Children.ContainsKey("Engine"));
+    }
+
+    [Fact]
+    public async Task WhenAFolderIsEmpty_ThenItsDeleteOperationIsEnabled()
+    {
+        // Arrange
+        Directory.CreateDirectory(GetFullPath("Empty"));
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var empty = Assert.IsType<VirtualFolder>(storage.Children["Empty"]);
+        Assert.True(empty.TryGetRegisteredSubject()!.TryGetProperty("Delete")!.IsMethodEnabled());
+    }
+
+    [Fact]
+    public async Task WhenAFolderHasChildren_ThenItsDeleteOperationIsDisabled()
+    {
+        // Arrange
+        WriteFile("House/Motor.json", SerializeMotor("Motor"));
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
+        Assert.False(house.TryGetRegisteredSubject()!.TryGetProperty("Delete")!.IsMethodEnabled());
+    }
+
+    [Fact]
+    public async Task WhenAnEmptyFolderIsDeleted_ThenItsDirectoryAndMetadataFileAreGone()
+    {
+        // Arrange
+        Directory.CreateDirectory(GetFullPath("Empty"));
+        WriteFile("Empty/.metadata.json", """{ "navTitle": "Empty" }""");
+        var storage = await ConnectAsync();
+        var empty = storage.Children["Empty"];
+        var deleteOperation = GetDeleteOperation(empty)!;
+
+        // Act
+        await deleteOperation.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.False(Directory.Exists(GetFullPath("Empty")));
+        Assert.False(storage.Children.ContainsKey("Empty"));
+    }
+
+    [Fact]
+    public async Task WhenAFolderWithChildrenIsDeleted_ThenItThrowsAndKeepsTheFolder()
+    {
+        // Arrange
+        WriteFile("House/Motor.json", SerializeMotor("Motor"));
+        var storage = await ConnectAsync();
+        var house = storage.Children["House"];
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => storage.DeleteSubjectAsync(house, CancellationToken.None));
+
+        // Assert
+        Assert.Contains("not empty", exception.Message);
+        Assert.True(File.Exists(GetFullPath("House/Motor.json")));
+        Assert.Same(house, storage.Children["House"]);
+    }
+
+    [Fact]
+    public async Task WhenAFileAppearedInAnEmptyFolderSinceTheLastPass_ThenDeletingTheFolderFailsAndKeepsTheFile()
+    {
+        // Arrange
+        Directory.CreateDirectory(GetFullPath("Empty"));
+        var storage = await ConnectAsync();
+        var empty = storage.Children["Empty"];
+        WriteFile("Empty/Late.txt");
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => storage.DeleteSubjectAsync(empty, CancellationToken.None));
+
+        // Assert
+        Assert.NotNull(exception);
+        Assert.True(File.Exists(GetFullPath("Empty/Late.txt")));
     }
 }

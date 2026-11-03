@@ -235,6 +235,13 @@ internal sealed class StorageMetadataStore
         }
     }
 
+    /// <summary>
+    /// Deletes the metadata file of a folder that is deleted, if it has one, and removes it from the index. A failure
+    /// is thrown, as the folder cannot be deleted while the file is there. Called on the worker.
+    /// </summary>
+    public Task DeleteFolderMetadataFileAsync(StorageConnection connection, string folderPath, CancellationToken cancellationToken)
+        => DeleteMetadataFileAsync(connection, StorageMetadataPath.GetFolderFilePath(folderPath), cancellationToken);
+
     private static async Task DeleteMetadataFileAsync(StorageConnection connection, string path, CancellationToken cancellationToken)
     {
         if (connection.Index.TryGet(path, out var entry))
