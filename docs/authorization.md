@@ -65,7 +65,7 @@ A member's segment is:
 
 A member has no index and a member path has at least one segment, so a pattern whose last segment has an index, such as `Line.Machines[CNC1]`, and the separator alone, `.`, would match no member; they fail compilation, so that a deny cannot silently match nothing. A rule for a branch ends in `.**`: a deny on `Line.Machines[CNC1].**` covers the machine's members and everything below, and `Line.Machines[CNC1].*` only the machine's own members.
 
-Compilation cannot catch every pattern that matches nothing, because it does not see the graph. Besides a misspelled name, the case to know is the bare key of an `[InlinePaths]` entry as the last segment. The registry writes the path of the subject at `Security.Roles[Reader]` as `Security.Reader`, but the member holding that subject is `Roles`, so the pattern `Security.Reader` names no member: it compiles, matches nothing, and as a deny hides nothing. Write `Security.Reader.**` for the subject and everything below it. An application that lets people write patterns can check each pattern against its graph and warn about one that matches no member.
+Compilation cannot catch every pattern that matches nothing, because it does not see the graph. Besides a misspelled name, the case to know is the bare key of an `[InlinePaths]` entry as the last segment. The registry builds the path of the subject at `Security.Roles[Reader]` as `Security.Reader`, but the member holding that subject is `Roles`, so the pattern `Security.Reader` names no member: it compiles, matches nothing, and as a deny hides nothing. Write `Security.Reader.**` for the subject and everything below it. An application that lets people write patterns can check each pattern against its graph and warn about one that matches no member.
 
 - A pattern matches the spellings the path provider writes plus the bare key of an `[InlinePaths]` entry, so `Security.FullReader.Name` and `Security.Roles[FullReader].Name` both match and `Security.Roles.**` covers every key. A provider that also resolves other spellings, such as names in another case, is matched only in the spelling it writes. A key the reader only resolves in one spelling, because another property's segment shadows the other, is matched in that spelling.
 - Segment text is taken as written, and a segment name or index with leading or trailing whitespace, such as `Home. Kitchen`, fails compilation; a quoted key may contain inner spaces, as in `Rooms['Living Room'].*`.
@@ -95,7 +95,7 @@ A root is a subject without parents that the registry still counts as attached (
 ```csharp
 var execute = new PermissionAction("execute");
 IMemberTagProvider tagProvider = new MyTagProvider();       // maps your markers to tags
-PathProviderBase pathProvider = DefaultPathProvider.Instance; // the provider your paths are written with
+PathProviderBase pathProvider = DefaultPathProvider.Instance; // the provider your paths are built with
 
 var roles = new[]
 {
