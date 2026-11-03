@@ -435,7 +435,20 @@ public class MqttMappingCacheTests
 
     private sealed class MutablePathProvider() : AttributeBasedPathProvider("mqtt", '/')
     {
-        public bool Included { get; set; } = true;
+        private long _version;
+        private volatile bool _included = true;
+
+        public bool Included
+        {
+            get => _included;
+            set
+            {
+                _included = value;
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public override long Version => Volatile.Read(ref _version);
 
         public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
         {
@@ -570,13 +583,25 @@ public class MqttMappingCacheTests
         /// </summary>
         public RegisteredSubjectProperty? ResolvedPropertyOverride { get; set; }
 
+        /// <summary>
+        /// When set, runs once inside the next forward lookup, after the inner mapper answered: a structural change
+        /// that lands while a cache computes its entry.
+        /// </summary>
+        public Action? DuringNextMapping { get; set; }
+
+        public long Version => _inner.Version;
+
         public bool TryGetMapping(
             RegisteredSubjectProperty property,
             IInterceptorSubject rootSubject,
             [NotNullWhen(true)] out MqttPropertyMapping? mapping)
         {
             Interlocked.Increment(ref _mappingLookupCount);
-            return _inner.TryGetMapping(property, rootSubject, out mapping);
+            var found = _inner.TryGetMapping(property, rootSubject, out mapping);
+            var duringMapping = DuringNextMapping;
+            DuringNextMapping = null;
+            duringMapping?.Invoke();
+            return found;
         }
 
         public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
@@ -608,9 +633,17 @@ public partial class MqttCacheTestRoot
 
     public partial MqttCacheTestChild? Hidden { get; set; }
 
+    [Path("mqtt", "items")]
+    public partial MqttCacheTestChild[] Items { get; set; }
+
+    [Path("mqtt", "map")]
+    public partial Dictionary<string, MqttCacheTestChild> Map { get; set; }
+
     public MqttCacheTestRoot()
     {
         Name = string.Empty;
+        Items = [];
+        Map = new Dictionary<string, MqttCacheTestChild>();
     }
 }
 
