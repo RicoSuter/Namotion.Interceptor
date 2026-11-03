@@ -21,7 +21,7 @@ const INK_DARKNESS = 0.6;
  * edges or 'soft' edges); whether outlines draw; the resolution of the corner shading relative to the render (0 turns it
  * off); and whether multisampling, the light sharpen, the wind and the sightline fade run.
  */
-export const QUALITY_PRESETS = Object.freeze({
+export const GRAPHICS_PRESETS = Object.freeze({
     low: Object.freeze({ resolution: 1, frameCap: 30, shadows: 'hard', outlines: true, ambientOcclusion: 0, multisampling: true, sharpen: true, wind: true, fade: true }),
     medium: Object.freeze({ resolution: 1.5, frameCap: 60, shadows: 'soft', outlines: true, ambientOcclusion: 0.5, multisampling: true, sharpen: true, wind: true, fade: true }),
     high: Object.freeze({ resolution: 2, frameCap: 60, shadows: 'soft', outlines: true, ambientOcclusion: 1, multisampling: true, sharpen: true, wind: true, fade: true }),
@@ -60,17 +60,17 @@ const AVERAGE_WEIGHT = 0.1;
 export function expandGraphics(choice, current, autoLevel) {
     const preset = choice?.preset;
     if (preset !== CUSTOM) {
-        const level = Object.hasOwn(QUALITY_PRESETS, preset ?? '') ? preset : autoLevel;
-        return { preset: level === preset ? preset : AUTO, level, settings: QUALITY_PRESETS[level] };
+        const level = Object.hasOwn(GRAPHICS_PRESETS, preset ?? '') ? preset : autoLevel;
+        return { preset: level === preset ? preset : AUTO, level, settings: GRAPHICS_PRESETS[level] };
     }
 
-    const base = current ?? QUALITY_PRESETS.medium;
+    const base = current ?? GRAPHICS_PRESETS.medium;
     const settings = {};
     for (const [name, values] of Object.entries(SETTING_VALUES)) {
         settings[name] = values.includes(choice[name]) ? choice[name] : base[name];
     }
 
-    for (const [name, presetSettings] of Object.entries(QUALITY_PRESETS)) {
+    for (const [name, presetSettings] of Object.entries(GRAPHICS_PRESETS)) {
         if (Object.keys(SETTING_VALUES).every(key => presetSettings[key] === settings[key])) {
             return { preset: name, level: name, settings: presetSettings };
         }

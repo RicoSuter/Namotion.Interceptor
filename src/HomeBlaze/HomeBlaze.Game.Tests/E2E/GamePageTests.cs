@@ -125,13 +125,24 @@ public class GamePageTests
         // Arrange
         await using var world = await GameWorld.CreateAsync(_fixture);
         world.Game.Tools = new Dictionary<string, GameTool> { ["emote-tool"] = new EmoteTool() };
-        var (clapper, _) = await world.JoinAsync();
-        var (watcher, _) = await world.JoinAsync();
+        var (clapper, clapperPlayer) = await world.JoinAsync();
+        var (watcher, watcherPlayer) = await world.JoinAsync();
         var watcherCanvas = watcher.GetByTestId("game-canvas");
-        // The watcher shows its own person and the clapper's, each idling, once both are loaded.
+        // The watcher loaded the clapper's person once a person idles where the clapper stands relative to the watcher,
+        // whose position the camera follows from 30 tiles south.
         await watcher.WaitForFunctionAsync(
-            "() => BABYLON.EngineStore.LastCreatedEngine.scenes[0].animationGroups.filter(group => group.name.endsWith('-Idle') && group.isPlaying).length >= 2",
-            null, new() { Timeout = Timeout });
+            """
+            ([offsetX, offsetZ]) => {
+                const scene = BABYLON.EngineStore.LastCreatedEngine.scenes[0];
+                const camera = scene.activeCamera;
+                const x = camera.position.x + offsetX;
+                const z = camera.position.z + 30 + offsetZ;
+                return scene.transformNodes.some(node => Math.abs(node.position.x - x) < 0.5 && Math.abs(node.position.z - z) < 0.5
+                    && scene.animationGroups.some(group => group.name === `${node.name}-Idle` && group.isPlaying));
+            }
+            """,
+            new[] { clapperPlayer.X - watcherPlayer.X, clapperPlayer.Y - watcherPlayer.Y },
+            new() { Timeout = Timeout });
 
         // Act
         await clapper.GetByTestId("game-action").Filter(new() { HasText = "Clap" }).ClickAsync(new() { Timeout = Timeout });
@@ -228,6 +239,62 @@ public class GamePageTests
     }
 
     [Fact]
+    public async Task WhenOutlinesAreTurnedOffInTheGraphicsDialog_ThenTheirPassLeavesTheChainAndTheSceneStaysMultisampled()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, _) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await PickGraphicsAsync(page, "game-graphics-preset", "Medium");
+        await Expect(canvas).ToHaveAttributeAsync("data-game-quality", "medium", new() { Timeout = Timeout });
+        var chainWithOutlines = await ReadPassChainAsync(page);
+
+        // Act
+        await page.GetByTestId("game-graphics-outlines").ClickAsync();
+        await Expect(canvas).ToHaveAttributeAsync("data-game-outlines", "false", new() { Timeout = Timeout });
+        var chainWithoutOutlines = await ReadPassChainAsync(page);
+
+        // Assert
+        Assert.StartsWith("outline:4,", chainWithOutlines);
+        Assert.DoesNotContain("outline", chainWithoutOutlines);
+        // The pass that now receives the scene multisamples it, and no other pass does.
+        Assert.Matches("^[^,:]+:4(,[^,:]+:1)*$", chainWithoutOutlines);
+    }
+
+    [Fact]
+    public async Task WhenTheSightlineFadeIsTurnedOff_ThenAnObjectInFrontOfThePlayerShowsAgainAndStaysVisible()
+    {
+        // Arrange
+        await using var world = await GameWorld.CreateAsync(_fixture);
+        var (page, player) = await world.JoinAsync();
+        var canvas = page.GetByTestId("game-canvas");
+        // A 10 tile high wall 3 tiles south of the player, between it and the camera.
+        world.Game.SetObjects(new Dictionary<string, GameObject> { ["wall"] = new Wall { X = player.X - 1, Y = player.Y - 3 } });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "1", new() { Timeout = Timeout });
+
+        // Act
+        await page.GetByTestId("game-graphics").ClickAsync(new() { Timeout = Timeout });
+        await page.GetByTestId("game-graphics-fade").ClickAsync();
+        await Expect(canvas).ToHaveAttributeAsync("data-game-fade", "false", new() { Timeout = Timeout });
+        await Expect(canvas).ToHaveAttributeAsync("data-game-faded", "0", new() { Timeout = Timeout });
+        // Long enough for many sightline tests at their interval of 100 ms.
+        var fadedAfterFrames = await page.EvaluateAsync<string?>(
+            """
+            async () => {
+                for (let index = 0; index < 30; index++) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                }
+
+                return document.querySelector('[data-testid="game-canvas"]').dataset.gameFaded;
+            }
+            """);
+
+        // Assert
+        Assert.Equal("0", fadedAfterFrames);
+    }
+
+    [Fact]
     public async Task WhenGraphicsChoicesAreExpanded_ThenCustomSettingsMergeFallBackAndMatchPresets()
     {
         // Arrange
@@ -239,14 +306,14 @@ public class GamePageTests
         var results = await page.EvaluateAsync<string[]>(
             """
             async () => {
-                const { expandGraphics, QUALITY_PRESETS } = await import('/_content/HomeBlaze.Game/game-render.js');
+                const { expandGraphics, GRAPHICS_PRESETS } = await import('/_content/HomeBlaze.Game/game-render.js');
                 const describe = ({ preset, level, settings }) => [preset, level, settings.shadows, settings.resolution, settings.sharpen].join(' ');
                 return [
-                    expandGraphics({ preset: 'custom', shadows: 'off' }, QUALITY_PRESETS.low, 'medium'),
-                    expandGraphics({ preset: 'custom', sharpen: 'yes', resolution: 3 }, QUALITY_PRESETS.low, 'medium'),
+                    expandGraphics({ preset: 'custom', shadows: 'off' }, GRAPHICS_PRESETS.low, 'medium'),
+                    expandGraphics({ preset: 'custom', sharpen: 'yes', resolution: 3 }, GRAPHICS_PRESETS.low, 'medium'),
                     expandGraphics({ preset: 'custom', shadows: 'off' }, null, 'medium'),
-                    expandGraphics({ preset: 'high', shadows: 'off' }, QUALITY_PRESETS.low, 'medium'),
-                    expandGraphics({ preset: 'unknown' }, QUALITY_PRESETS.high, 'low'),
+                    expandGraphics({ preset: 'high', shadows: 'off' }, GRAPHICS_PRESETS.low, 'medium'),
+                    expandGraphics({ preset: 'unknown' }, GRAPHICS_PRESETS.high, 'low'),
                     expandGraphics(null, null, 'medium'),
                 ].map(describe);
             }
@@ -750,6 +817,16 @@ public class GamePageTests
 
     private static Task PickGraphicsAsync(IPage page, string groupTestId, string label) =>
         GetGraphicsItem(page, groupTestId, label).ClickAsync(new() { Timeout = Timeout });
+
+    // The camera's post-processes in order, each as its name and samples, separated by commas.
+    private static Task<string> ReadPassChainAsync(IPage page) =>
+        page.EvaluateAsync<string>(
+            """
+            () => BABYLON.EngineStore.LastCreatedEngine.scenes[0].activeCamera._postProcesses
+                .filter(Boolean)
+                .map(pass => `${pass.name}:${pass.samples}`)
+                .join(',')
+            """);
 
     // Counts how often the render target of the expression, which reads the game's scene as scene, renders within 30
     // animation frames.
