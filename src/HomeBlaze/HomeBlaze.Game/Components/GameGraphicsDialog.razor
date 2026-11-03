@@ -60,7 +60,7 @@
             <MudSwitch T="bool" Value="_graphics.Sharpen" Color="Color.Primary" data-testid="game-graphics-sharpen"
                        ValueChanged="@(value => ChangeAsync("sharpen", value))" />
         </GameGraphicsRow>
-        <GameGraphicsRow Title="Wind" Caption="A few instructions per tree vertex in every pass.">
+        <GameGraphicsRow Title="Wind" Caption="Off stands the trees still; the shader work for the sway stays.">
             <MudSwitch T="bool" Value="_graphics.Wind" Color="Color.Primary" data-testid="game-graphics-wind"
                        ValueChanged="@(value => ChangeAsync("wind", value))" />
         </GameGraphicsRow>
@@ -129,14 +129,14 @@
     private void Close() => MudDialog?.Close();
 
     /// <summary>
-    /// Shows the graphics of <paramref name="view"/> and applies and stores every change until the dialog closes; does
-    /// nothing when the view is gone.
+    /// Shows the graphics of <paramref name="view"/>, which the dialog applies and stores on every change until it closes;
+    /// returns the dialog, or null when the view is gone.
     /// </summary>
-    internal static async Task ShowAsync(IDialogService dialogService, GameViewConnection view)
+    internal static async Task<IDialogReference?> ShowAsync(IDialogService dialogService, GameViewConnection view)
     {
         if (await view.GetGraphicsAsync() is not { } graphics)
         {
-            return;
+            return null;
         }
 
         var parameters = new DialogParameters<GameGraphicsDialog>
@@ -144,8 +144,7 @@
             { x => x.Target, new Session(view, graphics) },
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
-        var dialog = await dialogService.ShowAsync<GameGraphicsDialog>("Graphics", parameters, options);
-        await dialog.Result;
+        return await dialogService.ShowAsync<GameGraphicsDialog>("Graphics", parameters, options);
     }
 
     /// <summary>

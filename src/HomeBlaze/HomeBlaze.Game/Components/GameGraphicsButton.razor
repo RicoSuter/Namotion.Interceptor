@@ -1,10 +1,14 @@
+@implements IDisposable
 @inject IDialogService DialogService
 
 <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="game-action" StartIcon="@Icons.Material.Filled.Tune"
-           Disabled="@(Disabled || _isOpen || View is null)" data-testid="game-graphics" OnClick="OpenAsync">Graphics</MudButton>
+           Disabled="@(Disabled || _isOpening || _dialog is not null || View is null)" data-testid="game-graphics" OnClick="OpenAsync">Graphics</MudButton>
 
 @code {
-    private bool _isOpen;
+    private bool _isOpening;
+    // The open dialog and the view it changes; closed when the page replaces or drops that view.
+    private IDialogReference? _dialog;
+    private GameViewConnection? _dialogView;
 
     // Cascaded, because a parameter must be public and the connection is internal.
     [CascadingParameter] private GameViewConnection? View { get; set; }
@@ -14,21 +18,60 @@
     /// </summary>
     [Parameter] public bool Disabled { get; set; }
 
+    protected override void OnParametersSet()
+    {
+        if (_dialog is not null && !ReferenceEquals(View, _dialogView))
+        {
+            CloseDialog();
+        }
+    }
+
     private async Task OpenAsync()
     {
-        if (_isOpen || View is not { } view)
+        if (_isOpening || _dialog is not null || View is not { } view)
         {
             return;
         }
 
-        _isOpen = true;
+        _isOpening = true;
+        IDialogReference? dialog;
         try
         {
-            await GameGraphicsDialog.ShowAsync(DialogService, view);
+            dialog = await GameGraphicsDialog.ShowAsync(DialogService, view);
         }
         finally
         {
-            _isOpen = false;
+            _isOpening = false;
+        }
+
+        if (dialog is null)
+        {
+            return;
+        }
+
+        _dialog = dialog;
+        _dialogView = view;
+        if (!ReferenceEquals(View, view))
+        {
+            // The page replaced the view while the dialog was opening.
+            CloseDialog();
+        }
+
+        await dialog.Result;
+        if (ReferenceEquals(_dialog, dialog))
+        {
+            _dialog = null;
+            _dialogView = null;
         }
     }
+
+    private void CloseDialog()
+    {
+        var dialog = _dialog;
+        _dialog = null;
+        _dialogView = null;
+        dialog?.Close();
+    }
+
+    public void Dispose() => CloseDialog();
 }
