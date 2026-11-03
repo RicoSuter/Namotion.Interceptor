@@ -3,7 +3,6 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -246,7 +245,7 @@ public static class PathExtensions
             return false;
         }
 
-        var isInlinePathsKey = IsInlinePathsKey(subject, property, name, ownSegment);
+        var isInlinePathsKey = IsInlinePathsKey(property, name, ownSegment);
         bool resolved;
         if (segment.HasIndex)
         {
@@ -274,10 +273,8 @@ public static class PathExtensions
     /// <summary>
     /// A bare segment is an [InlinePaths] key when it resolved to the inline property without naming it.
     /// </summary>
-    private static bool IsInlinePathsKey(
-        RegisteredSubject subject, RegisteredSubjectProperty property, string segment, string ownSegment)
-        => segment != ownSegment &&
-           InlinePathsAttribute.IsInlinePathsProperty(subject.Subject.GetType(), property.Name);
+    private static bool IsInlinePathsKey(RegisteredSubjectProperty property, string segment, string ownSegment)
+        => segment != ownSegment && property.IsInlinePathsProperty;
 
     /// <summary>
     /// Gets all properties from a collection of paths, resolved as <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/> does.
@@ -372,9 +369,7 @@ public static class PathExtensions
                 var (frameProperty, index, segment) = frames[i];
 
                 // [InlinePaths] frames emit just the key where it resolves back as that key.
-                if (index is not null &&
-                    InlinePathsAttribute.IsInlinePathsProperty(
-                        frameProperty.Subject.GetType(), frameProperty.Name))
+                if (index is not null && frameProperty.IsInlinePathsProperty)
                 {
                     if (!TryAppendInlineKey(builder, pathProvider, characters, frameProperty, index, segment))
                     {
