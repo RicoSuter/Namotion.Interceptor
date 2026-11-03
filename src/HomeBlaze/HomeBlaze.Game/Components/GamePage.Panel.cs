@@ -12,12 +12,10 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Game.Components;
 
-// The panel: the actions of the game and its tools, the targets the player looks at, Nearby, renaming and the quality.
+// The panel: the actions of the game and its tools, the targets the player looks at, Nearby, renaming and the graphics.
 public partial class GamePage
 {
     private const string InsecureMessage = "Voice needs HTTPS";
-    // Taken from the browser once the view started.
-    private string _quality = "auto";
 
     private bool IsMicrophoneOn => _voice?.IsMicrophoneOn == true;
 
@@ -84,8 +82,6 @@ public partial class GamePage
             StateHasChanged();
         }
     }
-
-    private Task ApplyQualityAsync() => _view?.SetQualityAsync(_quality) ?? Task.CompletedTask;
 
     private async Task EditAsync()
     {

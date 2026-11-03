@@ -83,9 +83,10 @@
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="game-voice-message" data-testid="game-voice-message">@voiceMessage</MudAlert>
         }
-        @* Stored per browser by game.js, which also applies it, so the field only mirrors the choice. *@
         <section>
-            <GameQualitySelect @bind-Value="_quality" @bind-Value:after="ApplyQualityAsync" Disabled="@(!_isStarted)" />
+            <CascadingValue Value="_view">
+                <GameGraphicsButton Disabled="@(!_isStarted)" />
+            </CascadingValue>
         </section>
         @* The operations of the game and its tools come first, so they keep their place while targets come and go. *@
         <section>

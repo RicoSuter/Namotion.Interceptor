@@ -165,7 +165,7 @@ public partial class GamePage
         }
 
         _reference ??= DotNetObjectReference.Create(this);
-        var view = new GameViewConnection(JsRuntime, game);
+        var view = new GameViewConnection(JsRuntime, game, ServiceProvider);
         view.Delivered += OnDelivered;
         _view = view;
         try
@@ -204,7 +204,6 @@ public partial class GamePage
 
         var game = view.Game;
         _isStarted = true;
-        _quality = result.Quality ?? _quality;
         if (_subscribedGame is { } formerGame)
         {
             formerGame.VolumeTableChanged -= OnVolumeTableChanged;

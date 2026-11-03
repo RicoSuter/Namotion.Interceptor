@@ -1,7 +1,9 @@
+using HomeBlaze.Components.Preferences;
 using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.View;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
 namespace HomeBlaze.Game.Components;
@@ -19,6 +21,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     private static int _lastViewId;
 
     private readonly IJSRuntime _jsRuntime;
+    private readonly IServiceProvider _services;
     private readonly CancellationTokenSource _lifetime = new();
     // Read from the token source once, so calls that run after the disposal see it canceled rather than disposed.
     private readonly CancellationToken _lifetimeToken;
@@ -38,9 +41,13 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     private bool _isBroken;
     private bool _isDisposed;
 
-    public GameViewConnection(IJSRuntime jsRuntime, Game game)
+    /// <param name="jsRuntime">The runtime of the page's circuit.</param>
+    /// <param name="game">The game the view shows.</param>
+    /// <param name="services">The services of the page's circuit, whose browser preferences hold the graphics choice.</param>
+    public GameViewConnection(IJSRuntime jsRuntime, Game game, IServiceProvider services)
     {
         _jsRuntime = jsRuntime;
+        _services = services;
         Game = game;
         _lifetimeToken = _lifetime.Token;
     }
@@ -69,10 +76,12 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     bool IGameViewSink.IsBusy => Volatile.Read(ref _isBusy) == 1 || Volatile.Read(ref _isClosed) == 1;
 
     /// <summary>
-    /// Starts the view in the browser; a disposal meanwhile makes the module release the view.
+    /// Starts the view in the browser at the graphics choice the browser stored; a disposal meanwhile makes the module
+    /// release the view.
     /// </summary>
     public async Task<StartResult> StartAsync(ElementReference canvas, ElementReference pad, object dotNetReference)
     {
+        var graphics = _services.GetRequiredService<BrowserPreferences>().Get(GameGraphics.PreferenceKey);
         var module = await _jsRuntime.InvokeAsync<IJSObjectReference>("import", _lifetimeToken, ModulePath);
         if (_isDisposed)
         {
@@ -82,7 +91,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
         }
 
         _module = module;
-        var options = new { viewId = ViewId, pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = BaseUrl };
+        var options = new { viewId = ViewId, pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = BaseUrl, graphics };
         return await module.InvokeAsync<StartResult>("start", _lifetimeToken, canvas, dotNetReference, options);
     }
 
@@ -170,22 +179,43 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     }
 
     /// <summary>
-    /// Applies the quality choice of the browser, a preset name or <c>auto</c>, and stores it there for the next start.
+    /// Applies a graphics preset in the browser, or with <see cref="GameGraphics.Custom"/> changes the setting
+    /// <paramref name="setting"/>, named as in the JSON of <see cref="GameGraphics"/>, to <paramref name="value"/>. Returns
+    /// the graphics in effect, or null when the view is gone.
     /// </summary>
-    public async Task SetQualityAsync(string choice)
+    public Task<GameGraphics?> SetGraphicsAsync(string preset, string? setting = null, object? value = null)
+    {
+        var choice = new Dictionary<string, object?> { ["preset"] = preset };
+        if (setting is not null)
+        {
+            choice[setting] = value;
+        }
+
+        return InvokeGraphicsAsync("setGraphics", choice);
+    }
+
+    /// <summary>
+    /// Returns the graphics in effect in the browser, or null when the view is gone.
+    /// </summary>
+    public Task<GameGraphics?> GetGraphicsAsync() => InvokeGraphicsAsync("getGraphics", null);
+
+    private async Task<GameGraphics?> InvokeGraphicsAsync(string identifier, Dictionary<string, object?>? choice)
     {
         if (_isDisposed || _module is not { } module)
         {
-            return;
+            return null;
         }
 
         try
         {
-            await module.InvokeVoidAsync("setQuality", _lifetimeToken, ViewId, choice);
+            return choice is null
+                ? await module.InvokeAsync<GameGraphics?>(identifier, _lifetimeToken, ViewId)
+                : await module.InvokeAsync<GameGraphics?>(identifier, _lifetimeToken, ViewId, choice);
         }
         catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or JSException)
         {
             // The page went away, or the module dropped the view.
+            return null;
         }
     }
 
@@ -248,7 +278,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     }
 
     /// <summary>
-    /// The outcome of a start; <c>Quality</c> is the stored quality choice of the browser once the view started.
+    /// The outcome of a start.
     /// </summary>
-    public sealed record StartResult(bool IsStarted, string? Error, string? Quality = null);
+    public sealed record StartResult(bool IsStarted, string? Error);
 }
