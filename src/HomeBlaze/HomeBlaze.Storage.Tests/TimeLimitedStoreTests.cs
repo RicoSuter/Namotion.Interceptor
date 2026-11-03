@@ -204,7 +204,7 @@ public sealed class TimeLimitedStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheClientIsAFileSystem_ThenTheStoreIsOneAndDeletesAnEmptyDirectoryOnly()
+    public async Task WhenADirectoryIsDeletedWithoutRecursion_ThenTheClientDeletesAnEmptyOneOnly()
     {
         // Arrange
         var directory = Directory.CreateTempSubdirectory("homeblaze-limited-");
@@ -216,12 +216,10 @@ public sealed class TimeLimitedStoreTests : IDisposable
             using var store = new TimeLimitedStore(StorageFactory.Disk(directory.FullName), _timeProvider, _logger);
 
             // Act
-            var isFileSystem = await store.IsFileSystem();
             await store.DeleteDirectory("Empty", recursive: false);
             var exception = await Record.ExceptionAsync(() => store.DeleteDirectory("Full", recursive: false));
 
             // Assert
-            Assert.True(isFileSystem);
             Assert.False(Directory.Exists(Path.Combine(directory.FullName, "Empty")));
             Assert.IsAssignableFrom<IOException>(exception);
             Assert.True(File.Exists(Path.Combine(directory.FullName, "Full", "Notes.md")));
@@ -230,16 +228,6 @@ public sealed class TimeLimitedStoreTests : IDisposable
         {
             directory.Delete(recursive: true);
         }
-    }
-
-    [Fact]
-    public async Task WhenTheClientIsNotAFileSystem_ThenTheStoreIsNone()
-    {
-        // Arrange & Act
-        var isFileSystem = await _storage.IsFileSystem();
-
-        // Assert
-        Assert.False(isFileSystem);
     }
 
     public void Dispose() => _storage.Dispose();

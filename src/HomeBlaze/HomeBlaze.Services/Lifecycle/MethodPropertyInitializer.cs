@@ -61,6 +61,12 @@ public class MethodPropertyInitializer : ILifecycleHandler
             // Only the first parent counts, as the chain of parents follows no other.
             AddProvidedMethods(referencedSubject);
         }
+        else if (change.IsPropertyReferenceRemoved &&
+                 change.Subject.TryGetRegisteredSubject() is { Parents.Length: > 0 } remainingSubject)
+        {
+            // The first parent may have been the removed one, which makes the next parent the first.
+            AddProvidedMethods(remainingSubject);
+        }
     }
 
     private static void TryRegisterMethod(

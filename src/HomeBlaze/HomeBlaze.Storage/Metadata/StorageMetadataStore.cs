@@ -242,6 +242,28 @@ internal sealed class StorageMetadataStore
     public Task DeleteFolderMetadataFileAsync(StorageConnection connection, string folderPath, CancellationToken cancellationToken)
         => DeleteMetadataFileAsync(connection, StorageMetadataPath.GetFolderFilePath(folderPath), cancellationToken);
 
+    /// <summary>
+    /// Writes the metadata file of a folder back after the delete of the folder failed, also when the caller has given
+    /// up by now, as nothing would write it later. A failure is only logged, as the delete fails with its own error.
+    /// Called on the worker.
+    /// </summary>
+    public async Task RestoreFolderMetadataFileAsync(StorageConnection connection, string folderPath, byte[] content)
+    {
+        var path = StorageMetadataPath.GetFolderFilePath(folderPath);
+        try
+        {
+            StorageMetadataFile.TryParse(content, out var file, out _);
+            var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = file };
+            await _storage.WriteAndRecordAsync(connection, entry, content, CancellationToken.None);
+            connection.Index.Set(entry);
+            connection.Reconciler.Apply();
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "Failed to write back the metadata file of a folder that could not be deleted: {Path}", path);
+        }
+    }
+
     private static async Task DeleteMetadataFileAsync(StorageConnection connection, string path, CancellationToken cancellationToken)
     {
         if (connection.Index.TryGet(path, out var entry))

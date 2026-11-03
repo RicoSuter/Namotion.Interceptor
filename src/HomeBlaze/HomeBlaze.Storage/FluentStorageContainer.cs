@@ -1009,6 +1009,7 @@ public partial class FluentStorageContainer :
     // the last pass makes the delete fail instead of being lost. Called on the worker.
     private async Task DeleteFolderAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
     {
+        var name = StoragePath.GetName(entry.Path);
         var folderPrefix = entry.Path + "/";
         var metadataPath = StorageMetadataPath.GetFolderFilePath(entry.Path);
         foreach (var other in connection.Index.Entries)
@@ -1016,23 +1017,50 @@ public partial class FluentStorageContainer :
             if (other.Path.StartsWith(folderPrefix, StringComparison.Ordinal) &&
                 !string.Equals(other.Path, metadataPath, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException($"'{StoragePath.GetName(entry.Path)}' cannot be deleted: the folder is not empty.");
+                throw new InvalidOperationException($"'{name}' cannot be deleted: the folder is not empty.");
+            }
+        }
+
+        // Only a directory on disk has folders as such. On a bucket the folder is virtual and ends with its last object,
+        // and deleting it there deletes every object below it.
+        byte[]? metadata = null;
+        if (connection.IsOnDisk)
+        {
+            // Before anything is deleted: files that the index never holds, such as hidden ones, are not seen as content,
+            // and would make the delete of the directory fail after the metadata file is gone.
+            var content = await connection.Client.ListObjects(new StorageListOptions { FolderPath = entry.Path }, cancellationToken);
+            if (content.Exists(blob => !string.Equals(blob.FullPath, metadataPath, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException($"'{name}' cannot be deleted: the folder contains files that are not shown.");
+            }
+
+            if (connection.Index.TryGet(metadataPath, out var metadataEntry) && !metadataEntry.IsFolder)
+            {
+                metadata = await connection.Reconciler.ReadMetadataFileAsync(metadataPath, cancellationToken);
             }
         }
 
         await MetadataStore.DeleteFolderMetadataFileAsync(connection, entry.Path, cancellationToken);
 
-        // Only a file system has folders as such. On a bucket the folder is virtual and ends with its last object, and
-        // deleting it there deletes every object below it.
-        if (await connection.Client.IsFileSystem())
+        if (connection.IsOnDisk)
         {
             try
             {
                 await connection.Client.DeleteDirectory(entry.Path, recursive: false, cancellationToken);
             }
-            catch (Exception exception) when (CanHaveReachedStorage(exception))
+            catch (Exception exception)
             {
-                connection.NotifyChanged(entry.Path);
+                // A file can still have appeared since the listing, and the folder is then still there with its metadata.
+                if (metadata is not null)
+                {
+                    await MetadataStore.RestoreFolderMetadataFileAsync(connection, entry.Path, metadata);
+                }
+
+                if (CanHaveReachedStorage(exception))
+                {
+                    connection.NotifyChanged(entry.Path);
+                }
+
                 throw;
             }
         }
