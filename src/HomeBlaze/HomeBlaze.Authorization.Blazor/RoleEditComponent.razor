@@ -118,7 +118,7 @@
             return;
         }
 
-        (_authorization, _name) = FindParent(role);
+        (_authorization, _name) = role.FindParent();
         _loadedLists = new LoadedLists(role);
         _excluded = _name is null ? [] : [_name];
         // Normalized as the selector shows it, so saving without a change writes what was shown. Reading the role
@@ -159,7 +159,7 @@
             // A reload of the roles replaces them, so this role would be saved nowhere, or into a file it is no longer
             // part of. Every save assigns new lists, so other lists are the save of another dialog, which this one would
             // revert.
-            if (!ReferenceEquals(FindParent(role).Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
+            if (!ReferenceEquals(role.FindParent().Authorization, _authorization) || !_loadedLists.AreHeldBy(role))
             {
                 throw new InvalidOperationException(ConcurrentChangeMessage);
             }
@@ -180,10 +180,10 @@
         IsDirtyChanged?.Invoke(false);
     }
 
-    // Reads the name again, as the Authorization dialog of another user can rename the role while this one is open.
+    // Reads the name again, as the role can be renamed while this dialog is open.
     private string? UpdateName()
     {
-        if (Role is { } role && FindParent(role).Name is { } name && !string.Equals(name, _name, StringComparison.Ordinal))
+        if (Role?.FindParent().Name is { } name && !string.Equals(name, _name, StringComparison.Ordinal))
         {
             _name = name;
             _excluded = [name];
@@ -191,26 +191,6 @@
         }
 
         return _name;
-    }
-
-    // The Authorization that holds the role and the key it holds it under.
-    private static (Authorization? Authorization, string? Name) FindParent(Role role)
-    {
-        var registeredRole = role.TryGetRegisteredSubject();
-        if (registeredRole is null)
-        {
-            return (null, null);
-        }
-
-        foreach (var parent in registeredRole.Parents)
-        {
-            if (parent.Property.Subject is Authorization authorization && parent.Index is string name)
-            {
-                return (authorization, name);
-            }
-        }
-
-        return (null, null);
     }
 
     // Checked again for each edited role, so that the hint follows unsaved changes. The preview of the same instance is

@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Authorization.Internal;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -37,6 +39,19 @@ public partial class Authorization : IConfigurable
         Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase);
         Status = null;
     }
+
+    /// <summary>
+    /// Adds a custom role without rules under <paramref name="name"/>, trimmed, in a new <see cref="Roles"/> dictionary,
+    /// and writes the configuration.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The name is empty, cannot name a custom role (see <see cref="AuthorizationService.GetRoleNameError"/>) or names a
+    /// role already, ignoring case; two roles have the same name, ignoring case; or the configuration was not written, in
+    /// which case the role stays added.
+    /// </exception>
+    [Operation(Title = "Add Role", Description = "Adds a custom role without rules under the given name. Its rules are edited in its own dialog.", Icon = "Add")]
+    public Task AddRoleAsync(string name, [FromServices] AuthorizationService authorizationService, [FromServices] RootManager rootManager) =>
+        RoleEdits.AddAsync(this, name, authorizationService, rootManager);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
