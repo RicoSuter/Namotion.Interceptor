@@ -4,7 +4,9 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services.Metadata;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Lifecycle;
@@ -44,6 +46,26 @@ public class MethodPropertyInitializer : ILifecycleHandler
                     TryRegisterMethod(registeredSubject, change.Subject, method, discoveredMethods, typeMethods);
                 }
             }
+
+            // After the own methods, so that a provider sees them.
+            AddProvidedMethods(registeredSubject);
+        }
+        else if (change.IsPropertyReferenceAdded &&
+                 change.Property is { } addedProperty &&
+                 change.Subject.TryGetRegisteredSubject() is { } referencedSubject &&
+                 referencedSubject.Parents is [var firstParent, ..] &&
+                 firstParent.Property.Reference.Equals(addedProperty) &&
+                 Equals(firstParent.Index, change.Index))
+        {
+            // A subject created with a context attaches to it before a parent holds it, so the parent is known only now.
+            // Only the first parent counts, as the chain of parents follows no other.
+            AddProvidedMethods(referencedSubject);
+        }
+        else if (change.IsPropertyReferenceRemoved &&
+                 change.Subject.TryGetRegisteredSubject() is { Parents.Length: > 0 } remainingSubject)
+        {
+            // The first parent may have been the removed one, which makes the next parent the first.
+            AddProvidedMethods(remainingSubject);
         }
     }
 
@@ -105,6 +127,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = traits.Category,
             RequiresConfirmation = traits.RequiresConfirmation,
+            Purpose = GetPurpose(operationAttribute, traits.Parameters),
             ExcludedFrom = traits.ExcludedFrom,
             Parameters = traits.Parameters,
             ResultType = resultType,
@@ -116,6 +139,24 @@ public class MethodPropertyInitializer : ILifecycleHandler
             _ => metadata,
             null,
             [.. method.GetCustomAttributes<Attribute>()]);
+    }
+
+    // The purpose maps to a control without an input dialog, so an operation that takes input has none.
+    private static OperationPurpose GetPurpose(OperationAttribute? attribute, MethodParameter[] parameters) =>
+        attribute is not null && !Array.Exists(parameters, parameter => parameter.RequiresInput)
+            ? attribute.Purpose
+            : OperationPurpose.None;
+
+    private static void AddProvidedMethods(RegisteredSubject registeredSubject)
+    {
+        foreach (var current in new FirstParentChain(registeredSubject))
+        {
+            if (!ReferenceEquals(current, registeredSubject) && current.Subject is IChildMethodProvider provider)
+            {
+                provider.AddMethods(registeredSubject.Subject);
+                return;
+            }
+        }
     }
 
     private static Type? GetUnwrappedResultType(Type returnType)

@@ -136,7 +136,7 @@ namespace HomeBlaze.Storage
     [System.ComponentModel.Category("System")]
     [System.ComponentModel.Description("Mounts a storage location and loads the files in it as subjects")]
     [System.ComponentModel.DisplayName("Storage")]
-    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class FluentStorageContainer : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Metadata.IChildMethodProvider, HomeBlaze.Storage.Abstractions.IConfigurationWriter, HomeBlaze.Storage.Abstractions.IStorageContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public const string SetMetadataMethodName = "SetMetadata";
         public FluentStorageContainer(HomeBlaze.Services.SubjectTypeRegistry typeRegistry, HomeBlaze.Services.ConfigurableSubjectSerializer serializer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.FluentStorageContainer>? logger = null) { }
@@ -163,6 +163,7 @@ namespace HomeBlaze.Storage
         public string Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public void AddMethods(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
         public void ApplyStoredMetadata(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName) { }
