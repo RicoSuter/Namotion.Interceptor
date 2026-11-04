@@ -149,6 +149,20 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
         Assert.Contains("Select a role.", component.Markup);
     }
 
+    [Theory]
+    [InlineData(new string[0], "")]
+    [InlineData(new[] { "Reader" }, "1 role")]
+    [InlineData(new[] { "Reader", "Kitchen" }, "2 roles")]
+    public void WhenRolesAreSelected_ThenTheFieldCountsThemAndShowsNothingForNone(string[] selected, string expectedText)
+    {
+        // Act
+        var component = RenderSelector(selected);
+
+        // Assert
+        var select = component.FindComponent<MudSelect<string>>().Instance;
+        Assert.Equal(expectedText, select.MultiSelectionTextFunc!(selected));
+    }
+
     [Fact]
     public void WhenATestIdIsGiven_ThenTheChipsUseItAsPrefix()
     {

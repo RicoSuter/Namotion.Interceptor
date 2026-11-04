@@ -2,7 +2,7 @@
 @inject AuthorizationService AuthorizationService
 
 <MudSelect T="string" Label="@Label" MultiSelection="true" SelectedValues="@_selected" SelectedValuesChanged="@SelectAsync"
-           MultiSelectionTextFunc="@(_ => _selected.Count == 1 ? "1 role" : $"{_selected.Count} roles")"
+           MultiSelectionTextFunc="@FormatSelection"
            HelperText="@HelperText" Error="@Error" ErrorText="@ErrorText">
     @foreach (var name in GetOptions())
     {
@@ -86,14 +86,12 @@
             .ToList();
     }
 
-    protected override void OnInitialized()
+    // Read on each render of the parent as well, so that a parent re-rendered for changed roles shows them.
+    protected override void OnParametersSet()
     {
         _roleNames = AuthorizationService.GetRoleNames();
         _unavailableRoles = AuthorizationService.GetUnavailableRoles();
-    }
 
-    protected override void OnParametersSet()
-    {
         // Normalized only when the parent passes another list, which is not the case for the selection it got from here.
         if (!ReferenceEquals(Selected, _normalizedSelected))
         {
@@ -101,6 +99,13 @@
             _normalizedSelected = Selected;
         }
     }
+
+    private string FormatSelection(IReadOnlyList<string?>? _) => _selected.Count switch
+    {
+        0 => string.Empty,
+        1 => "1 role",
+        _ => $"{_selected.Count} roles"
+    };
 
     // The selected names that are not offered stay selectable, so they can be removed in the list as well.
     private IEnumerable<string> GetOptions()

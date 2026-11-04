@@ -2,40 +2,47 @@
 @implements ISubjectEditComponent
 @implements IDisposable
 
+@using System.Reactive.Concurrency
+@using System.Reactive.Linq
 @using Namotion.Interceptor.Registry.Abstractions
+@using Namotion.Interceptor.Tracking
 
 @inject AuthorizationService AuthorizationService
 @inject SubjectTypeCatalog TypeCatalog
 
 @if (Role is { } role)
 {
-    var executeWithoutRead = GetExecuteWithoutRead();
+    var checks = GetChecks();
     <div class="role-edit">
-        @if (role.Status is { } status)
+        @if (checks.Error is { } error)
         {
-            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-status">@status</MudAlert>
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-status">@error</MudAlert>
         }
-        @if (role.Warning is { } warning)
+        @if (checks.Warning is { } warning)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-warning">@warning</MudAlert>
         }
-        @if (executeWithoutRead is not null)
+        @if (checks.ExecuteWithoutRead is { } executeWithoutRead)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2" data-testid="role-edit-execute-without-read">@executeWithoutRead.Describe()</MudAlert>
         }
+        <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
+            Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
+        </MudText>
 
-        @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. *@
-        <MudTabs Elevation="0" KeepPanelsAlive="true" Class="role-edit-tabs" TabPanelsClass="role-edit-panels" data-testid="role-edit-tabs">
-            <Header>
-                <div class="role-edit-used-by">
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="role-edit-used-by">
-                        Used by @role.UsedByAgents @(role.UsedByAgents == 1 ? "agent" : "agents")
-                    </MudText>
-                </div>
-            </Header>
+        @* Kept alive, so that switching tabs keeps the text typed into a rule and the subject chosen for the preview. A tab
+           narrows with the window down to its label, so that the four tabs fit on a phone. *@
+        <MudTabs Elevation="0" KeepPanelsAlive="true" MinimumTabWidth="min(160px, 12vw)" Class="role-edit-tabs"
+                 TabPanelsClass="role-edit-panels" data-testid="role-edit-tabs">
             <ChildContent>
                 <MudTabPanel>
-                    <TabContent><span data-testid="role-edit-tab-roles">Roles</span></TabContent>
+                    <TabContent>
+                        <span data-testid="role-edit-tab-roles">Roles</span>
+                        @if (HasUnusableInclude())
+                        {
+                            @RenderErrorMarker("Includes a role that cannot be used", "roles")
+                        }
+                    </TabContent>
                     <ChildContent>
                         <MudForm>
                             <MudText Typo="Typo.body2" Class="mb-2">The roles whose rules this role has as well, built-in or custom.</MudText>
@@ -54,7 +61,8 @@
                             <MudText Typo="Typo.body2" Class="mb-2">
                                 What the role grants. A rule applies to a member when each of its selectors matches; an empty selector matches any.
                             </MudText>
-                            @RenderRules(_allow, "allow", executeWithoutRead)
+                            @RenderFieldHint()
+                            @RenderRules(_allow, "allow", checks.ExecuteWithoutRead)
                         </MudForm>
                     </ChildContent>
                 </MudTabPanel>
@@ -63,6 +71,7 @@
                     <ChildContent>
                         <MudForm>
                             <MudText Typo="Typo.body2" Class="mb-2">What the role takes away again, whichever role granted it.</MudText>
+                            @RenderFieldHint()
                             @RenderRules(_deny, "deny", null)
                         </MudForm>
                     </ChildContent>
@@ -101,12 +110,26 @@
         flex-direction: column;
     }
 
-    .role-edit-used-by {
-        display: flex;
-        align-items: center;
-        height: 100%;
-        padding: 0 8px;
-        white-space: nowrap;
+    .role-edit-tab-mark {
+        margin-left: 4px;
+    }
+
+    /* Narrower tabs, so that the four tabs fit on a phone with their error marks. */
+    @@media (max-width: 600px) {
+        .role-edit-tabs .mud-tab {
+            padding-left: 2px;
+            padding-right: 2px;
+            font-size: 0.8125rem;
+            letter-spacing: 0;
+        }
+
+        .role-edit-tab-mark {
+            margin-left: 2px;
+        }
+
+        .role-edit-tab-mark .mud-icon-root {
+            font-size: 1rem;
+        }
     }
 
     /* Edge-aligned icon buttons, such as the search button of the subject field, reach 12px past the content; the padding
@@ -142,8 +165,9 @@
     private AuthorizationRole? _editedRole;
     private bool _isDirty;
     private bool _wasValid = true;
-    private AuthorizationRole? _executeCheckedRole;
-    private ExecuteWithoutReadFindings? _executeWithoutRead;
+    private AuthorizationRole? _checkedRole;
+    private RoleChecks _checks = new(null, null, null);
+    private IDisposable? _usedBySubscription;
     private bool _isDisposed;
 
     [Parameter]
@@ -201,12 +225,20 @@
         _typeNames = TypeCatalog.GetTypeNames();
         _wasValid = IsValid;
         AuthorizationService.PoliciesChanged += OnPoliciesChanged;
+
+        // The filter runs inside each write of the graph; the rest runs off it, which every other writer waits for.
+        _usedBySubscription = ((IInterceptorSubject)role).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => ReferenceEquals(change.Property.Subject, role) && change.Property.Name == nameof(Role.UsedByAgents))
+            .ObserveOn(Scheduler.Default)
+            .Subscribe(_ => Refresh(), _ => { });
     }
 
     public void Dispose()
     {
         _isDisposed = true;
         AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
+        _usedBySubscription?.Dispose();
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken)
@@ -270,35 +302,68 @@
         }
     }
 
-    // Raised on the thread pool, also right after this component was disposed. Another role saved meanwhile, such as an
-    // included one, changes the hint of the same edited role.
-    private void OnPoliciesChanged() =>
+    // Another role saved meanwhile, such as an included one, changes the checks of the same edited role.
+    private void OnPoliciesChanged()
+    {
+        _checkedRole = null;
+        Refresh();
+    }
+
+    // Called on the thread pool, also right after this component was disposed.
+    private void Refresh() =>
         _ = InvokeAsync(() =>
         {
             if (!_isDisposed)
             {
-                _executeCheckedRole = null;
                 StateHasChanged();
             }
         });
 
-    // Checked again for each edited role and after the saved roles changed, so that the hint follows unsaved changes
+    // Checked again for each edited role and after the saved roles changed, so that the checks follow unsaved changes
     // and the other roles. The preview of the same instance is compiled once for this and the tab "Preview".
-    private ExecuteWithoutReadFindings? GetExecuteWithoutRead()
+    private RoleChecks GetChecks()
     {
         var role = GetEditedRole();
-        if (!ReferenceEquals(role, _executeCheckedRole))
+        if (!ReferenceEquals(role, _checkedRole))
         {
-            _executeCheckedRole = role;
-            _executeWithoutRead =
-                AuthorizationService.PreviewPolicy(role) is { Error: null } result &&
-                ExecuteWithoutRead.MayApply(result.Policy) &&
-                Subject?.Context.TryGetService<ISubjectRegistry>() is { } registry
-                    ? ExecuteWithoutRead.Find(role, result.Policy, registry.KnownSubjects.Values, AuthorizationService.PathProvider)
-                    : null;
+            _checkedRole = role;
+            var result = AuthorizationService.PreviewPolicy(role);
+            _checks = result.Error is not null
+                ? new RoleChecks(result.Error, null, null)
+                : new RoleChecks(null, GetWarning(role), FindExecuteWithoutRead(role, result.Policy));
         }
 
-        return _executeWithoutRead;
+        return _checks;
+    }
+
+    // Worded as Role.Warning once the role is saved: the warning of each path pattern once, allow rules first.
+    private string? GetWarning(AuthorizationRole role)
+    {
+        List<string>? warnings = null;
+        foreach (var rule in role.Allow.Concat(role.Deny))
+        {
+            foreach (var pattern in rule.Paths)
+            {
+                if (AuthorizationService.GetPathPatternWarning(pattern) is { } warning && warnings?.Contains(warning) != true)
+                {
+                    (warnings ??= []).Add(warning);
+                }
+            }
+        }
+
+        return warnings is null ? null : string.Join(' ', warnings);
+    }
+
+    private ExecuteWithoutReadFindings? FindExecuteWithoutRead(AuthorizationRole role, AuthorizationPolicy policy) =>
+        ExecuteWithoutRead.MayApply(policy) && Subject?.Context.TryGetService<ISubjectRegistry>() is { } registry
+            ? ExecuteWithoutRead.Find(role, policy, registry.KnownSubjects.Values, AuthorizationService.PathProvider)
+            : null;
+
+    // A selected name that is not one of the role names, which lists only the roles that can be used.
+    private bool HasUnusableInclude()
+    {
+        var roleNames = AuthorizationService.GetRoleNames();
+        return !_includes.All(name => roleNames.Contains(name, StringComparer.Ordinal));
     }
 
     private RenderFragment RenderTabLabel(string title, List<RuleEntry> rules, string section) => __builder =>
@@ -306,11 +371,22 @@
         <span data-testid="@($"role-edit-tab-{section}")">@title (@rules.Count)</span>
         @if (!rules.TrueForAll(IsValidEntry))
         {
-            <span role="img" aria-label="Has an invalid rule" title="Has an invalid rule" class="ml-1"
-                  data-testid="@($"role-edit-tab-{section}-error")">
-                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Small" Style="vertical-align: middle;" />
-            </span>
+            @RenderErrorMarker("Has an invalid rule", section)
         }
+    };
+
+    private static RenderFragment RenderErrorMarker(string label, string section) => __builder =>
+    {
+        <span role="img" aria-label="@label" title="@label" class="role-edit-tab-mark" data-testid="@($"role-edit-tab-{section}-error")">
+            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Small" Style="vertical-align: middle;" />
+        </span>
+    };
+
+    private static RenderFragment RenderFieldHint() => __builder =>
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2" data-testid="role-edit-field-hint">
+            In each field, press Enter, click Add or leave the field to add the typed text. Types, Members and Tags take several values separated by commas.
+        </MudText>
     };
 
     private RenderFragment RenderRules(List<RuleEntry> rules, string section, ExecuteWithoutReadFindings? executeWithoutRead) => __builder =>
@@ -399,6 +475,10 @@
             IsValidChanged?.Invoke(isValid);
         }
     }
+
+    // What the edited role would have once saved: the error that makes it unusable, the warning about its paths, and the
+    // methods it allows to execute but not to read; only the error when there is one.
+    private sealed record RoleChecks(string? Error, string? Warning, ExecuteWithoutReadFindings? ExecuteWithoutRead);
 
     // The lists of the role as this dialog read them, compared by reference.
     private readonly record struct LoadedLists(List<string>? Includes, List<PermissionRule>? Allow, List<PermissionRule>? Deny)

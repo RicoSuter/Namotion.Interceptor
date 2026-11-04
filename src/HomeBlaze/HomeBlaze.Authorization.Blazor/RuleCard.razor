@@ -8,25 +8,25 @@
 <MudPaper Outlined="true" Class="pa-2" data-testid="@TestId">
     <MudGrid Spacing="1">
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. Add one path at a time, as a path can contain commas; press Enter, click Add or leave the field to add."
+            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. One path at a time, as a path can contain commas."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
                            Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" SplitsAtCommas="false"
                            HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive. Separate several with commas; press Enter, click Add or leave the field to add."
+            <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive."
                            Values="@_rule.Types" ValuesChanged="@(values => ChangeAsync(_rule with { Types = [.. values] }))"
                            Suggestions="@TypeNames" Validator="@ValidateTypeName" Warning="@WarnTypeName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text. Separate several with commas; press Enter, click Add or leave the field to add."
+            <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text."
                            Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))"
                            Validator="@ValidateMemberName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
         </MudItem>
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry. Separate several with commas; press Enter, click Add or leave the field to add."
+            <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry."
                            Values="@_rule.Tags" ValuesChanged="@(values => ChangeAsync(_rule with { Tags = [.. values] }))"
-                           Suggestions="@TagNames" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
+                           Suggestions="@TagSuggestions" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
         </MudItem>
     </MudGrid>
     <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
@@ -53,8 +53,8 @@
     }
     @if (_rule.Paths.IsEmpty && _rule.Types.IsEmpty && _rule.Members.IsEmpty && _rule.Tags.IsEmpty)
     {
-        @* A warning, not an error: a rule for every member is valid, but an allow rule should never be one by accident. *@
-        <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Icon="@Icons.Material.Filled.Warning" Dense="true" Class="mt-1"
+        @* Saving is not blocked, as a rule for every member is valid, but an allow rule should never be one by accident. *@
+        <MudAlert Severity="@(IsDeny ? Severity.Warning : Severity.Error)" Dense="true" Class="mt-1"
                   data-testid="rule-any-member-warning">This rule applies to every member.</MudAlert>
     }
     @if (ExecuteWithoutReadExample is { } executeExample)
@@ -70,11 +70,8 @@
 </MudPaper>
 
 @code {
-    private static readonly IReadOnlyList<string> TagNames =
-    [
-        MemberTags.State, MemberTags.Configuration, MemberTags.Secret, MemberTags.Query, MemberTags.Operation,
-        MemberTags.RequiresConfirmation, MemberTags.Subjects, MemberTags.Attribute, MemberTags.Metadata
-    ];
+    // Boxed once rather than on each render.
+    private static readonly IReadOnlyList<string> TagSuggestions = MemberTags.All;
 
     private PermissionRule _rule = null!;
     private ChipListInput? _paths;
@@ -161,7 +158,7 @@
             return "A tag contains no whitespace.";
         }
 
-        return TagNames.Contains(tag, StringComparer.OrdinalIgnoreCase) ? null : $"Unknown tag; use one of {string.Join(", ", TagNames)}.";
+        return MemberTags.All.Contains(tag, StringComparer.OrdinalIgnoreCase) ? null : $"Unknown tag; use one of {string.Join(", ", MemberTags.All)}.";
     }
 
     // No type or member name has whitespace, so a rule naming one would never match.

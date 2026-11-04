@@ -94,7 +94,8 @@
 </div>
 
 <style>
-    /* The field, the readability line and the explanation keep their height; only the matrix scrolls, below its header. */
+    /* The field, the readability line and the explanation keep their height; only the matrix scrolls, below its header,
+       unless the window is short, see below. */
     .role-preview {
         display: flex;
         flex-direction: column;
@@ -115,6 +116,19 @@
     .role-preview-matrix > .mud-table-container {
         min-height: 0;
         overflow-y: auto;
+    }
+
+    /* In a short window, the whole tab scrolls instead, so that the matrix can take the height of the tab; its header row
+       stays at the top of the tab. */
+    @@media (max-height: 800px) {
+        .role-preview {
+            display: block;
+            height: auto;
+        }
+
+        .role-preview-matrix > .mud-table-container {
+            overflow: visible;
+        }
     }
 
     .role-preview-member-path {

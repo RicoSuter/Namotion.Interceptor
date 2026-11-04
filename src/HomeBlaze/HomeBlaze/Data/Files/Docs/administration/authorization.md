@@ -132,7 +132,7 @@ Agents and the custom roles that include a role name it, so a rename or deletion
 The property panel of a role shows these values:
 
 - **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." or "The name '...' cannot contain invisible characters, such as a zero-width space or a control character." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
-- **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role. The edit dialog of the role shows the warning above its tabs; the field "Paths" of a rule card checks a pattern against the current graph while you type, see [Rule Cards](#rule-cards).
+- **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role. The edit dialog of the role shows above its tabs the warning the role would have with its unsaved changes; it and the field "Paths" of a rule card check a pattern against the current graph while you edit, see [Rule Cards](#rule-cards).
 - **`UsedByAgents`**: the number of started agents that name the role.
 
 Role names compare ignoring case. A change applies to the next turn of each agent, as a whole: an agent never gets a part of one change.
@@ -145,7 +145,7 @@ A save sets the includes, the allow rules and the deny rules one after the other
 
 ## Editing a Role
 
-Select the role below the `Authorization` subject in the subject browser, such as `LightOperator`, and click "Edit", the pencil next to its title. The dialog is titled after the role, such as "Edit LightOperator". Above its tabs it shows the `Status` of the role as an error when it cannot be used, its `Warning` as a warning, and the hint about execute without read when it applies, see [Rule Cards](#rule-cards). The tabs are "Roles", "Allow (n)", "Deny (n)" and "Preview", with "Used by N agents" at their right. The numbers count the allow and deny rules, and a red mark after a number says that one of those rules is invalid. The dialog keeps its height, and only the content of the active tab scrolls.
+Select the role below the `Authorization` subject in the subject browser, such as `LightOperator`, and click "Edit", the pencil next to its title. The dialog is titled after the role, such as "Edit LightOperator". Above its tabs it shows the `Status` the role would have once saved as an error when it could not be used, its `Warning` as a warning, both with its unsaved changes, the hint about execute without read when it applies, see [Rule Cards](#rule-cards), and "Used by N agents". These follow the changes in the dialog, the roles saved meanwhile, such as an included role saved by another user, and the agents that start or stop using the role. The tabs are "Roles", "Allow (n)", "Deny (n)" and "Preview". The numbers count the allow and deny rules, and a red mark after a number says that one of those rules is invalid; a red mark after "Roles" says that "Includes" names a role that cannot be used. The dialog keeps its height, and only the content of the active tab scrolls.
 
 This builds the role `LightOperator`, which switches and dims the lights, except in the bedroom, and otherwise only reads:
 
@@ -178,7 +178,7 @@ The rules are edited on three tabs:
 | "Tags" | [Tags](#tags), suggested while you type. Another text shows "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata." |
 | "Actions" | The checkboxes "read", "write", "execute" and "history". At least one is required, else the card shows "Select at least one action." |
 
-Each value is a chip below its field:
+At their top, the tabs "Allow" and "Deny" say "In each field, press Enter, click Add or leave the field to add the typed text. Types, Members and Tags take several values separated by commas.". Each value is a chip below its field:
 
 - **Adding**: press Enter, click "Add" next to the field or leave the field to add the typed text. "Add" is disabled while the field is empty or holds invalid text. In "Types", "Members" and "Tags", separate several values with commas, such as `TurnOn, TurnOff`; each part becomes a chip, without the whitespace around it. "Paths" takes one path at a time and keeps its commas, as a name in a path can hold one, such as `/Devices/Living room, left/**`. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
 - **Removing**: click the cross of the chip.
@@ -201,7 +201,9 @@ The tab "Preview" shows what the role allows on one subject. It uses the role as
 4. Read the table of its members, and hover over or click a cell to see why.
 5. Change a rule on the tab "Allow" or "Deny" and return; the preview follows the change.
 
-The field "Subject" and the line below it stay in place, and the table scrolls below its header row.
+The preview also follows the roles saved meanwhile, such as an included role saved by another user. A subject added or removed while the dialog is open shows once a rule or a role changes, or the subject is chosen again.
+
+In a window at least 800 pixels high, the field "Subject" and the line below it stay in place, and the table scrolls below its header row. In a lower window, the whole tab scrolls, so that the table can take its height, and the header row of the table stays at the top.
 
 The line below the field reads:
 
