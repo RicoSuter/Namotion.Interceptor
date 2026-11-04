@@ -43,10 +43,10 @@ public class DerivedPropertyValidationTests
     }
 
     [Fact]
-    public void WhenSettableDerivedPropertyIsWritten_ThenOnlyTheAttemptedValueIsValidated()
+    public void WhenSettableDerivedPropertyIsWritten_ThenOnlyTheWriteIsValidated()
     {
         // Arrange
-        var validator = new RejectingValidator { IsRejecting = false };
+        var validator = new RejectingValidator();
         var context = CreateContext(validator);
         var device = new DerivedDevice(context);
         validator.Calls.Clear();
@@ -88,6 +88,9 @@ public class DerivedPropertyValidationTests
             getValue: subject => ((DerivedDevice)subject).Input.ToString(CultureInfo.InvariantCulture),
             setValue: (subject, value) => ((DerivedDevice)subject).Input = int.Parse(value!, CultureInfo.InvariantCulture));
         validator.IsRejecting = true;
+        var publishedValues = new List<string?>();
+        using var subscription = inputText.Reference
+            .SubscribeInline((in SubjectPropertyChange change) => publishedValues.Add(change.GetNewValue<string?>()));
         validator.Calls.Clear();
 
         // Act
@@ -95,6 +98,7 @@ public class DerivedPropertyValidationTests
 
         // Assert
         Assert.Equal("5", inputText.GetValue());
+        Assert.Equal(["5"], publishedValues);
         Assert.Equal([nameof(DerivedDevice.Input)], validator.Calls);
     }
 

@@ -17,8 +17,9 @@ public interface IPropertyValidator
     /// <remarks>
     /// <typeparamref name="TProperty"/> is the property type for writes through the generated setters, and
     /// <c>object</c> for untyped writes through <c>SetPropertyValueWithInterception</c> (dynamic properties).
-    /// Derived recalculations are not validated. In the transaction commit checks it can be either, depending on which writes ran earlier
-    /// in the process. Test the value (<c>context.Value is int speed</c>), not <c>typeof(TProperty)</c>.
+    /// In the transaction commit checks it can be either, depending on which writes ran earlier in the process.
+    /// Test the value (<c>context.Value is int speed</c>), not <c>typeof(TProperty)</c>.
+    /// Derived recalculations are not validated.
     /// </remarks>
     IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context);
 }

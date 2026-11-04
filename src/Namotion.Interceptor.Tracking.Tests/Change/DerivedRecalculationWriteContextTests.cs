@@ -1,4 +1,6 @@
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -47,6 +49,53 @@ public class DerivedRecalculationWriteContextTests
         Assert.Contains((nameof(DerivedSetterPerson.Nickname), true), probe.Writes);
         Assert.Contains((nameof(DerivedSetterPerson.NicknameWithPrefix), true), probe.Writes);
         Assert.DoesNotContain((nameof(DerivedSetterPerson.NicknameWithPrefix), false), probe.Writes);
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyIsRecalculatedManually_ThenTheWriteIsFlagged()
+    {
+        // Arrange
+        var probe = new RecalculationFlagProbe();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        context.AddService(probe);
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => 5.0;
+        probe.Writes.Clear();
+
+        // Act
+        new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature)).RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Contains((nameof(ExternalSensor.CalibratedTemperature), true), probe.Writes);
+        Assert.DoesNotContain((nameof(ExternalSensor.CalibratedTemperature), false), probe.Writes);
+    }
+
+    [Fact]
+    public void WhenDynamicSettableDerivedPropertyIsWritten_ThenTheWriteIsNotFlaggedAndItsRecalculationIs()
+    {
+        // Arrange
+        var probe = new RecalculationFlagProbe();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+        context.AddService(probe);
+        var person = new Person(context);
+        string? backing = null;
+        var derived = person.TryGetRegisteredSubject()!.AddDerivedProperty<string?>(
+            "Trimmed",
+            getValue: _ => backing?.Trim(),
+            setValue: (_, value) => backing = value);
+        probe.Writes.Clear();
+
+        // Act
+        derived.SetValue("  hello  ");
+
+        // Assert
+        Assert.Single(probe.Writes, write => write == ("Trimmed", false));
+        Assert.Contains(("Trimmed", true), probe.Writes);
     }
 
     private sealed class RecalculationFlagProbe : IWriteInterceptor

@@ -76,6 +76,8 @@ catch (ValidationException)
 Console.WriteLine(person.FirstName);  // Still "Rico"
 ```
 
+Attributes on a derived property only apply to writes a caller makes to a settable derived property, because derived recalculations are not validated (see [Custom Validators](#custom-validators)).
+
 ## Custom Validators
 
 For validation logic beyond Data Annotations, implement `IPropertyValidator`:

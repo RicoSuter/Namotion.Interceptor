@@ -181,6 +181,8 @@ Each interceptor can:
 - Skip calling the next interceptor (blocking the operation)
 - Perform side effects (logging, validation, change tracking)
 
+A write that publishes a derived recalculation (`PropertyWriteContext.IsDerivedRecalculation`) is already committed, so skipping `next` only suppresses its notification and the interceptor must not throw for it (see [Concurrency and Delivery](tracking.md#concurrency-and-delivery)).
+
 ```csharp
 public class LoggingInterceptor : IWriteInterceptor
 {
