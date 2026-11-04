@@ -194,7 +194,7 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task WhenLoadIsCancelledWhileAChildIsStaged_ThenRollbackIsCompleteAndALaterLoadSucceeds()
+    public async Task WhenLoadIsCanceledWhileAChildIsStaged_ThenRollbackIsCompleteAndALaterLoadSucceeds()
     {
         // Arrange: the mock cancels the load's token from inside the browse of Status, the first
         // browse the loader issues after Sensor has been staged and Temperature's claim queued. The

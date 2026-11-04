@@ -1,6 +1,6 @@
 # OPC UA client loader: why the load works the way it does
 
-Maintainer notes for the address space loader in `src/Namotion.Interceptor.OpcUa/Client/`. Consumer-facing behaviour is in [OPC UA Client](../connectors-opcua-client.md); this covers the reasoning behind it, which is not recoverable from the code.
+Maintainer notes for the address space loader in `src/Namotion.Interceptor.OpcUa/Client/`. Consumer-facing behavior is in [OPC UA Client](../connectors-opcua-client.md); this covers the reasoning behind it, which is not recoverable from the code.
 
 The moving parts are `OpcUaSubjectLoader` (the pipeline), `OpcUaAttributeLoader` (the attribute rounds), `OpcUaLoadContext` (per-load state, staging and commit) and `OpcUaSessionExtensions` (the batched browse and read primitives).
 
