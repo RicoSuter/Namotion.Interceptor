@@ -287,6 +287,31 @@ public class OpcUaSubjectLoaderTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
+    public async Task WhenAReferencePointsBackToTheRootNode_ThenTheRootSubjectIsReused()
+    {
+        // Arrange
+        var rootId = new NodeId(1, 0);
+        var childId = new NodeId(1001, 2);
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] = [CreateObjectReferenceDescription("Child", new ExpandedNodeId(childId))],
+            [childId] = [CreateObjectReferenceDescription("BackToRoot", new ExpandedNodeId(rootId))]
+        });
+
+        var (loader, _, subject) = CreateLoader(shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId)), mockSession.Object, CancellationToken.None);
+
+        // Assert
+        var child = (IInterceptorSubject)subject.TryGetRegisteredSubject()!.Properties.Single(p => p.Name == "Child").GetValue()!;
+        var backToRoot = child.TryGetRegisteredSubject()!.Properties.Single(p => p.Name == "BackToRoot").GetValue();
+        Assert.Same(subject, backToRoot);
+        Assert.Equal(2, subject.Context.TryGetService<ISubjectRegistry>()!.KnownSubjects.Count);
+    }
+
+    [Fact]
     public async Task WhenBrowseNameIsNull_ThenNodeIsSkippedWithoutCrash()
     {
         // Arrange: a child node has a null BrowseName.Name (malformed server response).

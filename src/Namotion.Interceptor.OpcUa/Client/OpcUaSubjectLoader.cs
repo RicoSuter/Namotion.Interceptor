@@ -73,6 +73,12 @@ internal sealed class OpcUaSubjectLoader
             _logger,
             cancellationToken);
 
+        // Seeded so a reference back to the root's node reuses the root instead of creating a copy.
+        if (context.ResolveNodeId(node.NodeId) is { } rootNodeId)
+        {
+            context.SubjectsByNodeId.TryAdd(rootNodeId, subject);
+        }
+
         await LoadSubjectsAsync([(node, subject)], context).ConfigureAwait(false);
         context.Commit();
         return context.MonitoredItems;
