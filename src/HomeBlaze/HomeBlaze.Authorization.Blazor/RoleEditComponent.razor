@@ -166,6 +166,7 @@
     private bool _isDirty;
     private bool _wasValid = true;
     private AuthorizationRole? _checkedRole;
+    private IReadOnlyList<string>? _checkedRoleNames;
     private RoleChecks _checks = new(null, null, null);
     private IDisposable? _usedBySubscription;
     private bool _isDisposed;
@@ -302,12 +303,18 @@
         }
     }
 
-    // Another role saved meanwhile, such as an included one, changes the checks of the same edited role.
-    private void OnPoliciesChanged()
-    {
-        _checkedRole = null;
-        Refresh();
-    }
+    // Another role saved meanwhile, such as an included one, changes the checks of the same edited role. Raised on the
+    // thread pool, also right after this component was disposed, and also for the roles this component checked already,
+    // which then render nothing new.
+    private void OnPoliciesChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed && !ReferenceEquals(AuthorizationService.GetRoleNames(), _checkedRoleNames))
+            {
+                _checkedRole = null;
+                StateHasChanged();
+            }
+        });
 
     // Called on the thread pool, also right after this component was disposed.
     private void Refresh() =>
@@ -327,6 +334,9 @@
         if (!ReferenceEquals(role, _checkedRole))
         {
             _checkedRole = role;
+
+            // Read before the policy, so that roles compiled in between are checked again.
+            _checkedRoleNames = AuthorizationService.GetRoleNames();
             var result = AuthorizationService.PreviewPolicy(role);
             _checks = result.Error is not null
                 ? new RoleChecks(result.Error, null, null)

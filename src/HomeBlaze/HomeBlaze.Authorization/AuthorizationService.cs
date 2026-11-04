@@ -178,6 +178,7 @@ public sealed class AuthorizationService : IDisposable
     /// <summary>
     /// Gets the names of the built-in roles, followed by those of the custom roles that names resolve to, ordered by name.
     /// A custom role whose rules do not compile is listed; its <see cref="Role.Status"/> and <see cref="GetPolicy"/> report the error.
+    /// The same instance is returned until the roles are compiled again, so that a caller can tell whether they were.
     /// </summary>
     public IReadOnlyList<string> GetRoleNames() => GetSnapshot().RoleNames;
 

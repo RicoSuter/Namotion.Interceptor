@@ -146,6 +146,7 @@
 @code {
     private string? _path;
     private AuthorizationRole? _previewedRole;
+    private IReadOnlyList<string>? _previewedRoleNames;
     private string? _error;
     private IInterceptorSubject? _subject;
     private SubjectReadDecision _subjectDecision;
@@ -177,12 +178,13 @@
         AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
     }
 
-    // Raised on the thread pool, also right after this component was disposed. An included role saved by another dialog,
-    // or a file reload, changes the decisions of the same edited role.
+    // An included role saved by another dialog, or a file reload, changes the decisions of the same edited role. Raised
+    // on the thread pool, also right after this component was disposed, and also for the roles previewed already, which
+    // then render nothing new.
     private void OnPoliciesChanged() =>
         _ = InvokeAsync(() =>
         {
-            if (!_isDisposed)
+            if (!_isDisposed && !ReferenceEquals(AuthorizationService.GetRoleNames(), _previewedRoleNames))
             {
                 Update();
                 StateHasChanged();
@@ -215,6 +217,9 @@
     private void Update()
     {
         _previewedRole = Role;
+
+        // Read before the policy, so that roles compiled in between are previewed again.
+        _previewedRoleNames = AuthorizationService.GetRoleNames();
         var result = AuthorizationService.PreviewPolicy(Role);
         _error = result.Error;
         _subject = string.IsNullOrWhiteSpace(_path) ? null : PathResolver.ResolveSubject(_path.Trim(), PathStyle.Canonical);
