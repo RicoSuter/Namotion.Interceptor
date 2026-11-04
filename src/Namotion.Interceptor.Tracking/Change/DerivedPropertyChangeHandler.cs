@@ -149,8 +149,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     private static bool IsUsedByCurrentData(in PropertyReference property, in PropertyReference derivedProperty)
     {
-        var currentData = property.TryGetDerivedPropertyData();
-        return currentData is not null && currentData.GetUsedByProperties().Contains(derivedProperty);
+        return property.TryGetDerivedPropertyData()?.UsedByDependencies?.Contains(derivedProperty) is true;
     }
 
     /// <inheritdoc />

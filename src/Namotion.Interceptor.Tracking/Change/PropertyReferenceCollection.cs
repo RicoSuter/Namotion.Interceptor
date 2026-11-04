@@ -50,6 +50,14 @@ public sealed class PropertyReferenceCollection
     internal PropertyReference[] ItemsArray => Volatile.Read(ref _items);
 
     /// <summary>
+    /// Returns whether the collection contains the property (thread-safe, allocation-free).
+    /// </summary>
+    internal bool Contains(in PropertyReference property)
+    {
+        return Array.IndexOf(Volatile.Read(ref _items), property) >= 0;
+    }
+
+    /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
     /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
     /// Idempotent: Adding the same property multiple times is safe (no duplicates).

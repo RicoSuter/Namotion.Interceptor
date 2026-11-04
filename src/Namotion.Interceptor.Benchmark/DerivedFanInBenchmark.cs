@@ -92,7 +92,7 @@ public class DerivedFanInBenchmark
     }
 
     /// <summary>
-    /// Recalculates every dependent with an unchanged dependency set. Must stay linear.
+    /// Recalculates every dependent with an unchanged dependency set.
     /// </summary>
     [Benchmark]
     public void Change()
