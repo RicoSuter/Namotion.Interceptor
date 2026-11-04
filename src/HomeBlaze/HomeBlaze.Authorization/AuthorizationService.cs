@@ -165,14 +165,14 @@ public sealed class AuthorizationService : IDisposable
     /// <summary>
     /// Gets why <paramref name="name"/> cannot name a custom role, or null: it is blank, is the name of a built-in role or
     /// of the system rules, ignoring case, contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role,
-    /// or contains an invisible character, one of the Unicode categories Format or Control, such as a zero-width space.
-    /// Uniqueness among the custom roles is not checked.
+    /// or contains an invisible character, one of the Unicode categories Format or Control, such as a zero-width space,
+    /// other than the zero-width non-joiner and joiner. Uniqueness among the custom roles is not checked.
     /// </summary>
     public static string? GetRoleNameError(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        return AuthorizationSnapshot.GetNameError(name, count: 1);
+        return RoleNameRules.GetError(name);
     }
 
     /// <summary>

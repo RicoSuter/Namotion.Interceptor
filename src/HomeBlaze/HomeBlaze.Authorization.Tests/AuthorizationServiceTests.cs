@@ -247,6 +247,9 @@ public sealed class AuthorizationServiceTests : IDisposable
     [InlineData("Light\u200BOperator", "The name 'Light\u200BOperator' cannot contain invisible characters, such as a zero-width space or a control character.")]
     [InlineData("\uFEFFKitchen", "The name '\uFEFFKitchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
     [InlineData("Kit\tchen", "The name 'Kit\tchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
+    [InlineData("Kitchen\U000E0041", "The name 'Kitchen\U000E0041' cannot contain invisible characters, such as a zero-width space or a control character.")] // a tag character, outside the BMP
+    [InlineData("\u06A9\u062A\u0627\u0628\u200C\u062E\u0627\u0646\u0647", null)] // Persian for library, spelled with a zero-width non-joiner
+    [InlineData("\U0001F9D1\u200D\U0001F373 Kitchen", null)] // the cook emoji, a zero-width joiner sequence
     public void WhenARoleNameIsChecked_ThenOnlyBlankReservedPathAndInvisibleCharacterNamesHaveAnError(string name, string? expectedError)
     {
         // Act

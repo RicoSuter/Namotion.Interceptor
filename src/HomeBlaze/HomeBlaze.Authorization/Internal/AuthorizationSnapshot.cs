@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Globalization;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -16,9 +15,6 @@ namespace HomeBlaze.Authorization.Internal;
 internal sealed class AuthorizationSnapshot
 {
     private static readonly HomeBlazeMemberTagProvider TagProvider = new();
-
-    // A role's name is a segment of its path, where these separate segments and enclose indexes.
-    private static readonly char[] RoleNamePathCharacters = ['/', '[', ']'];
 
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
@@ -190,7 +186,7 @@ internal sealed class AuthorizationSnapshot
     private AuthorizationResult CompilePreview(AuthorizationRole editedRole)
     {
         var name = editedRole.Name;
-        var reason = GetNameError(name, count: 1) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
+        var reason = AuthorizationService.GetRoleNameError(name) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
         if (reason is not null)
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, reason);
@@ -285,53 +281,10 @@ internal sealed class AuthorizationSnapshot
         return roles;
     }
 
-    /// <summary>
-    /// Gets why <paramref name="name"/> cannot name a custom role held by <paramref name="count"/> roles of the
-    /// <see cref="Authorization"/>, ignoring case, or null.
-    /// </summary>
-    public static string? GetNameError(string name, int count)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "A role needs a name.";
-        }
-
-        if (BuiltInRoles.IsBuiltIn(name))
-        {
-            return $"The name '{name}' is reserved for a built-in role.";
-        }
-
-        if (string.Equals(name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
-        {
-            return $"The name '{name}' is reserved for the system rules.";
-        }
-
-        if (name.IndexOfAny(RoleNamePathCharacters) >= 0)
-        {
-            return $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
-        }
-
-        if (HasInvisibleCharacter(name))
-        {
-            return $"The name '{name}' cannot contain invisible characters, such as a zero-width space or a control character.";
-        }
-
-        return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;
-    }
-
-    // Such a name looks like another one but differs from it, so that the same name typed elsewhere never matches it.
-    private static bool HasInvisibleCharacter(string name)
-    {
-        foreach (var character in name)
-        {
-            if (char.GetUnicodeCategory(character) is UnicodeCategory.Format or UnicodeCategory.Control)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    // Gets why a name held by count roles, ignoring case, cannot name a custom role, or null.
+    private static string? GetNameError(string name, int count) =>
+        AuthorizationService.GetRoleNameError(name) ??
+        (count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null);
 
     private static AuthorizationRole ToAuthorizationRole(string name, Role role) =>
         new()

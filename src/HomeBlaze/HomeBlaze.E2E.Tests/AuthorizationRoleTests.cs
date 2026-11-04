@@ -227,6 +227,7 @@ public class AuthorizationRoleTests
             await deleteButton.ClickAsync();
             var confirmation = rolePane.Page.GetByRole(AriaRole.Dialog);
             await Assertions.Expect(confirmation).ToContainTextAsync($"Delete '{RenamedRoleName}'?", new() { Timeout = Timeout });
+            await Assertions.Expect(confirmation).ToContainTextAsync("Agents and roles that name it report it as unknown afterwards.");
             await confirmation.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
 
             // Assert
