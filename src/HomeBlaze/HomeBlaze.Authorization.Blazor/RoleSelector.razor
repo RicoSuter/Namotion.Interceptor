@@ -23,14 +23,17 @@
     {
         if (IsKnownRole(role))
         {
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" OnClose="@(() => RemoveAsync(role))"
-                     data-testid="@($"{TestId}-{role}")">@role</MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" data-testid="@($"{TestId}-{role}")">
+                @role<ChipRemoveButton Value="@role" OnRemove="@(() => RemoveAsync(role))" />
+            </MudChip>
         }
         else
         {
             <MudTooltip Text="@GetRoleError(role)">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
-                         Class="ma-0" OnClose="@(() => RemoveAsync(role))" data-testid="@($"{TestId}-{role}")">@role</MudChip>
+                         Class="ma-0" data-testid="@($"{TestId}-{role}")">
+                    @role<ChipRemoveButton Value="@role" OnRemove="@(() => RemoveAsync(role))" />
+                </MudChip>
             </MudTooltip>
         }
     }

@@ -100,6 +100,9 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         // Assert
         Assert.Equal([Denied, null, Allowed, null], GetCellStates(component, "Start"));
         Assert.Equal("execute-without-read", component.Find("[data-testid='role-preview-cell-Start-execute']").GetAttribute("data-note"));
+        Assert.Equal("Start, execute: allowed, cannot be used",
+            component.Find("[data-testid='role-preview-cell-Start-execute'] button").GetAttribute("aria-label"));
+        Assert.Equal("Start, read: denied", component.Find("[data-testid='role-preview-cell-Start-read'] button").GetAttribute("aria-label"));
         Assert.Null(component.Find("[data-testid='role-preview-cell-Start-read']").GetAttribute("data-note"));
         Assert.Contains(
             "It cannot be used, as read is denied: A method is listed and run only when it is readable.",
@@ -205,6 +208,21 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         Assert.Equal("/Devices", component.Find("[data-testid='role-preview-path'] input").GetAttribute("value"));
         Assert.Equal([Allowed, Allowed, null, Denied], GetCellStates(component, "Temperature"));
         Assert.Same(savedAllow, role.Allow);
+    }
+
+    [Fact]
+    public async Task WhenThePreviewIsShown_ThenTheSubjectIsBrowsedWithAButtonTheKeyboardReaches()
+    {
+        // Arrange
+        var component = RenderEditor(_graph.GetRole("Kitchen"));
+
+        // Act
+        await ActivateTabAsync(component, PreviewTabIndex);
+
+        // Assert
+        var browse = component.Find("[data-testid='role-preview-path'] [data-testid='subject-path-field-browse']");
+        Assert.Equal("Browse Subject", browse.GetAttribute("aria-label"));
+        Assert.Null(browse.GetAttribute("tabindex"));
     }
 
     [Fact]

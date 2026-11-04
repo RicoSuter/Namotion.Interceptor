@@ -1,27 +1,24 @@
 @* A list of texts shown as chips, with a field that adds the typed text on Enter, with its Add button or when it loses
    focus, or a picked suggestion. Typed text is split at commas into several values, see SplitsAtCommas. Text that is typed
    and invalid stays in the field with its error, see HasInvalidText. A picked text goes into the field to be edited before
-   it is added. *@
+   it is added. Backspace in the empty field removes the last chip. *@
+@implements IHandleEvent
 
 <div data-testid="@TestId">
     <div class="d-flex align-start gap-2">
         <div class="flex-grow-1">
             @if (Suggestions is null)
             {
-                <div @onkeyup="OnTextKeyUpAsync">
-                    <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
-                                  Immediate="true" Placeholder="@Placeholder"
-                                  HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error"
-                                  Adornment="@(Pick is null ? Adornment.None : Adornment.End)" AdornmentIcon="@Icons.Material.Filled.Search"
-                                  AdornmentAriaLabel="@($"Browse {Label}")" OnAdornmentClick="@PickAsync" />
-                </div>
+                <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
+                              OnKeyDown="@OnTextKeyDownAsync" OnKeyUp="@OnTextKeyUpAsync" Immediate="true" Placeholder="@Placeholder"
+                              HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error" />
             }
             else
             {
                 @* The value changes only when a suggestion is picked; typed text is added on Enter, not on every keystroke. The
                    keys are seen on the element around the field, as the field passes a key on only after it handled it, which
                    can wait for the browser, so that a later key could be seen first. *@
-                <div @onkeydown="OnSuggestionKeyDown" @onfocusin="OnSuggestionFocusIn">
+                <div @onkeydown="OnSuggestionKeyDownAsync" @onfocusin="OnSuggestionFocusIn">
                     <MudAutocomplete T="string" @ref="_autocomplete" Label="@Label" Placeholder="@Placeholder" HelperText="@HelperText"
                                      Error="@(_error is not null)" ErrorText="@_error"
                                      ValueChanged="@AddSuggestionAsync" TextChanged="@OnTextChangedAsync" OnKeyUp="@OnSuggestionKeyUpAsync"
@@ -30,8 +27,14 @@
                 </div>
             }
         </div>
+        @* A button rather than an icon in the field, which the keyboard does not reach. *@
+        @if (Pick is not null)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" OnClick="@PickAsync"
+                           aria-label="@($"Browse {Label}")" data-testid="@($"{TestId}-browse")" />
+        }
         @* Leaving the field adds its text before the click, which then finds the field empty. *@
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" Disabled="@(string.IsNullOrWhiteSpace(_text) || _error is not null)"
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" Disabled="@IsAddDisabled"
                    OnClick="@CommitTextAsync" aria-label="@($"Add {Label}")" data-testid="@($"{TestId}-add")">Add</MudButton>
     </div>
     @if (_warning is not null)
@@ -52,20 +55,25 @@
             {
                 <MudTooltip Text="@error">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
-                             Class="ma-0" OnClose="@(() => RemoveAtAsync(position))" data-testid="@($"{TestId}-chip")">@value</MudChip>
+                             Class="ma-0" data-testid="@($"{TestId}-chip")">
+                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveAtAsync(position))" />
+                    </MudChip>
                 </MudTooltip>
             }
             else if (Warning?.Invoke(value) is { } warning)
             {
                 <MudTooltip Text="@warning">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Icon="@Icons.Material.Filled.WarningAmber"
-                             Class="ma-0" OnClose="@(() => RemoveAtAsync(position))" data-testid="@($"{TestId}-chip")">@value</MudChip>
+                             Class="ma-0" data-testid="@($"{TestId}-chip")">
+                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveAtAsync(position))" />
+                    </MudChip>
                 </MudTooltip>
             }
             else
             {
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" OnClose="@(() => RemoveAtAsync(position))"
-                         data-testid="@($"{TestId}-chip")">@value</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" data-testid="@($"{TestId}-chip")">
+                    @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveAtAsync(position))" />
+                </MudChip>
             }
         }
     </MudStack>
@@ -86,6 +94,9 @@
     // Set on Enter to the text to add once the key is released; null when Enter picks a suggestion.
     private string? _enterText;
     private bool _isSuggestionChosen;
+
+    // Set by an event handler that changed nothing shown, see IHandleEvent.HandleEventAsync.
+    private bool _isUnchanged;
 
     /// <summary>The texts shown as chips.</summary>
     [Parameter]
@@ -200,6 +211,30 @@
         return true;
     }
 
+    private bool IsAddDisabled => string.IsNullOrWhiteSpace(_text) || _error is not null;
+
+    // An event renders the field only when its handler changed what is shown, so that a key renders it at most once: a
+    // key reaches several handlers, which mostly change nothing, and each render delays the events after it. Only a
+    // handler that completed at once can skip the render, as another event can run and set the flag while one awaits.
+    Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem item, object? arg)
+    {
+        _isUnchanged = false;
+        var task = item.InvokeAsync(arg);
+        if (task.IsCompletedSuccessfully && _isUnchanged)
+        {
+            return Task.CompletedTask;
+        }
+
+        StateHasChanged();
+        return task.IsCompleted ? task : RenderOnCompletionAsync(task);
+    }
+
+    private async Task RenderOnCompletionAsync(Task task)
+    {
+        await task;
+        StateHasChanged();
+    }
+
     /// <summary>
     /// Adds the text in the field, unless it is blank or invalid, as Enter would.
     /// </summary>
@@ -212,9 +247,12 @@
         }
     }
 
+    // The field shows its text itself, so that most keys change nothing else shown.
     private async Task OnTextChangedAsync(string? text)
     {
+        var shown = (_error, _warning, IsAddDisabled);
         SetText(text);
+        _isUnchanged = shown == (_error, _warning, IsAddDisabled);
 
         // Typing searches again, which highlights the first suggestion.
         _isSuggestionChosen = false;
@@ -230,12 +268,29 @@
         }
     }
 
-    private async Task OnTextKeyUpAsync(KeyboardEventArgs args)
+    private Task OnTextKeyDownAsync(KeyboardEventArgs args) => RemoveLastOnBackspaceAsync(args);
+
+    private Task OnTextKeyUpAsync(KeyboardEventArgs args)
     {
         if (args.Key is "Enter" or "NumpadEnter")
         {
-            await AddAsync(_text);
+            return AddAsync(_text);
         }
+
+        _isUnchanged = true;
+        return Task.CompletedTask;
+    }
+
+    // The text is that of the input before the key, as the input events before it are handled first.
+    private Task RemoveLastOnBackspaceAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Backspace" && string.IsNullOrEmpty(_text) && Values.Count > 0)
+        {
+            return RemoveAtAsync(Values.Count - 1);
+        }
+
+        _isUnchanged = true;
+        return Task.CompletedTask;
     }
 
     private async Task PickAsync()
@@ -351,25 +406,33 @@
         if (_autocomplete?.Open == true)
         {
             _isCommitPending = true;
+            _isUnchanged = true;
             return;
         }
 
         await CommitTextAsync();
     }
 
-    private void OnSuggestionFocusIn() => _isCommitPending = false;
+    private void OnSuggestionFocusIn()
+    {
+        _isCommitPending = false;
+        _isUnchanged = true;
+    }
 
     private async Task OnSuggestionOpenChangedAsync(bool isOpen)
     {
-        if (!isOpen && _isCommitPending)
+        if (isOpen || !_isCommitPending)
         {
-            _isCommitPending = false;
-            await CommitTextAsync();
+            _isUnchanged = true;
+            return;
         }
+
+        _isCommitPending = false;
+        await CommitTextAsync();
     }
 
     // Runs in the order of the keys, before the field handles the release of Enter.
-    private void OnSuggestionKeyDown(KeyboardEventArgs args)
+    private Task OnSuggestionKeyDownAsync(KeyboardEventArgs args)
     {
         if (args.Key is "ArrowDown" or "ArrowUp")
         {
@@ -383,6 +446,8 @@
         {
             _enterText = _isSuggestionChosen ? null : _text ?? string.Empty;
         }
+
+        return RemoveLastOnBackspaceAsync(args);
     }
 
     // Runs after the field handled the key: when Enter picked a suggestion, the text was added already.
@@ -390,16 +455,20 @@
     {
         if (args.Key is not ("Enter" or "NumpadEnter"))
         {
+            _isUnchanged = true;
             return;
         }
 
         var text = _enterText;
         _enterText = null;
         _isSuggestionChosen = false;
-        if (text is not null)
+        if (text is null)
         {
-            await AddSuggestionAsync(text);
+            _isUnchanged = true;
+            return;
         }
+
+        await AddSuggestionAsync(text);
     }
 
     // The suggestions that contain the text and are not added yet, after the text itself unless it is one of them.

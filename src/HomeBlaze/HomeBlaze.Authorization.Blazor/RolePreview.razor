@@ -14,7 +14,7 @@
 <div class="role-preview">
     <div data-testid="role-preview-path">
         <SubjectPathField Value="@_path" ValueChanged="@OnPathChanged" Label="Subject" Placeholder="/Devices/Kitchen"
-                          IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" />
+                          IsPropertyVisible="@IsSubjectProperty" CanSelectProperty="@IsSubjectReference" HasBrowseButton="true" />
     </div>
     <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
         What the role allows on the chosen subject, its unsaved changes included, with the other roles it includes and the system rules.
@@ -69,7 +69,7 @@
                                     <MudTooltip Text="@cell.Explanation">
                                         <MudIconButton Size="Size.Small" Icon="@(cell.IsAllowed ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
                                                        Color="@cell.Color"
-                                                       aria-label="@($"{row.Name}, {action.Name}: {cell.Decision}")"
+                                                       aria-label="@($"{row.Name}, {action.Name}: {cell.AccessibleDecision}")"
                                                        OnClick="@(() => Select(row.Name, action))" />
                                     </MudTooltip>
                                 }
@@ -388,6 +388,9 @@
     private sealed record Cell(bool IsAllowed, string Explanation, bool IsUnusable = false)
     {
         public string Decision => IsAllowed ? "allowed" : "denied";
+
+        // The decision as screen readers announce it, which the color of an unusable cell says otherwise.
+        public string AccessibleDecision => IsUnusable ? $"{Decision}, cannot be used" : Decision;
 
         public Color Color
         {

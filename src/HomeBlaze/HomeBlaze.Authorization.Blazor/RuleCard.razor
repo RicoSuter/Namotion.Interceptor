@@ -40,7 +40,9 @@
         {
             <MudTooltip Text="Unknown action">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
-                         Class="ma-0" OnClose="@(() => ToggleActionAsync(action, false))">@action.Name</MudChip>
+                         Class="ma-0">
+                    @action.Name<ChipRemoveButton Value="@action.Name" OnRemove="@(() => ToggleActionAsync(action, false))" />
+                </MudChip>
             </MudTooltip>
         }
         <MudSpacer />
