@@ -69,13 +69,8 @@ internal class SubscriptionManager : IAsyncDisposable
     // item keeps being retried and self-heals once the node recovers.
     internal const int MaxHealAttemptsBeforeEscalation = 3;
 
-    // Prevents new callbacks during cleanup. Monotonic by design: set once by DisposeAsync, never
-    // cleared. Disposal is terminal because SessionManager.DisposeAsync is Interlocked-guarded and
-    // its callers null out the session manager, so the next connect builds a fresh instance instead
-    // of reusing this one. Reconnect does reuse the instance, but it never sets this flag, so
-    // CreateBatchedSubscriptionsAsync has nothing to reset. Do not add a reset there: it would let a
-    // reconnect racing a disposal resume callbacks on a disposed manager, and it would make the
-    // !_shuttingDown guard in CompleteSetup dead.
+    // Set once by DisposeAsync and never cleared, because disposal is terminal. Do not reset it in
+    // setup: a reconnect racing a disposal would resume callbacks on a disposed manager.
     private volatile bool _shuttingDown;
     private volatile bool _callbacksEnabled; // Gated to false until subscription setup completes
 
@@ -817,7 +812,6 @@ internal class SubscriptionManager : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _shuttingDown = true;
-        _callbacksEnabled = false;
 
         var subscriptions = _subscriptions.Keys.ToArray();
         ClearTrackedCollections();

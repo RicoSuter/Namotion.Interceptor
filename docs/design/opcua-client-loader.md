@@ -18,7 +18,7 @@ So a newly constructed subject is attached to its discovering parent's context b
 
 ## Staging is keyed to the discovering parent
 
-`RegisterStagedSubject` adds the immediate parent's context as a fallback context, not the root context. In the ordinary tree case that link is exactly the one `ContextInheritanceHandler` removes when the subject's last property reference goes away, so the two agree and nothing is left behind. The handler adds no link of its own for a staged subject, because its add is gated on the subject not already being context-attached, which staging has already made true.
+`RegisterStagedSubject` adds the immediate parent's context as a fallback context, not the root context. `ContextInheritanceHandler` swaps that link for a remaining parent's context when the discovering parent releases the subject, and removes it when the last reference goes away, so nothing is left behind, also for a subject reachable under two parents. The handler adds no link of its own for a staged subject, because its add is gated on the subject not already being context-attached, which staging has already made true.
 
 Re-keying the link to the parent that finally binds the subject was implemented and rejected. Staging-parent keying is what keeps the fallback chain acyclic. In an address space where two subjects reference each other, re-keying makes each one's context delegate to the other's, and the next context resolution throws the delegation cycle error from `InterceptorSubjectContext`. `OpcUaSubjectLoaderTests.WhenAddressSpaceHasCycle_ThenLoaderTerminatesWithoutInfiniteRecursion` is the test that catches it.
 
@@ -55,11 +55,3 @@ That is not a theoretical saving. In the round-trip measurement on the 241-subje
 `IsRecoverableWithinSession` asks whether a status can recover without a new session, and backs the subscribe and write paths. `BadUserAccessDenied`, `BadNotReadable` and `BadNotImplemented` are recoverable there, because role permissions and the `AccessLevel` attribute are mutable server-side, so a monitored item can start succeeding mid-session and has to be kept for retry rather than dropped. `BadSecurityModeInsufficient` is permanent, because it is bound to the secure channel's message security mode, which only a new channel can change, and a reconnect re-attempts everything anyway.
 
 `ThrowIfLoadMustRetry` asks whether the load must abort and retry, and backs the browse and read paths. Here the same three access-scoped codes repeat: the session's identity and permissions have not changed within the load, so throwing would crash-loop the whole load instead of skipping the one unreachable node. The load-skip set is therefore a superset of the session-permanent set by exactly those three codes.
-
-## The remaining leak is in the core
-
-In a graph-shaped address space the staging link can survive a successful load. `ContextInheritanceHandler` adds an inherited fallback context when a subject gains its first property reference, keyed to the parent holding that reference, and removes it when the last reference goes away, keyed to the parent holding that last one. For a subject reachable under two parents those are different parents, so the removal does not match the addition and a link to the first parent's context remains.
-
-This is not specific to the loader. The same mismatch exists in the core for any subject reachable under two parents, however the model was built, and the loader only makes it easy to reach because a server-side DAG produces exactly that shape. The consequence is a retained context reference, not a wrong model: the subject stays registered, monitored and correct.
-
-The fix belongs in the core rather than in the connector: record the inherited context per subject when it is added, and remove the recorded one on the last detach instead of re-deriving it from whichever parent happens to be last. Re-keying the loader's staging link to the binding parent is not a substitute, for the delegation cycle reason above. This is a follow-up.

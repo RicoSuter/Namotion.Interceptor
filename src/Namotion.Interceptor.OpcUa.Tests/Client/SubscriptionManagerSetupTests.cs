@@ -5,8 +5,71 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
-public class SubscriptionManagerSweepOrderingTests
+public class SubscriptionManagerSetupTests
 {
+    [Fact]
+    public void WhenDataChangeArrivesBeforeSetupCompletes_ThenNotificationIsIgnored()
+    {
+        // Arrange
+        var harness = SubscriptionManagerTestHarness.Create();
+        harness.RegisterMonitoredItem(clientHandle: 7, propertyName: "Value");
+
+        var notification = SubscriptionManagerTestHarness.CreateNotification(clientHandle: 7, value: 42d);
+
+        // Act: deliver before setup completes, so the gate is still closed
+        harness.Manager.OnFastDataChange(new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()), notification, []);
+
+        // Assert
+        Assert.Equal(0d, harness.GetValue("Value"));
+
+        // Act: complete setup (which opens the gate) and deliver the same notification
+        harness.Manager.CompleteSetup([]);
+        harness.Manager.OnFastDataChange(new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()), notification, []);
+
+        // Assert
+        Assert.Equal(42d, harness.GetValue("Value"));
+    }
+
+    [Fact]
+    public void WhenSubscriptionsAreTransferred_ThenTheCallbackGateStaysOpen()
+    {
+        // Arrange: setup has completed, then the reconnect handler hands over a transferred subscription.
+        var harness = SubscriptionManagerTestHarness.Create();
+        harness.RegisterMonitoredItem(clientHandle: 7, propertyName: "Value");
+        harness.Manager.CompleteSetup([]);
+        harness.Manager.UpdateTransferredSubscriptions([new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions())]);
+
+        // Act
+        harness.Manager.OnFastDataChange(
+            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
+            SubscriptionManagerTestHarness.CreateNotification(clientHandle: 7, value: 42d),
+            []);
+
+        // Assert
+        Assert.Equal(42d, harness.GetValue("Value"));
+    }
+
+    [Fact]
+    public async Task WhenDisposedManagerRunsSubscriptionSetup_ThenCallbacksStaySuppressed()
+    {
+        // Arrange
+        var harness = SubscriptionManagerTestHarness.Create();
+        await harness.Manager.DisposeAsync();
+
+        // Act: a reconnect that starts after disposal runs subscription setup again. Passing no
+        // monitored items makes the null session safe: the batching loop that dereferences the
+        // session never executes for an empty item list.
+        await harness.Manager.CreateBatchedSubscriptionsAsync([], null!, CancellationToken.None);
+        harness.RegisterMonitoredItem(clientHandle: 7, propertyName: "Value");
+        harness.Manager.OnFastDataChange(
+            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
+            SubscriptionManagerTestHarness.CreateNotification(clientHandle: 7, value: 42d),
+            []);
+
+        // Assert
+        Assert.Equal(0d, harness.GetValue("Value"));
+    }
+
     [Fact]
     public void WhenSubjectDetachesBeforeItsItemsAreRegistered_ThenTheSweepStillDropsThem()
     {

@@ -69,6 +69,44 @@ public class OpcUaSubjectLoaderDeduplicationTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
+    public async Task WhenTheDiscoveringParentReleasesASharedSubject_ThenItsContextNoLongerFallsBackOnThatParent()
+    {
+        // Arrange
+        var sharedNodeId = new NodeId(9999, 2);
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateObjectReferenceDescription("Parent1", new ExpandedNodeId(new NodeId(1001, 2))),
+                CreateObjectReferenceDescription("Parent2", new ExpandedNodeId(new NodeId(1002, 2)))
+            ],
+            [new NodeId(1001, 2)] = [CreateObjectReferenceDescription("SharedChild", new ExpandedNodeId(sharedNodeId))],
+            [new NodeId(1002, 2)] = [CreateObjectReferenceDescription("SharedChild", new ExpandedNodeId(sharedNodeId))]
+        });
+
+        var (loader, _, subject) = CreateLoader(shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+        await loader.LoadSubjectAsync(subject, CreateTestReferenceDescription("Root", new NodeId(1, 0)), mockSession.Object, CancellationToken.None);
+
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var parent1 = (IInterceptorSubject)registeredSubject.Properties.Single(p => p.Name == "Parent1").GetValue()!;
+        var parent2 = (IInterceptorSubject)registeredSubject.Properties.Single(p => p.Name == "Parent2").GetValue()!;
+        var parent1SharedChild = parent1.TryGetRegisteredSubject()!.Properties.Single(p => p.Name == "SharedChild");
+        var parent2SharedChild = parent2.TryGetRegisteredSubject()!.Properties.Single(p => p.Name == "SharedChild");
+        var shared = (IInterceptorSubject)parent1SharedChild.GetValue()!;
+
+        // Act
+        parent1SharedChild.SetValue(null);
+        var fallbacksAfterFirstRelease = ((InterceptorSubjectContext)shared.Context).FallbackContexts;
+        parent2SharedChild.SetValue(null);
+
+        // Assert
+        Assert.DoesNotContain(parent1.Context, fallbacksAfterFirstRelease);
+        Assert.Contains(parent2.Context, fallbacksAfterFirstRelease);
+        Assert.Empty(((InterceptorSubjectContext)shared.Context).FallbackContexts);
+    }
+
+    [Fact]
     public async Task WhenSameNodeAppearsInCollectionsFromMultipleParents_ThenSubjectIsReused()
     {
         // Arrange

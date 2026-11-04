@@ -620,12 +620,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     return match;
                 }
 
-                // ToNodeId returns null when the matched reference carries a namespace URI that
-                // is not registered in the session's NamespaceTable. Return null rather than
-                // browsing a null NodeId (which throws deep in the browse primitive): the caller
-                // logs "could not find root node", the root subject keeps its current property
-                // values, and the next load resolves the path again. Symmetric with the
-                // null-BrowseName tolerance in FindChildByBrowseName.
+                // Null for a namespace URI the session does not know; browsing a null NodeId would
+                // throw, so give up and let the next load resolve the path again.
                 var resolvedNodeId = ExpandedNodeId.ToNodeId(match.NodeId, session.NamespaceUris);
                 if (resolvedNodeId is null)
                 {

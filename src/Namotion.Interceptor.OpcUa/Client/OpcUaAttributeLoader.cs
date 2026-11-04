@@ -67,11 +67,8 @@ internal sealed class OpcUaAttributeLoader
             return;
         }
 
-        // Tracks (property, parentNodeId) pairs already processed in any prior round, so
-        // we never call MatchKnownAttributes / CollectDynamicAttributesAsync twice for the
-        // same pair. A property could legitimately appear in multiple rounds against
-        // different parent NodeIds, but processing the SAME pair twice would re-claim
-        // already-monitored sub-attribute references.
+        // Processing the same (property, parent node) pair twice would re-claim its
+        // already-monitored sub-attributes.
         var processedEntries = new HashSet<(RegisteredSubjectProperty Property, NodeId ParentNodeId)>();
 
         // Tracks the NodeIds already traversed under each variable property. A dynamic attribute
@@ -261,12 +258,8 @@ internal sealed class OpcUaAttributeLoader
                 continue;
             }
 
-            // Two entries in the same round can stage the same (property, browse name):
-            // sibling parents with identical BrowseNames but different NodeIds resolve to
-            // the same owner property, and the TryGetAttribute pre-check in
-            // CollectDynamicAttributesAsync runs before any attribute is created. Re-check
-            // here so the duplicate is skipped instead of crashing AddAttribute with a
-            // duplicate-key exception (which would abort the load and recur on every retry).
+            // Sibling parents sharing a BrowseName resolve to the same owner property, so two
+            // entries of one round can stage the same attribute; AddAttribute would throw.
             if (entry.OwnerProperty.TryGetAttribute(entry.BrowseName) is not null)
             {
                 _logger.LogWarning(

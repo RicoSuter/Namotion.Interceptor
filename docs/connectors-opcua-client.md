@@ -896,7 +896,3 @@ A load discovers the address space first and changes the model only at the end. 
 A failure inside the commit undoes what that commit did: the ownership claims it established are released, while ownership from a previous successful load is kept, and the bindings it applied are restored in reverse order, except where the application has since written the property itself, in which case the newer value wins.
 
 A subject whose browse did not complete this load is skipped rather than loaded from a truncated child list. Its properties keep their current values and the next load reloads it.
-
-### Known Limitations
-
-**The staging link can survive a successful load in a graph-shaped address space.** A subject reached under two parents can keep delegating to its discovering parent's context after a successful load. The consequence is a retained context reference rather than a wrong model: the subject stays registered, monitored and correct. The cause and the fix, which belongs in the core, are described in [OPC UA Client Loader Design](design/opcua-client-loader.md#the-remaining-leak-is-in-the-core).

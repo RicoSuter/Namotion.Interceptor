@@ -22,7 +22,7 @@ public class OpcUaSessionExtensionsTests
     {
         // Arrange
         var nodeId = new NodeId(2001, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
@@ -64,7 +64,7 @@ public class OpcUaSessionExtensionsTests
         // The browse must skip the unknown NodeId and continue with the rest of the batch.
         var unknownNodeId = new NodeId(1001, 2);
         var goodNodeId = new NodeId(1002, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -122,7 +122,7 @@ public class OpcUaSessionExtensionsTests
         // Arrange: initial browse returns a continuation point; BrowseNext returns a transient bad status.
         var nodeId = new NodeId(1, 0);
         var continuationToken = new byte[] { 0xCA, 0xFE };
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -189,7 +189,7 @@ public class OpcUaSessionExtensionsTests
         // (BadServerNotConnected) and a permanent one (BadUserAccessDenied) both pass through for
         // the caller to handle per property.
         var nodeId = new NodeId(5001, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -227,7 +227,7 @@ public class OpcUaSessionExtensionsTests
         // BadWaitingForInitialData (a startup status) must not throw or drop the good value read with it.
         var goodNodeId = new NodeId(8001, 2);
         var notReadyNodeId = new NodeId(8002, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -273,7 +273,7 @@ public class OpcUaSessionExtensionsTests
         // loading that subject with zero children.
         var returnedNodeId = new NodeId(1001, 2);
         var missingNodeId = new NodeId(1002, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
@@ -310,7 +310,7 @@ public class OpcUaSessionExtensionsTests
         // and leaking its continuation point.
         var returnedNodeId = new NodeId(1001, 2);
         var missingNodeId = new NodeId(1002, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -362,7 +362,7 @@ public class OpcUaSessionExtensionsTests
         // batching loop math.
         var firstNodeId = new NodeId(1001, 2);
         var secondNodeId = new NodeId(1002, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = uint.MaxValue });
 
         mockSession
@@ -408,7 +408,7 @@ public class OpcUaSessionExtensionsTests
         // Batching by the operation limit would open more continuation points than the server
         // allows, which fails permanently and identically on every reconnect retry.
         var nodeIds = Enumerable.Range(1, 5).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = 100 });
         mockSession.SetupGet(s => s.ServerCapabilities).Returns(new ServerCapabilities { MaxBrowseContinuationPoints = 2 });
 
@@ -450,7 +450,7 @@ public class OpcUaSessionExtensionsTests
         // Arrange: the server rejects any batch above one node with BadRequestTooLarge. Halving
         // must recurse until every node is browsed rather than failing the whole load.
         var nodeIds = Enumerable.Range(1, 4).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -494,7 +494,7 @@ public class OpcUaSessionExtensionsTests
         var pagingNodeId = new NodeId(1001, 2);
         var failingNodeId = new NodeId(1002, 2);
         var continuationToken = new byte[] { 0xAA };
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -549,7 +549,7 @@ public class OpcUaSessionExtensionsTests
         // and release the trailing continuation point.
         var nodeId = new NodeId(1001, 2);
         var browseNextCallCount = 0;
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -633,7 +633,7 @@ public class OpcUaSessionExtensionsTests
         // Arrange: the first page arrives, the second fails permanently. The node has a truncated
         // child list either way, so it is omitted rather than reported as fully browsed.
         var nodeId = new NodeId(1001, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         mockSession
             .Setup(s => s.BrowseAsync(
@@ -689,7 +689,7 @@ public class OpcUaSessionExtensionsTests
         // response and issues no continuation point, so the quota (100) cannot bind and the far
         // larger operation limit (4000) governs. Capping here would turn one round-trip into ten.
         var nodeIds = Enumerable.Range(1, 1000).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = 4000 });
         mockSession.SetupGet(s => s.ServerCapabilities).Returns(new ServerCapabilities { MaxBrowseContinuationPoints = 100 });
 
@@ -732,7 +732,7 @@ public class OpcUaSessionExtensionsTests
         // can leave a continuation point open, so the quota (100) binds even though the operation
         // limit (4000) would allow the whole load in one call.
         var nodeIds = Enumerable.Range(1, 1000).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerBrowse = 4000 });
         mockSession.SetupGet(s => s.ServerCapabilities).Returns(new ServerCapabilities { MaxBrowseContinuationPoints = 100 });
 
@@ -776,7 +776,7 @@ public class OpcUaSessionExtensionsTests
         // every operation past that with BadNoContinuationPoints. Without splitting, reconnect
         // would retry the identical batch size and fail identically forever.
         var nodeIds = Enumerable.Range(1, 5).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
 
         var batchSizes = new List<int>();
         mockSession
@@ -879,7 +879,7 @@ public class OpcUaSessionExtensionsTests
         // Arrange: a single node cannot be split any further, so the quota status is classified
         // like any other bad status and aborts the load instead of looping on the split.
         var nodeId = new NodeId(1001, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
@@ -914,7 +914,7 @@ public class OpcUaSessionExtensionsTests
         // so its continuation point goes back to the server and the requested node still loads.
         var nodeId = new NodeId(1001, 2);
         var extraToken = new byte[] { 0xEE };
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
@@ -972,7 +972,7 @@ public class OpcUaSessionExtensionsTests
         // reordered results would surface as a value under the wrong request.
         var firstNodeId = new NodeId(5001, 2);
         var secondNodeId = new NodeId(5002, 2);
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits { MaxNodesPerRead = 3 });
 
         var valuesByRequest = new Dictionary<(NodeId NodeId, uint AttributeId), int>
@@ -1024,15 +1024,5 @@ public class OpcUaSessionExtensionsTests
         {
             Assert.Equal(valuesByRequest[(nodesToRead[i].NodeId, nodesToRead[i].AttributeId)], results[i].Value);
         }
-    }
-
-    private static Mock<ISession> CreateMockSession()
-    {
-        var mockSession = new Mock<ISession>();
-        var namespaceTable = new NamespaceTable();
-        namespaceTable.Append("urn:test");
-        mockSession.SetupGet(s => s.NamespaceUris).Returns(namespaceTable);
-        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());
-        return mockSession;
     }
 }

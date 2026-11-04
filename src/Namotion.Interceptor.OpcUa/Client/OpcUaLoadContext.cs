@@ -166,19 +166,10 @@ internal sealed class OpcUaLoadContext : IDisposable
     /// </remarks>
     public void RegisterStagedSubject(IInterceptorSubject subject, IInterceptorSubjectContext parentContext)
     {
-        // Record the rollback entry BEFORE the side effect. If AddFallbackContext throws
-        // or _stagedSubjects.Add throws after the side effect, the link could leak;
-        // recording first ensures rollback always sees what was actually added.
+        // Recorded first and kept on a throw: AddFallbackContext publishes the link before its
+        // attach handlers run, so a throw can still leave a link that Dispose must remove.
         _stagedSubjects.Add((subject, parentContext));
-        try
-        {
-            subject.Context.AddFallbackContext(parentContext);
-        }
-        catch
-        {
-            _stagedSubjects.RemoveAt(_stagedSubjects.Count - 1);
-            throw;
-        }
+        subject.Context.AddFallbackContext(parentContext);
     }
 
     /// <summary>
@@ -318,10 +309,5 @@ internal sealed class OpcUaLoadContext : IDisposable
                 }
             }
         } while (removedAny);
-
-        _stagedSubjects.Clear();
-        _pendingClaimIndices.Clear();
-        _pendingClaims.Clear();
-        _pendingBindings.Clear();
     }
 }

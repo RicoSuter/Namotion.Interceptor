@@ -134,14 +134,11 @@ public class OpcUaSubjectLoaderTestsBase
         };
     }
 
-    private protected static Mock<ISession> CreateMockSession()
+    internal static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();
         var namespaceTable = new NamespaceTable();
-        // Register the test namespace so that ExpandedNodeId("...", "urn:test") resolves
-        // through the session's NamespaceUris. Production servers register their
-        // namespaces with the client session at handshake time; an empty NamespaceTable
-        // would cause every ExpandedNodeId carrying a NamespaceUri to resolve to null.
+        // Lets an ExpandedNodeId carrying the test namespace URI resolve through the session.
         namespaceTable.Append("urn:test");
         mockSession.SetupGet(s => s.NamespaceUris).Returns(namespaceTable);
         mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());

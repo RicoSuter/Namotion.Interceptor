@@ -49,34 +49,6 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
     private static readonly TimeSpan RollbackCompletionTimeout = TimeSpan.FromSeconds(15);
 
     [Fact]
-    public async Task WhenLoadFailsDuringDiscovery_ThenRootRemainsAtPreLoadState()
-    {
-        // Arrange: Status fails its browse transiently. By then Temperature's claim and Sensor's
-        // binding are queued and Sensor is staged, so a load that applied either eagerly, or a
-        // rollback that missed the staged subject, is visible.
-        var (loader, source, subject) = CreateFixture();
-        var registry = subject.Context.TryGetService<ISubjectRegistry>()!;
-        var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
-
-        var mockSession = CreateMockSession();
-        SetupBrowseAsync(mockSession, SensorTree, failWhile: nodeId => nodeId == StatusId);
-        SetupReadAsync(mockSession, SensorTreeDataTypes);
-
-        var rootNode = CreateObjectReferenceDescription("Root", RootId);
-
-        // Act
-        await Assert.ThrowsAsync<OpcUaTransientServiceException>(
-            () => loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None));
-
-        // Assert: the dynamic property slots added during discovery may remain on the root, but they
-        // hold no value, no claim reached the source, and the registry knows no subject it did not
-        // know before the load.
-        Assert.All(subject.TryGetRegisteredSubject()!.Properties, property => Assert.Null(property.GetValue()));
-        Assert.Empty(source.Ownership.Properties);
-        Assert.Equal(preLoadKeys, registry.KnownSubjects.Keys.ToHashSet());
-    }
-
-    [Fact]
     public void WhenCommitFailsMidway_ThenOnlyItsOwnClaimsAndBindingsAreRolledBack()
     {
         // Arrange: simulate a reload. "PreOwned" is already owned by this source from a previous
@@ -129,11 +101,15 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task WhenLoadFailsAndRetries_ThenSecondAttemptSucceedsCleanly()
+    public async Task WhenLoadFailsAndRetries_ThenTheFailureLeavesThePreLoadStateAndTheRetrySucceeds()
     {
-        // Arrange: the browse of Status fails transiently during the first load and succeeds
-        // during the second.
+        // Arrange: Status fails its browse transiently during the first load and succeeds during
+        // the second. By then Temperature's claim and Sensor's binding are queued and Sensor is
+        // staged, so a load that applied either eagerly, or a rollback that missed the staged
+        // subject, is visible.
         var (loader, source, subject) = CreateFixture();
+        var registry = subject.Context.TryGetService<ISubjectRegistry>()!;
+        var preLoadKeys = registry.KnownSubjects.Keys.ToHashSet();
 
         var failStatusBrowse = true;
         var mockSession = CreateMockSession();
@@ -146,6 +122,13 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
         await Assert.ThrowsAsync<OpcUaTransientServiceException>(
             () => loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None));
 
+        // Assert: the dynamic property slots added during discovery may remain on the root, but they
+        // hold no value, no claim reached the source, and the registry knows no subject it did not
+        // know before the load.
+        Assert.All(subject.TryGetRegisteredSubject()!.Properties, property => Assert.Null(property.GetValue()));
+        Assert.Empty(source.Ownership.Properties);
+        Assert.Equal(preLoadKeys, registry.KnownSubjects.Keys.ToHashSet());
+
         // Act: the second load browses Status cleanly.
         failStatusBrowse = false;
         var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
@@ -156,7 +139,7 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
         // Sensor, Status) with no orphan from the failed attempt.
         AssertMonitoredAndClaimed(source, monitoredItems, TemperatureId);
         AssertSensorIsBound(subject, "Status");
-        Assert.Equal(3, subject.Context.TryGetService<ISubjectRegistry>()!.KnownSubjects.Count);
+        Assert.Equal(3, registry.KnownSubjects.Count);
     }
 
     [Fact]

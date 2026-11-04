@@ -219,12 +219,8 @@ internal sealed class OpcUaSubjectLoader
                 continue;
             }
 
-            // A server may return two siblings with the same BrowseName but different NodeIds
-            // (allowed when reached via different reference types). They survive
-            // DistinctByResolvedNodeId because the NodeIds differ, and the TryGetProperty check
-            // above does not catch them because the first is only added later in
-            // LoadChildPropertiesAsync. Skip the second here so AddProperty is never called twice
-            // with the same name (which would throw a duplicate-key ArgumentException).
+            // Siblings may share a BrowseName under different NodeIds (via different reference
+            // types); AddProperty would throw on the second.
             if (!stagedDynamicNames.Add(nodeReference.BrowseName.Name))
             {
                 _logger.LogWarning(
@@ -283,14 +279,8 @@ internal sealed class OpcUaSubjectLoader
         var pendingContainers = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>();
 
-        // Two sibling references with different NodeIds can map to the same property
-        // (legal OPC UA, e.g. reached via different reference types). For subject,
-        // collection, and dictionary properties the assignments are deferred, so the
-        // duplicate would create, stage, claim, and monitor a second subject tree that
-        // the final assignment then overwrites, leaving committed orphans. Dedupe by
-        // destination property; the first reference wins (browse order), matching the
-        // dynamic-property sibling dedup. Plain values and Variable-typed subject
-        // references keep their own smaller-NodeId dedup rules downstream.
+        // Two sibling references can map to the same structured property. Without this the
+        // second would stage and claim a subject tree the final assignment then orphans.
         var reservedStructuredTargets = new HashSet<RegisteredSubjectProperty>();
 
         bool TryReserveStructuredTarget(RegisteredSubjectProperty targetProperty, ReferenceDescription reference, NodeId nodeId)
@@ -397,11 +387,8 @@ internal sealed class OpcUaSubjectLoader
         }
 
         object? value = null;
-        // Added eagerly rather than staged in the load context: if the load fails later,
-        // the property survives on non-staged subjects (root and reused children), but the
-        // next load re-matches it via the mapper's NodeIdentifier priority (the attached
-        // OpcUaNodeAttribute carries the exact NodeId) and re-monitors it, so the leftover
-        // is transient rather than torn state.
+        // Added eagerly, not staged: a property left behind by a failed load is re-matched by
+        // NodeId and re-monitored on the next load.
         return registeredSubject.AddProperty(
             nodeReference.BrowseName.Name,
             inferredType,
@@ -443,11 +430,8 @@ internal sealed class OpcUaSubjectLoader
         return subjectToLoad;
     }
 
-    // Variable subjects' value properties intentionally don't enter `_attributeLoader.LoadAttributesAsync`.
-    // OPC UA Variable attributes (DataType, ValueRank, AccessLevel, etc.) should be modeled as peer
-    // properties of the Variable subject, which the child-name match below handles. C# `.Attributes`
-    // declared on the Value property are not discovered here, by design, to avoid the model-vs-protocol
-    // ambiguity when a browse-child matches both a peer property and an attribute name.
+    // A Variable subject's value property does not load attributes: OPC UA Variable attributes
+    // are modeled as peer properties of the Variable subject, matched below.
     private async Task LoadVariableSubjectReferencesAsync(
         List<(RegisteredSubjectProperty Property, NodeId NodeId)> variableNodes,
         OpcUaLoadContext context)

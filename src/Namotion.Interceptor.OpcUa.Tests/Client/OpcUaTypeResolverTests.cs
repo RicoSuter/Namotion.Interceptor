@@ -128,7 +128,7 @@ public class OpcUaTypeResolverTests
             new() { BrowseName = new QualifiedName("Name"), NodeId = new ExpandedNodeId(node3Id), NodeClass = NodeClass.Variable },
         };
 
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
         {
             [node1Id] = (DataTypeIds.Float, -1),
@@ -159,7 +159,7 @@ public class OpcUaTypeResolverTests
             .Setup(t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataTypeIds.Double);
 
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
 
         mockSession
@@ -215,7 +215,7 @@ public class OpcUaTypeResolverTests
             new() { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable },
         };
 
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -255,7 +255,7 @@ public class OpcUaTypeResolverTests
             new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(variableNodeId), NodeClass = NodeClass.Variable }
         };
 
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -293,7 +293,7 @@ public class OpcUaTypeResolverTests
             new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(variableNodeId), NodeClass = NodeClass.Variable }
         };
 
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -338,7 +338,7 @@ public class OpcUaTypeResolverTests
             [node2Id] = (DataTypeIds.Int32, -1)
         };
 
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         var readCallCount = 0;
 
         mockSession
@@ -407,7 +407,7 @@ public class OpcUaTypeResolverTests
 
         var readCallCount = 0;
         var submittedNodeCounts = new List<int>();
-        var mockSession = CreateMockSession();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -472,17 +472,8 @@ public class OpcUaTypeResolverTests
 
     private Task<Type> ResolveObjectTypeAsync(IReadOnlyList<ReferenceDescription> children) =>
         _resolver.ResolveObjectNodeTypeAsync(
-            new OpcUaObjectNodeContext(CreateMockSession().Object, ObjectNode, new NodeId(1, 2), children),
+            new OpcUaObjectNodeContext(OpcUaSubjectLoaderTestsBase.CreateMockSession().Object, ObjectNode, new NodeId(1, 2), children),
             CancellationToken.None);
-
-    private static Mock<ISession> CreateMockSession()
-    {
-        var mockSession = new Mock<ISession>();
-        mockSession.SetupGet(s => s.NamespaceUris).Returns(new NamespaceTable());
-        mockSession.SetupGet(s => s.TypeTree).Returns(new Mock<ITypeTable>().Object);
-        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());
-        return mockSession;
-    }
 
     private static void SetupReadAsync(Mock<ISession> mockSession, Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)> dataTypes)
     {
