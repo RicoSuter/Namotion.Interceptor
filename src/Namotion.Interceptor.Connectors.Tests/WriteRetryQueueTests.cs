@@ -784,6 +784,53 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
+    public void WhenBelowCapacity_ThenRepeatedWritesToAPropertyAreKeptInOrder()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(10, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var property = new PropertyReference(new Mock<IInterceptorSubject>().Object, "Hot");
+
+        // Act
+        queue.Enqueue(new[] { CreateChange(property, oldValue: 0, newValue: 1, revision: 1), CreateChange(7) });
+        queue.Enqueue(new[] { CreateChange(property, oldValue: 1, newValue: 2, revision: 2) });
+
+        // Assert
+        var drained = queue.DrainForLocalReapply();
+        Assert.Equal(3, drained.Length);
+        Assert.Equal(1, drained[0].GetNewValue<int>());
+        Assert.Equal("Property7", drained[1].Property.Name);
+        Assert.Equal(2, drained[2].GetNewValue<int>());
+    }
+
+    [Fact]
+    public void WhenTheQueueOverflows_ThenWritesAreCollapsedPerPropertyBeforeTheOldestAreDropped()
+    {
+        // Arrange: capacity 3; the hot property's first write is the oldest entry when the queue overflows.
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var queue = new WriteRetryQueue(3, NullLogger.Instance, metrics);
+        var subject = new Mock<IInterceptorSubject>().Object;
+        var hot = new PropertyReference(subject, "Hot");
+        queue.Enqueue(new[] { CreateChange(hot, oldValue: 0, newValue: 1, revision: 1) });
+        queue.Enqueue(new[] { CreateChange(new PropertyReference(subject, "P1"), oldValue: 0, newValue: 1, revision: 2) });
+        queue.Enqueue(new[] { CreateChange(new PropertyReference(subject, "P2"), oldValue: 0, newValue: 1, revision: 3) });
+
+        // Act: the fourth write collapses the hot property instead of evicting P1, the fifth evicts P1.
+        queue.Enqueue(new[] { CreateChange(hot, oldValue: 1, newValue: 4, revision: 4) });
+        var depthAfterCollapse = queue.PendingWriteCount;
+        queue.Enqueue(new[] { CreateChange(new PropertyReference(subject, "P3"), oldValue: 0, newValue: 1, revision: 5) });
+
+        // Assert: each surviving property keeps its latest commit, and only one write counts as dropped.
+        Assert.Equal(3, depthAfterCollapse);
+        Assert.Equal(1, diagnostics.TotalDropped);
+        var drained = queue.DrainForLocalReapply();
+        Assert.Equal(["P2", "Hot", "P3"], drained.Select(change => change.Property.Name).ToArray());
+        Assert.Equal(4, drained[1].GetNewValue<int>());
+        Assert.Equal(0, drained[1].GetOldValue<int>());
+        Assert.Equal(4, drained[1].Revision);
+    }
+
+    [Fact]
     public void WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
     {
         // Arrange
@@ -800,14 +847,11 @@ public class WriteRetryQueueTests
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();
-        return SubjectPropertyChange.Create(
-            new PropertyReference(subjectMock.Object, $"Property{id}"),
-            ChangeOrigin.Local,
-            DateTimeOffset.UtcNow,
-            null,
-            id,
-            id + 1);
+        return CreateChange(new PropertyReference(subjectMock.Object, $"Property{id}"), id, id + 1, revision: 0);
     }
+
+    private static SubjectPropertyChange CreateChange(PropertyReference property, int oldValue, int newValue, long revision) =>
+        SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue, revision);
 
     private static ReadOnlyMemory<SubjectPropertyChange> CreateChanges(int count, int startId = 0)
     {
