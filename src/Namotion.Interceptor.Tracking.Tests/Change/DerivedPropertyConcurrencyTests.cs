@@ -884,5 +884,121 @@ public class DerivedPropertyConcurrencyTests
         }
     }
 
+    [Fact]
+    public async Task WhenManyDependentsChangeDependenciesConcurrently_ThenValuesAndUsedByAgreeAfterWritesSettle()
+    {
+        // More than 32 children, so the used-by lists of A and B switch between small and large storage.
+        // Many short rounds rather than one long one: a later write repairs a missed recalculation, so only
+        // races among the last writes of a round stay visible.
+        const int roundCount = 200;
+        const int childCount = 40;
+        const int movingChildCount = 10;
+        const int operationCount = 20;
+
+        for (var round = 0; round < roundCount; round++)
+        {
+            // Arrange
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking()
+                .WithContextInheritance();
+
+            var root = new ConditionalSourceRoot(context);
+            var children = Enumerable
+                .Range(0, childCount)
+                .Select(_ => new ConditionalSourceChild(root))
+                .ToArray();
+            root.Children = children;
+
+            // Act - change dependencies concurrently
+            await ChangeDependenciesConcurrentlyAsync(root, children[movingChildCount..], operationCount);
+
+            // Assert
+            Assert.Same(children, root.Children);
+            AssertValuesAndUsedByAgree(root, children);
+
+            // Act - write every source once more
+            root.UseA = !root.UseA;
+            root.A = -1;
+            root.B = -2;
+
+            // Assert
+            AssertValuesAndUsedByAgree(root, children);
+        }
+    }
+
+    private static void AssertValuesAndUsedByAgree(ConditionalSourceRoot root, ConditionalSourceChild[] children)
+    {
+        var expectedValue = root.UseA ? root.A : root.B;
+        Assert.All(children, child =>
+        {
+            Assert.Equal(expectedValue, child.Value);
+            var valueProperty = new PropertyReference(child, nameof(ConditionalSourceChild.Value));
+            Assert.Equal(expectedValue, valueProperty.TryGetDerivedPropertyData()?.LastKnownValue);
+        });
+
+        var selectedProperty = new PropertyReference(root, root.UseA ? nameof(ConditionalSourceRoot.A) : nameof(ConditionalSourceRoot.B));
+        var unselectedProperty = new PropertyReference(root, root.UseA ? nameof(ConditionalSourceRoot.B) : nameof(ConditionalSourceRoot.A));
+        var selectedUsedBy = selectedProperty.GetUsedByProperties().Items.ToArray();
+        Assert.Equal(children.Length, selectedUsedBy.Length);
+        Assert.All(children, child => Assert.Contains(new PropertyReference(child, nameof(ConditionalSourceChild.Value)), selectedUsedBy));
+        Assert.Empty(unselectedProperty.GetUsedByProperties().Items.ToArray());
+    }
+
+    /// <summary>
+    /// Flips UseA, writes A and B, and detaches and re-attaches the children missing from the staying ones,
+    /// each on its own thread. Ends with all children attached.
+    /// </summary>
+    private static async Task ChangeDependenciesConcurrentlyAsync(
+        ConditionalSourceRoot root, ConditionalSourceChild[] stayingChildren, int operationCount)
+    {
+        var children = root.Children;
+        using var start = new ManualResetEventSlim();
+        var tasks = new[]
+        {
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 0; index < operationCount; index++)
+                {
+                    root.UseA = !root.UseA;
+                }
+            }),
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 1; index <= operationCount; index++)
+                {
+                    root.A = index;
+                }
+            }),
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 1; index <= operationCount; index++)
+                {
+                    root.B = index;
+                }
+            }),
+            StartWhenSignaled(start, () =>
+            {
+                for (var index = 0; index < operationCount; index++)
+                {
+                    root.Children = stayingChildren;
+                    root.Children = children;
+                }
+            })
+        };
+
+        start.Set();
+        await Task.WhenAll(tasks);
+    }
+
+    private static Task StartWhenSignaled(ManualResetEventSlim start, Action action)
+    {
+        return Task.Factory.StartNew(() =>
+        {
+            start.Wait();
+            action();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    }
+
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
 }

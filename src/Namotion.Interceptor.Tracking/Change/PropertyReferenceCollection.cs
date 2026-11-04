@@ -108,21 +108,27 @@ public sealed class PropertyReferenceCollection
     /// Adds a dependency. Thread-safe and idempotent.
     /// </summary>
     /// <returns>True if property was added; false if already exists.</returns>
+    /// <remarks>
+    /// A successful add is a full memory barrier: the addition is visible to other threads before any later
+    /// read by the calling thread. Dependency registration relies on this to pair with the write generation,
+    /// see the "Concurrent write detection via _writeGeneration" section of docs/design/tracking-derived-properties.md.
+    /// </remarks>
     internal bool Add(in PropertyReference property)
     {
         lock (Sync)
         {
             if (_state is not PropertyReference[] array)
             {
-                return ((LargeStorage)_state).Add(property);
+                if (!((LargeStorage)_state).Add(property))
+                {
+                    return false;
+                }
             }
-
-            if (Array.IndexOf(array, property) >= 0)
+            else if (Array.IndexOf(array, property) >= 0)
             {
                 return false;
             }
-
-            if (array.Length < MaxSmallCount)
+            else if (array.Length < MaxSmallCount)
             {
                 var newArray = new PropertyReference[array.Length + 1];
                 Array.Copy(array, newArray, array.Length);
@@ -134,6 +140,8 @@ public sealed class PropertyReferenceCollection
                 Volatile.Write(ref _state, new LargeStorage(array, property));
             }
 
+            // Not implied by the lock: releasing it is not documented to be a full fence.
+            Interlocked.MemoryBarrier();
             return true;
         }
     }
