@@ -474,6 +474,56 @@ public sealed class RuleCardTests : RoleEditorTestContext
     }
 
     [Fact]
+    public async Task WhenPathsSeparatedByACommaAreTyped_ThenTheFieldWarnsToAddEachPathOnItsOwn()
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/**,/Kitchen/**");
+
+        // Assert
+        Assert.Equal(
+            "Looks like several paths separated by a comma, which is part of a path here; add each path on its own.",
+            component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-text-warning']").TextContent);
+    }
+
+    [Fact]
+    public async Task WhenPathsSeparatedByACommaAndASpaceAreEntered_ThenTheErrorSaysToAddEachPathOnItsOwn()
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/**, /Kitchen/**");
+
+        // Assert
+        Assert.Contains(
+            "has a segment with leading or trailing whitespace. Looks like several paths separated by a comma, which is part of a path here; add each path on its own.",
+            component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths']").TextContent);
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-paths"));
+    }
+
+    [Fact]
+    public async Task WhenAPathWithACommaInANameIsTyped_ThenTheFieldDoesNotWarn()
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await TypeTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/Living room, left/**");
+
+        // Assert
+        Assert.Empty(component.FindAll("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-text-warning']"));
+    }
+
+    [Fact]
     public async Task WhenALoadedPathHasAComma_ThenItIsValidAndSaved()
     {
         // Arrange

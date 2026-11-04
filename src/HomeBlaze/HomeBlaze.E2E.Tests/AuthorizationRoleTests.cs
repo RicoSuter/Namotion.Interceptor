@@ -142,6 +142,29 @@ public class AuthorizationRoleTests
                 roles => IsStateReadRule(roles[RoleName]?["allow"]?.AsArray().SingleOrDefault()),
                 "The allow rule was not written to Authorization.json.");
 
+            // Act: preview the role in a short window, where the whole tab scrolls and the header row of the matrix sticks
+            // to its top.
+            var previewDialog = await OpenEditDialogAsync($"Authorization/{RoleName}");
+            await previewDialog.Page.SetViewportSizeAsync(1280, 700);
+            await previewDialog.GetByTestId("role-edit-tab-preview").ClickAsync();
+            await previewDialog.GetByTestId("role-preview-path").Locator("input").FillAsync("/" + AgentPath);
+            await Assertions.Expect(previewDialog.GetByTestId("role-preview-matrix")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            var header = await previewDialog.EvaluateAsync<double[]>(
+                """
+                dialog => {
+                    const panels = dialog.querySelector('.role-edit-panels');
+                    const header = dialog.querySelector('.role-preview-matrix thead th');
+                    const offset = header.getBoundingClientRect().top - panels.getBoundingClientRect().top;
+                    panels.scrollTop = panels.scrollHeight;
+                    return [offset, panels.scrollTop, header.getBoundingClientRect().top - panels.getBoundingClientRect().top];
+                }
+                """);
+
+            // Assert
+            Assert.True(header[1] > header[0], "The tab did not scroll past the header row of the matrix.");
+            Assert.InRange(header[2], -1, 1);
+            await previewDialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+
             // Act: give the role to the agent in its dialog.
             var agentDialog = await OpenEditDialogAsync(AgentPath);
             var roles = agentDialog.GetByTestId("agent-edit-roles");

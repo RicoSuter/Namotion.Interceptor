@@ -9,7 +9,7 @@
         <div class="flex-grow-1">
             @if (Suggestions is null)
             {
-                <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
+                <MudTextField T="string" @ref="_textField" Label="@Label" Value="@_text" ValueChanged="@OnTextChangedAsync" OnBlur="@CommitTextAsync"
                               OnKeyDown="@OnTextKeyDownAsync" OnKeyUp="@OnTextKeyUpAsync" Immediate="true" Placeholder="@Placeholder"
                               HelperText="@HelperText" Error="@(_error is not null)" ErrorText="@_error" />
             }
@@ -56,7 +56,7 @@
                 <MudTooltip Text="@error">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
                              Class="ma-0" data-testid="@($"{TestId}-chip")">
-                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveAtAsync(position))" />
+                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveChipAsync(position))" />
                     </MudChip>
                 </MudTooltip>
             }
@@ -65,14 +65,14 @@
                 <MudTooltip Text="@warning">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Icon="@Icons.Material.Filled.WarningAmber"
                              Class="ma-0" data-testid="@($"{TestId}-chip")">
-                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveAtAsync(position))" />
+                        @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveChipAsync(position))" />
                     </MudChip>
                 </MudTooltip>
             }
             else
             {
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0" data-testid="@($"{TestId}-chip")">
-                    @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveAtAsync(position))" />
+                    @value<ChipRemoveButton Value="@value" OnRemove="@(() => RemoveChipAsync(position))" />
                 </MudChip>
             }
         }
@@ -80,6 +80,7 @@
 </div>
 
 @code {
+    private MudTextField<string>? _textField;
     private MudAutocomplete<string>? _autocomplete;
     private string? _text;
     private string? _error;
@@ -281,10 +282,11 @@
         return Task.CompletedTask;
     }
 
-    // The text is that of the input before the key, as the input events before it are handled first.
+    // The text is that of the input before the key, as the input events before it are handled first. A held key repeats,
+    // so that holding it to delete the text would go on to remove every chip.
     private Task RemoveLastOnBackspaceAsync(KeyboardEventArgs args)
     {
-        if (args.Key == "Backspace" && string.IsNullOrEmpty(_text) && Values.Count > 0)
+        if (args.Key == "Backspace" && !args.Repeat && string.IsNullOrEmpty(_text) && Values.Count > 0)
         {
             return RemoveAtAsync(Values.Count - 1);
         }
@@ -378,6 +380,27 @@
     }
 
     private Task RemoveAtAsync(int index) => ValuesChanged.InvokeAsync([.. Values.Take(index), .. Values.Skip(index + 1)]);
+
+    // The chips are matched by position, so the button of a removed chip shows the next value and keeps the focus, except
+    // for the last chip, whose button goes away and would leave the focus nowhere.
+    private async Task RemoveChipAsync(int index)
+    {
+        var isLast = index == Values.Count - 1;
+        await RemoveAtAsync(index);
+        if (!isLast)
+        {
+            return;
+        }
+
+        if (_autocomplete is not null)
+        {
+            await _autocomplete.FocusAsync();
+        }
+        else if (_textField is not null)
+        {
+            await _textField.FocusAsync();
+        }
+    }
 
     // A picked suggestion; also called with null when the field is cleared. On Enter the field picks the highlighted
     // suggestion, which can be one of a search for text typed before, so Enter adds the typed text instead unless a

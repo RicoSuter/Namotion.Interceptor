@@ -84,6 +84,60 @@ public sealed class RuleCardKeyboardTests : RoleEditorTestContext
         Assert.Equal(["TurnOn"], rule.Members.ToArray());
     }
 
+    [Theory]
+    [InlineData("rule-members")]
+    [InlineData("rule-types")]
+    public async Task WhenBackspaceIsHeldDownInTheEmptyField_ThenOnlyTheLastChipIsRemoved(string input)
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Types = ["TestRoot", "Role", "TestDevice"], Members = ["TurnOn", "TurnOff", "Toggle"], Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await FindInput(component, input).KeyDownAsync(new KeyboardEventArgs { Key = "Backspace" });
+        await FindInput(component, input).KeyDownAsync(new KeyboardEventArgs { Key = "Backspace", Repeat = true });
+        await FindInput(component, input).KeyDownAsync(new KeyboardEventArgs { Key = "Backspace", Repeat = true });
+
+        // Assert
+        var rule = component.Instance.GetEditedRole().Allow[0];
+        Assert.Equal(input == "rule-members" ? ["TurnOn", "TurnOff"] : ["TestRoot", "Role"], input == "rule-members" ? rule.Members.ToArray() : rule.Types.ToArray());
+    }
+
+    [Theory]
+    [InlineData("rule-members")]
+    [InlineData("rule-types")]
+    public async Task WhenTheRemoveButtonOfTheLastChipIsPressed_ThenTheFieldGetsTheFocus(string input)
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Types = ["TestRoot", "Role"], Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await RemoveChipAsync(component, Card, input, 1);
+
+        // Assert
+        var focused = (ElementReference)JSInterop.VerifyFocusAsyncInvoke().Arguments[0]!;
+        Assert.Equal(FindInput(component, input).GetAttribute("blazor:elementReference"), focused.Id);
+    }
+
+    [Fact]
+    public async Task WhenTheRemoveButtonOfAChipBeforeTheLastIsPressed_ThenTheFocusIsNotMoved()
+    {
+        // Arrange
+        var role = Graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Members = ["TurnOn", "TurnOff"], Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await RemoveChipAsync(component, Card, "rule-members", 0);
+
+        // Assert
+        Assert.Equal(["TurnOff"], component.Instance.GetEditedRole().Allow[0].Members.ToArray());
+        Assert.Empty(JSInterop.Invocations["Blazor._internal.domWrapper.focus"]);
+    }
+
     [Fact]
     public void WhenAPathCanBePicked_ThenItsBrowseButtonIsNextToTheFieldWhereTheKeyboardReachesIt()
     {

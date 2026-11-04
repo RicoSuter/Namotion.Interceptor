@@ -119,15 +119,21 @@
     }
 
     /* In a short window, the whole tab scrolls instead, so that the matrix can take the height of the tab; its header row
-       stays at the top of the tab. */
+       stays at the top of the tab. The container must outrank the overflow MudBlazor gives a sticky header's container,
+       as a header sticks to the nearest ancestor that scrolls, even one that never does. */
     @@media (max-height: 800px) {
         .role-preview {
             display: block;
             height: auto;
         }
 
-        .role-preview-matrix > .mud-table-container {
+        .role-preview .role-preview-matrix.mud-table-sticky-header > .mud-table-container {
             overflow: visible;
+        }
+
+        /* Sticks over the top padding of the tab panels, see RoleEditComponent, rather than show rows above it. */
+        .role-preview .role-preview-matrix.mud-table-sticky-header thead th {
+            top: -16px;
         }
     }
 

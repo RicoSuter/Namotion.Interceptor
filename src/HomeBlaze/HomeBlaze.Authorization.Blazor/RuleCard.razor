@@ -10,23 +10,23 @@
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. One path at a time, as a path can contain commas."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
-                           Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" SplitsAtCommas="false"
+                           Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" SplitsAtCommas="@PathsSplitAtCommas"
                            HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive."
                            Values="@_rule.Types" ValuesChanged="@(values => ChangeAsync(_rule with { Types = [.. values] }))"
-                           Suggestions="@TypeNames" Validator="@ValidateTypeName" Warning="@WarnTypeName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
+                           Suggestions="@TypeNames" Validator="@ValidateTypeName" Warning="@WarnTypeName" SplitsAtCommas="@NamesSplitAtCommas" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-types" />
         </MudItem>
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_members" Label="Members" Placeholder="Set*" HelperText="Member names, case-sensitive; * matches any text."
                            Values="@_rule.Members" ValuesChanged="@(values => ChangeAsync(_rule with { Members = [.. values] }))"
-                           Validator="@ValidateMemberName" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
+                           Validator="@ValidateMemberName" SplitsAtCommas="@NamesSplitAtCommas" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-members" />
         </MudItem>
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_tags" Label="Tags" HelperText="Tags a member must all carry."
                            Values="@_rule.Tags" ValuesChanged="@(values => ChangeAsync(_rule with { Tags = [.. values] }))"
-                           Suggestions="@TagSuggestions" Validator="@ValidateTag" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
+                           Suggestions="@TagSuggestions" Validator="@ValidateTag" SplitsAtCommas="@NamesSplitAtCommas" Comparer="@StringComparer.OrdinalIgnoreCase" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-tags" />
         </MudItem>
     </MudGrid>
     <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mt-1">
@@ -72,6 +72,14 @@
 </MudPaper>
 
 @code {
+    // How each field and IsValid treat commas: a name in a path can hold one, so Paths takes one path at a time, while
+    // the other selectors take several values separated by commas.
+    private const bool PathsSplitAtCommas = false;
+    private const bool NamesSplitAtCommas = true;
+
+    private const string SeveralPathsHint =
+        "Looks like several paths separated by a comma, which is part of a path here; add each path on its own.";
+
     // Boxed once rather than on each render.
     private static readonly IReadOnlyList<string> TagSuggestions = MemberTags.All;
 
@@ -124,10 +132,10 @@
     internal static bool IsValid(PermissionRule rule, AuthorizationService authorizationService) =>
         !rule.Actions.IsEmpty &&
         rule.Actions.All(IsKnownAction) &&
-        ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal, splitsAtCommas: false) &&
-        ChipListInput.AreValid(rule.Types, ValidateTypeName, StringComparer.Ordinal, splitsAtCommas: true) &&
-        ChipListInput.AreValid(rule.Members, ValidateMemberName, StringComparer.Ordinal, splitsAtCommas: true) &&
-        ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase, splitsAtCommas: true);
+        ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal, PathsSplitAtCommas) &&
+        ChipListInput.AreValid(rule.Types, ValidateTypeName, StringComparer.Ordinal, NamesSplitAtCommas) &&
+        ChipListInput.AreValid(rule.Members, ValidateMemberName, StringComparer.Ordinal, NamesSplitAtCommas) &&
+        ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase, NamesSplitAtCommas);
 
     /// <summary>
     /// Gets whether a selector field holds typed text that is invalid, which keeps the rule from being saved, as it is
@@ -179,9 +187,31 @@
             : "No known subject type or interface has this name; check its spelling and case.";
     }
 
-    private string? ValidatePath(string pattern) => AuthorizationService.ValidatePathPattern(pattern);
+    // Pasted paths with a space after the comma give a segment with trailing whitespace, whose error alone would not say why.
+    private string? ValidatePath(string pattern)
+    {
+        var error = AuthorizationService.ValidatePathPattern(pattern);
+        return error is not null && LooksLikeSeveralPaths(pattern) ? $"{error} {SeveralPathsHint}" : error;
+    }
 
-    private string? WarnPath(string pattern) => AuthorizationService.GetPathPatternWarning(pattern);
+    private string? WarnPath(string pattern) =>
+        LooksLikeSeveralPaths(pattern) ? SeveralPathsHint : AuthorizationService.GetPathPatternWarning(pattern);
+
+    // A comma followed by the separator, directly or after a space, rather starts another pasted path than continues a name.
+    private bool LooksLikeSeveralPaths(string pattern)
+    {
+        var separator = AuthorizationService.PathProvider.PathSeparator;
+        for (var comma = pattern.IndexOf(','); comma >= 0; comma = pattern.IndexOf(',', comma + 1))
+        {
+            var next = comma + 1 < pattern.Length && pattern[comma + 1] == ' ' ? comma + 2 : comma + 1;
+            if (next < pattern.Length && pattern[next] == separator)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // The paths of a deny rule that match one member and leave what is below it allowed: valid, without a wildcard and
     // naming a member that holds subjects. An entry is left to the path warning, and a value has nothing below it.
