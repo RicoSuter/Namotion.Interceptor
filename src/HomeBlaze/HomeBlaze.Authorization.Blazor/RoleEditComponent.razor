@@ -13,7 +13,7 @@
 @if (Role is { } role)
 {
     var checks = GetChecks();
-    <div class="role-edit">
+    <div class="role-edit" data-testid="role-edit">
         @if (checks.Error is { } error)
         {
             <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" data-testid="role-edit-status">@error</MudAlert>

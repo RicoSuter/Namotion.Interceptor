@@ -136,14 +136,21 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public async Task WhenAListHasNoRules_ThenItsTabSaysSoUntilARuleIsAdded()
+    public void WhenAListHasNoRules_ThenItsTabSaysSo()
     {
-        // Arrange
+        // Act
         var component = RenderEditor(Graph.GetRole("Kitchen"));
 
         // Assert
         Assert.Equal("No allow rules yet", component.Find("[data-testid='role-edit-allow-empty']").TextContent.Trim());
         Assert.Equal("No deny rules yet", component.Find("[data-testid='role-edit-deny-empty']").TextContent.Trim());
+    }
+
+    [Fact]
+    public async Task WhenARuleIsAddedToAnEmptyList_ThenOnlyItsTabNoLongerSaysItHasNoRules()
+    {
+        // Arrange
+        var component = RenderEditor(Graph.GetRole("Kitchen"));
 
         // Act
         await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());

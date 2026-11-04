@@ -90,14 +90,15 @@ public class AuthorizationRoleTests
                 roles => roles[RoleName] is not null,
                 "The added role was not written to Authorization.json.");
 
-            // Act: add an allow rule in the dialog of the role, which is titled after it and scrolls only its tabs.
+            // Act: add an allow rule in the dialog of the role, which is titled after it and keeps its height.
             var roleDialog = await OpenEditDialogAsync($"Authorization/{RoleName}");
             await Assertions.Expect(roleDialog).ToContainTextAsync($"Edit {RoleName}", new() { Timeout = Timeout });
-            await Assertions.Expect(roleDialog.Locator(".role-edit-panels")).ToHaveCSSAsync("overflow-y", "auto");
             var allowTab = roleDialog.GetByTestId("role-edit-tab-allow");
             await Assertions.Expect(allowTab).ToHaveTextAsync("Allow (0)", new() { Timeout = Timeout });
             await allowTab.ClickAsync();
             await Assertions.Expect(roleDialog.GetByTestId("role-edit-allow-empty")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            var editor = roleDialog.GetByTestId("role-edit");
+            var editorHeight = (await editor.BoundingBoxAsync())!.Height;
             await roleDialog.GetByTestId("role-edit-add-allow").ClickAsync();
 
             // A new rule has no action yet, which the tab marks as invalid until one is checked.
@@ -113,6 +114,10 @@ public class AuthorizationRoleTests
             await Assertions.Expect(rule.GetByTestId("rule-tags-chip")).ToHaveTextAsync(MemberTags.State, new() { Timeout = Timeout });
             await rule.GetByTestId("rule-action-read").CheckAsync();
             await Assertions.Expect(roleDialog.GetByTestId("role-edit-tab-allow-error")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+
+            // A rule card leaves the height of the editor as it was; what does not fit scrolls inside the tab.
+            Assert.Equal(editorHeight, (await editor.BoundingBoxAsync())!.Height);
+            Assert.True(await editor.EvaluateAsync<bool>("element => element.scrollHeight <= element.clientHeight"));
 
             // A path picked in the dialog goes into the field, to be edited there and added with its button.
             var paths = rule.GetByTestId("rule-paths");
