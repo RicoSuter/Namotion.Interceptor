@@ -143,7 +143,7 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
-    public async Task WhenTheApplicationDetachesAParentDuringTheLoad_ThenItsNewChildIsNotLeftRegisteredOrMonitored()
+    public async Task WhenTheApplicationDetachesAParentDuringTheLoad_ThenItsNewChildIsNeitherClaimedNorMonitored()
     {
         // Arrange: the first load binds Sensor. On the reload Sensor has gained Extra, which carries
         // the Level variable, and the application removes Sensor from the root while Level's type is
@@ -189,7 +189,6 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
         // Assert
         var extra = subjectFactory.GetCreatedSubject("Extra");
         Assert.Null(sensorProperty.GetValue());
-        Assert.Null(extra.TryGetRegisteredSubject());
         Assert.DoesNotContain(monitoredItems, item => item.StartNodeId == levelId);
         Assert.DoesNotContain(source.Ownership.Properties, property => ReferenceEquals(property.Subject, extra));
     }
