@@ -219,6 +219,15 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                             if (!stoppingToken.IsCancellationRequested)
                             {
                                 await server.StopAsync().ConfigureAwait(false);
+
+                                // MQTTnet removes a stopped connection's session only after StopAsync returns, and
+                                // restarting the same server before that keeps the session referenced forever.
+                                // The delay takes no token so cancellation cannot skip the rest of this finally.
+                                var drainDeadline = Environment.TickCount64 + 5000;
+                                while (Volatile.Read(ref clientCounter.Count) > 0 && Environment.TickCount64 < drainDeadline)
+                                {
+                                    await Task.Delay(10).ConfigureAwait(false);
+                                }
                             }
 
                             Metrics.MarkNotOperational();

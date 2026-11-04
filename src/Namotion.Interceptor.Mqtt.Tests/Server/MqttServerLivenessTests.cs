@@ -16,6 +16,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry;
@@ -638,6 +639,138 @@ public partial class MqttServerLivenessTests
 
             await server.StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact]
+    public async Task WhenTheBrokerIsForceKilledRepeatedlyWithClientsConnected_ThenNoStoppedSessionStaysReferenced()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        await using var server = CreateServer(port: brokerPort);
+        var clients = new List<MqttSubjectClientSource>();
+        for (var index = 0; index < 2; index++)
+        {
+            clients.Add(CreateClientSource(brokerPort));
+        }
+
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            foreach (var client in clients)
+            {
+                await client.StartAsync(CancellationToken.None);
+            }
+
+            await WaitForClientsSubscribedAsync(server, clients.Count);
+
+            // Act
+            for (var kill = 0; kill < 50; kill++)
+            {
+                var previousOperationalTime = server.Diagnostics.OperationalChangeTime;
+                await ((IFaultInjectable)server).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => server.Diagnostics.IsOperational == true &&
+                          server.Diagnostics.OperationalChangeTime != previousOperationalTime,
+                    message: "The broker should become operational again after the kill.");
+                await WaitForClientsSubscribedAsync(server, clients.Count);
+            }
+        }
+        finally
+        {
+            foreach (var client in clients)
+            {
+                await client.StopAsync(CancellationToken.None);
+                await client.DisposeAsync();
+            }
+        }
+
+        // Assert
+        var broker = GetCurrentBroker(server);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetSubscriberSessions(broker).Count == 0,
+                timeout: TimeSpan.FromSeconds(5),
+                message: "A session of a stopped connection is still referenced by the broker.");
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static async Task WaitForClientsSubscribedAsync(MqttSubjectServer server, int clientCount)
+    {
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var broker = GetCurrentBroker(server);
+                if (!broker.IsStarted)
+                {
+                    return false;
+                }
+
+                var connectedClients = broker.GetClientsAsync().GetAwaiter().GetResult();
+                var subscriberSessions = GetSubscriberSessions(broker);
+                return connectedClients.Count == clientCount &&
+                       connectedClients.All(connectedClient => subscriberSessions.Any(session =>
+                           (string)session.GetType().GetProperty("Id")!.GetValue(session)! == connectedClient.Id));
+            },
+            message: "Every client should be connected and subscribed.");
+    }
+
+    /// <summary>
+    /// The sessions MQTTnet dispatches published messages to. Reading it is an unsynchronized copy of a
+    /// set the broker mutates under its own lock, so a torn read is retried.
+    /// </summary>
+    private static List<object> GetSubscriberSessions(MqttServer broker)
+    {
+        var sessionsManager = typeof(MqttServer)
+            .GetField("_clientSessionsManager", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(broker)!;
+        var subscriberSessions = (IEnumerable)sessionsManager.GetType()
+            .GetField("_subscriberSessions", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(sessionsManager)!;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return subscriberSessions.Cast<object>().ToList();
+            }
+            catch (InvalidOperationException) when (attempt < 10)
+            {
+                // The set changed while it was copied.
+            }
+        }
+    }
+
+    private static MqttSubjectClientSource CreateClientSource(int brokerPort)
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithSourceTransactions()
+            .WithSourceMonitoring();
+
+        return new MqttSubjectClientSource(
+            new LivenessTestRoot(context),
+            new MqttClientConfiguration
+            {
+                // The broker binds IPv4 only, so dialling it by name would let the client spend its
+                // connect timeout on the IPv6 loopback first.
+                BrokerHost = "127.0.0.1",
+                BrokerPort = brokerPort,
+                Mapper = new MqttCompositeMapper(
+                    new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+                    new MqttAttributeMapper("mqtt")),
+                ReconnectDelay = TimeSpan.FromMilliseconds(100),
+                MaximumReconnectDelay = TimeSpan.FromSeconds(1),
+                HealthCheckInterval = TimeSpan.FromMilliseconds(500)
+            },
+            NullLogger<MqttSubjectClientSource>.Instance);
     }
 
     private static MqttSubjectServer CreateServer(
