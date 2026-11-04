@@ -8,7 +8,10 @@ namespace Namotion.Interceptor.Connectors;
 /// connector cannot forget to report that it stopped serving.
 /// </summary>
 /// <remarks>
-/// <see cref="ExecuteAsync"/> is sealed and derived classes override <see cref="RunAsync"/> instead.
+/// Derive a source from <see cref="SubjectSourceBase"/> and a server from <see cref="SubjectServerBase"/>:
+/// both own their restart loop and the ordering between subscribing to changes and exchanging values.
+/// Derive from this class directly only for a connector that is neither, and override
+/// <see cref="RunAsync"/>; <see cref="ExecuteAsync"/> is sealed.
 /// </remarks>
 public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnector
 {

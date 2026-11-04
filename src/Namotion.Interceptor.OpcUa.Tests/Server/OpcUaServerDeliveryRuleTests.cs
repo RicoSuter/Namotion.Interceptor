@@ -28,7 +28,7 @@ public class OpcUaServerDeliveryRuleTests
         var server = new OpcUaSubjectServer(subject, new OpcUaServerConfiguration(), NullLogger.Instance);
 
         // Act
-        using var processor = server.CreateChangeQueueProcessor();
+        using var processor = server.CreateOutboundProcessor(dropHandler: null);
 
         // Assert
         Assert.Equal(ChangeDeliveryRule.SourceValuesAreSettled, processor.DeliveryRule);

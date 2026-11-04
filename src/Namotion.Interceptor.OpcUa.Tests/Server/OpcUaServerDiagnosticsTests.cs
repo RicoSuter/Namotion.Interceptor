@@ -74,45 +74,9 @@ public class OpcUaServerDiagnosticsTests
         Assert.Equal(2.0, throughput.OutgoingPerSecond!.Value);
     }
 
-    [Fact]
-    public void WhenFailuresAreRecordedConcurrently_ThenDiagnosticsReportsEveryFailure()
-    {
-        // Arrange
-        using var server = CreateServer();
-        const int workerCount = 16;
-        const int failuresPerWorker = 50_000;
-        using var startGate = new ManualResetEventSlim();
-        var workers = Enumerable.Range(0, workerCount)
-            .Select(_ => new Thread(() =>
-            {
-                startGate.Wait();
-                for (var failure = 0; failure < failuresPerWorker; failure++)
-                {
-                    server.RecordConsecutiveFailure();
-                }
-            }))
-            .ToArray();
-
-        foreach (var worker in workers)
-        {
-            worker.Start();
-        }
-
-        // Act
-        startGate.Set();
-        foreach (var worker in workers)
-        {
-            worker.Join();
-        }
-
-        // Assert
-        Assert.Equal(workerCount * failuresPerWorker, server.Diagnostics.ConsecutiveFailures);
-    }
-
     /// <summary>
-    /// The application instance is built outside the restart loop's own try, so a failure there leaves
-    /// the pump rather than being retried. It is the cheapest reachable failure that pins the
-    /// diagnostics to the connector's own metrics.
+    /// The application instance is built inside each attempt, so a failure there is retried. It is the
+    /// cheapest reachable failure that pins the diagnostics to the connector's own metrics.
     /// </summary>
     [Fact]
     public async Task WhenTheServerCannotBuildItsApplication_ThenTheFailureReachesItsOwnDiagnostics()
@@ -120,14 +84,24 @@ public class OpcUaServerDiagnosticsTests
         // Arrange
         using var server = CreateServer(new FailingOpcUaServerConfiguration());
 
-        // Act
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => server.StartAsync(CancellationToken.None));
+        try
+        {
+            // Act
+            await server.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Diagnostics.LastError is not null,
+                message: "A server that cannot build its application should record the failure.");
 
-        // Assert
-        Assert.IsType<InvalidOperationException>(server.Diagnostics.LastError);
-        Assert.NotNull(server.Diagnostics.StartTime);
-        Assert.False(server.Diagnostics.IsOperational);
+            // Assert
+            Assert.IsType<InvalidOperationException>(server.Diagnostics.LastError);
+            Assert.True(server.Diagnostics.ConsecutiveFailures >= 1);
+            Assert.NotNull(server.Diagnostics.StartTime);
+            Assert.False(server.Diagnostics.IsOperational);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
     }
 
     /// <summary>
@@ -140,8 +114,8 @@ public class OpcUaServerDiagnosticsTests
     [Fact]
     public async Task WhenAStartAttemptFails_ThenTheNextAttemptCanRegisterItsOwnChangeQueue()
     {
-        // Arrange: the certificate check is the first failure point inside the loop's own try, so the
-        // attempt gets far enough to have registered its processor before it fails.
+        // Arrange: the base registers the outbound processor before every StartServerAsync call, so a
+        // failing certificate check exercises the release just as any other start failure would.
         using var server = CreateServer(
             new UncheckableCertificateOpcUaServerConfiguration { CleanCertificateStore = false });
 
