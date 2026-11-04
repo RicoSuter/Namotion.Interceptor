@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Globalization;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -310,7 +311,26 @@ internal sealed class AuthorizationSnapshot
             return $"The name '{name}' cannot contain '/', '[' or ']', because it is part of the role's path.";
         }
 
+        if (HasInvisibleCharacter(name))
+        {
+            return $"The name '{name}' cannot contain invisible characters, such as a zero-width space or a control character.";
+        }
+
         return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;
+    }
+
+    // Such a name looks like another one but differs from it, so that the same name typed elsewhere never matches it.
+    private static bool HasInvisibleCharacter(string name)
+    {
+        foreach (var character in name)
+        {
+            if (char.GetUnicodeCategory(character) is UnicodeCategory.Format or UnicodeCategory.Control)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static AuthorizationRole ToAuthorizationRole(string name, Role role) =>

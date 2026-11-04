@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Role))]
 @implements ISubjectEditComponent
+@implements IDisposable
 
 @using Namotion.Interceptor.Registry.Abstractions
 
@@ -143,6 +144,7 @@
     private bool _wasValid = true;
     private AuthorizationRole? _executeCheckedRole;
     private ExecuteWithoutReadFindings? _executeWithoutRead;
+    private bool _isDisposed;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -198,6 +200,13 @@
         _deny = (role.Deny ?? []).Select(rule => new RuleEntry(rule)).ToList();
         _typeNames = TypeCatalog.GetTypeNames();
         _wasValid = IsValid;
+        AuthorizationService.PoliciesChanged += OnPoliciesChanged;
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken)
@@ -261,8 +270,20 @@
         }
     }
 
-    // Checked again for each edited role, so that the hint follows unsaved changes. The preview of the same instance is
-    // compiled once for this and the tab "Preview".
+    // Raised on the thread pool, also right after this component was disposed. Another role saved meanwhile, such as an
+    // included one, changes the hint of the same edited role.
+    private void OnPoliciesChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed)
+            {
+                _executeCheckedRole = null;
+                StateHasChanged();
+            }
+        });
+
+    // Checked again for each edited role and after the saved roles changed, so that the hint follows unsaved changes
+    // and the other roles. The preview of the same instance is compiled once for this and the tab "Preview".
     private ExecuteWithoutReadFindings? GetExecuteWithoutRead()
     {
         var role = GetEditedRole();

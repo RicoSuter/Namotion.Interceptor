@@ -86,6 +86,7 @@ public sealed class RoleOperationsTests : IDisposable
     [InlineData("  ", "Enter a name.")]
     [InlineData("Kitchen/Lights", "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.")]
     [InlineData("Lights[0]", "The name 'Lights[0]' cannot contain '/', '[' or ']', because it is part of the role's path.")]
+    [InlineData("Pantry\u200B", "The name 'Pantry\u200B' cannot contain invisible characters, such as a zero-width space or a control character.")]
     public async Task WhenTheNameIsInvalid_ThenAddingThrowsItsErrorAndChangesAndWritesNothing(string name, string error)
     {
         // Arrange
@@ -234,6 +235,7 @@ public sealed class RoleOperationsTests : IDisposable
     [InlineData("reader", "The name 'reader' is reserved for a built-in role.")]
     [InlineData("  ", "Enter a name.")]
     [InlineData("Kitchen/Lights", "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.")]
+    [InlineData("\uFEFFPantry", "The name '\uFEFFPantry' cannot contain invisible characters, such as a zero-width space or a control character.")]
     public async Task WhenTheNewNameIsInvalid_ThenRenamingThrowsItsErrorAndChangesAndWritesNothing(string name, string error)
     {
         // Arrange

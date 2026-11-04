@@ -244,13 +244,35 @@ public sealed class AuthorizationServiceTests : IDisposable
     [InlineData("OPERATOR", "The name 'OPERATOR' is reserved for a built-in role.")]
     [InlineData("System", "The name 'System' is reserved for the system rules.")]
     [InlineData("a/b", "The name 'a/b' cannot contain '/', '[' or ']', because it is part of the role's path.")]
-    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedAndPathCharacterNamesHaveAnError(string name, string? expectedError)
+    [InlineData("Light\u200BOperator", "The name 'Light\u200BOperator' cannot contain invisible characters, such as a zero-width space or a control character.")]
+    [InlineData("\uFEFFKitchen", "The name '\uFEFFKitchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
+    [InlineData("Kit\tchen", "The name 'Kit\tchen' cannot contain invisible characters, such as a zero-width space or a control character.")]
+    public void WhenARoleNameIsChecked_ThenOnlyBlankReservedPathAndInvisibleCharacterNamesHaveAnError(string name, string? expectedError)
     {
         // Act
         var error = AuthorizationService.GetRoleNameError(name);
 
         // Assert
         Assert.Equal(expectedError, error);
+    }
+
+    [Fact]
+    public async Task WhenACustomRoleNameHasAnInvisibleCharacter_ThenItIsUnavailableWithAStatus()
+    {
+        // Arrange
+        const string name = "Kitchen\u200B";
+        var invalid = new Role { Allow = [ReadPlain()] };
+        AddAuthorization((name, invalid));
+        const string expectedStatus = $"The name '{name}' cannot contain invisible characters, such as a zero-width space or a control character.";
+
+        // Act
+        var result = _service.GetPolicy([name]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, result.Policy);
+        Assert.Equal($"Role '{name}' is unavailable: {expectedStatus}", result.Error);
+        Assert.DoesNotContain(name, _service.GetRoleNames());
+        await StatusAssert.EqualAsync(expectedStatus, () => invalid.Status);
     }
 
     [Fact]

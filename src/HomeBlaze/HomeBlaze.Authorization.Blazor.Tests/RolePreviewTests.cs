@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
 using Namotion.Interceptor.Authorization;
+using Namotion.Interceptor.Registry;
 using Xunit;
 
 namespace HomeBlaze.Authorization.Blazor.Tests;
@@ -17,7 +18,7 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
     private const int AllowTabIndex = 1;
     private const int PreviewTabIndex = 3;
 
-    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen");
+    private readonly TestAuthorizationGraph _graph = TestAuthorizationGraph.Create("Kitchen", "Garden");
 
     public RolePreviewTests()
     {
@@ -204,6 +205,46 @@ public sealed class RolePreviewTests : BunitContext, IAsyncLifetime
         Assert.Equal("/Devices", component.Find("[data-testid='role-preview-path'] input").GetAttribute("value"));
         Assert.Equal([Allowed, Allowed, null, Denied], GetCellStates(component, "Temperature"));
         Assert.Same(savedAllow, role.Allow);
+    }
+
+    [Fact]
+    public async Task WhenAnIncludedRoleIsSavedElsewhere_ThenTheMatrixFollowsIt()
+    {
+        // Arrange
+        var garden = _graph.GetRole("Garden");
+        garden.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }];
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = ["Garden"];
+        var component = RenderEditor(role);
+        await ChoosePathAsync(component, "/Devices");
+
+        // Act
+        garden.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Write] }];
+
+        // Assert
+        await component.WaitForAssertionAsync(
+            () => Assert.Equal([Denied, Allowed, null, Denied], GetCellStates(component, "Temperature")),
+            TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task WhenAGetterThrows_ThenTheMatrixListsTheMemberWithoutCallingIt()
+    {
+        // Arrange
+        var isGetterThrowing = false;
+        _graph.Devices.TryGetRegisteredSubject()!.AddProperty(
+            "Broken", typeof(object), _ => isGetterThrowing ? throw new InvalidOperationException("The getter was called.") : null, null);
+        isGetterThrowing = true;
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = [BuiltInRoles.ReaderName];
+        var component = RenderEditor(role);
+
+        // Act
+        await ChoosePathAsync(component, "/Devices");
+
+        // Assert
+        Assert.Contains("Broken", GetMemberNames(component));
+        Assert.Equal([Allowed, Denied, null, Allowed], GetCellStates(component, "Broken"));
     }
 
     [Fact]

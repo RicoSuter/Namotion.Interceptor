@@ -164,7 +164,8 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Gets why <paramref name="name"/> cannot name a custom role, or null: it is blank, is the name of a built-in role or
-    /// of the system rules, ignoring case, or contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role.
+    /// of the system rules, ignoring case, contains <c>/</c>, <c>[</c> or <c>]</c>, which would break the path of the role,
+    /// or contains an invisible character, one of the Unicode categories Format or Control, such as a zero-width space.
     /// Uniqueness among the custom roles is not checked.
     /// </summary>
     public static string? GetRoleNameError(string name)
@@ -182,7 +183,7 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name that is blank,
-    /// used by more than one role, reserved for the system rules or contains a path character, see
+    /// used by more than one role, reserved for the system rules or contains a path or invisible character, see
     /// <see cref="GetRoleNameError"/>, or any custom role while several <see cref="Authorization"/>
     /// subjects exist. A custom role named like a built-in role is not listed, as the name means the built-in role.
     /// </summary>

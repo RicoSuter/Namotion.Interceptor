@@ -719,6 +719,26 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenAnIncludedRoleStopsAllowingRead_ThenTheExecuteWithoutReadHintAppears()
+    {
+        // Arrange
+        var garden = _graph.GetRole("Garden");
+        garden.Allow = [new PermissionRule { Members = ["Start"], Actions = [PermissionAction.Read] }];
+        var role = _graph.GetRole("Kitchen");
+        role.Includes = ["Garden"];
+        role.Allow = [new PermissionRule { Members = ["Start"], Actions = [AuthorizationActions.Execute] }];
+        var component = RenderEditor(role);
+
+        // Act
+        garden.Allow = [];
+
+        // Assert
+        await component.WaitForAssertionAsync(
+            () => Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']")),
+            TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
     public async Task WhenReadIsAddedToTheRule_ThenTheExecuteWithoutReadHintsGo()
     {
         // Arrange
@@ -1078,7 +1098,6 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     [Theory]
     [InlineData("rule-members", "Temperature, Set*,,Temperature", new[] { "Temperature", "Set*" })]
     [InlineData("rule-types", "ILight, ISwitch", new[] { "ILight", "ISwitch" })]
-    [InlineData("rule-paths", "/Devices/A,/Devices/B", new[] { "/Devices/A", "/Devices/B" })]
     [InlineData("rule-tags", "state, Secret", new[] { "state", "Secret" })]
     public async Task WhenTextWithCommasIsEntered_ThenEachPartIsAddedAsAChip(string input, string text, string[] expectedChips)
     {
@@ -1104,13 +1123,47 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
         var component = RenderEditor(role);
 
         // Act
-        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", "/Devices/A, Devices");
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-types", "ILight, I Switch");
 
         // Assert
-        Assert.Contains("Path pattern 'Devices' must start with '/'.",
-            component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths']").TextContent);
-        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.Contains("A type name contains no whitespace.",
+            component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-types']").TextContent);
+        Assert.Empty(GetChips(GetCards(component, "allow")[0], "rule-types"));
         Assert.False(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenAPathWithACommaIsEntered_ThenItIsAddedAsOneChip()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var component = RenderEditor(role);
+
+        // Act
+        await EnterTextAsync(component, "role-edit-allow-rule-0", "rule-paths", " /Devices/Living room, left/** ");
+
+        // Assert
+        Assert.Equal(["/Devices/Living room, left/**"], GetChips(GetCards(component, "allow")[0], "rule-paths"));
+        Assert.True(component.Instance.IsValid);
+    }
+
+    [Fact]
+    public async Task WhenALoadedPathHasAComma_ThenItIsValidAndSaved()
+    {
+        // Arrange
+        var role = _graph.GetRole("Kitchen");
+        var rule = new PermissionRule { Paths = ["/Devices/Living room, left/**"], Actions = [PermissionAction.Read] };
+        role.Allow = [rule];
+        var component = RenderEditor(role);
+
+        // Act: saving throws for an invalid role.
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        var chip = component.Find("[data-testid='role-edit-allow-rule-0'] [data-testid='rule-paths-chip']");
+        Assert.DoesNotContain("mud-chip-color-error", chip.ClassName);
+        Assert.Equal([rule], role.Allow);
     }
 
     [Theory]
@@ -1140,7 +1193,6 @@ public sealed class RoleEditComponentTests : BunitContext, IAsyncLifetime
     [InlineData("Types", "ILight,ISwitch", "Contains a comma, which separates values; remove it and add each part on its own.")]
     [InlineData("Types", "I Light", "A type name contains no whitespace.")]
     [InlineData("Paths", "/Devices ", "Has leading or trailing whitespace.")]
-    [InlineData("Paths", "/Devices/A,/Devices/B", "Contains a comma, which separates values; remove it and add each part on its own.")]
     [InlineData("Tags", "state ", "Has leading or trailing whitespace.")]
     public void WhenALoadedValueWouldBeRejected_ThenItIsAnErrorChipAndTheRoleIsInvalid(string selector, string value, string expectedError)
     {

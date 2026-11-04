@@ -1,6 +1,7 @@
 @* A list of texts shown as chips, with a field that adds the typed text on Enter, with its Add button or when it loses
-   focus, or a picked suggestion. Typed text is split at commas into several values. Text that is typed and invalid stays
-   in the field with its error, see HasInvalidText. A picked text goes into the field to be edited before it is added. *@
+   focus, or a picked suggestion. Typed text is split at commas into several values, see SplitsAtCommas. Text that is typed
+   and invalid stays in the field with its error, see HasInvalidText. A picked text goes into the field to be edited before
+   it is added. *@
 
 <div data-testid="@TestId">
     <div class="d-flex align-start gap-2">
@@ -47,7 +48,7 @@
         {
             var position = index;
             var value = Values[position];
-            if (GetValueError(Values, position, Validator, Comparer) is { } error)
+            if (GetValueError(Values, position, Validator, Comparer, SplitsAtCommas) is { } error)
             {
                 <MudTooltip Text="@error">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.ErrorOutline"
@@ -121,6 +122,13 @@
     [Parameter]
     public Func<string, string?>? Warning { get; set; }
 
+    /// <summary>
+    /// Whether typed text is split at commas into several values, and a value with a comma is invalid; true by default.
+    /// When false, the whole text is one value.
+    /// </summary>
+    [Parameter]
+    public bool SplitsAtCommas { get; set; } = true;
+
     /// <summary>Compares the texts to find one that is added already.</summary>
     [Parameter]
     public StringComparer Comparer { get; set; } = StringComparer.Ordinal;
@@ -147,10 +155,11 @@
 
     /// <summary>
     /// Gets why the value at <paramref name="index"/> is invalid, or null: it is listed before, compared with
-    /// <paramref name="comparer"/>, it holds a comma or has leading or trailing whitespace, which typed text never has
-    /// but a file can, or <paramref name="validator"/> rejects it.
+    /// <paramref name="comparer"/>, it holds a comma while <paramref name="splitsAtCommas"/>, it has leading or trailing
+    /// whitespace, which typed text never has but a file can, or <paramref name="validator"/> rejects it.
     /// </summary>
-    internal static string? GetValueError(IReadOnlyList<string> values, int index, Func<string, string?>? validator, StringComparer comparer)
+    internal static string? GetValueError(
+        IReadOnlyList<string> values, int index, Func<string, string?>? validator, StringComparer comparer, bool splitsAtCommas)
     {
         var value = values[index];
         for (var other = 0; other < index; other++)
@@ -161,7 +170,7 @@
             }
         }
 
-        if (value.Contains(','))
+        if (splitsAtCommas && value.Contains(','))
         {
             return "Contains a comma, which separates values; remove it and add each part on its own.";
         }
@@ -177,11 +186,12 @@
     /// <summary>
     /// Gets whether no value is invalid, see <see cref="GetValueError"/>.
     /// </summary>
-    internal static bool AreValid(IReadOnlyList<string> values, Func<string, string?>? validator, StringComparer comparer)
+    internal static bool AreValid(
+        IReadOnlyList<string> values, Func<string, string?>? validator, StringComparer comparer, bool splitsAtCommas)
     {
         for (var index = 0; index < values.Count; index++)
         {
-            if (GetValueError(values, index, validator, comparer) is not null)
+            if (GetValueError(values, index, validator, comparer, splitsAtCommas) is not null)
             {
                 return false;
             }
@@ -285,9 +295,16 @@
             : null;
     }
 
-    // The parts between commas, trimmed, without empty ones.
-    private static string[] SplitText(string? text) =>
-        text is null ? [] : text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    // The parts between commas, or the whole text unless SplitsAtCommas; trimmed, without empty ones.
+    private string[] SplitText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return SplitsAtCommas ? text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) : [text.Trim()];
+    }
 
     private string? GetTextError(string[] parts)
     {

@@ -110,6 +110,7 @@ The name is checked when "Execute" is clicked. An invalid name changes nothing a
 - It is not the name of a built-in role, ignoring case, else "The name 'reader' is reserved for a built-in role.".
 - It is not `System`, ignoring case, else "The name 'System' is reserved for the system rules.".
 - It contains no `/`, `[` or `]`, because the name is part of the role's path, else "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path.".
+- It contains no invisible character, such as a zero-width space pasted with the name, or a control character, else "The name '...' cannot contain invisible characters, such as a zero-width space or a control character.".
 - No other custom role has it, ignoring case, else "A role with this name exists already.". A rename may change only the case of the name, and a rename to the same name changes nothing.
 
 When the file holds two roles whose names differ only in case, such as after it was written by hand, "Add Role" fails with "Several roles are named 'KITCHEN', ignoring case. Rename or delete one of them first."; "Rename" and the Delete button of one of them work.
@@ -130,13 +131,15 @@ Agents and the custom roles that include a role name it, so a rename or deletion
 
 The property panel of a role shows these values:
 
-- **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
+- **`Status`**: why the role cannot be used, or empty. "The name 'Reader' is reserved for a built-in role." or "The name 'System' is reserved for the system rules." for a reserved name, where agents naming `Reader` keep the built-in role; "The name 'Kitchen/Lights' cannot contain '/', '[' or ']', because it is part of the role's path." or "The name '...' cannot contain invisible characters, such as a zero-width space or a control character." for a name written by hand with such a character; "The name '...' is used by more than one role, ignoring case."; or why the rules do not compile, such as "Role 'LightOperator' includes 'Readers', which is not defined.", "Action 'run' of role 'LightOperator' is not a known action." or "Path pattern 'Devices' of role 'LightOperator' must start with '/'.".
 - **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role. The edit dialog of the role shows the warning above its tabs; the field "Paths" of a rule card checks a pattern against the current graph while you type, see [Rule Cards](#rule-cards).
 - **`UsedByAgents`**: the number of started agents that name the role.
 
 Role names compare ignoring case. A change applies to the next turn of each agent, as a whole: an agent never gets a part of one change.
 
 When the file of the `Authorization` subject is reloaded while the edit dialog of one of its roles is open, such as after it was edited by hand, or the role is deleted meanwhile, "Save" neither overwrites the reloaded roles nor brings the role back. Neither does "Save" when another dialog of the same role, such as one of another user, saved it since this one was opened, so that the earlier save is not reverted. It shows "Error saving configuration: The roles changed while this dialog was open. Close it and open it again."; close the dialog, open it again and repeat the change. A role renamed while its dialog is open is saved under its new name.
+
+A save sets the includes, the allow rules and the deny rules one after the other, and a rename changes the roles in two steps. When a change of another user saves the file between two of these steps, and the server stops or the save of this change fails before it is written, the file holds only a part of the change. Open the role after a restart, or after such a failed save, and check its rules.
 
 ---
 
@@ -177,10 +180,10 @@ The rules are edited on three tabs:
 
 Each value is a chip below its field:
 
-- **Adding**: press Enter, click "Add" next to the field or leave the field to add the typed text. "Add" is disabled while the field is empty or holds invalid text. Separate several values with commas, such as `/Devices/Kitchen/**, /Devices/Garden/**`; each part becomes a chip, without the whitespace around it. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
+- **Adding**: press Enter, click "Add" next to the field or leave the field to add the typed text. "Add" is disabled while the field is empty or holds invalid text. In "Types", "Members" and "Tags", separate several values with commas, such as `TurnOn, TurnOff`; each part becomes a chip, without the whitespace around it. "Paths" takes one path at a time and keeps its commas, as a name in a path can hold one, such as `/Devices/Living room, left/**`. In a field with suggestions, click a suggestion, or choose one with the arrow keys and press Enter. "Save" also adds the text still in a field, so nothing typed is lost.
 - **Removing**: click the cross of the chip.
 - **Invalid text**: an invalid pattern, tag or name is not added. It stays in the field with its error, and "Save" stays disabled until it is corrected or cleared. When one part of text with commas is invalid, none of its parts is added.
-- **Invalid values from the file**: a value from the file that is invalid shows as a red chip with the error as its tooltip, and "Save" stays disabled until it is removed. Besides the errors above, this is a value that holds a comma, "Contains a comma, which separates values; remove it and add each part on its own.", has whitespace around it, "Has leading or trailing whitespace.", or is listed a second time in the same field, "Listed twice.". Tags count as listed twice in another case as well.
+- **Invalid values from the file**: a value from the file that is invalid shows as a red chip with the error as its tooltip, and "Save" stays disabled until it is removed. Besides the errors above, this is a value of "Types", "Members" or "Tags" that holds a comma, "Contains a comma, which separates values; remove it and add each part on its own.", has whitespace around it, "Has leading or trailing whitespace.", or is listed a second time in the same field, "Listed twice.". Tags count as listed twice in another case as well.
 - **"any"**: a selector without values shows "any" below its field and matches every value, so a rule with only "Types" applies to every member of every subject of those types.
 - **Every member**: a card whose four selectors are all empty shows "This rule applies to every member.", in red on an allow rule and as a warning on a deny rule. The rule can still be saved, but an allow rule then grants its actions on every member of every subject, as `Everything` does.
 - **Deny of one member**: a deny rule with a path that has no `*` and names a property that can hold subjects, such as `/Devices/Kitchen/Lights`, shows "'/Devices/Kitchen/Lights' matches only that one member, not what is below it; add /** to deny everything below it as well.". A deny of `read` on such a property hides the subjects below it from browsing, but their members stay readable when asked for by their paths. A path that names a value, a method or an attribute shows no hint, as nothing is below it, and neither does a path with a `*` anywhere, a path that names an entry of a folder, which has the warning described under "Paths" instead, or a path that names nothing in the current graph.
@@ -341,7 +344,7 @@ When the roles cannot be used, the agent shows the status Error with "Invalid ro
 - "Role 'LightOperator' is not defined.", for a name that is no built-in or custom role,
 - "A role name is empty.",
 - why a custom role does not compile, see [Status and Usage](#status-and-usage),
-- "Role '...' is unavailable: ...", for a role with a reserved name or a name with `/`, `[` or `]`, or while [several Authorization subjects](#one-authorization-subject) exist.
+- "Role '...' is unavailable: ...", for a role with a reserved name or a name with `/`, `[`, `]` or an invisible character, or while [several Authorization subjects](#one-authorization-subject) exist.
 
 Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows a saved role or an edit of `Authorization.json` without waiting for a turn.
 
@@ -410,7 +413,6 @@ A role has these settings, each optional:
 - **Subjects with only secrets**: a subject whose only members other than attributes are secrets has no readable member, so it is hidden from every agent and `/mcp` client, as is a subject the roles deny every member of.
 - **Page addresses**: `browse` and `search` give a subject with a page its address as `$url`, which is built with the shallowest path of the subject. When a member or subject on that path is hidden, `$url` is left out, so it names nothing hidden, even when the subject is readable for the tools at another path, such as a subject that is also held below a hidden branch.
 - **Roles changed while they are read**: when an edit or a reload changes the roles while they are compiled, they are read once more; when that fails as well, custom roles are unavailable for that one call, and the next call reads them again.
-- **Commas in values**: a value of a rule cannot hold a comma, as typed text is split at commas. A path to a subject whose name holds a comma cannot be named in a rule; name a path above it with `**` instead.
 - **Watch paths**: see [Watch Paths](#watch-paths).
 
 ---

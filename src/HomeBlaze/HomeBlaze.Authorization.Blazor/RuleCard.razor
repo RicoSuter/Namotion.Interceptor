@@ -8,9 +8,10 @@
 <MudPaper Outlined="true" Class="pa-2" data-testid="@TestId">
     <MudGrid Spacing="1">
         <MudItem xs="12" md="6">
-            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. Separate several with commas; press Enter, click Add or leave the field to add."
+            <ChipListInput @ref="_paths" Label="Paths" Placeholder="/Devices/Sonos/*" HelperText="Member paths; * matches one segment and ** any depth, as in /Devices/**/Volume. Add one path at a time, as a path can contain commas; press Enter, click Add or leave the field to add."
                            Values="@_rule.Paths" ValuesChanged="@(values => ChangeAsync(_rule with { Paths = [.. values] }))"
-                           Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
+                           Validator="@ValidatePath" Warning="@WarnPath" Pick="@PickPathAsync" SplitsAtCommas="false"
+                           HasInvalidTextChanged="@ReportInvalidTextAsync" TestId="rule-paths" />
         </MudItem>
         <MudItem xs="12" md="6">
             <ChipListInput @ref="_types" Label="Types" HelperText="Subject types or interfaces, by simple or full name, case-sensitive. Separate several with commas; press Enter, click Add or leave the field to add."
@@ -124,10 +125,10 @@
     internal static bool IsValid(PermissionRule rule, AuthorizationService authorizationService) =>
         !rule.Actions.IsEmpty &&
         rule.Actions.All(IsKnownAction) &&
-        ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal) &&
-        ChipListInput.AreValid(rule.Types, ValidateTypeName, StringComparer.Ordinal) &&
-        ChipListInput.AreValid(rule.Members, ValidateMemberName, StringComparer.Ordinal) &&
-        ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase);
+        ChipListInput.AreValid(rule.Paths, authorizationService.ValidatePathPattern, StringComparer.Ordinal, splitsAtCommas: false) &&
+        ChipListInput.AreValid(rule.Types, ValidateTypeName, StringComparer.Ordinal, splitsAtCommas: true) &&
+        ChipListInput.AreValid(rule.Members, ValidateMemberName, StringComparer.Ordinal, splitsAtCommas: true) &&
+        ChipListInput.AreValid(rule.Tags, ValidateTag, StringComparer.OrdinalIgnoreCase, splitsAtCommas: true);
 
     /// <summary>
     /// Gets whether a selector field holds typed text that is invalid, which keeps the rule from being saved, as it is

@@ -2,8 +2,11 @@
    rule that decided it. Compiles the role through the authorization service and never writes anything. *@
 @using System.Text
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
 @using Namotion.Interceptor.Registry.Paths
+
+@implements IDisposable
 
 @inject AuthorizationService AuthorizationService
 @inject SubjectPathResolver PathResolver
@@ -136,10 +139,15 @@
     private IReadOnlyList<MemberRow> _rows = [];
     private string? _selectedMember;
     private PermissionAction? _selectedAction;
+    private bool _isDisposed;
 
-    /// <summary>The role to preview; a new instance is compiled again.</summary>
+    /// <summary>
+    /// The role to preview; a new instance is compiled again, and so is the same one once the saved roles changed.
+    /// </summary>
     [Parameter, EditorRequired]
     public AuthorizationRole Role { get; set; } = null!;
+
+    protected override void OnInitialized() => AuthorizationService.PoliciesChanged += OnPoliciesChanged;
 
     protected override void OnParametersSet()
     {
@@ -148,6 +156,24 @@
             Update();
         }
     }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        AuthorizationService.PoliciesChanged -= OnPoliciesChanged;
+    }
+
+    // Raised on the thread pool, also right after this component was disposed. An included role saved by another dialog,
+    // or a file reload, changes the decisions of the same edited role.
+    private void OnPoliciesChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            if (!_isDisposed)
+            {
+                Update();
+                StateHasChanged();
+            }
+        });
 
     private static bool IsSubjectProperty(RegisteredSubjectProperty property) => property.CanContainSubjects;
 
@@ -221,7 +247,8 @@
         {
             if (!property.IsAttribute)
             {
-                (property.TryGetMethodMetadata() is null ? properties : methods).Add(property);
+                // By type, as reading the value to classify the member would call its getter.
+                (property.Type == typeof(MethodMetadata) ? methods : properties).Add(property);
             }
         }
 
