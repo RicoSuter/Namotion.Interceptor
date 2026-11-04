@@ -222,6 +222,7 @@ namespace Namotion.Interceptor.Interceptors
     public struct PropertyWriteContext<TProperty>
     {
         public TProperty CurrentValue { get; }
+        public bool IsDerivedRecalculation { get; }
         public bool IsWritten { get; set; }
         public TProperty NewValue { get; set; }
         public Namotion.Interceptor.ChangeOrigin Origin { get; }

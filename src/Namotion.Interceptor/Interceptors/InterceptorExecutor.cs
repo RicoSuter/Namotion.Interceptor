@@ -85,7 +85,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
     /// The new value is already the stabilized getter output on this path, so publishing reuses it
     /// instead of invoking the getter again (see
-    /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
+    /// <see cref="PropertyWriteContext{TProperty}.GetFinalValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)

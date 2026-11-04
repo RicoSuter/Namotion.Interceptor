@@ -61,16 +61,14 @@ public struct PropertyWriteContext<TProperty>
     internal long Revision;
 
     /// <summary>
-    /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
-    /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
-    /// which would run user code at publish time and could return a value that never paired
-    /// atomically with this change's old value.
-    ///
-    /// The published value is therefore <see cref="NewValue"/> as of publish time, not as of entry.
-    /// <see cref="NewValue"/> is publicly settable, so an interceptor that rewrites it on a derived
-    /// recalculation now changes what is published; the getter re-read used to mask such a rewrite.
+    /// Gets whether this write publishes a derived property's recalculation. The value is already
+    /// committed and the getter returns it, so an interceptor must not throw for this write.
     /// </summary>
-    internal bool FinalValueIsNewValue;
+    /// <remarks>
+    /// <see cref="NewValue"/> is the recalculated value, and it is what <see cref="GetFinalValue"/>
+    /// returns and what is published, so an interceptor that rewrites it changes the published value.
+    /// </remarks>
+    public bool IsDerivedRecalculation { get; }
 
     /// <summary>
     /// Gets the property to write a value to.
@@ -136,8 +134,9 @@ public struct PropertyWriteContext<TProperty>
     /// Like the other constructor, this consumes the thread-static pending origin stamp for
     /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
     ///
-    /// Cascade re-entry is only ever reached with a new value that is already the stabilized getter
-    /// output, so <see cref="FinalValueIsNewValue"/> is set here rather than passed in.
+    /// Cascade re-entry is only ever reached from a derived recalculation, with a new value that is
+    /// already the stabilized getter output, so <see cref="IsDerivedRecalculation"/> is set here
+    /// rather than passed in.
     /// </summary>
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
@@ -146,7 +145,7 @@ public struct PropertyWriteContext<TProperty>
         CurrentValue = currentValue;
         NewValue = newValue;
         IsWritten = false;
-        FinalValueIsNewValue = true;
+        IsDerivedRecalculation = true;
         _writeTimestamp = rawTimestamp;
         PendingOrigin.TryConsume(in property, out _attempted);
     }
@@ -244,7 +243,7 @@ public struct PropertyWriteContext<TProperty>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()
     {
-        if (FinalValueIsNewValue)
+        if (IsDerivedRecalculation)
         {
             return NewValue;
         }
