@@ -22,6 +22,9 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
+    // A broker matches each filter of a SUBSCRIBE against every retained message before it answers the packet, and answers keep-alive pings only between packets.
+    private const int SubscriptionBatchSize = 1000;
+
     // Pool for UserProperties lists to avoid allocations on hot path
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
         = new(() => new List<MqttUserProperty>(1));
@@ -555,6 +558,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
+        var batchCount = 0;
+        var subscribedCount = 0;
 
         foreach (var property in properties)
         {
@@ -580,11 +585,23 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
                 .WithQualityOfServiceLevel(qos));
+            batchCount++;
+            subscribedCount++;
+
+            if (batchCount == SubscriptionBatchSize)
+            {
+                await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+                subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
+                batchCount = 0;
+            }
         }
 
-        await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        if (batchCount > 0)
+        {
+            await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        }
 
-        _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
+        _logger.LogInformation("Subscribed to {Count} MQTT topics.", subscribedCount);
     }
 
     internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
