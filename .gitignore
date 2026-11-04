@@ -390,3 +390,6 @@ src/HomeBlaze/HomeBlaze/Data/DataProtection-Keys/
 # Performance pass artifacts
 benchmark_*.md
 .claude/scheduled_tasks.lock
+
+# Git worktrees
+.worktrees/
