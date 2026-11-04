@@ -423,9 +423,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
         // not need a WithChangedTimestamp scope active to share the time with the dependent).
         // newValue is the value the stabilization loop settled on and the value paired with
-        // oldValue by the guards above. finalValueIsNewValue publishes it rather than
-        // re-invoking the getter, which could return a later value that never coexisted with
-        // oldValue (see PropertyWriteContext.GetFinalValue).
+        // oldValue by the guards above, so finalValueIsNewValue publishes it rather than
+        // re-invoking the getter (see PropertyWriteContext.FinalValueIsNewValue).
         derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp, finalValueIsNewValue: true);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)

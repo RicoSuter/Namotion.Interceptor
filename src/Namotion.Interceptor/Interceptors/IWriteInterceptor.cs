@@ -61,13 +61,14 @@ public struct PropertyWriteContext<TProperty>
     internal long Revision;
 
     // Set only for a recalculation published by derived property change detection, where NewValue is the
-    // committed value its guards paired with CurrentValue. Re-invoking the getter at publish time could return
-    // a later value that never coexisted with CurrentValue.
+    // committed value its guards paired with CurrentValue, so GetFinalValue returns NewValue. Re-invoking the
+    // getter at publish time could return a later value that never coexisted with CurrentValue.
     internal readonly bool FinalValueIsNewValue;
 
     /// <summary>
     /// Gets whether this write publishes a derived property's calculated value, which is already committed
-    /// and returned by the getter. An interceptor must call the next interceptor and must not throw for this write.
+    /// and returned by the getter. An interceptor must not veto or throw for this write; it may only drop it as
+    /// unchanged when <see cref="NewValue"/> equals <see cref="CurrentValue"/>.
     /// </summary>
     /// <remarks>
     /// Skipping the next interceptor skips the terminal write, lifecycle reconciliation of subject values and the
@@ -138,9 +139,8 @@ public struct PropertyWriteContext<TProperty>
     /// <see cref="IsDerivedRecalculation"/>. A recalculation cascade passes the trigger's already-resolved
     /// raw timestamp, so the dependent's write does not need to lazy-resolve (and therefore does not need
     /// an active <c>WithChangedTimestamp</c> scope to share state with the trigger). Pass 0 to leave the
-    /// cache uninitialized (the default lazy behavior). Pass <paramref name="finalValueIsNewValue"/> true
-    /// only when the new value is the value a recalculation committed and paired with the current value
-    /// (see <see cref="FinalValueIsNewValue"/>).
+    /// cache uninitialized (the default lazy behavior). <paramref name="finalValueIsNewValue"/> makes
+    /// <see cref="GetFinalValue"/> return the new value (see <see cref="FinalValueIsNewValue"/>).
     /// Like the other constructor, this consumes the thread-static pending origin stamp for
     /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
     /// </summary>

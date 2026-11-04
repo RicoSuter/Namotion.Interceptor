@@ -343,6 +343,41 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenHandlerWritesOtherContextDependencyDuringOnCommitting_ThenDerivedRecalculationIsPublished()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var other = new TransactionCascadeSubject(InterceptorSubjectContext.Create().WithFullPropertyTracking())
+        {
+            Plain = "before"
+        };
+        var subject = new TransactionCascadeSubject(context)
+        {
+            ProbeEvaluator = _ => other.Plain
+        };
+
+        // Recalculates the derived property with the evaluator, so it depends on the other subject.
+        subject.Plain = "initial";
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+
+        // The other subject's context does not route through the transaction interceptor, so the write lands.
+        handler.OnCommittingAction = (_, _) => other.Plain = "during";
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.SideEffect = "committed";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("committed", subject.SideEffect);
+        Assert.Equal("during", subject.Probe);
+        var probeChange = Assert.Single(notifications, change => change.Property.Name == nameof(TransactionCascadeSubject.Probe));
+        Assert.Equal("before", probeChange.GetOldValue<string>());
+        Assert.Equal("during", probeChange.GetNewValue<string>());
+    }
+
+    [Fact]
     public async Task WhenHandlerWriteOutsideTheTransactionRecalculatesDerivedPropertyAndCommitIsRejected_ThenOnlyLandedValuesArePublished()
     {
         // Arrange

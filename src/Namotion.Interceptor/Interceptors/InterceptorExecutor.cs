@@ -86,7 +86,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// recalculation cascade share the trigger's captured time without pushing a
     /// <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope. With
     /// <paramref name="finalValueIsNewValue"/> set, publishing reuses the new value instead of invoking the
-    /// getter again (see <see cref="PropertyWriteContext{TProperty}.GetFinalValue"/>).
+    /// getter again (see <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp, bool finalValueIsNewValue)

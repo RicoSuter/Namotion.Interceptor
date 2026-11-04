@@ -1,9 +1,9 @@
 namespace Namotion.Interceptor.Tests;
 
-public class PublishDerivedPropertyValueTests
+public class PublishInitialDerivedPropertyValueTests
 {
     [Fact]
-    public void WhenPropertyIsNotDerived_ThenPublishDerivedPropertyValueThrows()
+    public void WhenPropertyIsNotDerived_ThenPublishInitialDerivedPropertyValueThrows()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
@@ -11,6 +11,6 @@ public class PublishDerivedPropertyValueTests
         var property = new PropertyReference(car, nameof(Car.Speed));
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => property.PublishDerivedPropertyValue());
+        Assert.Throws<InvalidOperationException>(() => property.PublishInitialDerivedPropertyValue());
     }
 }

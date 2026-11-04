@@ -326,7 +326,7 @@ public class RegisteredSubject
             // publishing reads it again, and once more for the change notification when one is consumed.
             // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
             // evaluation. Consider a dedicated lifecycle notification for derived properties.
-            property.Reference.PublishDerivedPropertyValue();
+            property.Reference.PublishInitialDerivedPropertyValue();
         }
         else
         {
