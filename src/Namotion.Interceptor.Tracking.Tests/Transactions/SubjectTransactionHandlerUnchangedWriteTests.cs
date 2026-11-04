@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -392,20 +391,5 @@ public class SubjectTransactionHandlerUnchangedWriteTests
         // Assert
         Assert.Empty(handler.Captured);
         Assert.Equal(0, handler.CommittingCalls);
-    }
-
-    private sealed class ThrowingReadInterceptor(string propertyName, Exception exception) : IReadInterceptor
-    {
-        public bool IsArmed { get; set; }
-
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
-        {
-            if (IsArmed && context.Property.Name == propertyName)
-            {
-                throw exception;
-            }
-
-            return next(ref context);
-        }
     }
 }

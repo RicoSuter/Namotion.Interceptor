@@ -50,6 +50,7 @@ internal static class SubjectPropertyChangeOperations
 
                 failed.Add(change);
                 (errors ??= []).Add(error);
+                RestoreFailedApply(change, markingTransaction, successful!, errors);
 
                 // The handlers checked the changes as a set, which no longer lands as checked, so the remaining
                 // changes would only run hooks and notifications against a half-applied model before the revert.
@@ -102,6 +103,56 @@ internal static class SubjectPropertyChangeOperations
         }
 
         return successful;
+    }
+
+    /// <summary>
+    /// Restores the old value of a failed change whose setter threw after storing the value, for example from a change
+    /// hook or a synchronous observer, so the failed change does not stay applied. The restore is skipped only when the
+    /// property reads as its old value. After a restore that throws, a property that does not hold its old value, or
+    /// whose value cannot be read, stays applied: it is added to <paramref name="applied"/>, where the caller reverts or
+    /// reports it like any applied change, and a failed read adds its error to <paramref name="errors"/>.
+    /// </summary>
+    private static void RestoreFailedApply(
+        SubjectPropertyChange change,
+        SubjectTransaction? markingTransaction,
+        List<SubjectPropertyChange> applied,
+        List<Exception> errors)
+    {
+        // Compared with the old value, not the new one, because a hook or an interceptor can change the stored value.
+        var oldValue = change.GetOldValue<object?>();
+        if (HoldsValue(change.Property, oldValue, out _) ||
+            change.ToRollbackChange().TryApplyLocalChange(markingTransaction, out var restoreError))
+        {
+            return;
+        }
+
+        errors.Add(restoreError);
+        if (!HoldsValue(change.Property, oldValue, out var readError))
+        {
+            applied.Add(change);
+            if (readError is not null)
+            {
+                errors.Add(readError);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns true when the property holds <paramref name="value"/>, and false with <paramref name="readError"/> set
+    /// when reading it throws, for example from a getter or a read interceptor.
+    /// </summary>
+    private static bool HoldsValue(PropertyReference property, object? value, out Exception? readError)
+    {
+        try
+        {
+            readError = null;
+            return Equals(property.Metadata.GetValue?.Invoke(property.Subject), value);
+        }
+        catch (Exception exception)
+        {
+            readError = exception;
+            return false;
+        }
     }
 
     /// <summary>

@@ -13,14 +13,19 @@ namespace Namotion.Interceptor.Validation;
 /// Validates property values with the registered <see cref="IPropertyValidator"/> services. Writes that reach the
 /// model are validated before any derived recalculation, change notification or lifecycle handling. Writes captured
 /// by a transaction are validated as an <see cref="ITransactionHandler"/>, according to the transaction's
-/// <see cref="TransactionCheckMode"/>; a write recognized by
-/// <see cref="SubjectTransaction.TryConsumeCommitWrite"/> is not validated again.
+/// <see cref="TransactionCheckMode"/>, and the commit checks also validate the derived properties that depend on
+/// the changed properties; a write recognized by <see cref="SubjectTransaction.TryConsumeCommitWrite"/> and the derived
+/// properties it recalculates are not validated again.
 /// </summary>
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
 [RunsBefore(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor), typeof(LifecycleInterceptor))]
 public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandler
 {
     private static readonly ConcurrentDictionary<Type, ITypedValidation> TypedValidations = new();
+
+    // Set while a write recognized by TryConsumeCommitWrite runs the rest of the chain.
+    [ThreadStatic]
+    private static bool _isApplyingCheckedWrite;
 
     static ValidationInterceptor()
     {
@@ -41,7 +46,25 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!SubjectTransaction.TryConsumeCommitWrite(this, context.Property, context.NewValue))
+        if (SubjectTransaction.TryConsumeCommitWrite(this, context.Property, context.NewValue))
+        {
+            // Derived recalculations run inside next and see the values applied so far, while the commit check
+            // validated them over the final set, so they are not validated again.
+            var wasApplyingCheckedWrite = _isApplyingCheckedWrite;
+            _isApplyingCheckedWrite = true;
+            try
+            {
+                next(ref context);
+            }
+            finally
+            {
+                _isApplyingCheckedWrite = wasApplyingCheckedWrite;
+            }
+
+            return;
+        }
+
+        if (!_isApplyingCheckedWrite || !context.Property.Metadata.IsDerived)
         {
             ThrowIfInvalid(context.Property, context.NewValue, context.Origin);
         }
@@ -101,9 +124,62 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
             }
         }
 
+        ValidateDerivedProperties(context.Changes, ref failedChanges, ref errors);
+
         if (failedChanges is not null)
         {
             throw new SubjectTransactionValidationException(failedChanges, errors!);
+        }
+    }
+
+    /// <summary>
+    /// Validates the derived properties that depend on the changed properties, computed over the transaction's values
+    /// (reads in the checks return them). An invalid one is reported as a change whose old and new value are its
+    /// computed value. Their recalculations during the apply are not validated again, see
+    /// <see cref="WriteProperty{TProperty}"/>.
+    /// </summary>
+    private static void ValidateDerivedProperties(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        ref List<SubjectPropertyChange>? failedChanges,
+        ref List<Exception>? errors)
+    {
+        HashSet<PropertyReference>? visited = null;
+        foreach (ref readonly var change in changes)
+        {
+            // Dependencies are flattened, so this includes derived properties of derived properties.
+            foreach (var derivedProperty in change.Property.GetUsedByProperties().Items)
+            {
+                // A single change's used-by set has no duplicates, so only several changes need the set.
+                if (changes.Length > 1 && !(visited ??= new HashSet<PropertyReference>(PropertyReference.Comparer)).Add(derivedProperty))
+                {
+                    continue;
+                }
+
+                var validators = derivedProperty.Subject.Context.GetServices<IPropertyValidator>();
+                if (validators.IsDefaultOrEmpty)
+                {
+                    continue;
+                }
+
+                object? value;
+                try
+                {
+                    value = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                }
+                catch (Exception)
+                {
+                    // A recalculation keeps the last value when the getter throws, so there is no new value to validate.
+                    continue;
+                }
+
+                var validationResults = Validate(validators, derivedProperty, value, ChangeOrigin.Local);
+                if (validationResults is not null)
+                {
+                    (failedChanges ??= []).Add(SubjectPropertyChange.Create(
+                        derivedProperty, ChangeOrigin.Local, change.ChangedTimestamp, null, value, value));
+                    (errors ??= []).Add(new PropertyValidationException(derivedProperty, value, validationResults));
+                }
+            }
         }
     }
 

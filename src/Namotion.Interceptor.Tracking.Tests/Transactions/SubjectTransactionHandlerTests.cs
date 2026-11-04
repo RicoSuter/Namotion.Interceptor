@@ -502,6 +502,32 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenRestoreOfFailedApplyIsRejected_ThenThePropertyIsReportedAsNotReverted()
+    {
+        // Arrange
+        var context = CreateContext(out _);
+        var rejectingInterceptor = new ValueRejectingWriteInterceptor();
+        context.AddService(rejectingInterceptor);
+        var subject = new TransactionCascadeSubject(context) { Plain = "model" };
+        subject.PlainChangedAction = _ => throw new InvalidOperationException("Hook failed.");
+        rejectingInterceptor.Rejected.Add((nameof(TransactionCascadeSubject.Plain), "model"));
+
+        // Act
+        SubjectTransactionException exception;
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback))
+        {
+            subject.Plain = "new";
+            exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        }
+
+        // Assert
+        Assert.Equal("new", subject.Plain);
+        Assert.Contains("could not be reverted", exception.Message);
+        Assert.Equal(2, exception.FailedChanges.Count(change => change.Property.Name == nameof(TransactionCascadeSubject.Plain)));
+    }
+
+    [Fact]
     public async Task WhenSourceWriteAndApplyFailAfterHandlersCheckedTheSet_ThenNothingLandsAndOnlyWrittenSourcesAreReverted()
     {
         // Arrange
