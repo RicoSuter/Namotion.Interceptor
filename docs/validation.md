@@ -110,6 +110,8 @@ public class NoSwearWordsValidator : IPropertyValidator
 
 The `PropertyValidationContext` carries the property, the new value, and the attempted `Origin` of the write (`Local` for user writes, `FromSource` for inbound source applies). Provenance-aware validators can treat source values as authoritative while strictly validating local input. Because the context is passed by `in`, implementations must return a collection instead of using `yield`.
 
+Derived property recalculations are not validated, in or outside a [transaction](#transactions): the recalculated value is already committed and the getter returns it, so it cannot be rejected. Validators see writes a caller makes to a settable derived property, with the attempted value, before the setter runs. To enforce a rule over a derived value, validate it on the properties the derived property reads.
+
 Register your custom validator:
 
 ```csharp
@@ -192,10 +194,10 @@ await transaction.CommitAsync(cancellationToken);
 ```
 
 At commit:
-- The [commit check](tracking-transactions.md#transaction-handlers) validates the final set with the validators of each subject's context before anything is written, reading the transaction's values, so write order does not matter (except for derived properties).
+- The [commit check](tracking-transactions.md#transaction-handlers) validates the final set with the validators of each subject's context before anything is written, reading the transaction's values, so write order does not matter.
 - A commit check rejection makes `CommitAsync` throw `SubjectTransactionValidationException`, whose `FailedChanges` and `Errors` list the invalid changes and their validation errors in the same order, and keeps the pending changes, so fix the values and [retry](tracking-transactions.md#retrying).
 - With source transactions, the [pre-apply check](tracking-transactions.md#transaction-handlers) validates again right before the local apply and rejects terminally with a plain `SubjectTransactionException`, not a `SubjectTransactionValidationException`, whose `Errors` hold the validation errors, see the [Failure Table](tracking-transactions.md#failure-table) for its `FailedChanges` and what lands.
-- Applied values and values a rollback restores are not validated again, but writes made during the apply, such as from change handlers or a hook that changes the value, and recalculated derived properties are. For a failed apply, see the [Failure Table](tracking-transactions.md#failure-table).
+- Applied values and values a rollback restores are not validated again, but writes made during the apply, such as from change handlers or a hook that changes the value, are. For a failed apply, see the [Failure Table](tracking-transactions.md#failure-table).
 
 ### Writing Validators for Transactions
 
@@ -204,7 +206,7 @@ At commit:
 - **Errors**: each invalid property is reported as one `PropertyValidationException`, the exception that writes outside transactions and `Immediate` writes throw, see [Custom Validators](#custom-validators).
 - **Reads**: properties without a pending change are read from the landed model, which writes outside transactions can change before the apply. Validate a rule on every property it reads, and do not mutate a value object after writing it. In `Deferred` mode with `FailOnConflict` (the default), write every value a rule depends on, changed or not, to check the rule against the final set, see [Check Mode](tracking-transactions.md#check-mode).
 - **Object graph and timestamps**: during the checks, registry and lifecycle state such as parents and children reflect the landed graph, and `SubjectChangeContext.Current` does not carry the checked changes' timestamps. Only property reads return the transaction's values.
-- **Derived properties**: a derived property is validated only when the commit recalculates it after applying a value it depends on, which is after any source write, so it cannot reject the commit before the sources are written. Values are applied one at a time, so the recalculation sees intermediate values and write order matters: with `Free => Capacity - Level` validated as non-negative, writing `Level` before `Capacity` can fail the apply although the final set is valid, and `Level`, whose apply triggered the failed recalculation, stays in the local model because the failed apply itself is not reverted ([#674](https://github.com/RicoSuter/Namotion.Interceptor/issues/674)).
+- **Derived properties**: the recalculations while the commit applies its values are not validated, like any other recalculation (see [Custom Validators](#custom-validators)). For a rule such as `Free => Capacity - Level` being non-negative, validate `Capacity` and `Level`, reading both, so the commit check rejects an invalid final set before anything is written.
 - **New subjects**: only captured writes are validated, so the written subject must already use the context; one created without it and attached in the transaction is not validated.
 - **Interceptor order**: `ValidationInterceptor` runs after the transaction interceptor and before derived property recalculation, change notifications and lifecycle handling. An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]`, which ordering before `ValidationInterceptor` alone does not imply, otherwise the raw value is validated and captured and its own writes are not captured. Ordering one after `ValidationInterceptor` and before `SubjectTransactionInterceptor` is circular and throws `InvalidOperationException` at the first write. See [Edge Cases and Limitations](tracking-transactions.md#edge-cases-and-limitations) and [Service Ordering](interceptor.md#service-ordering).
 
