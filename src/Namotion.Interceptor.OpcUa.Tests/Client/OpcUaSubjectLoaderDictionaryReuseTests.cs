@@ -167,6 +167,41 @@ public class OpcUaSubjectLoaderDictionaryReuseTests : OpcUaSubjectLoaderTestsBas
         var newItem = Assert.Single(newSubjects);
         Assert.IsType<DictionaryReuseItem>(newItem);
     }
+
+    [Fact]
+    public async Task WhenIntKeyedDictionaryChildrenCollideOrDoNotConvert_ThenTheyAreSkippedAndTheRestLoads()
+    {
+        // Arrange: "Items[1]" and "Items[01]" convert to the same int key, and "Items[x]" converts
+        // to none. Either used to throw while building the dictionary, failing every retry.
+        var rootId = new NodeId(1, 0);
+        var itemsId = new NodeId(100, 2);
+        var firstId = new NodeId(101, 2);
+        var collidingId = new NodeId(102, 2);
+        var unconvertibleId = new NodeId(103, 2);
+        var secondId = new NodeId(104, 2);
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] = [CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId))],
+            [itemsId] =
+            [
+                CreateObjectReferenceDescription("Items[1]", new ExpandedNodeId(firstId)),
+                CreateObjectReferenceDescription("Items[01]", new ExpandedNodeId(collidingId)),
+                CreateObjectReferenceDescription("Items[x]", new ExpandedNodeId(unconvertibleId)),
+                CreateObjectReferenceDescription("Items[2]", new ExpandedNodeId(secondId))
+            ]
+        });
+
+        var container = new DictionaryReuseContainer(CreateSubjectContext());
+        var (loader, _, _) = CreateLoaderFor(container);
+
+        // Act
+        await loader.LoadSubjectAsync(container, CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId)), mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Equal([1, 2], container.Items.Keys.Order());
+    }
 }
 
 [InterceptorSubject]

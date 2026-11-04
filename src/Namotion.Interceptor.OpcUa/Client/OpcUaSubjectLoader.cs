@@ -1,4 +1,4 @@
-using System.Globalization;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Mapping;
@@ -563,10 +563,12 @@ internal sealed class OpcUaSubjectLoader
             object container;
             if (isDictionary)
             {
+                var keyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
                 var entries = new Dictionary<object, IInterceptorSubject>(containerChildren.Count);
                 foreach (var (node, subject) in containerChildren)
                 {
-                    entries[ExtractDictionaryKey(node.BrowseName.Name)] = subject;
+                    // Converts, because ResolveChildSubjectsAsync kept only children whose key does.
+                    entries[DictionaryKeyConverter.Convert(ExtractDictionaryKey(node.BrowseName.Name), keyType)] = subject;
                 }
                 container = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
             }
@@ -590,28 +592,25 @@ internal sealed class OpcUaSubjectLoader
         OpcUaLoadContext context)
     {
         var existingChildren = property.Children;
-        var existingByKey = new Dictionary<string, IInterceptorSubject?>(isDictionary ? existingChildren.Length : 0);
+        var keyType = isDictionary ? property.Type.GetDictionaryKeyAndValueTypes().Key : null;
+        var existingByKey = new Dictionary<object, IInterceptorSubject?>(isDictionary ? existingChildren.Length : 0);
         if (isDictionary)
         {
             foreach (var existing in existingChildren)
             {
-                // Key by the invariant string form of the dictionary key so it matches the bracket
-                // key parsed from the browse name (ExtractDictionaryKey), regardless of the key type
-                // (e.g. an int key 1 and the browse name "Items[1]" both reduce to "1").
-                if (existing.Index is { } index &&
-                    Convert.ToString(index, CultureInfo.InvariantCulture) is { } existingKey)
+                if (existing.Index is { } index)
                 {
-                    existingByKey[existingKey] = existing.Subject;
+                    existingByKey[index] = existing.Subject;
                 }
             }
         }
 
-        // Two children can extract to the same dictionary key (e.g. 'Items[a]' and a
-        // bracket-less sibling 'a'). The loser is skipped before its subject is created so it is
-        // never staged, claimed, or monitored (it would be committed yet unreachable from the
-        // graph); the first reference wins, matching the sibling dedup in
-        // ClassifyChildReferencesAsync.
-        HashSet<string>? seenKeys = isDictionary ? new(childNodes.Count) : null;
+        // Two children can convert to the same dictionary key (e.g. 'Items[a]' and a bracket-less
+        // sibling 'a', or 'Items[1]' and 'Items[01]' for an int key). The loser is skipped before
+        // its subject is created so it is never staged, claimed, or monitored (it would be
+        // committed yet unreachable from the graph); the first reference wins, matching the
+        // sibling dedup in ClassifyChildReferencesAsync.
+        HashSet<object>? seenKeys = isDictionary ? new(childNodes.Count) : null;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childNodes.Count);
 
         for (var i = 0; i < childNodes.Count; i++)
@@ -623,7 +622,14 @@ internal sealed class OpcUaSubjectLoader
 
             if (isDictionary)
             {
-                var key = ExtractDictionaryKey(childNode.BrowseName.Name);
+                if (!TryConvertDictionaryKey(childNode.BrowseName.Name, keyType!, out var key))
+                {
+                    _logger.LogWarning(
+                        "Skipping OPC UA dictionary child '{BrowseName}' (NodeId: {NodeId}): its key does not convert to {KeyType}.",
+                        childNode.BrowseName.Name, nodeId, keyType!.Name);
+                    continue;
+                }
+
                 if (!seenKeys!.Add(key))
                 {
                     _logger.LogWarning(
@@ -660,6 +666,20 @@ internal sealed class OpcUaSubjectLoader
         }
 
         return children;
+    }
+
+    private static bool TryConvertDictionaryKey(string browseName, Type keyType, [NotNullWhen(true)] out object? key)
+    {
+        try
+        {
+            key = DictionaryKeyConverter.Convert(ExtractDictionaryKey(browseName), keyType);
+            return true;
+        }
+        catch (Exception exception) when (exception is FormatException or ArgumentException or InvalidCastException or OverflowException)
+        {
+            key = null;
+            return false;
+        }
     }
 
     private static string ExtractDictionaryKey(string browseName)
