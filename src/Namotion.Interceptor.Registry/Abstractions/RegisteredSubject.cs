@@ -324,8 +324,15 @@ public class RegisteredSubject
         // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
         // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
         // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            null, delegate { });
+        var initialValue = getValue?.Invoke(Subject);
+        if (property.Reference.Metadata.IsDerived)
+        {
+            property.Reference.PublishDerivedPropertyValue(initialValue, null);
+        }
+        else
+        {
+            property.Reference.SetPropertyValueWithInterception(initialValue, null, delegate { });
+        }
 
         return property;
     }

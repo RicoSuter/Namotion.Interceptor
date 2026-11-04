@@ -98,6 +98,27 @@ public class DerivedRecalculationWriteContextTests
         Assert.Contains(("Trimmed", true), probe.Writes);
     }
 
+    [Fact]
+    public void WhenDerivedPropertyIsAddedAtRuntime_ThenItsInitialPublishIsFlagged()
+    {
+        // Arrange
+        var probe = new RecalculationFlagProbe();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+        context.AddService(probe);
+        var person = new Person(context);
+        probe.Writes.Clear();
+
+        // Act
+        person.TryGetRegisteredSubject()!.AddDerivedProperty<string?>("Computed", getValue: _ => "value");
+
+        // Assert
+        Assert.Contains(("Computed", true), probe.Writes);
+        Assert.DoesNotContain(("Computed", false), probe.Writes);
+    }
+
     private sealed class RecalculationFlagProbe : IWriteInterceptor
     {
         public List<(string Property, bool IsDerivedRecalculation)> Writes { get; } = [];

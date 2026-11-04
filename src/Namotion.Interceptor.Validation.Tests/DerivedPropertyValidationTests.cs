@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.Reactive.Concurrency;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -79,15 +80,13 @@ public class DerivedPropertyValidationTests
     public void WhenDependencyOfDynamicSettableDerivedPropertyIsWritten_ThenRecalculationIsNotValidated()
     {
         // Arrange
-        var validator = new RejectingValidator("InputText") { IsRejecting = false };
+        var validator = new RejectingValidator("InputText");
         var context = CreateContext(validator);
         var device = new DerivedDevice(context);
-        // AddDerivedProperty publishes the initial value through the write chain, so rejecting starts afterwards.
         var inputText = device.TryGetRegisteredSubject()!.AddDerivedProperty<string?>(
             "InputText",
             getValue: subject => ((DerivedDevice)subject).Input.ToString(CultureInfo.InvariantCulture),
             setValue: (subject, value) => ((DerivedDevice)subject).Input = int.Parse(value!, CultureInfo.InvariantCulture));
-        validator.IsRejecting = true;
         var publishedValues = new List<string?>();
         using var subscription = inputText.Reference
             .SubscribeInline((in SubjectPropertyChange change) => publishedValues.Add(change.GetNewValue<string?>()));
@@ -102,17 +101,59 @@ public class DerivedPropertyValidationTests
         Assert.Equal([nameof(DerivedDevice.Input)], validator.Calls);
     }
 
-    /// <summary>Records the name of every validated property and rejects the given properties while <see cref="IsRejecting"/> is set.</summary>
+    [Fact]
+    public void WhenDerivedPropertyIsAddedAtRuntime_ThenItsInitialValueIsNotValidatedAndIsPublished()
+    {
+        // Arrange
+        var validator = new RejectingValidator("InputText");
+        var context = CreateContext(validator);
+        var device = new DerivedDevice(context);
+        device.Input = 2;
+        var publishedValues = new List<string?>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property.Name == "InputText")
+                {
+                    publishedValues.Add(change.GetNewValue<string?>());
+                }
+            });
+        validator.Calls.Clear();
+
+        // Act
+        var inputText = device.TryGetRegisteredSubject()!.AddDerivedProperty<string?>(
+            "InputText",
+            getValue: subject => ((DerivedDevice)subject).Input.ToString(CultureInfo.InvariantCulture));
+
+        // Assert
+        Assert.Equal("2", inputText.GetValue());
+        Assert.Equal(["2"], publishedValues);
+        Assert.DoesNotContain("InputText", validator.Calls);
+    }
+
+    [Fact]
+    public void WhenNonDerivedPropertyIsAddedAtRuntimeWithRejectedValue_ThenAddPropertyThrows()
+    {
+        // Arrange
+        var validator = new RejectingValidator("Code");
+        var context = CreateContext(validator);
+        var device = new DerivedDevice(context);
+
+        // Act & Assert
+        Assert.Throws<PropertyValidationException>(
+            () => device.TryGetRegisteredSubject()!.AddProperty("Code", typeof(string), _ => "invalid", null));
+    }
+
+    /// <summary>Records the name of every validated property and rejects the given properties.</summary>
     private sealed class RejectingValidator(params string[] rejectedProperties) : IPropertyValidator
     {
-        public bool IsRejecting { get; set; } = true;
-
         public List<string> Calls { get; } = [];
 
         public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
             Calls.Add(context.Property.Name);
-            return IsRejecting && rejectedProperties.Contains(context.Property.Name)
+            return rejectedProperties.Contains(context.Property.Name)
                 ? [new ValidationResult($"{context.Property.Name} is rejected.")]
                 : [];
         }

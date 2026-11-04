@@ -112,7 +112,7 @@ public class NoSwearWordsValidator : IPropertyValidator
 
 The `PropertyValidationContext` carries the property, the new value, and the attempted `Origin` of the write (`Local` for user writes, `FromSource` for inbound source applies). Provenance-aware validators can treat source values as authoritative while strictly validating local input. Because the context is passed by `in`, implementations must return a collection instead of using `yield`.
 
-Derived property recalculations are not validated, in or outside a [transaction](#transactions): the recalculated value is already committed and the getter returns it, so it cannot be rejected. Validators see writes a caller makes to a settable derived property, with the attempted value, before the setter runs. To enforce a rule over a derived value, validate it on the properties the derived property reads.
+Derived property recalculations are not validated, in or outside a [transaction](#transactions), and neither is the initial value of a derived property added at runtime: the calculated value is already committed and the getter returns it, so it cannot be rejected. Validators see writes a caller makes to a settable derived property, with the attempted value, before the setter runs. To enforce a rule over a derived value, validate it on the properties the derived property reads.
 
 Register your custom validator:
 

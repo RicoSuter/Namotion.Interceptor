@@ -28,4 +28,22 @@ public static class PropertyReferenceExtensions
         var executor = property.Subject.Context as InterceptorExecutor;
         executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
     }
+
+    /// <summary>
+    /// Publishes the calculated value of a derived property through the write chain without invoking a setter. The
+    /// write has <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set.
+    /// </summary>
+    /// <param name="property">The derived property.</param>
+    /// <param name="newValue">The calculated value, which the getter already returns.</param>
+    /// <param name="currentValue">The value published before, or null when none was.</param>
+    /// <exception cref="InvalidOperationException">The property is not derived.</exception>
+    public static void PublishDerivedPropertyValue(this PropertyReference property, object? newValue, object? currentValue)
+    {
+        if (!property.Metadata.IsDerived)
+        {
+            throw new InvalidOperationException($"Property '{property.Name}' is not derived.");
+        }
+
+        property.SetPropertyValueWithInterception(newValue, currentValue, static (_, _) => { }, rawTimestamp: 0);
+    }
 }
