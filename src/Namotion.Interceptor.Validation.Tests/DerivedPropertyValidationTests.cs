@@ -44,6 +44,26 @@ public class DerivedPropertyValidationTests
     }
 
     [Fact]
+    public void WhenDataAnnotationOnGetterOnlyDerivedPropertyIsViolatedByRecalculation_ThenWriteSucceeds()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithPropertyValidation()
+            .WithDataAnnotationValidation();
+        var device = new DerivedDevice(context);
+
+        // Act
+        var exception = Record.Exception(() => device.Input = 2);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Equal(2, device.Input);
+        Assert.Equal("b", device.Computed);
+    }
+
+    [Fact]
     public void WhenSettableDerivedPropertyIsWritten_ThenOnlyTheWriteIsValidated()
     {
         // Arrange

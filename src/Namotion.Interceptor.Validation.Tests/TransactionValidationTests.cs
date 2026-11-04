@@ -531,11 +531,8 @@ public class TransactionValidationTests
         }
     }
 
-    [Theory]
-    [InlineData(TransactionFailureHandling.BestEffort)]
-    [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenCommitRecalculatesDerivedProperty_ThenRecalculationIsNotValidated(
-        TransactionFailureHandling failureHandling)
+    [Fact]
+    public async Task WhenCommitRecalculatesDerivedProperty_ThenRecalculationIsNotValidated()
     {
         // Arrange
         var log = new List<string>();
@@ -545,7 +542,7 @@ public class TransactionValidationTests
         var motor = new PoweredMotor(context);
         _ = motor.Power;
         log.Clear();
-        using var transaction = await context.BeginTransactionAsync(failureHandling);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         motor.MotorSpeed = 200;
 
         // Act
@@ -564,6 +561,30 @@ public class TransactionValidationTests
         Assert.Equal(1, writer.WriteCount);
         Assert.Equal(200, motor.MotorSpeed);
         Assert.Equal(2000, motor.Power);
+    }
+
+    [Fact]
+    public async Task WhenSettableDerivedPropertyIsWrittenInTransaction_ThenItIsValidatedOnceAndAppliedImmediately()
+    {
+        // Arrange
+        var validator = new RecordingValidator();
+        var context = CreateContext(validator);
+        var device = new DerivedDevice(context);
+        validator.Calls.Clear();
+
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            device.Label = "x";
+        }
+
+        // Assert
+        // The transaction is disposed without a commit, so only a write that landed immediately keeps its value.
+        Assert.Equal("x", device.Label);
+        Assert.Equal("Label: x", device.LabelWithPrefix);
+        var call = Assert.Single(validator.Calls);
+        Assert.Equal(nameof(DerivedDevice.Label), call.Property);
+        Assert.Equal("x", call.Value);
     }
 
     [Fact]

@@ -11,6 +11,6 @@ public class PublishDerivedPropertyValueTests
         var property = new PropertyReference(car, nameof(Car.Speed));
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => property.PublishDerivedPropertyValue(1, null));
+        Assert.Throws<InvalidOperationException>(() => property.PublishDerivedPropertyValue());
     }
 }

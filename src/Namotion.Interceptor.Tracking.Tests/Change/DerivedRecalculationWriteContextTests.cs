@@ -1,3 +1,5 @@
+using System.Reactive.Concurrency;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
@@ -11,11 +13,7 @@ public class DerivedRecalculationWriteContextTests
     public void WhenPlainPropertyIsWritten_ThenOnlyTheDerivedRecalculationIsFlagged()
     {
         // Arrange
-        var probe = new RecalculationFlagProbe();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-        context.AddService(probe);
+        var (context, probe) = CreateContext();
         var person = new Person(context);
         probe.Writes.Clear();
 
@@ -25,19 +23,14 @@ public class DerivedRecalculationWriteContextTests
         // Assert
         Assert.Contains((nameof(Person.FirstName), false), probe.Writes);
         Assert.Contains((nameof(Person.FullName), true), probe.Writes);
-        Assert.DoesNotContain((nameof(Person.FirstName), true), probe.Writes);
-        Assert.DoesNotContain((nameof(Person.FullName), false), probe.Writes);
+        Assert.All(probe.Writes, write => Assert.Equal(write.Property != nameof(Person.FirstName), write.IsDerivedRecalculation));
     }
 
     [Fact]
     public void WhenSettableDerivedPropertyIsWritten_ThenTheWriteIsNotFlaggedAndItsRecalculationsAre()
     {
         // Arrange
-        var probe = new RecalculationFlagProbe();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-        context.AddService(probe);
+        var (context, probe) = CreateContext();
         var person = new DerivedSetterPerson(context);
         probe.Writes.Clear();
 
@@ -55,11 +48,7 @@ public class DerivedRecalculationWriteContextTests
     public void WhenDerivedPropertyIsRecalculatedManually_ThenTheWriteIsFlagged()
     {
         // Arrange
-        var probe = new RecalculationFlagProbe();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-        context.AddService(probe);
+        var (context, probe) = CreateContext();
         var sensor = new ExternalSensor(context);
         sensor.ExternalValueProvider = () => 5.0;
         probe.Writes.Clear();
@@ -68,20 +57,14 @@ public class DerivedRecalculationWriteContextTests
         new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature)).RecalculateDerivedProperty();
 
         // Assert
-        Assert.Contains((nameof(ExternalSensor.CalibratedTemperature), true), probe.Writes);
-        Assert.DoesNotContain((nameof(ExternalSensor.CalibratedTemperature), false), probe.Writes);
+        Assert.Equal([(nameof(ExternalSensor.CalibratedTemperature), true)], probe.Writes);
     }
 
     [Fact]
     public void WhenDynamicSettableDerivedPropertyIsWritten_ThenTheWriteIsNotFlaggedAndItsRecalculationIs()
     {
         // Arrange
-        var probe = new RecalculationFlagProbe();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-        context.AddService(probe);
+        var (context, probe) = CreateContext();
         var person = new Person(context);
         string? backing = null;
         var derived = person.TryGetRegisteredSubject()!.AddDerivedProperty<string?>(
@@ -102,12 +85,7 @@ public class DerivedRecalculationWriteContextTests
     public void WhenDerivedPropertyIsAddedAtRuntime_ThenItsInitialPublishIsFlagged()
     {
         // Arrange
-        var probe = new RecalculationFlagProbe();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-        context.AddService(probe);
+        var (context, probe) = CreateContext();
         var person = new Person(context);
         probe.Writes.Clear();
 
@@ -115,8 +93,46 @@ public class DerivedRecalculationWriteContextTests
         person.TryGetRegisteredSubject()!.AddDerivedProperty<string?>("Computed", getValue: _ => "value");
 
         // Assert
-        Assert.Contains(("Computed", true), probe.Writes);
-        Assert.DoesNotContain(("Computed", false), probe.Writes);
+        Assert.Equal([("Computed", true)], probe.Writes);
+    }
+
+    [Fact]
+    public void WhenDependencyChangesWhileRuntimeDerivedPropertyIsPublished_ThenLastPublishedValueIsCurrentValue()
+    {
+        // Arrange
+        var (context, _) = CreateContext();
+        var interleaver = new InterleavingWriter();
+        context.AddService(interleaver);
+        var person = new Person(context) { FirstName = "a" };
+        var published = new List<string?>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property.Name == "Upper")
+                {
+                    published.Add(change.GetNewValue<string?>());
+                }
+            });
+        interleaver.Pending = ("Upper", () => person.FirstName = "b");
+
+        // Act
+        var upper = person.TryGetRegisteredSubject()!.AddDerivedProperty<string?>(
+            "Upper", getValue: subject => ((Person)subject).FirstName?.ToUpperInvariant());
+
+        // Assert
+        Assert.Equal("B", upper.GetValue());
+        Assert.Equal("B", published[^1]);
+    }
+
+    private static (IInterceptorSubjectContext Context, RecalculationFlagProbe Probe) CreateContext()
+    {
+        var probe = new RecalculationFlagProbe();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+        context.AddService(probe);
+        return (context, probe);
     }
 
     private sealed class RecalculationFlagProbe : IWriteInterceptor
@@ -126,6 +142,24 @@ public class DerivedRecalculationWriteContextTests
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             Writes.Add((context.Property.Name, context.IsDerivedRecalculation));
+            next(ref context);
+        }
+    }
+
+    // Stands in for a dependency write that lands between reading the initial value and publishing it.
+    [RunsBefore(typeof(PropertyChangeInterceptor))]
+    private sealed class InterleavingWriter : IWriteInterceptor
+    {
+        public (string Name, Action Write)? Pending;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (Pending is { } pending && context.Property.Name == pending.Name)
+            {
+                Pending = null;
+                pending.Write();
+            }
+
             next(ref context);
         }
     }

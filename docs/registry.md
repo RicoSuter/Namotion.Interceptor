@@ -135,7 +135,7 @@ Dynamic properties (including derived) fully participate in lifecycle tracking w
 
 When the underlying data changes, derived properties are re-evaluated and lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones).
 
-When a dynamic property is added, its initial value triggers a change event with `OldValue = null`, representing a transition from "property did not exist" to its initial value. This ensures interceptors (lifecycle, change tracking, etc.) correctly process the initial state.
+When a dynamic property is added, its initial value triggers a change event with `OldValue = null`, representing a transition from "property did not exist" to its initial value. This ensures interceptors (lifecycle, change tracking, etc.) correctly process the initial state. A derived property's initial value is not validated (see [Custom Validators](validation.md#custom-validators)).
 
 ### Add attributes
 

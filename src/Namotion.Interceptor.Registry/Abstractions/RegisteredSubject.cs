@@ -320,18 +320,17 @@ public class RegisteredSubject
         var property = AddPropertyInternal(name, type, attributes);
 
         // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
-        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
-        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
-        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        var initialValue = getValue?.Invoke(Subject);
         if (property.Reference.Metadata.IsDerived)
         {
-            property.Reference.PublishDerivedPropertyValue(initialValue, null);
+            // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
+            // publishing reads it again, and once more for the change notification when one is consumed.
+            // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
+            // evaluation. Consider a dedicated lifecycle notification for derived properties.
+            property.Reference.PublishDerivedPropertyValue();
         }
         else
         {
-            property.Reference.SetPropertyValueWithInterception(initialValue, null, delegate { });
+            property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
         }
 
         return property;
