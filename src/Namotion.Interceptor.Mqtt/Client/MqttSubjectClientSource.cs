@@ -22,7 +22,8 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
-    // A broker matches each filter of a SUBSCRIBE against every retained message before it answers the packet, and answers keep-alive pings only between packets.
+    // A broker matches each filter of a SUBSCRIBE against every retained message before it answers the packet, and
+    // answers keep-alive pings only between packets.
     private const int SubscriptionBatchSize = 1000;
 
     // Pool for UserProperties lists to avoid allocations on hot path
