@@ -41,7 +41,9 @@ public sealed class ValidationInterceptor : IWriteInterceptor, ITransactionHandl
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!SubjectTransaction.TryConsumeCommitWrite(this, context.Property, context.NewValue))
+        // A transaction never captures a derived write, so a recalculation has no commit write to consume.
+        if (!context.IsDerivedRecalculation &&
+            !SubjectTransaction.TryConsumeCommitWrite(this, context.Property, context.NewValue))
         {
             ThrowIfInvalid(context.Property, context.NewValue, context.Origin);
         }

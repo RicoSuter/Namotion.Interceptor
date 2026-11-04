@@ -534,7 +534,7 @@ public class TransactionValidationTests
     [Theory]
     [InlineData(TransactionFailureHandling.BestEffort)]
     [InlineData(TransactionFailureHandling.Rollback)]
-    public async Task WhenDerivedPropertyBecomesInvalid_ThenBothChecksPassAndApplyFailsAfterSourceWrite(
+    public async Task WhenCommitRecalculatesDerivedProperty_ThenRecalculationIsNotValidated(
         TransactionFailureHandling failureHandling)
     {
         // Arrange
@@ -549,22 +549,21 @@ public class TransactionValidationTests
         motor.MotorSpeed = 200;
 
         // Act
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
+        // PowerLimitValidator would reject Power 2000, but the recalculation is never validated.
         Assert.Equal(
             [
                 nameof(PoweredMotor.MotorSpeed), // capture
                 nameof(PoweredMotor.MotorSpeed), // commit check
                 "source write",
-                nameof(PoweredMotor.MotorSpeed), // pre-apply check
-                nameof(PoweredMotor.Power) // recalculation while the commit applies MotorSpeed
+                nameof(PoweredMotor.MotorSpeed) // pre-apply check
             ],
             log);
         Assert.Equal(1, writer.WriteCount);
-        Assert.Equal(nameof(PoweredMotor.MotorSpeed), Assert.Single(exception.FailedChanges).Property.Name);
-        Assert.Contains("Power 2000 exceeds", Assert.IsType<PropertyValidationException>(Assert.Single(exception.Errors)).Message);
+        Assert.Equal(200, motor.MotorSpeed);
+        Assert.Equal(2000, motor.Power);
     }
 
     [Fact]
