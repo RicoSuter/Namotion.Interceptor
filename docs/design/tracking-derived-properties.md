@@ -53,7 +53,7 @@ Dependencies (RequiredProperties):      Used-by properties (UsedByProperties):
 - **Dependencies** (`data.RequiredPropertiesSpan`): Which properties a derived property reads. Stored as a private `PropertyReference[]` with separate count, accessed via `ReadOnlySpan` under `lock(data)`. Buffer is reused when capacity is sufficient to avoid allocation on re-evaluation.
 - **Used-by properties** (`data.GetUsedByProperties()`): Which derived properties depend on this property. Stored as private `PropertyReferenceCollection`, which synchronizes its own writes (see [Used-by properties collection](#used-by-properties-collection)).
 
-The two use different data structures because of their access patterns. Dependencies are always read and written under `lock(data)` (the derived property's own data), so a plain array with buffer reuse is sufficient. Used-by properties are read without any lock (`WriteProperty` iterates dependents via `GetUsedByProperties()` which does `Volatile.Read`) and mutated from multiple lock scopes (`Remove` is called under the *derived* property's lock, not the *source* property's lock, so two derived properties detaching concurrently can call `Remove` on the same source's `UsedByProperties`). No caller's lock covers every write, so the collection synchronizes its own writes with a leaf lock and never relies on a caller's lock.
+The two use different data structures because of their access patterns. Dependencies are always read and written under `lock(data)` (the derived property's own data), so a plain array with buffer reuse is sufficient. Used-by properties are read without a caller's lock (`WriteProperty` iterates dependents via `GetUsedByProperties()` which does `Volatile.Read`) and mutated from multiple lock scopes (`Remove` is called under the *derived* property's lock, not the *source* property's lock, so two derived properties detaching concurrently can call `Remove` on the same source's `UsedByProperties`). No caller's lock covers every write, so the collection synchronizes its own writes with a leaf lock and never relies on a caller's lock.
 
 Both directions are needed:
 - Dependencies enable cleanup when a derived property is detached (remove itself from all dependencies' used-by properties).
@@ -679,7 +679,7 @@ In all cases for tracked properties, both dependencies and used-by properties ar
 | Recording | Zero (pooled buffers) | Stack push/pop per frame |
 | Recalculation | Zero (beyond getter) | Brief `lock(data)` acquisitions (Phase 1, UpdateDependencies, Phase 3, outer loop check, finally) + getter invocation + two `Volatile.Read` (~2ns). Lock not held during getter evaluation or notification delivery; `IsRecalculating` flag serializes concurrent access. |
 | Attach (common path) | Zero (beyond initial) | One `lock(data)` + getter invocation + two `Volatile.Read` (~2ns) |
-| Used-by read (`UsedByProperties.Items`) | Zero (one snapshot copy on the first read after a change to a collection above 32 entries) | Returns stable `ReadOnlySpan` snapshot |
+| Used-by read (`UsedByProperties.Items`) | Zero (one snapshot copy on the first read after a change to a collection in large mode) | Returns stable `ReadOnlySpan` snapshot |
 
 ## Interaction with Other Interceptors
 

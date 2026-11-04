@@ -37,6 +37,7 @@ public partial class FanInChild
 /// with the number of dependents.
 /// </summary>
 [MemoryDiagnoser]
+// Caps the run: before #891 one AttachDetach at 50,000 dependents took about 20 seconds.
 [MaxWarmupCount(8)]
 [MaxIterationCount(20)]
 public class DerivedFanInBenchmark

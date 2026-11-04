@@ -265,7 +265,8 @@ public class PropertyReferenceCollectionTests
     [Theory]
     [InlineData(100, 1, 1)]
     [InlineData(31, 0, 2)]
-    [InlineData(17, 2, 0)]
+    [InlineData(33, 17, 0)]
+    [InlineData(40, 30, 10)]
     public void WhenCollectionIsModifiedAfterSnapshot_ThenSnapshotsAreUnchanged(int initialCount, int removeCount, int addCount)
     {
         // Arrange
