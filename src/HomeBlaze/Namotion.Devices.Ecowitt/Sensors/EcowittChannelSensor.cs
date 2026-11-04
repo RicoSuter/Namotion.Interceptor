@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
 
@@ -11,7 +10,6 @@ namespace Namotion.Devices.Ecowitt.Sensors;
 public partial class EcowittChannelSensor :
     ITemperatureSensor,
     IHumiditySensor,
-    IBatteryState,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
@@ -27,17 +25,14 @@ public partial class EcowittChannelSensor :
     [State(Unit = StateUnit.Percent)]
     public partial decimal? Humidity { get; internal set; }
 
-    [State(Unit = StateUnit.Percent)]
-    public partial decimal? BatteryLevel { get; internal set; }
-
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
+    /// <summary>
+    /// Gets the paired sensors that can feed these readings, the same subjects as in the gateway's <c>Sensors</c>.
+    /// </summary>
     [State]
-    public partial string? SensorId { get; internal set; }
-
-    [State]
-    public partial int? SignalStrength { get; internal set; }
+    public partial Dictionary<string, EcowittSensor> Sources { get; internal set; }
 
     [Derived]
     public string? Title => !string.IsNullOrEmpty(Name) ? Name : $"Channel {Channel}";
@@ -53,9 +48,7 @@ public partial class EcowittChannelSensor :
         Name = null;
         Temperature = null;
         Humidity = null;
-        BatteryLevel = null;
         LastUpdated = null;
-        SensorId = null;
-        SignalStrength = null;
+        Sources = new Dictionary<string, EcowittSensor>(StringComparer.Ordinal);
     }
 }

@@ -1,21 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>preview</LangVersion>
-  </PropertyGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="Namotion.Devices.Shelly.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="9.*" />
-    <PackageReference Include="System.Reactive" Version="6.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="System.Reactive" />
   </ItemGroup>
 
   <ItemGroup>

@@ -34,8 +34,8 @@ public class SubscriptionManagerSweepOrderingTests
 
         // Assert: the detached subject's handle (2) is gone and the survivor's (1) remains, and the
         // count agrees with the dictionary.
-        Assert.False(harness.Manager.MonitoredItems.ContainsKey(2));
-        Assert.True(harness.Manager.MonitoredItems.ContainsKey(1));
+        Assert.False(harness.Manager.IsTrackingForTesting(2));
+        Assert.True(harness.Manager.IsTrackingForTesting(1));
         Assert.Equal(1, harness.Manager.MonitoredItemCount);
 
         // Assert: the sweep drained what it recorded and recorded nothing while removing.
@@ -60,8 +60,8 @@ public class SubscriptionManagerSweepOrderingTests
         harness.Manager.CompleteSetup([survivorItem, detachedItem]);
 
         // Assert: the sweep removed the detached subject's handle (2) and kept the survivor (1)
-        Assert.False(harness.Manager.MonitoredItems.ContainsKey(2));
-        Assert.True(harness.Manager.MonitoredItems.ContainsKey(1));
+        Assert.False(harness.Manager.IsTrackingForTesting(2));
+        Assert.True(harness.Manager.IsTrackingForTesting(1));
         Assert.Equal(1, harness.Manager.MonitoredItemCount);
 
         // Assert: only the survivor is registered for read-after-write

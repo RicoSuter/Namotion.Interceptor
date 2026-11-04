@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.Installation\HomeBlaze.Installation.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
+        <PackageReference Include="MudBlazor" />
+        <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+    </ItemGroup>
+
+</Project>

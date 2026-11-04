@@ -500,7 +500,15 @@ public class LifecycleEventsTests
 
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            var type = change.IsContextAttach ? "attached" : change.IsContextDetach ? "detached" : null;
+            string? type = null;
+            if (change.IsContextAttach)
+            {
+                type = "attached";
+            }
+            else if (change.IsContextDetach)
+            {
+                type = "detached";
+            }
             if (type is not null)
             {
                 _events.Add(("Handler", type, change.Subject));

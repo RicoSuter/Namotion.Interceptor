@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Linq;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -29,10 +30,6 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
     {
     }
 
-    public void RefreshCollectionProperty(PropertyReference property, object? value)
-    {
-    }
-
     private static void InitializePropertyAttributes(RegisteredSubjectProperty property)
     {
         var hasState = false;
@@ -45,6 +42,7 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
         bool? isCumulative = null;
         bool? isDiscrete = null;
         bool? isEstimated = null;
+        CategoryAttribute? categoryAttribute = null;
 
         foreach (var reflectionAttribute in property.ReflectionAttributes)
         {
@@ -68,6 +66,11 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
 
                 if (isEstimated == null && stateAttribute.IsEstimatedSet)
                     isEstimated = stateAttribute.IsEstimated;
+            }
+            else if (reflectionAttribute is CategoryAttribute category)
+            {
+                // Also when its name is empty, which is how a class property opts out of the category of an interface.
+                categoryAttribute ??= category;
             }
             else if (reflectionAttribute is ConfigurationAttribute configAttribute)
             {
@@ -120,6 +123,7 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
                 IsCumulative = isCumulative ?? false,
                 IsDiscrete = isDiscrete ?? false,
                 IsEstimated = isEstimated ?? false,
+                Category = categoryAttribute.GetNormalizedCategory(),
             };
             property.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
                 _ => stateMetadata, null);

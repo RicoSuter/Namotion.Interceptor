@@ -11,6 +11,33 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools;
 public class BrowseToolEdgeCaseTests
 {
     [Fact]
+    public async Task WhenTwoChildrenAreEqual_ThenBothAreBrowsed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var group = new TestMixedGroup(context);
+        group.Items = new Dictionary<string, IInterceptorSubject>
+        {
+            ["First"] = new TestEqualItem { Name = "First" },
+            ["Second"] = new TestEqualItem { Name = "Second" }
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var tool = new McpToolFactory(group, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.Equal(2, json.GetProperty("subjectCount").GetInt32());
+    }
+
+    [Fact]
     public async Task WhenInvalidStartPath_ThenReturnsError()
     {
         // Arrange
@@ -136,6 +163,37 @@ public class BrowseToolEdgeCaseTests
         var properties = json.GetProperty("result").GetProperty("properties");
         var deviceName = properties.GetProperty("DeviceName");
         Assert.Equal("Light", deviceName.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task WhenDictionaryKeyIsEmpty_ThenChildIsListedUnderEmptyKey()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var container = new TestContainer(context) { Name = "Root" };
+        container.Children = new Dictionary<string, TestContainer>
+        {
+            [""] = new(context) { Name = "Empty" },
+            ["a"] = new(context) { Name = "A" }
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(container, config);
+        var tool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var children = json.GetProperty("result").GetProperty("properties")
+            .GetProperty("Children").GetProperty("children");
+        var keys = children.EnumerateObject().Select(child => child.Name).Order().ToArray();
+        Assert.Equal(["", "a"], keys);
     }
 
     private class ThrowingEnricher : IMcpSubjectEnricher

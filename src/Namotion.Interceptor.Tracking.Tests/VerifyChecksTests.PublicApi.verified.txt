@@ -1,7 +1,9 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Blazor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
-[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.WebSocket.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Tracking.Change
 {
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
@@ -102,9 +104,9 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking
 {
-    public interface IStartupCompletionDeferrer
+    public interface IStartupCompletion
     {
-        System.IDisposable DeferCompletion();
+        System.IDisposable Defer();
     }
     public static class InterceptorSubjectContextExtensions
     {
@@ -136,6 +138,7 @@ namespace Namotion.Interceptor.Tracking
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInCollection(object value, int index) { }
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInDictionary(object value, object key) { }
+        public static System.Type? GetDictionaryKeyType(System.Type dictionaryType) { }
         public static bool TryGetSubjectFromKeyValuePair(object keyValuePair, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
     public static class SubjectPropertyTypeExtensions
@@ -153,7 +156,12 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         public ContextInheritanceHandler() { }
         public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+    }
+    public interface IChildIndexHandler
+    {
+        void HandleChildIndexChanges(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild> children);
     }
     public interface ILifecycleHandler
     {
@@ -163,7 +171,6 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
-        void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
     }
     public class LifecycleInterceptor : Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
@@ -172,6 +179,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public event System.Action<Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange>? SubjectDetaching;
         public void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public bool TryRunWhileAttached(Namotion.Interceptor.IInterceptorSubject subject, System.Action whenAttached) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class LifecycleInterceptorExtensions
@@ -180,6 +188,12 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public static void DetachSubjectProperty(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.PropertyReference property) { }
         public static int GetReferenceCount(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor? TryGetLifecycleInterceptor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+    }
+    public readonly struct SubjectChild : System.IEquatable<Namotion.Interceptor.Tracking.Lifecycle.SubjectChild>
+    {
+        public SubjectChild(Namotion.Interceptor.IInterceptorSubject Subject, object? Index) { }
+        public object? Index { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
     public readonly struct SubjectLifecycleChange
     {
@@ -203,7 +217,7 @@ namespace Namotion.Interceptor.Tracking.Parent
 {
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler)})]
-    public class ParentTrackingHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public class ParentTrackingHandler : Namotion.Interceptor.Tracking.Lifecycle.IChildIndexHandler, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public ParentTrackingHandler() { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
@@ -212,6 +226,8 @@ namespace Namotion.Interceptor.Tracking.Parent
     {
         public static System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> GetParents(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static TRoot? TryGetFirstParent<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
+            where TRoot :  class { }
+        public static TRoot? TryGetFirstParentOrSelf<TRoot>(this Namotion.Interceptor.IInterceptorSubject subject)
             where TRoot :  class { }
     }
     public struct SubjectParent : System.IEquatable<Namotion.Interceptor.Tracking.Parent.SubjectParent>
@@ -233,20 +249,34 @@ namespace Namotion.Interceptor.Tracking.Performance
 }
 namespace Namotion.Interceptor.Tracking.Recorder
 {
+    public interface IReadPropertyRecorderTarget
+    {
+        void OnRead(Namotion.Interceptor.PropertyReference property);
+    }
     public class ReadPropertyRecorder : Namotion.Interceptor.Interceptors.IReadInterceptor
     {
         public ReadPropertyRecorder() { }
         public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
+        public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderTargetScope RecordOnCurrentThread(Namotion.Interceptor.Tracking.Recorder.IReadPropertyRecorderTarget target) { }
         public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderScope Start(System.Collections.Concurrent.ConcurrentDictionary<Namotion.Interceptor.PropertyReference, bool>? properties = null) { }
     }
-    public class ReadPropertyRecorderScope : System.IDisposable
+    public sealed class ReadPropertyRecorderScope : System.IDisposable
     {
         public void Dispose() { }
         public System.Collections.Generic.ICollection<Namotion.Interceptor.PropertyReference> GetPropertiesAndDispose() { }
     }
+    public readonly ref struct ReadPropertyRecorderTargetScope
+    {
+        public void Dispose() { }
+    }
 }
 namespace Namotion.Interceptor.Tracking.Transactions
 {
+    public interface ITransactionHandler
+    {
+        void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context);
+        void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context);
+    }
     public interface ITransactionWriter
     {
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult> RevertSourceWritesAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, object? revertState, System.Threading.CancellationToken cancellationToken);
@@ -268,6 +298,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
     }
     public sealed class SubjectTransaction : System.IDisposable
     {
+        public Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode CheckMode { get; }
         public Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior ConflictBehavior { get; }
         public Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
         public Namotion.Interceptor.Tracking.Transactions.TransactionLocking Locking { get; }
@@ -276,6 +307,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public System.Threading.Tasks.ValueTask CommitAsync(System.Threading.CancellationToken cancellationToken) { }
         public void Dispose() { }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> GetPendingChanges() { }
+        public static bool TryConsumeCommitWrite<TProperty>(Namotion.Interceptor.Tracking.Transactions.ITransactionHandler handler, Namotion.Interceptor.PropertyReference property, TProperty value) { }
     }
     public sealed class SubjectTransactionConflictException : Namotion.Interceptor.Tracking.Transactions.SubjectTransactionException
     {
@@ -293,7 +325,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
     public static class SubjectTransactionExtensions
     {
         public static readonly System.TimeSpan DefaultCommitTimeout;
-        public static Namotion.Interceptor.Tracking.Transactions.TransactionAwaitable BeginTransactionAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionLocking locking = 0, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement = 0, Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior conflictBehavior = 0, System.TimeSpan? commitTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
+        public static Namotion.Interceptor.Tracking.Transactions.TransactionAwaitable BeginTransactionAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionLocking locking = 0, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement = 0, Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior conflictBehavior = 0, Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode checkMode = 0, System.TimeSpan? commitTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
     }
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler)})]
@@ -314,6 +346,29 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction GetResult() { }
         public void OnCompleted(System.Action continuation) { }
         public void UnsafeOnCompleted(System.Action continuation) { }
+    }
+    public readonly ref struct TransactionCaptureContext<TProperty>
+    {
+        public TProperty NewValue { get; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
+    }
+    public readonly ref struct TransactionCheckContext
+    {
+        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Changes { get; }
+        public Namotion.Interceptor.Tracking.Transactions.TransactionCheckStage Stage { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
+    }
+    public enum TransactionCheckMode
+    {
+        Immediate = 0,
+        Deferred = 1,
+    }
+    public enum TransactionCheckStage
+    {
+        Commit = 0,
+        PreApply = 1,
     }
     public enum TransactionConflictBehavior
     {

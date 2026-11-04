@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -31,23 +30,23 @@ internal class GetPropertyTool
         Description = "Read a single property value by its full path (e.g. /Devices/Sensor/Temperature). " +
                       "Returns the value, type, and any attributes. Use browse or search to discover paths first.",
         InputSchema = Schema,
-        Handler = HandleGetPropertyAsync
+        Handler = HandleGetPropertyAsync,
+        Annotations = McpToolAnnotations.ReadOnly
     };
 
     private Task<object?> HandleGetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+        var result = _configuration.TryGetReadableProperty(rootRegistered, path);
 
         if (result is null)
         {
-            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+            return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path));
         }
 
         var (property, _) = result.Value;
@@ -62,7 +61,10 @@ internal class GetPropertyTool
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
         {
-            attributes[attribute.BrowseName] = attribute.GetValue();
+            if (McpToolHelper.TryGetListedAttributeValue(attribute, _configuration, out var value))
+            {
+                attributes[attribute.BrowseName] = value;
+            }
         }
 
         var response = new Dictionary<string, object?>
@@ -71,7 +73,7 @@ internal class GetPropertyTool
             ["type"] = JsonSchemaTypeMapper.ToJsonSchemaType(property.Type)
         };
 
-        if (!_configuration.IsReadOnly && property.HasSetter)
+        if (McpToolHelper.IsWritable(property, _configuration))
         {
             response["isWritable"] = true;
         }

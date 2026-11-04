@@ -29,7 +29,7 @@ internal class MyStromSwitchInformation
     public bool IsStatic { get; set; }
 
     [JsonPropertyName("connected")]
-    public bool Connected { get; set; }
+    public bool IsConnected { get; set; }
 
     [JsonPropertyName("type")]
     public string? Type { get; set; }

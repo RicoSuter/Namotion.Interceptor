@@ -209,13 +209,15 @@ Apply structural changes in two sub-phases:
 **Sub-phase 1b: Move operations** are applied atomically using snapshot semantics:
 - All moves reference the state **after** removes/inserts have been applied
 - Multiple moves are applied simultaneously (each move reads from the snapshot)
-- Move `fromIndex` accounts for prior removes (intermediate index, not original)
+- Move `fromIndex` is the item's index after all removes and inserts (intermediate index, not original)
+- One move is sent for each retained item whose index among the retained items changes
+- A diff update does not reliably reproduce a collection that holds the same subject more than once
 
 | Operation | Index semantics |
 |-----------|-----------------|
 | `Remove` | Original index, descending order |
 | `Insert` | Final target index |
-| `Move` | `fromIndex`: intermediate (after removes), `index`: final target |
+| `Move` | `fromIndex`: intermediate (after removes and inserts), `index`: final target |
 
 **Example: Remove + Move**
 
@@ -225,15 +227,35 @@ Transform `[A, B, C]` → `[C, B]` (remove A, swap remaining):
 {
   "operations": [
     { "action": "Remove", "index": 0 },
-    { "action": "Move", "fromIndex": 1, "index": 0 }
+    { "action": "Move", "fromIndex": 1, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 1 }
   ]
 }
 ```
 
 After `Remove(0)`: `[B, C]` (indices 0, 1)
-After `Move(from=1, to=0)`: `[C, B]`
+After both moves, read from that snapshot: `[C, B]`
 
-Note: The move's `fromIndex` is 1 (C's position after the remove), not 2 (C's original position).
+Note: C's `fromIndex` is 1 (its position after the remove), not 2 (its original position).
+
+**Example: Insert + Move**
+
+Transform `[A, B]` → `[B, X, A]` (insert X, swap A and B):
+
+```json
+{
+  "operations": [
+    { "action": "Insert", "index": 1, "id": "2" },
+    { "action": "Move", "fromIndex": 2, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 2 }
+  ]
+}
+```
+
+After `Insert(1)`: `[A, X, B]` (indices 0, 1, 2)
+After both moves, read from that snapshot: `[B, X, A]`
+
+Note: B's `fromIndex` is 2 (its position after the insert), not 1 (its position before the insert).
 
 ### Phase 2: Property Updates
 
@@ -280,7 +302,9 @@ After: `[C, A, B]`
 {
   "kind": "Collection",
   "operations": [
-    { "action": "Move", "fromIndex": 2, "index": 0 }
+    { "action": "Move", "fromIndex": 2, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 1 },
+    { "action": "Move", "fromIndex": 1, "index": 2 }
   ],
   "count": 3
 }
@@ -393,6 +417,8 @@ Note: In partial updates, `Kind=Collection/Dictionary` entries with no operation
 - **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
 - **Dictionary keys** are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+- **Element types** are read from the declared collection or dictionary interfaces and must resolve uniquely. A legacy wrapper implementing only the non-generic `ICollection` or `IDictionary` falls back to its own generic arguments, read by position. A declaration naming several possible item types, of which more than one could hold a subject, and one naming none at all both throw `NotSupportedException`. This runs before any `ISubjectFactory` is consulted, so a factory cannot change which item subject is created for an incoming update or which key type a dictionary update is converted to.
+- **Container types** are the factory's choice. The default factory creates arrays, `List<T>` and `Dictionary<TKey, TValue>`, so a property declared as a more specific container receives one of those instead; supply an `ISubjectFactory` to create the declared type.
 
 ## Attributes
 

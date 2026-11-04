@@ -99,10 +99,8 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         // rebuilt, matching real crash behavior (like MQTT restarts its broker).
                         _app = BuildWebApplication(linkedToken, out var listenUrl);
 
-                        _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
-                        await _app.StartAsync(stoppingToken).ConfigureAwait(false);
-                        Metrics.MarkOperational();
-
+                        // Subscribed before the app accepts connections: a client welcomed earlier would
+                        // miss every change made between its snapshot and the subscription.
                         using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(
                             _logger, Metrics.OutboundChanges.CreateDropReporter());
 
@@ -110,6 +108,10 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         // next restart register its own: a second Register while one is still live throws.
                         using var outboundRegistration = Metrics.OutboundChanges.Register(
                             () => changeQueueProcessor.QueueDepth, capacity: null);
+
+                        _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
+                        await _app.StartAsync(stoppingToken).ConfigureAwait(false);
+                        Metrics.MarkOperational();
 
                         var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
                         var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);

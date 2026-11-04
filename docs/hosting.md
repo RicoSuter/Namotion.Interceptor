@@ -140,30 +140,42 @@ await person.AttachHostedServiceAsync(
     cancellationToken);
 ```
 
-## Construction and Configuration
+## Configuration Before Startup
 
-A context-taking constructor can attach a hosted subject before its object initializer or deserializer has populated configuration. There is no timing delay that guarantees initialization completes first. Construct and populate a detached subject before attaching it, or use a startup scope. The scope keeps context-taking construction available while delaying captured service starts:
+A hosted subject that takes the context in its constructor is attached during construction, which queues its service start. Object initializers, property assignments and deserializers all run afterwards, so the service can start against a subject that is not configured yet.
+
+Either build the subject detached, configure it and attach it once it is ready, or keep the context-taking constructor and wrap the work in a start deferral:
 
 ```csharp
-using (var startup = context.DeferHostedServiceStartup())
+using (context.DeferHostedServiceStarts())
 {
     var person = new Person(context) { FirstName = "John", LastName = "Doe" };
     person.AttachHostedService(new PersonBackgroundService(person));
-    startup?.Complete();
 }
 ```
 
-The scope follows the current execution flow for that context. Starts wait until the scope and all enclosing scopes are completed and disposed. Disposal without `Complete()` cancels captured starts, including when initialization throws. Cancellation does not detach subjects; normal detach and host shutdown still stop their attached services. The extension returns null when hosted services are not configured. Do not await an attaching service's startup inside its open scope, since that startup is waiting for scope disposal.
+Attaching still takes effect immediately: the subject joins the graph and is visible to the registry and to sources. Only the service start waits for the block to exit.
 
-`AddHostedSubject<T>()` holds a scope through its configuration callback. HomeBlaze deserialization uses this scope while populating configuration. Root loading holds an enclosing scope until the root is published, attached and registered as a context service.
+The contract:
 
-## Deferred Starts and Startup Completion
+- The deferral applies to the current execution flow, including asynchronous work awaited inside the block. Attaches made from other flows keep starting immediately.
+- Leaving the block releases the captured starts, including when configuration throws. There is nothing to call on success and no way to report failure through the deferral, so validating configuration stays with the service and its caller.
+- A captured start waits for its own deferral and for every deferral enclosing it.
+- Do not await a captured service's start inside its own block, because that start cannot run until the block exits.
+- Detaching a subject before the block exits cancels its pending start, so the service never runs.
+- A deferral that is never disposed holds its starts until the host shuts down. There is no timeout.
+- Dispose deferrals in reverse creation order, which nested `using` blocks do. Repeated or out-of-order disposal does not throw, but which attaches such a deferral still covers is then undefined.
+- `DeferHostedServiceStarts()` returns null on a context without hosting support, and `using` accepts that.
+
+`AddHostedSubject<T>()` wraps construction and its `configure` callback in a start deferral, so subjects registered through dependency injection are configured before they start.
+
+## Queued Starts and Startup Completion
 
 Attaching a hosted service queues its `StartAsync` without waiting for it. Any subsystem that treats "the graph has finished starting" as a completion point would otherwise pass that point while a queued start is still on its way in.
 
-A subsystem says so by implementing `IStartupCompletionDeferrer` and registering it on the context. Before queueing a start, the hosting layer takes a hold on every reachable deferrer and releases it once the start has actually run, including when the start throws. Both attach paths do this, awaiting and fire-and-forget alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
+A subsystem says so by implementing `IStartupCompletion` and registering it on the context. Before queueing a start, the hosting layer defers startup completion on every reachable `IStartupCompletion` and releases those completion deferrals once the start has actually run, including when the start throws. Both attach paths do this, awaiting and fire-and-forget alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs deferring.
 
-Holds are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` takes their holds before its own is released.
+Completion deferrals are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` defers completion for them before its own deferral is released.
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 

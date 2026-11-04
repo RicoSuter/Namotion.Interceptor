@@ -14,7 +14,7 @@ internal class ShellySwitchStatus
     public string? Source { get; set; }
 
     [JsonPropertyName("output")]
-    public bool? Output { get; set; }
+    public bool? IsOutputOn { get; set; }
 
     [JsonPropertyName("apower")]
     public decimal? ActivePower { get; set; }
@@ -27,6 +27,9 @@ internal class ShellySwitchStatus
 
     [JsonPropertyName("aenergy")]
     public ShellyEnergyData? ActiveEnergy { get; set; }
+
+    [JsonPropertyName("ret_aenergy")]
+    public ShellyEnergyData? ReturnedActiveEnergy { get; set; }
 
     [JsonPropertyName("temperature")]
     public ShellyTemperatureData? Temperature { get; set; }

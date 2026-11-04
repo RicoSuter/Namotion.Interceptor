@@ -1,0 +1,83 @@
+---
+title: HomeBlaze Documentation
+navTitle: Home
+---
+
+# HomeBlaze Documentation
+
+HomeBlaze is a modular .NET platform for building real-time digital twins. It models physical and virtual systems as trackable object graphs built from **subjects** with properties, operations, and metadata, and keeps them synchronized with external systems via protocol connectors (OPC UA, MQTT, WebSocket).
+
+Multiple HomeBlaze instances can form a distributed topology: satellites connect to field devices, a central instance aggregates them into a Unified Namespace, and active-standby pairs provide high availability. Both human operators (via Blazor UI) and AI agents (via MCP) can browse, query, and act on the knowledge graph.
+
+## Documentation Sections
+
+### Concepts
+
+A 5-minute overview of HomeBlaze: subjects, the object graph, properties, storage, and APIs. Start here if you're new.
+
+- [Concepts](concepts.md): Core ideas and mental model
+
+### Glossary
+
+Terms and concepts used throughout HomeBlaze.
+
+- [Glossary](glossary.md): Alphabetical reference with links to deeper coverage
+
+### Administration
+
+Setup, deployment, and runtime configuration for operators and administrators.
+
+- [Installation](administration/installation.md): Docker hosting, data folder and running from source
+- [Configuration](administration/configuration.md): Application settings (data folder, logging, plugins, MCP server, telemetry)
+- [Subjects, Storage & Files](administration/subjects.md): Creating and editing subjects, `Root.json`, file layout
+- [Markdown Pages](administration/pages.md): Interactive pages with live expressions and widget blocks
+- [Widgets](administration/widgets/overview.md): Every widget for markdown pages, each with a page of its own
+- [Page Errors](administration/page-errors.md): Every error message of a markdown page with its cause and its fix
+- [Paths](administration/paths.md): Path syntax for referencing subjects
+- [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
+- [AI Agents](administration/ai-agents.md): Built-in agents on a Claude subscription or the Anthropic API: triggers, chat, memory and permissions
+- [Version and Updates](administration/updates.md): Running version, build and update check
+
+### Development
+
+Guides for building custom subjects, plugins, and UI components.
+
+- [Building Subjects](development/building-subjects.md): Creating custom subject types
+- [Configurable Subjects](development/configurable-subject.md): Subject serialization and persistence
+- [Notifications](development/notifications.md): Notification channel interface
+- [Aspire](development/aspire.md): Development environment with Seq
+- [Testing the AI Agents](development/testing-ai-agents.md): Fakes and the opt-in integration tests of the AI agents
+
+### Devices
+
+Per-device documentation and setup guides.
+
+- [Ecowitt](devices/Ecowitt.md): Ecowitt weather station gateways (GW1000/GW2000 family)
+- [FRITZ!Box](devices/FritzBox.md): AVM FRITZ!Box routers over the local TR-064 interface, with clients and presence, mesh access points, internet connection and WLANs
+- [GPIO](devices/Gpio.md): Raspberry Pi / Linux GPIO with optional MCP3008 and ADS1115 ADCs
+- [Luxtronik](devices/Luxtronik.md): Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan) via the Smart Home Interface, read only
+- [myStrom](devices/MyStrom.md): myStrom WiFi switches with power metering
+- [Nuki](devices/Nuki.md): Nuki smart locks, Smart Doors and Openers through the local bridge HTTP API
+- [Pushover](devices/Pushover.md): Push notifications to phones and desktops, one target per user or group key
+- [Philips Hue](devices/PhilipsHue.md): Hue Bridge: lights, rooms, motion and button sensors
+- [Shelly](devices/Shelly.md): Shelly Gen2+ devices via the RPC API
+- [Sonos](devices/Sonos.md): Sonos households over the local UPnP API: rooms with their satellites, groups, playback, favorites and live events
+- [SunSpec](devices/SunSpec.md): SunSpec inverters, meters and batteries (SolarEdge and others) via Modbus TCP, read only
+- [Wallbox](devices/Wallbox.md): Wallbox EV chargers via the cloud API
+
+### Architecture
+
+System architecture, scaling stages, deployment topology, and design decisions. Start here to understand how HomeBlaze works as a system.
+
+- [Architecture Overview](architecture/overview.md): Arc42 system architecture
+- [Runtime Scenarios](architecture/runtime-scenarios.md): Step-by-step system flows
+- [Implementation State](architecture/state.md): What is implemented vs. planned
+- [Project Structure](architecture/project-structure.md): .NET project layout and dependencies
+- [Design Documents](architecture/design/): Detailed designs for individual building blocks
+- [Architecture Decisions](architecture/decisions/): ADRs for significant design choices
+
+### Plans
+
+Working design documents for features not yet implemented. During implementation, the relevant content migrates into [design documents](architecture/design/) and [architecture decisions](architecture/decisions/). Completed plans are removed. [Implementation State](architecture/state.md) tracks overall status.
+
+- [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md): WebSocket sync with dynamic proxy subjects

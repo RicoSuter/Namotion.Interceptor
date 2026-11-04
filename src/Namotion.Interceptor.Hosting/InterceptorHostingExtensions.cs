@@ -74,6 +74,20 @@ public static class InterceptorHostingExtensions
     /// <param name="hostedService">The hosted service to detach.</param>
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
     {
+        if (!RemoveAttachedHostedService(subject, hostedService))
+        {
+            return false;
+        }
+
+        subject.Context.TryGetService<HostedServiceHandler>()?.DetachHostedService(hostedService);
+        return true;
+    }
+
+    /// <summary>
+    /// Removes a hosted service from the subject's attached services without stopping it.
+    /// </summary>
+    internal static bool RemoveAttachedHostedService(IInterceptorSubject subject, IHostedService hostedService)
+    {
         bool wasRemoved = false;
         subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
             _ => null,
@@ -87,12 +101,6 @@ public static class InterceptorHostingExtensions
                 }
                 return value;
             });
-
-        if (wasRemoved)
-        {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.DetachHostedService(hostedService);
-        }
 
         return wasRemoved;
     }
@@ -143,29 +151,17 @@ public static class InterceptorHostingExtensions
         IHostedService hostedService,
         CancellationToken cancellationToken)
     {
-        var wasRemoved = false;
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
-            _ => null,
-            (_, value) =>
-            {
-                if (value is ImmutableArray<IHostedService> array && array.Contains(hostedService))
-                {
-                    wasRemoved = true;
-                    var newArray = array.Remove(hostedService);
-                    return newArray.Length > 0 ? newArray : null;
-                }
-                return value;
-            });
-
-        if (wasRemoved)
+        if (!RemoveAttachedHostedService(subject, hostedService))
         {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            if (hostedServiceHandler != null)
-            {
-                await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);
-            }
+            return false;
         }
 
-        return wasRemoved;
+        var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+        if (hostedServiceHandler != null)
+        {
+            await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);
+        }
+
+        return true;
     }
 }

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <modelNumber>S36</modelNumber>
+    <modelName>Sonos Ray</modelName>
+    <UDN>uuid:RINCON_A0000000000701400</UDN>
+    <roomName>Büro</roomName>
+    <displayName>Ray</displayName>
+    <serviceList>
+      <service><serviceType>urn:schemas-upnp-org:service:AlarmClock:1</serviceType><serviceId>urn:upnp-org:serviceId:AlarmClock</serviceId></service>
+      <service><serviceType>urn:schemas-upnp-org:service:DeviceProperties:1</serviceType><serviceId>urn:upnp-org:serviceId:DeviceProperties</serviceId></service>
+      <service><serviceType>urn:schemas-upnp-org:service:ZoneGroupTopology:1</serviceType><serviceId>urn:upnp-org:serviceId:ZoneGroupTopology</serviceId></service>
+      <service><serviceType>urn:schemas-upnp-org:service:GroupManagement:1</serviceType><serviceId>urn:upnp-org:serviceId:GroupManagement</serviceId></service>
+      <service><serviceType>urn:schemas-upnp-org:service:HTControl:1</serviceType><serviceId>urn:upnp-org:serviceId:HTControl</serviceId></service>
+    </serviceList>
+    <deviceList>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
+        <modelNumber>S36</modelNumber>
+        <modelName>Sonos Ray</modelName>
+        <serviceList>
+          <service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType><serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId></service>
+        </serviceList>
+      </device>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
+        <modelNumber>S36</modelNumber>
+        <modelName>Sonos Ray</modelName>
+        <serviceList>
+          <service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId></service>
+          <service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId></service>
+          <service><serviceType>urn:schemas-sonos-com:service:Queue:1</serviceType><serviceId>urn:sonos-com:serviceId:Queue</serviceId></service>
+          <service><serviceType>urn:schemas-upnp-org:service:GroupRenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:GroupRenderingControl</serviceId></service>
+        </serviceList>
+      </device>
+    </deviceList>
+  </device>
+</root>

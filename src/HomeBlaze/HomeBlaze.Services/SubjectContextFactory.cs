@@ -1,4 +1,5 @@
 using HomeBlaze.Services.Lifecycle;
+using HomeBlaze.Services.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
@@ -34,6 +35,9 @@ public static class SubjectContextFactory
             .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer)
+            .WithService<ILifecycleHandler>(
+                () => new MetadataLifecycleHandler(),
+                handler => handler is MetadataLifecycleHandler)
             .WithDataAnnotationValidation()
             .WithHostedServices(services);
     }

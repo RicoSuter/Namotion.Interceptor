@@ -51,6 +51,32 @@ public class FluentStorageContainerTests
     }
 
     [Fact]
+    public void WhenConfigurationWasSavedBeforeReconcileIntervalExisted_ThenIntervalIsItsDefault()
+    {
+        // Arrange
+        var (typeProvider, _, serializer, _, _) = CreateDependencies();
+        typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+
+        const string json = """
+            {
+              "$type": "HomeBlaze.Storage.FluentStorageContainer",
+              "storageType": "disk",
+              "connectionString": "./Data",
+              "containerName": null,
+              "enableFileWatching": false
+            }
+            """;
+
+        // Act
+        using var storage = Assert.IsType<FluentStorageContainer>(serializer.Deserialize(json));
+
+        // Assert
+        Assert.Equal("./Data", storage.ConnectionString);
+        Assert.False(storage.EnableFileWatching);
+        Assert.Equal(300, storage.ReconcileIntervalSeconds);
+    }
+
+    [Fact]
     public void Title_ReturnsConnectionStringFileName_WhenNotEmpty()
     {
         // Arrange
@@ -218,5 +244,27 @@ public class FluentStorageContainerTests
 
         // Cleanup
         storage.Dispose();
+    }
+
+    [Fact]
+    public async Task WhenSubjectsAreAdded_ThenChildNamesAreTheNamesOfTheDirectChildren()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        using var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+
+        storage.StorageType = "inmemory";
+        await storage.ConnectAsync(CancellationToken.None);
+
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+        await storage.AddSubjectAsync("testmotor.json", new Samples.Motor(context), CancellationToken.None);
+        await storage.AddSubjectAsync("demo/nestedmotor.json", new Samples.Motor(context), CancellationToken.None);
+        await storage.AddSubjectAsync("notes.md", new Samples.Motor(context), CancellationToken.None);
+
+        // Act
+        var childNames = storage.ChildNames;
+
+        // Assert - a JSON subject without its extension, any other file with it, and a folder by its name.
+        Assert.Equal(["demo", "notes.md", "testmotor"], childNames.Order());
     }
 }

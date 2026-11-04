@@ -57,7 +57,7 @@ public class InMemoryHistoryStoreCoreOversizeAndMetricsTests
         // Act & Assert
         Assert.Equal(3, core.RecordedCount);
         Assert.Equal(2, core.TrackedPropertyCount);
-        Assert.Equal(3, core.TotalSampleCount);
+        Assert.Equal(3, core.RetainedSampleCount);
         Assert.True(core.EstimatedMemoryBytes > 0);
     }
 
@@ -73,7 +73,7 @@ public class InMemoryHistoryStoreCoreOversizeAndMetricsTests
 
         // Act & Assert
         Assert.Equal(3, core.EvictedCount);
-        Assert.Equal(2, core.TotalSampleCount);
+        Assert.Equal(2, core.RetainedSampleCount);
     }
     [Fact]
     public void WhenEverySampleForAPathAgesOut_ThenThePathIsReclaimed()
@@ -160,7 +160,7 @@ public class InMemoryHistoryStoreCoreOversizeAndMetricsTests
         await sweeper;
 
         // Assert - not one write ended up in a buffer the sweep had already dropped.
-        Assert.Equal(pathCount, store.TotalSampleCount);
+        Assert.Equal(pathCount, store.RetainedSampleCount);
         Assert.Equal(pathCount, store.TrackedPropertyCount);
     }
 }

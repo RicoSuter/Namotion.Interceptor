@@ -37,7 +37,7 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
         var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10)));
 
         // Assert
-        Assert.False(series.Truncated);
+        Assert.False(series.IsTruncated);
         Assert.Equal(new double?[] { 1.5, 2.5 }, series.Points.Select(point => point.Number).ToArray());
     }
 
@@ -108,7 +108,7 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
         var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(100), MaxPoints: 2));
 
         // Assert
-        Assert.True(series.Truncated);
+        Assert.True(series.IsTruncated);
         Assert.Equal(new double?[] { 3, 4 }, series.Points.Select(point => point.Number).ToArray());
     }
 

@@ -152,7 +152,16 @@ public class OpcUaNestedStructureTests : SharedServerTestBase
                   clientArea.Sensor?.MinValue == -50.0 &&
                   clientArea.Number_Unit == "items",
             timeout: TimeSpan.FromSeconds(90),
-            message: "Client should receive all nested structure updates");
+            message: () => "Client should receive all nested structure updates. Actual: " +
+                $"Person.FirstName={clientArea.Person.FirstName}, " +
+                $"People[0].LastName={clientArea.People[0].LastName}, " +
+                $"PeopleByName[john].FirstName={clientArea.PeopleByName!["john"].FirstName}, " +
+                $"Person.Address.City={clientArea.Person.Address?.City}, " +
+                $"People[0].Address.ZipCode={clientArea.People[0].Address?.ZipCode}, " +
+                $"Sensor.Value={clientArea.Sensor?.Value}, " +
+                $"Sensor.Unit={clientArea.Sensor?.Unit}, " +
+                $"Sensor.MinValue={clientArea.Sensor?.MinValue}, " +
+                $"Number_Unit={clientArea.Number_Unit}");
 
         Logger.Log("All nested structure tests passed!");
     }

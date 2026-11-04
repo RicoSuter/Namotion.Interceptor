@@ -32,12 +32,12 @@ internal sealed class BoxedValueHolder<T> : IBoxedValueHolder
         }
 
         // Nullable/reference type unboxing
-        if (default(T) == null)
+        if (default(T) is null)
         {
-            if (_value == null)
+            if (_value is null)
             {
                 value = default!;
-                return default(TValue) == null;
+                return default(TValue) is null;
             }
 
             if (_value is TValue typedValue)

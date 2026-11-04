@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// maintains for the same lifecycle change, so it has to be up to date first.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
-public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
+public class SourceMonitor : ILifecycleHandler, IStartupCompletion
 {
     private readonly Lock _lock = new();
     private Func<ILogger?>? _loggerResolver;
@@ -217,7 +217,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// <summary>
     /// Publishes under _lock, which is what keeps delivery ordered against a concurrent
     /// Register/Unregister/Subscribe. Cannot deadlock: Publish only enqueues onto a ConcurrentQueue
-    /// and at most schedules a Task.Run, never running a handler synchronously or calling back into
+    /// and at most queues a drain, never running a handler synchronously or calling back into
     /// anything that takes _lock.
     /// </summary>
     internal void PublishUnderLock(in SourceEvent sourceEvent)
@@ -259,7 +259,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     /// <inheritdoc />
     /// <remarks>Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface.</remarks>
-    IDisposable IStartupCompletionDeferrer.DeferCompletion() => DeferWaitCompletion();
+    IDisposable IStartupCompletion.Defer() => DeferWaitCompletion();
 
     private void ReleaseHold()
     {

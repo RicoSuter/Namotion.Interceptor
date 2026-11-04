@@ -1,0 +1,120 @@
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    _renderedEntry = Entry;
+    _renderedQuietCount = QuietCount;
+    _renderedTimeZoneVersion = TimeZoneVersion;
+    _renderedShowsFullAnswer = _showsFullAnswer;
+}
+@switch (Entry.Kind)
+{
+    case AgentTimelineEntryKind.User:
+        <MudPaper Class="pa-3 my-2 ml-auto mud-background-gray" Elevation="0" Style="max-width: min(85%, 40rem); width: fit-content;">
+            <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Entry.Text</MudText>
+        </MudPaper>
+        break;
+    case AgentTimelineEntryKind.Assistant:
+        <div class="py-2 my-2" style="max-width: min(100%, 56rem);" data-testid="agent-reply">
+            <AgentMarkdown>@_html</AgentMarkdown>
+            <AgentToolCalls Calls="Entry.ToolCalls" />
+        </div>
+        break;
+    case AgentTimelineEntryKind.BackgroundRun when Entry.IsQuiet:
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="my-1 mud-text-secondary">
+            <MudIcon Icon="@Icons.Material.Outlined.CheckCircle" Size="Size.Small" />
+            <MudText Typo="Typo.caption">
+                @(QuietCount <= 1 ? "Quiet background run" : $"{QuietCount} quiet background runs, newest")
+                @TimeZone.Format(Entry.Timestamp) · @AgentTriggerLabels.Format(Entry.Trigger) · @_quietText
+            </MudText>
+        </MudStack>
+        break;
+    case AgentTimelineEntryKind.BackgroundRun:
+        <div class="py-2 my-2" style="max-width: min(100%, 56rem);" data-testid="agent-background-run">
+            <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="1" Class="mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Info" Size="Size.Small" />
+                <MudText Typo="Typo.subtitle2">Background run</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@TimeZone.Format(Entry.Timestamp) · @AgentTriggerLabels.Format(Entry.Trigger)</MudText>
+            </MudStack>
+            <AgentMarkdown>@(_showsFullAnswer ? _fullAnswerHtml : _html)</AgentMarkdown>
+            @if (Entry.FinalText is not null)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" Class="mt-1" OnClick="ToggleFullAnswer"
+                           data-testid="agent-show-full-answer">@(_showsFullAnswer ? "Show result only" : "Show full answer")</MudButton>
+            }
+            <AgentToolCalls Calls="Entry.ToolCalls" />
+        </div>
+        break;
+    case AgentTimelineEntryKind.Error:
+        <div class="py-2 my-2" data-testid="agent-error">
+            <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="mud-error-text">
+                <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Color="Color.Error" Size="Size.Small" Class="mt-1" />
+                <MudText Style="white-space: pre-wrap; overflow-wrap: anywhere;">@Entry.Text</MudText>
+            </MudStack>
+            <AgentToolCalls Calls="Entry.ToolCalls" />
+        </div>
+        break;
+    case AgentTimelineEntryKind.Divider:
+        <MudDivider Class="mt-4 mb-1" />
+        <MudText Typo="Typo.caption" Align="Align.Center" Class="d-block mb-2 mud-text-secondary">@Entry.Text</MudText>
+        break;
+}
+
+@code {
+    private AgentTimelineEntry? _renderedEntry;
+    private AgentTimelineEntry? _htmlEntry;
+    private MarkupString _html;
+    private MarkupString _fullAnswerHtml;
+    private string? _quietText;
+    private bool _showsFullAnswer;
+    private bool _renderedShowsFullAnswer;
+    private int _renderedQuietCount;
+    private int _renderedTimeZoneVersion;
+
+    [Parameter, EditorRequired]
+    public AgentTimelineEntry Entry { get; set; } = null!;
+
+    /// <summary>For a quiet background run, how many consecutive quiet runs it stands for, ending with <see cref="Entry"/>.</summary>
+    [Parameter]
+    public int QuietCount { get; set; }
+
+    [Parameter]
+    public int TimeZoneVersion { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Converted once per entry; the parent passes the same entry again on every timeline change.
+        if (!ReferenceEquals(_htmlEntry, Entry))
+        {
+            _htmlEntry = Entry;
+            _showsFullAnswer = false;
+            _fullAnswerHtml = default;
+            _html = Entry.Kind switch
+            {
+                // A chat reply shows the whole answer; a background run shows its result and the rest on request.
+                AgentTimelineEntryKind.Assistant => new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.Text)),
+                AgentTimelineEntryKind.BackgroundRun when !Entry.IsQuiet => new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.ResultText)),
+                _ => default
+            };
+            _quietText = Entry is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true }
+                ? AgentMarkdownRenderer.ToPlainText(Entry.ResultText)
+                : null;
+        }
+    }
+
+    private void ToggleFullAnswer()
+    {
+        if (!_showsFullAnswer && _fullAnswerHtml.Value is null)
+        {
+            _fullAnswerHtml = new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.Text));
+        }
+
+        _showsFullAnswer = !_showsFullAnswer;
+    }
+
+    // Compared by reference: records compare by value, which would cost a deep compare.
+    protected override bool ShouldRender() =>
+        !ReferenceEquals(_renderedEntry, Entry) ||
+        _renderedQuietCount != QuietCount ||
+        _renderedTimeZoneVersion != TimeZoneVersion ||
+        _renderedShowsFullAnswer != _showsFullAnswer;
+}

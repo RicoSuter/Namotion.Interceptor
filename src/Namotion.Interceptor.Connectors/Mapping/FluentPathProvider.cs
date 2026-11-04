@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
@@ -30,21 +31,20 @@ public sealed class FluentPathProvider<TMetadata> : PathProviderBase
     public override char PathSeparator => _pathSeparator;
 
     /// <inheritdoc />
-    public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    /// <remarks>
+    /// Includes a property the registry maps, with its mapped segment or its BrowseName when the mapping has none, and
+    /// an unmapped [InlinePaths] property with its BrowseName, because its keys are built and resolved as path segments.
+    /// </remarks>
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        if (_registry.TryGetSegment(property.Subject.GetType(), property.Name, out _))
+        var subjectType = property.Subject.GetType();
+        if (_registry.TryGetSegment(subjectType, property.Name, out segment))
+        {
+            segment ??= property.BrowseName;
             return true;
+        }
 
-        // Mirror AttributeBasedPathProvider: [InlinePaths] containers participate in path resolution.
-        return property.ReflectionAttributes.OfType<InlinePathsAttribute>().Any();
-    }
-
-    /// <inheritdoc />
-    public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-    {
-        if (_registry.TryGetSegment(property.Subject.GetType(), property.Name, out var segment))
-            return segment ?? property.BrowseName;
-
-        return null;
+        segment = InlinePathsAttribute.IsInlinePathsProperty(subjectType, property.Name) ? property.BrowseName : null;
+        return segment is not null;
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
 
 namespace Namotion.Interceptor.Mcp;
@@ -9,6 +10,8 @@ namespace Namotion.Interceptor.Mcp;
 /// </summary>
 internal sealed class McpToolAIFunction : AIFunction
 {
+    private static readonly JsonTypeInfo ArgumentsTypeInfo = AIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(IDictionary<string, object?>));
+
     private readonly McpToolInfo _descriptor;
 
     public McpToolAIFunction(McpToolInfo descriptor)
@@ -30,28 +33,7 @@ internal sealed class McpToolAIFunction : AIFunction
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        // Build a JSON object from the arguments, preserving JsonElement values as-is
-        // to avoid double-serialization (e.g., a JsonElement boolean becoming a string "true").
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            foreach (var kvp in arguments)
-            {
-                writer.WritePropertyName(kvp.Key);
-                if (kvp.Value is JsonElement jsonElement)
-                {
-                    jsonElement.WriteTo(writer);
-                }
-                else
-                {
-                    JsonSerializer.Serialize(writer, kvp.Value);
-                }
-            }
-            writer.WriteEndObject();
-        }
-
-        var inputElement = JsonSerializer.Deserialize<JsonElement>(stream.ToArray());
+        var inputElement = JsonSerializer.SerializeToElement(arguments, ArgumentsTypeInfo);
         return await _descriptor.Handler(inputElement, cancellationToken);
     }
 }

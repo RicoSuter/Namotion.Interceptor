@@ -153,7 +153,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
 | `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
-| `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
+| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost ([Thread Safety](#thread-safety)) |
 
 **Polling Fallback:**
 
@@ -389,7 +389,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -460,7 +460,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
 
-**All reconnection paths guarantee eventual consistency** through a full server state read. The client never relies solely on subscription notifications for state synchronization after a reconnection.
+**All reconnection paths reload the server state** with a full read, so server-to-client values are eventually consistent. The client never relies solely on subscription notifications for state synchronization after a reconnection. None of the reconnection flows below reconciles queued client-to-server writes, see **Eventual consistency for writes** below.
 
 #### Reconnection Flows
 
@@ -513,7 +513,7 @@ Between the SDK's `OnReconnectComplete` (step 3) and the health check's full sta
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). The queue is reconciled only when the source restarts its connection loop, which for this client happens when the initial connection or initial load fails, not on a connection loss after startup: after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. None of the reconnection flows above runs this reconcile. They reload the state, and queued writes stay in the retry queue until a local write to any property this source owns flushes it, or the connection loop restarts, see [Connectors: Known Limitations](connectors.md#known-limitations). Combined with the full state read for server-to-client values, writes are eventually consistent in both directions once one of those happens.
 
 ### Resilience Configuration
 
@@ -530,7 +530,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+| `SubscriptionSequentialPublishing` | false | Order messages across properties, at a throughput cost (see Thread Safety) |
 
 Final outbound delivery on stop shares the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
@@ -585,7 +585,7 @@ public class CustomTypeResolver : OpcUaTypeResolver
 
 Both per-node seams are asynchronous so an override can read the server to classify a node, and every such read costs one round-trip per node. The base object seam never reads the server; the base variable seam reads it only to walk a custom DataType up the type tree to its built-in type. `ResolveVariableNodeTypeAsync` returns null when the type cannot be inferred, and the loader then skips that node. Its two attribute values have already been classified, so a bad status reaching it is permanent and null is the right answer. A transient status never reaches it: `ResolveVariableNodeTypesAsync` throws `OpcUaTransientServiceException` first, which aborts the load so the source retries it, and an override that replaces the batched read must do the same.
 
-The two decoration seams, `GetAttributesForDynamicProperty` and `GetAttributesForDynamicAttribute`, return the attributes stamped on a member the loader adds for a discovered node: the base `OpcUaNodeAttribute` is what makes the member addressable by the mapper and re-matches it to the same node on the next load, so an override that drops it unmaps the member. HomeBlaze overrides both to stamp its own framework attribute alongside the base one.
+The two decoration seams, `GetAttributesForDynamicProperty` and `GetAttributesForDynamicAttribute`, return the attributes stamped on a member the loader adds for a discovered node: the base `OpcUaNodeAttribute` is what makes the member addressable by the mapper and re-matches it to the same node on the next load, so an override that drops it unmaps the member. An application can override both to stamp its own attribute alongside the base one.
 
 ### Custom Subject Factory
 
@@ -804,9 +804,9 @@ The library ensures thread-safe operations across all OPC UA interactions. Prope
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
 
 **Update ordering:**
-By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
+The SDK can deliver a subscription's notification messages out of order, for example a delayed or republished one after newer ones. The client skips a value from a message older than the last one applied to the same property, ranked by the server-assigned sequence number (logged at `Debug`). Not ranked against notifications: values that are read (initial and post-reconnect reads, polling, read-after-write) and late messages of a subscription replaced on reconnect.
 
-Set `SubscriptionSequentialPublishing = true` to order subscription messages at the cost of reduced throughput. This does not order them against local writes: a transaction commit does not wait for subscription echoes, and a delayed notification can overwrite newer local state or cause a transaction conflict.
+`SubscriptionSequentialPublishing = true` additionally applies a subscription's messages in order across its properties, at a throughput cost. Neither orders notifications against local writes: a notification sent before the server received a local write can overwrite it or cause a transaction conflict.
 
 To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 

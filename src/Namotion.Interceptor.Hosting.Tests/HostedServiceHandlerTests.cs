@@ -123,9 +123,8 @@ public class HostedServiceHandlerTests
             // Act - AttachHostedServiceAsync should wait for StartAsync to complete
             await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
 
-            // Assert - Service should be running immediately after await returns
-            Assert.Equal("John", person.FirstName);
-            Assert.Equal("Doe", person.LastName);
+            // Assert - the service has been started; its execution runs on another thread
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John" && person.LastName == "Doe");
             Assert.Single(person.GetAttachedHostedServices());
         });
 
@@ -145,7 +144,7 @@ public class HostedServiceHandlerTests
 
             // Start the service
             await person.AttachHostedServiceAsync(hostedService, CancellationToken.None);
-            Assert.Equal("John", person.FirstName);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
 
             // Act - DetachHostedServiceAsync should wait for StopAsync to complete
             await person.DetachHostedServiceAsync(hostedService, CancellationToken.None);
@@ -171,10 +170,33 @@ public class HostedServiceHandlerTests
 
             // Assert - Should only be in the collection once
             Assert.Single(person.GetAttachedHostedServices());
-            Assert.Equal("John", person.FirstName);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
         });
     }
 
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenChildWithAttachedServiceLeavesGraph_ThenHostedServiceIsStopped(bool constructedWithContext)
+    {
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            // Arrange
+            var root = new Person(context);
+            var child = constructedWithContext ? new Person(context) : new Person();
+            root.Child = child;
+            child.AttachHostedService(new PersonBackgroundService(child));
+            await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "John");
+
+            // Act
+            root.Child = null;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => child.FirstName == "Disposed");
+            Assert.Empty(child.GetAttachedHostedServices());
+        });
+    }
 
     private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
     {
@@ -182,7 +204,7 @@ public class HostedServiceHandlerTests
 
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
+            .WithContextInheritance()
             .WithHostedServices(builder.Services);
 
         var host = builder.Build();

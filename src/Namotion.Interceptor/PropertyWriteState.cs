@@ -6,9 +6,9 @@ namespace Namotion.Interceptor;
 /// so splitting it would double that cost.
 /// </summary>
 /// <remarks>
-/// Written under the subject's lock, read without it. The 64-bit fields go through
-/// <see cref="Interlocked"/> because netstandard2.0 includes 32-bit runtimes, where a plain
-/// <c>long</c> store can tear.
+/// Written under a lock, the subject's lock for commits and the derived-property data lock for derived
+/// timestamps, and read without it. Every access to the 64-bit fields goes through <see cref="Volatile"/>,
+/// which is atomic for <c>long</c> on every .NET 10 platform.
 /// </remarks>
 internal sealed class PropertyWriteState
 {
@@ -44,7 +44,7 @@ internal sealed class PropertyWriteState
     /// <remarks>
     /// Kept disjoint from <see cref="LastNonSourceCommitRevision"/> rather than as a combined
     /// last-of-any-kind field so that a commit writes exactly one of the two: recording the revision costs
-    /// one interlocked store rather than two, on top of the timestamp store the write path already had.
+    /// one store rather than two, on top of the timestamp store the write path already had.
     /// The last commit of any kind is their maximum, computed on the read side, which runs per delivered
     /// change rather than per write.
     /// <para>

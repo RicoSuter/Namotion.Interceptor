@@ -7,5 +7,4 @@ public class EcowittCo2Data
     public decimal? Co2Avg24h { get; set; }
     public decimal? Temperature { get; set; }
     public decimal? Humidity { get; set; }
-    public int? Battery { get; set; }
 }

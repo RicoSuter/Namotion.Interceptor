@@ -36,13 +36,12 @@ public static class HostedSubjectServiceCollectionExtensions
                     ? contextResolver(serviceProvider)
                     : serviceProvider.GetService<IInterceptorSubjectContext>()
                 : null;
-            using var startup = (context ?? serviceProvider.GetService<IInterceptorSubjectContext>())?.DeferHostedServiceStartup();
+            using var startup = (context ?? serviceProvider.GetService<IInterceptorSubjectContext>())?.DeferHostedServiceStarts();
             var instance = context is not null
                 ? ActivatorUtilities.CreateInstance<T>(serviceProvider, context)
                 : ActivatorUtilities.CreateInstance<T>(serviceProvider);
 
             configure?.Invoke(instance);
-            startup?.Complete();
             return instance;
         });
 

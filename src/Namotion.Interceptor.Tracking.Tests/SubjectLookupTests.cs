@@ -11,6 +11,21 @@ namespace Namotion.Interceptor.Tracking.Tests;
 
 public class SubjectLookupTests
 {
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public void WhenIndexIsOutsideList_ThenReturnsNull(int index)
+    {
+        // Arrange
+        var list = new List<Person> { new(), new(), new() };
+
+        // Act
+        var result = SubjectLookup.FindSubjectInCollection(list, index);
+
+        // Assert
+        Assert.Null(result);
+    }
+
     [Fact]
     public void WhenValueIsList_ThenReturnsSubjectAtIndex()
     {
@@ -455,6 +470,35 @@ public class SubjectLookupTests
         Assert.Same(person, third);
         Assert.Equal(1, indexerCallsAfterFirst);
         Assert.Equal(1, dictionary.IndexerCalls);
+    }
+
+    [Theory]
+    [InlineData(typeof(Dictionary<string, Person>), typeof(string))]
+    [InlineData(typeof(IDictionary<int, Person>), typeof(int))]
+    [InlineData(typeof(IReadOnlyDictionary<Guid, Person>), typeof(Guid))]
+    [InlineData(typeof(ImmutableDictionary<long, Person>), typeof(long))]
+    [InlineData(typeof(Hashtable), null)]
+    [InlineData(typeof(List<Person>), null)]
+    public void WhenDictionaryKeyTypeIsRequested_ThenGenericKeyTypeIsReturned(Type dictionaryType, Type? expectedKeyType)
+    {
+        // Act
+        var keyType = SubjectLookup.GetDictionaryKeyType(dictionaryType);
+
+        // Assert
+        Assert.Equal(expectedKeyType, keyType);
+    }
+
+    [Fact]
+    public void WhenIndexIsOutsideEnumerable_ThenReturnsNull()
+    {
+        // Arrange
+        var items = new HashSet<Person> { new(), new() };
+
+        // Act
+        var result = SubjectLookup.FindSubjectInCollection(items, 2);
+
+        // Assert
+        Assert.Null(result);
     }
 
     /// <summary>Throws from the object indexer the way the immutable dictionaries do, and counts entries.</summary>

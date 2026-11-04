@@ -8,5 +8,7 @@ namespace Namotion.Interceptor.Hosting.Tests.Models
         public partial string? FirstName { get; set; }
 
         public partial string? LastName { get; set; }
+
+        public partial Person? Child { get; set; }
     }
 }

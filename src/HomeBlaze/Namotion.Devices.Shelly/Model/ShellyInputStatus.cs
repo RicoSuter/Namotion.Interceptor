@@ -11,7 +11,7 @@ internal class ShellyInputStatus
     public int Id { get; set; }
 
     [JsonPropertyName("state")]
-    public bool? State { get; set; }
+    public bool? IsActive { get; set; }
 
     [JsonPropertyName("counts")]
     public ShellyInputCounts? Counts { get; set; }

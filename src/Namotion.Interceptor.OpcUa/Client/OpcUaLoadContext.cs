@@ -219,6 +219,12 @@ internal sealed class OpcUaLoadContext : IDisposable
 
                 if (!_ownership.ClaimSource(property))
                 {
+                    // A disposal cancels before it disposes the ownership, which then rejects every claim.
+                    if (CancellationToken.IsCancellationRequested)
+                    {
+                        continue;
+                    }
+
                     _logger.LogError(
                         "Property {Subject}.{Property} already owned by another source. Skipping OPC UA monitoring.",
                         property.Subject.GetType().Name, property.Name);

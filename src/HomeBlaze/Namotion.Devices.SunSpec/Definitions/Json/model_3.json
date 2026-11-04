@@ -1,0 +1,481 @@
+{
+    "group": {
+        "desc": "Request a digital signature over a specified set of data registers",
+        "groups": [
+            {
+                "count": 0,
+                "name": "repeating",
+                "points": [
+                    {
+                        "desc": "Digital Signature",
+                        "label": "DS",
+                        "mandatory": "M",
+                        "name": "DS",
+                        "size": 1,
+                        "type": "uint16"
+                    }
+                ],
+                "type": "group"
+            }
+        ],
+        "label": "Secure Dataset Read Request",
+        "name": "model_3",
+        "points": [
+            {
+                "desc": "Model identifier",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 3
+            },
+            {
+                "desc": "Model length",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Number of registers being requested",
+                "label": "X",
+                "mandatory": "M",
+                "name": "X",
+                "size": 1,
+                "type": "uint16",
+                "detail": "A max of 50 registers are allowed"
+            },
+            {
+                "access": "RW",
+                "desc": "Offset of value to read",
+                "label": "Offset1",
+                "mandatory": "M",
+                "name": "Off1",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off2",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off3",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off4",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off5",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off6",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off7",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off8",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off9",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off10",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off11",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off12",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off13",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off14",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off15",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off16",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off17",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off18",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off19",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off20",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off21",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off22",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off23",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off24",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off25",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off26",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off27",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off28",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off29",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off30",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off31",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off32",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off33",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off34",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off35",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off36",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off37",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off38",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off39",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off40",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off41",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off42",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off43",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off44",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off45",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off46",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off47",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off48",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off49",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Off50",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Timestamp value is the number of seconds since January 1, 2000",
+                "label": "Timestamp",
+                "mandatory": "M",
+                "name": "Ts",
+                "size": 2,
+                "type": "uint32"
+            },
+            {
+                "access": "RW",
+                "desc": "Millisecond counter 0-999",
+                "label": "Milliseconds",
+                "mandatory": "M",
+                "name": "Ms",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Sequence number of request",
+                "label": "Sequence",
+                "mandatory": "M",
+                "name": "Seq",
+                "size": 1,
+                "type": "uint16",
+                "detail": "Shall be advanced for each request"
+            },
+            {
+                "access": "RW",
+                "desc": "Digital Signature ID",
+                "label": "Role",
+                "mandatory": "M",
+                "name": "Role",
+                "size": 1,
+                "type": "uint16",
+                "detail": "User's role id 0-5"
+            },
+            {
+                "desc": "Algorithm used to compute the digital signature",
+                "label": "Algorithm",
+                "mandatory": "M",
+                "name": "Alg",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "NONE",
+                        "value": 0,
+                        "detail": "For test purposes only"
+                    },
+                    {
+                        "name": "AES-GMAC-64",
+                        "value": 1
+                    },
+                    {
+                        "name": "ECC-256",
+                        "value": 2
+                    }
+                ],
+                "type": "enum16",
+                "detail": "For future proof"
+            },
+            {
+                "desc": "Number of registers comprising the digital signature.",
+                "label": "N",
+                "mandatory": "M",
+                "name": "N",
+                "size": 1,
+                "type": "uint16",
+                "detail": "The value of N must be at least 4 (64 bits)"
+            }
+        ],
+        "type": "group",
+        "detail": "Used in conjunction with Secure Dataset Read Response Model"
+    },
+    "id": 3
+}

@@ -3,7 +3,7 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Interceptor.Tracking.Tests.Models;
 
 [InterceptorSubject]
-public partial class SwitchableDerivedSubject : IDisposable
+public sealed partial class SwitchableDerivedSubject : IDisposable
 {
     private int _getterCallCount;
     private int _blockNextEvaluation;

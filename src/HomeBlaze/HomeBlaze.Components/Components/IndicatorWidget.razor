@@ -1,0 +1,25 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Indicator))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@{
+    var indicator = Subject as Indicator;
+}
+
+@if (indicator is not null)
+{
+    // Read once per render and never kept: its render records the read, so that it renders again when it changes.
+    var path = indicator.Path;
+    var map = indicator.Map;
+    <IndicatorView Reading="@ValueReader.Read(PathResolver, indicator, path, map, TimeZone)"
+                   Map="@map"
+                   Icon="@indicator.Icon"
+                   Kind="@indicator.Kind"
+                   Path="@path" />
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+}

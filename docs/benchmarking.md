@@ -24,7 +24,7 @@ The script checks the base branch out **in your working tree**, so:
 
 ## Pin the CPU first
 
-A CPU that changes frequency mid-run makes the arms incomparable by more than anything you are measuring. Pin it, and keep the machine quiet: no builds, no test runs, no leftover MSBuild nodes. BenchmarkDotNet's header cannot confirm the pin, having reported two different maxima for the two arms of one pinned run, so check the operating system instead (`scaling_governor`, `scaling_min_freq`, `scaling_max_freq`, `intel_pstate/no_turbo`).
+A CPU that changes frequency mid-run makes the arms incomparable by more than anything you are measuring. Pin it, and keep the machine quiet: no builds, no test runs, no leftover MSBuild nodes. An idle node uses no CPU, but it exits on its own 15 minutes after its last build, which can happen during one arm and not the other. Its effect on timings has not been measured, so remove the nodes rather than reason about it. The script builds each arm with `--disable-build-servers`, so build your own setup the same way. `MSBUILDDISABLENODEREUSE=1` alone is not enough, since it still leaves a compiler server (`VBCSCompiler`) that exits 10 minutes after its last compile. `dotnet build-server shutdown` does not clear the rest reliably: it only reaches MSBuild nodes started by the same SDK from the same terminal session, and reports success either way. Check with `ps -eo pid,args | grep -E '[n]odemode:1|[V]BCSCompiler'` and end any leftovers by PID. BenchmarkDotNet's header cannot confirm the pin, having reported two different maxima for the two arms of one pinned run, so check the operating system instead (`scaling_governor`, `scaling_min_freq`, `scaling_max_freq`, `intel_pstate/no_turbo`).
 
 Allocation columns survive all of this far better than timings and are usually the whole answer for allocation work. Not immune, though: accounting is process-wide, so a benchmark with a background thread such as `PropertyChangeSubscriptionsBenchmark` or `SubjectSourceBenchmark` absorbs that thread's allocations, and `Gen0`/`Gen1`/`Gen2` shift with heap randomization.
 
@@ -75,6 +75,8 @@ Both arms, full job, `-LaunchCount 3`, from one machine, for scoping only:
 | `*RegistryBenchmark*` | about 30 minutes |
 | Whole suite | about 6 hours |
 
-`SubjectSourceBenchmark` measures in milliseconds per operation, and `ConstructThreeLevel` earns a `MultimodalDistribution` warning and so runs to its hundred iteration ceiling rather than the default fifteen, every launch. Between them they dominate a full run. Judge `ConstructThreeLevel` by allocations, its timing carrying a standard deviation around a quarter of its mean.
+`SubjectSourceBenchmark` measures in milliseconds per operation and dominates a full run.
+
+A benchmark that constructs subjects must not pass a context from `[GlobalSetup]` to their constructors: the fallback it registers keeps every subject ever constructed alive, and the row then measures garbage collection over a growing heap. Construct without a context, as a subject that inherits its context on attach is, or detach what the benchmark attached.
 
 A class present on only one branch has nothing to compare against, so exclude it unless you are deliberately measuring it. To compare a new benchmark properly, put it on the base branch first.

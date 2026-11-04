@@ -1,0 +1,38 @@
+{
+    "group": {
+        "desc": "This model has been deprecated.",
+        "label": "Energy Storage Base Model (DEPRECATED)",
+        "name": "storage",
+        "points": [
+            {
+                "desc": "Model identifier",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 801
+            },
+            {
+                "desc": "Model length",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16"
+            },
+            {
+                "desc": "This model has been deprecated.",
+                "label": "Deprecated Model",
+                "mandatory": "M",
+                "name": "DEPRECATED",
+                "size": 1,
+                "type": "enum16"
+            }
+        ],
+        "type": "group"
+    },
+    "id": 801
+}

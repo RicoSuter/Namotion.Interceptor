@@ -3,6 +3,8 @@ using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -19,7 +21,7 @@ public class ConfigurableSubjectStartupTests
         using var probe = new ConfigurableStartupProbe();
         probe.Release.Set();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         await using var provider = services.BuildServiceProvider();
@@ -38,7 +40,8 @@ public class ConfigurableSubjectStartupTests
             new SubjectPathResolver(() => manager?.Root), configuration.Object);
         var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         probe.Starting = subject => published.TrySetResult(ReferenceEquals(rootManager.Root, subject) &&
-            ReferenceEquals(context.TryGetService<ConfigurableStartupSubject>(), subject));
+            ReferenceEquals(context.TryGetService<ConfigurableStartupSubject>(), subject) &&
+            rootManager.RootLoaded.IsCompletedSuccessfully);
         await handler.StartAsync(CancellationToken.None);
 
         try
@@ -64,7 +67,7 @@ public class ConfigurableSubjectStartupTests
         // Arrange
         using var probe = new ConfigurableStartupProbe();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         using var provider = services.BuildServiceProvider();
@@ -96,14 +99,15 @@ public class ConfigurableSubjectStartupTests
             await handler.StopAsync(CancellationToken.None);
         }
     }
+
     [Fact]
-    public async Task WhenConfigurationPopulationThrows_ThenThePartiallyConfiguredServiceNeverStarts()
+    public async Task WhenConfigurationPopulationThrows_ThenTheCapturedStartIsStillReleased()
     {
         // Arrange
         using var probe = new ConfigurableStartupProbe { FailPopulation = true };
         probe.Release.Set();
         var services = new ServiceCollection().AddSingleton(probe)
-            .AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>), typeof(Microsoft.Extensions.Logging.Abstractions.NullLogger<>));
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         var context = InterceptorSubjectContext.Create().WithHostedServices(services);
         services.AddSingleton(context);
         using var provider = services.BuildServiceProvider();
@@ -119,12 +123,46 @@ public class ConfigurableSubjectStartupTests
             Assert.Throws<System.Reflection.TargetInvocationException>(() => serializer.Deserialize("""
                 {"$type":"HomeBlaze.Services.Tests.Serialization.ConfigurableStartupSubject","configuration":"configured"}
                 """));
-            using var next = new ConfigurableStartupProbe();
-            _ = new ConfigurableStartupSubject(next, context);
-            await next.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-            // Assert
-            Assert.False(probe.Started.Task.IsCompleted);
+            // Assert - the scope defers the start, it does not decide whether the subject is fit to
+            // run, so unwinding through its disposal releases the start like any other exit.
+            Assert.Equal(string.Empty, await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            await handler.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenDefaultConfigurationOfAHostedServiceIsRequested_ThenTheSubjectItCreatedIsNeverStarted()
+    {
+        // Arrange
+        using var probe = new ConfigurableStartupProbe();
+        probe.Release.Set();
+        var services = new ServiceCollection().AddSingleton(probe)
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        var context = InterceptorSubjectContext.Create().WithHostedServices(services);
+        services.AddSingleton(context);
+        using var provider = services.BuildServiceProvider();
+        var handler = Assert.Single(provider.GetServices<IHostedService>());
+        await handler.StartAsync(CancellationToken.None);
+        var types = new TypeProvider();
+        var type = typeof(ConfigurableStartupSubject);
+        types.AddTypes([type]);
+        var serializer = new ConfigurableSubjectSerializer(types, provider);
+
+        try
+        {
+            // Act
+            var defaults = serializer.GetDefaultConfiguration(type);
+            serializer.Deserialize($$"""
+                {"$type":"{{type.FullName}}","configuration":"configured"}
+                """);
+
+            // Assert: the starts run in the order of their subjects, so a start of the first subject would come first.
+            Assert.Equal(string.Empty, defaults!.Value.GetProperty("configuration").GetString());
+            Assert.Equal("configured", await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
         }
         finally
         {

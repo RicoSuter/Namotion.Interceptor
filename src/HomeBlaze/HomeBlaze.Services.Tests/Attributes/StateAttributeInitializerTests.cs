@@ -118,7 +118,7 @@ public class StateAttributeInitializerTests
 
         // Act
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty(nameof(MergeTestSubject.EnergyConsumed))!;
+        var property = registered.TryGetProperty(nameof(MergeTestSubject.TotalConsumedEnergy))!;
         var metadata = property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
 
         // Assert — all values from interface
@@ -165,7 +165,7 @@ public interface IMergeTestPowerSensor
     decimal? Power { get; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    decimal? EnergyConsumed { get; }
+    decimal? TotalConsumedEnergy { get; }
 }
 
 [InterceptorSubject]
@@ -175,5 +175,5 @@ public partial class MergeTestSubject : IMergeTestPowerSensor
     public partial decimal? Power { get; set; }
 
     // No [State] on class — should inherit from interface
-    public partial decimal? EnergyConsumed { get; set; }
+    public partial decimal? TotalConsumedEnergy { get; set; }
 }

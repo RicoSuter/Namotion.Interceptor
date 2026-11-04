@@ -1,14 +1,19 @@
 namespace HomeBlaze.Abstractions.Devices.Locks;
 
 /// <summary>
-/// Represents the state of a door lock.
+/// Represents the state of a door lock. An unknown state is null.
 /// </summary>
 public enum DoorLockState
 {
-    Unlocking,
-    Unlocked,
-    Locking,
     Locked,
+    Locking,
+    Unlocked,
+    Unlocking,
+
+    /// <summary>The latch is pulled, so that the door can be pushed open.</summary>
+    Unlatched,
     Unlatching,
-    Unlatched
+
+    /// <summary>The bolt did not reach its position, for example because the motor is blocked.</summary>
+    Jammed
 }

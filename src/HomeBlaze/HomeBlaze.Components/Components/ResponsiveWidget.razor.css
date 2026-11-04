@@ -1,0 +1,5 @@
+/* The content of a Responsive block that the page shows at every width while the block or a widget in it is selected. */
+.responsive-widget-preview {
+    display: block;
+    opacity: 0.55;
+}

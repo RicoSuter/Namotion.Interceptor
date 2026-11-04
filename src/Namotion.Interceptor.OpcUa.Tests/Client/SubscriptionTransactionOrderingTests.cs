@@ -17,7 +17,7 @@ public class SubscriptionTransactionOrderingTests
     [Theory]
     [InlineData("Committed", 0, false)]
     // TODO #373: This older-notification case records a known consistency defect, not the intended contract.
-    // Update its timestamp and conflict expectations when inbound ordering is fixed.
+    // Update its timestamp and conflict expectations when notifications are ordered against local writes.
     [InlineData("Initial", -1, true)]
     [InlineData("External", 0, true)]
     [InlineData("External", 1, true)]

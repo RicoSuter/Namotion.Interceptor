@@ -57,27 +57,7 @@ public class ContextConcurrencyTests
                 start.Wait();
                 for (var index = 0; index < Mutations; index++)
                 {
-                    switch (mutation)
-                    {
-                        case nameof(IInterceptorSubjectContext.AddService):
-                            fallbackContext.AddService(new MarkerService());
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.TryAddService):
-                            fallbackContext.TryAddService(() => new MarkerService(), _ => false);
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.AddFallbackContext):
-                            fallbackContext.AddFallbackContext(attachedContexts[index]);
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.RemoveFallbackContext):
-                            fallbackContext.RemoveFallbackContext(attachedContexts[index]);
-                            break;
-
-                        default:
-                            throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
-                    }
+                    ApplyMutation(fallbackContext, attachedContexts, index, mutation);
                 }
             }, TaskCreationOptions.LongRunning);
 
@@ -95,6 +75,37 @@ public class ContextConcurrencyTests
                     "on a fallback context acquired the two context locks in opposite orders.",
                     exception);
             }
+
+            Assert.Equal(1_999, car.Speed);
+        }
+    }
+
+    private static void ApplyMutation(
+        InterceptorSubjectContext fallbackContext,
+        InterceptorSubjectContext[] attachedContexts,
+        int index,
+        string mutation)
+    {
+        switch (mutation)
+        {
+            case nameof(IInterceptorSubjectContext.AddService):
+                fallbackContext.AddService(new MarkerService());
+                break;
+
+            case nameof(IInterceptorSubjectContext.TryAddService):
+                fallbackContext.TryAddService(() => new MarkerService(), _ => false);
+                break;
+
+            case nameof(IInterceptorSubjectContext.AddFallbackContext):
+                fallbackContext.AddFallbackContext(attachedContexts[index]);
+                break;
+
+            case nameof(IInterceptorSubjectContext.RemoveFallbackContext):
+                fallbackContext.RemoveFallbackContext(attachedContexts[index]);
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
         }
     }
 

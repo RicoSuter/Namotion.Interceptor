@@ -1,0 +1,11 @@
+{
+  "order": [
+    "Setup.md",
+    "Inline.md",
+    "Blocks.md",
+    "Dashboard.md",
+    "References.md",
+    "Configuration.md",
+    "Errors.md"
+  ]
+}

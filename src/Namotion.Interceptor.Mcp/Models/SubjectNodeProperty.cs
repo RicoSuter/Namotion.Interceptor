@@ -35,7 +35,15 @@ public record SubjectObjectProperty(
     [property: JsonPropertyName("isCollapsed")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool IsCollapsed = false
-) : SubjectNodeProperty;
+) : SubjectNodeProperty
+{
+    /// <summary>
+    /// The child subject's type name when the property is collapsed at the depth limit.
+    /// </summary>
+    [JsonPropertyName("itemType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ItemType { get; init; }
+}
 
 /// <summary>
 /// A property containing an ordered collection of subjects.

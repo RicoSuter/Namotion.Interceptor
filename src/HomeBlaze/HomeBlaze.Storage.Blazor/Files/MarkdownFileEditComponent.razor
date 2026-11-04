@@ -1,5 +1,3 @@
-@using System.Text.RegularExpressions
-@using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
@@ -10,54 +8,66 @@
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
+@using HomeBlaze.Storage.Pages
 @using Microsoft.AspNetCore.Components.Sections
-@using Microsoft.JSInterop
 @using MudBlazor
 @using Namotion.Interceptor
 
-@inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
+@inject ISnackbar Snackbar
 @inject ConfigurableSubjectSerializer Serializer
 @inject SubjectComponentRegistry ComponentRegistry
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
+@implements ISubjectRevealTarget
 
-@if (string.IsNullOrEmpty(_originalContent))
+@if (!_isLoaded)
 {
     <MudProgressCircular Indeterminate="true"/>
 }
 else
 {
+    @* The actions stand in the page head at the end of the bar above the editor, which can be too narrow for their
+       labels. *@
     <SectionContent SectionName="EditActions">
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
                    Size="Size.Small"
+                   Class="editor-action"
                    StartIcon="@Icons.Material.Filled.Add"
                    OnClick="OnCreateClick"
+                   title="Create"
+                   aria-label="Create"
                    data-testid="create-subject-button">
-            Create
+            <span class="editor-action-label">Create</span>
         </MudButton>
         @if (_activeRegion != null)
         {
+            var editLabel = _activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression";
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        Size="Size.Small"
+                       Class="editor-action"
                        StartIcon="@Icons.Material.Filled.Edit"
                        OnClick="OnEditButtonClick"
+                       title="@editLabel"
+                       aria-label="@editLabel"
                        data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
-                @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
+                <span class="editor-action-label">@editLabel</span>
             </MudButton>
         }
     </SectionContent>
 
-    <StandaloneCodeEditor @ref="_editor"
-                          Id="markdown-editor"
+    <MarkdownSourceEditor @ref="_sourceEditor"
+                          EditorId="markdown-editor"
                           CssClass="monaco-editor-container"
-                          ConstructionOptions="GetEditorOptions"
-                          OnDidInit="OnEditorInit"
-                          OnDidChangeModelContent="OnContentChanged"
-                          OnDidChangeCursorPosition="OnCursorPositionChanged"/>
+                          InitialText="@_originalContent"
+                          IsDarkMode="IsDarkMode"
+                          GetBlockSubject="_getBlockSubject"
+                          TextChanged="OnTextChanged"
+                          ActiveRegionChanged="OnActiveRegionChanged"
+                          Initialized="OnEditorInitializedAsync"/>
 }
 
 <style>
@@ -66,15 +76,30 @@ else
         width: 100%;
     }
 
-    /* Decoration styles for subject blocks and expressions */
-    .subject-block-decoration {
-        background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
-        border-radius: 3px;
+    /* A long block name is cut off, and the title of the button shows it in full. */
+    .editor-action-label {
+        display: inline-block;
+        max-width: 12rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
     }
 
-    .expression-decoration {
-        background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
-        border-radius: 3px;
+    /* In a page head narrower than the actions with their longest labels and the button of the page menu need (372px),
+       the actions show only their icons. */
+    @@container page-head (max-width: 371.98px) {
+        .editor-action-label {
+            display: none;
+        }
+
+        .editor-action .mud-button-icon-start {
+            margin: 0;
+        }
+
+        .editor-action.mud-button-root {
+            min-width: 0;
+        }
     }
 </style>
 
@@ -88,15 +113,25 @@ else
     public bool IsDarkMode { get; set; } = true;
 
     private MarkdownFile? File => Subject as MarkdownFile;
-    private StandaloneCodeEditor? _editor;
+    private MarkdownSourceEditor? _sourceEditor;
+    private Func<int, IInterceptorSubject?>? _getBlockSubject;
     private string _originalContent = string.Empty;
+
+    // Set once the file was read: an empty file is a page without text and not one that is still loading.
+    private bool _isLoaded;
     private string _currentContent = string.Empty;
-    private bool _previousDarkMode = true;
-    private List<DecorationRegion> _decorationRegions = new();
-    private string[] _currentDecorationIds = Array.Empty<string>();
+
+    // Counts the changes of _currentContent, so that a save can tell whether newer text arrived during its write.
+    private int _contentChangeCount;
     private DecorationRegion? _activeRegion;
 
-    private string MonacoTheme => IsDarkMode ? "vs-dark" : "vs";
+    // The dirty state that IsDirtyChanged reported last. Its handler renders the panel around the editor, so it is raised
+    // when the state flips and not for every typed character.
+    private bool _reportedIsDirty;
+
+    // Set once the editor has its text, before which a reveal waits in _pendingReveal.
+    private bool _isEditorReady;
+    private IInterceptorSubject? _pendingReveal;
 
     public bool IsValid => true;
     public bool IsDirty => _currentContent != _originalContent;
@@ -109,50 +144,32 @@ else
 
     public event Action<bool>? IsDirtyChanged;
 
-    private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
+    protected override void OnParametersSet()
     {
-        return new StandaloneEditorConstructionOptions
+        // Once per file and not in every render. The other parameters of the editor are created in each render, which is
+        // rare: when the dirty state flips and when the cursor enters or leaves a region.
+        if (!ReferenceEquals(_getBlockSubject?.Target, File))
         {
-            AutomaticLayout = true,
-            Language = "markdown",
-            Value = _originalContent,
-            WordWrap = "on",
-            Theme = MonacoTheme
-        };
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        await base.OnAfterRenderAsync(firstRender);
-
-        // Update Monaco theme when dark mode changes
-        if (_editor != null && _previousDarkMode != IsDarkMode)
-        {
-            _previousDarkMode = IsDarkMode;
-            await Global.SetTheme(JsRuntime, MonacoTheme);
+            _getBlockSubject = File is { } file ? file.GetBlockSubject : null;
         }
     }
 
-    private async Task OnEditorInit()
+    private async Task OnEditorInitializedAsync()
     {
-        // Apply initial decorations
-        await RefreshDecorationsAsync();
+        _isEditorReady = true;
+        if (_pendingReveal is { } subject)
+        {
+            _pendingReveal = null;
+            await RevealAsync(subject);
+        }
     }
 
-    private void OnCursorPositionChanged(CursorPositionChangedEvent e)
+    private void OnActiveRegionChanged(DecorationRegion? region) => _activeRegion = region;
+
+    private void OnTextChanged(string text)
     {
-        // Find if cursor is inside any decoration region
-        var cursorLine = e.Position.LineNumber;
-        var cursorColumn = e.Position.Column;
-
-        var previousRegion = _activeRegion;
-        _activeRegion = _decorationRegions.FirstOrDefault(r => r.ContainsPosition(cursorLine, cursorColumn));
-
-        // Only update UI if active region changed
-        if (_activeRegion != previousRegion)
-        {
-            StateHasChanged();
-        }
+        SetCurrentContent(text);
+        ReportIsDirty();
     }
 
     private async Task OnEditButtonClick()
@@ -172,57 +189,66 @@ else
 
     private async Task OnEditSubjectClick(DecorationRegion region)
     {
-        if (File == null || _editor == null)
+        if (File == null || _sourceEditor == null || region.BlockIndex is not { } blockIndex)
             return;
 
-        // Get the subject from File.Children
-        if (!File.Children.TryGetValue(region.Name, out var subject))
+        // _currentContent follows the editor with a delay, and the comparison below must see what was typed last.
+        if (await _sourceEditor.GetTextAsync() is not { } text)
             return;
 
-        // Open the SubjectEditDialog using the static ShowAsync method
+        SetCurrentContent(text);
+
+        // The subject belongs to the block of the saved page. Opening the dialog on editor text that
+        // differs would show the saved values and then replace what was typed, or write into another block.
+        if (MarkdownBlockMatcher.FindSavedBlock(_currentContent, File.Content, blockIndex) is null)
+        {
+            Snackbar.Add($"Save the page before editing {region.Name}. The text up to the end of this block has changes that are not saved.", Severity.Warning);
+            return;
+        }
+
+        // The region is from the last content change and the page can have been parsed again since,
+        // so the subject is looked up now.
+        if (File.GetBlockSubject(blockIndex) is not { } subject)
+        {
+            Snackbar.Add($"{region.Name} cannot be edited because the block did not create a subject.", Severity.Warning);
+            return;
+        }
+
         var dialog = await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, $"Edit {region.Name}");
         var result = await dialog.Result;
 
         if (result?.Canceled != false)
             return;
 
-        // Serialize the updated subject back to JSON
-        var newJson = Serializer.Serialize(subject);
-
-        // Replace the subject block in the content
-        var pattern = $@"```subject\({Regex.Escape(region.Name)}\)\s*\n[\s\S]*?```";
-        var replacement = $"```subject({region.Name})\n{newJson}\n```";
-        _currentContent = Regex.Replace(_currentContent, pattern, replacement);
-
-        // TODO: Code below is repeated 3x (extract to method)
-        // Update the Monaco editor
-        await _editor.SetValue(_currentContent);
-
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
-        // Save the file
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
-
-        // Reload the file to update Children dictionary with new parsed content
-        await File.OnFileChangedAsync(CancellationToken.None);
-
-        // Apply configuration if needed
-        if (subject is IConfigurable configurable)
+        // Saving in the dialog wrote the configuration into the saved page, so its head line and json
+        // fence no longer equal the editor text and only the text before the block is compared.
+        if (MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(_currentContent, File.Content, blockIndex) is not { } block)
         {
-            await configurable.ApplyConfigurationAsync(CancellationToken.None);
+            Snackbar.Add($"The page changed while {region.Name} was edited, so the editor text was not updated. Reload the page before saving it.", Severity.Warning);
+            return;
         }
 
-        // Update dirty state
-        _originalContent = _currentContent;
-        IsDirtyChanged?.Invoke(false);
+        // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
+        // can also have inserted or removed blocks, and writing the editor text below overwrites that.
+        SetCurrentContent(MarkdownBlockWriter.WriteConfiguration(
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject, block)));
+
+        // The reload inside the write keeps the edited subject and applies its configuration.
+        await _sourceEditor.SetTextAsync(_currentContent);
+        await WriteShownTextAsync(_currentContent);
     }
 
     private async Task OnEditExpressionClick(DecorationRegion region)
     {
-        if (File == null || _editor == null)
+        if (File == null || _sourceEditor == null)
             return;
+
+        // The dialog edits one path. A condition, or text that does not parse, has no single path to edit.
+        if (MarkdownExpressions.Parse(region.Name, out _)?.SinglePath is not { } selectedPath)
+        {
+            Snackbar.Add($"{region.Name} has no single path to edit. Change its text in the editor.", Severity.Warning);
+            return;
+        }
 
         // Filter to only include actual subject blocks (not HtmlSegment, RenderExpression, etc.)
         var subjectBlocks = File.Children
@@ -232,7 +258,7 @@ else
         // Open the ExpressionEditDialog
         var parameters = new DialogParameters<object>
         {
-            { "SelectedPath", region.Name },
+            { "SelectedPath", selectedPath },
             { "LocalSubjects", subjectBlocks }
         };
 
@@ -280,113 +306,112 @@ else
             }
         }
 
-        _currentContent = string.Join('\n', lines);
-
-        // Update the Monaco editor
-        await _editor.SetValue(_currentContent);
-
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
-        // Save the file
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
-
-        // Reload the file to update Children dictionary with new parsed content
-        await File.OnFileChangedAsync(CancellationToken.None);
-
-        // Update dirty state
-        _originalContent = _currentContent;
-        IsDirtyChanged?.Invoke(false);
+        SetCurrentContent(string.Join('\n', lines));
+        await _sourceEditor.SetTextAsync(_currentContent);
+        await WriteShownTextAsync(_currentContent);
     }
 
     private async Task OnCreateClick()
     {
-        if (File == null || _editor == null)
+        if (File == null || _sourceEditor == null)
             return;
 
-        // Open the SubjectSetupDialog
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
-        if (result == null)
+        if (await _sourceEditor.CreateAsync() is not { } content)
             return;
 
-        // Serialize the new subject
-        var json = Serializer.Serialize(result.Subject);
-
-        // Create the subject block
-        var subjectBlock = $"```subject({result.Name})\n{json}\n```";
-
-        // Get cursor position to insert at
-        var position = await _editor.GetPosition();
-        var lines = _currentContent.Split('\n');
-
-        // Insert at cursor line (or end if no cursor)
-        var insertLine = position?.LineNumber ?? lines.Length;
-        var newLines = new List<string>(lines);
-
-        // Add a blank line before if not at start
-        if (insertLine > 1 && !string.IsNullOrWhiteSpace(lines[insertLine - 2]))
-        {
-            newLines.Insert(insertLine - 1, "");
-            insertLine++;
-        }
-
-        // Insert the subject block
-        newLines.InsertRange(insertLine - 1, subjectBlock.Split('\n'));
-
-        // Add a blank line after
-        if (insertLine + 2 < newLines.Count && !string.IsNullOrWhiteSpace(newLines[insertLine + 2]))
-        {
-            newLines.Insert(insertLine + 2, "");
-        }
-
-        _currentContent = string.Join('\n', newLines);
-
-        // Update the Monaco editor
-        await _editor.SetValue(_currentContent);
-
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
-        // Save the file
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
-        await File.WriteAsync(stream, CancellationToken.None);
-
-        // Reload the file to update Children dictionary with new parsed content
-        await File.OnFileChangedAsync(CancellationToken.None);
-
-        // Update dirty state
-        _originalContent = _currentContent;
-        IsDirtyChanged?.Invoke(false);
+        SetCurrentContent(content);
+        await WriteShownTextAsync(content);
     }
 
-    private async Task RefreshDecorationsAsync()
+    // Writes the text that the editor shows. The storage reloads the file inside the write, so the decorations are refreshed
+    // after it, so that the regions carry the subjects of the reloaded page.
+    private async Task WriteShownTextAsync(string content)
     {
-        if (_editor == null)
-            return;
+        await File!.WriteAsync(content, CancellationToken.None);
+        await _sourceEditor!.RefreshDecorationsAsync();
+        _originalContent = content;
+        ReportIsDirty();
+    }
 
-        // Parse decoration regions from current content
-        _decorationRegions = MarkdownDecorationParser.Parse(_currentContent, File?.Children);
-
-        // Convert to Monaco decorations
-        var decorations = _decorationRegions.Select(region => new ModelDeltaDecoration
+    public async Task<bool> RevealAsync(IInterceptorSubject subject)
+    {
+        if (File is null)
         {
-            Range = new BlazorMonaco.Range(
-                region.StartLine,
-                region.StartColumn,
-                region.EndLine,
-                region.EndColumn),
-            Options = new ModelDecorationOptions
-            {
-                ClassName = region.Type == DecorationRegionType.SubjectBlock
-                    ? "subject-block-decoration"
-                    : "expression-decoration",
-                IsWholeLine = false
-            }
-        }).ToArray();
+            return false;
+        }
 
-        // Apply decorations (delta update - removes old, adds new)
-        _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations);
+        // The page can ask as soon as it switched to the editor, which reads its text and decorations afterwards.
+        if (!_isEditorReady || _sourceEditor is null)
+        {
+            _pendingReveal = subject;
+            return true;
+        }
+
+        if (subject is HtmlSegment segment)
+        {
+            return await RevealTextBlockAsync(File, _sourceEditor, segment);
+        }
+
+        var region = _sourceEditor.Regions.FirstOrDefault(
+            candidate => candidate.Type == DecorationRegionType.SubjectBlock && ReferenceEquals(candidate.Subject, subject));
+        if (region?.BlockIndex is not { } blockIndex || await _sourceEditor.GetTextAsync() is not { } text)
+        {
+            return false;
+        }
+
+        // The subject belongs to the block of the saved page. Text that changed before the block makes the region point
+        // at another block, so it is only revealed while the text up to the block is saved. The block is found all the
+        // same, so true keeps the caller from revealing a block around it instead.
+        if (MarkdownBlockMatcher.FindSavedBlock(text, File.Content, blockIndex) is null)
+        {
+            Snackbar.Add($"Save the page to find {region.Name} in the editor. The text before it has changes that are not saved.", Severity.Warning);
+            return true;
+        }
+
+        var endLine = _sourceEditor.Outlines.FirstOrDefault(outline => outline.StartLine == region.StartLine)?.EndLine ?? region.EndLine;
+        return await _sourceEditor.RevealAsync(region.StartLine, endLine);
+    }
+
+    // Selects the lines of the text block, such as raw HTML, while the text up to its last line is saved. The editor ends a
+    // line at a lone carriage return as well, as the parser of the page does, and keeps its own line endings. Text that is
+    // not of this page, such as in a widget of another page that a Widget block shows, is not found, so that the preview
+    // reveals the block around it.
+    private async Task<bool> RevealTextBlockAsync(MarkdownFile file, MarkdownSourceEditor editor, HtmlSegment segment)
+    {
+        if (file.GetTextBlockLines(segment) is not (var line, var endLine))
+        {
+            return false;
+        }
+
+        if (await editor.GetTextAsync() is not { } text)
+        {
+            return false;
+        }
+
+        var savedText = NormalizeLineEndings(file.Content ?? string.Empty);
+        var savedEnd = 0;
+        for (var current = 0; current < endLine && savedEnd >= 0; current++)
+        {
+            savedEnd = savedText.IndexOf('\n', savedEnd) is var lineFeed and >= 0 ? lineFeed + 1 : -1;
+        }
+
+        var editorText = NormalizeLineEndings(text);
+        var savedLength = savedEnd < 0 ? savedText.Length : savedEnd;
+        if (!editorText.AsSpan().StartsWith(savedText.AsSpan(0, savedLength), StringComparison.Ordinal))
+        {
+            Snackbar.Add("Save the page to find the text in the editor. The text up to it has changes that are not saved.", Severity.Warning);
+            return true;
+        }
+
+        return await editor.RevealAsync(line, endLine);
+    }
+
+    private static string NormalizeLineEndings(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+    private void SetCurrentContent(string content)
+    {
+        _currentContent = content;
+        _contentChangeCount++;
     }
 
     protected override async Task OnInitializedAsync()
@@ -396,46 +421,42 @@ else
             await using var stream = await File.ReadAsync(CancellationToken.None);
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
-            _currentContent = _originalContent;
+            SetCurrentContent(_originalContent);
+            _isLoaded = true;
         }
-    }
-
-    private void OnContentChanged(ModelContentChangedEvent e)
-    {
-        // Content changed, we'll get the actual value on save
-        // For now, mark as potentially dirty
-        // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
-        Task.Run(async () =>
-        {
-            if (_editor != null)
-            {
-                _currentContent = await _editor.GetValue();
-
-                // Refresh decorations after content change
-                await RefreshDecorationsAsync();
-
-                await InvokeAsync(() =>
-                {
-                    IsDirtyChanged?.Invoke(IsDirty);
-                    StateHasChanged();
-                });
-            }
-        });
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (File == null || _editor == null) return;
+        if (File == null || _sourceEditor == null || await _sourceEditor.GetTextAsync() is not { } content)
+            return;
 
-        var content = await _editor.GetValue();
+        var contentChangeCount = _contentChangeCount;
 
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        await File.WriteAsync(stream, cancellationToken);
+        await File.WriteAsync(content, cancellationToken);
 
         _originalContent = content;
-        _currentContent = content;
 
-        IsDirtyChanged?.Invoke(false);
+        // Text typed during the write was read by its content change after the read above, and stays the current
+        // text, which is not saved.
+        if (_contentChangeCount == contentChangeCount)
+        {
+            SetCurrentContent(content);
+        }
+
+        // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
+        await _sourceEditor.RefreshDecorationsAsync();
+
+        ReportIsDirty();
     }
 
+    private void ReportIsDirty()
+    {
+        var isDirty = IsDirty;
+        if (isDirty != _reportedIsDirty)
+        {
+            _reportedIsDirty = isDirty;
+            IsDirtyChanged?.Invoke(isDirty);
+        }
+    }
 }

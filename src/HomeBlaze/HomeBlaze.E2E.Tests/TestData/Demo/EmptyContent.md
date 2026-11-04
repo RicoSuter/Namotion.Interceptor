@@ -1,0 +1,7 @@
+---
+title: Empty Content Demo
+---
+
+# Empty Content Demo
+
+The tests that use this page write their own content into it before they open it, so no test depends on what it holds.

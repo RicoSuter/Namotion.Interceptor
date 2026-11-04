@@ -1,0 +1,23 @@
+/* The class of the component around gives the text area its size. 16px, because a phone zooms into a field with a smaller
+   font when it takes the focus. */
+.markdown-source-text {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 8px;
+    resize: none;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: var(--mud-default-borderradius);
+    background-color: var(--mud-palette-surface);
+    color: var(--mud-palette-text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.5;
+    tab-size: 4;
+}
+
+.markdown-source-text:focus {
+    outline: none;
+    border-color: var(--mud-palette-primary);
+}

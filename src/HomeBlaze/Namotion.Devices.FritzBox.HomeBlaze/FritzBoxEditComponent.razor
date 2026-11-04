@@ -1,0 +1,282 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(FritzBox))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  @bind-Value:after="OnFieldChanged"
+                  Label="Name"
+                  Immediate="true" />
+
+    <MudTextField @bind-Value="_hostAddress"
+                  @bind-Value:after="OnFieldChanged"
+                  Label="Host Address (IP or hostname)"
+                  Required="true"
+                  RequiredError="Host address is required"
+                  HelperText="An IP address or host name, without http:// or a port"
+                  Error="@IsHostAddressRejected"
+                  ErrorText="@FritzBoxConnectionCheck.InvalidHostAddressMessage"
+                  Immediate="true"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_username"
+                  @bind-Value:after="OnFieldChanged"
+                  Label="Username"
+                  Immediate="true"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_password"
+                  @bind-Value:after="OnFieldChanged"
+                  Label="Password (leave empty to keep the current one)"
+                  InputType="InputType.Password"
+                  UserAttributes="_passwordAttributes"
+                  Immediate="true"
+                  Class="mt-4" />
+
+    <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Polling Interval (seconds)"
+                     Min="FritzBox.MinimumIntervalSeconds"
+                     Max="FritzBox.MaximumIntervalSeconds"
+                     Class="mt-4" />
+
+    <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
+                     Label="Retry Interval (seconds)"
+                     Min="FritzBox.MinimumIntervalSeconds"
+                     Max="FritzBox.MaximumIntervalSeconds"
+                     Class="mt-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4">Trusted certificate key</MudText>
+    <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;">
+        @(TrustedPublicKeyPin ?? "None yet: the next connection trusts the key the router presents.")
+    </MudText>
+
+    @if (RouterSubject?.PresentedPublicKeyPin is { } presentedPin && presentedPin != TrustedPublicKeyPin)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-2">
+            The router presents a different certificate key: @presentedPin. Accept it only if you know why the router's certificate changed.
+        </MudAlert>
+        @if (RouterSubject?.PresentedCertificateFingerprint is { } presentedFingerprint)
+        {
+            <MudText Typo="Typo.caption" Style="font-family: monospace; word-break: break-all;" Class="mt-1">
+                Fingerprint (compare it with the one your browser shows for this router's web UI): @presentedFingerprint
+            </MudText>
+        }
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="() => AcceptPresentedCertificate(presentedPin)" Class="mt-2">
+            Accept New Certificate
+        </MudButton>
+    }
+
+    @if (!IsCreating)
+    {
+        <MudDivider Class="my-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText>Connection:</MudText>
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(RouterSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(RouterSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+        @if (RouterSubject?.StatusMessage != null)
+        {
+            <MudText Class="mt-1">@RouterSubject.StatusMessage</MudText>
+        }
+        @if (RouterSubject?.Model != null)
+        {
+            <MudText Class="mt-1">Model: @RouterSubject.Model</MudText>
+        }
+        @if (RouterSubject?.SoftwareVersion != null)
+        {
+            <MudText>FRITZ!OS: @RouterSubject.SoftwareVersion</MudText>
+        }
+        @if (RouterSubject?.AvailableSoftwareUpdate != null)
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-2">Update available: @RouterSubject.AvailableSoftwareUpdate</MudAlert>
+        }
+        @if (RouterSubject != null)
+        {
+            <MudText>Clients: @RouterSubject.PresentClientCount present of @RouterSubject.ClientCount</MudText>
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private FritzBox? RouterSubject => Subject as FritzBox;
+
+    private string _name = string.Empty;
+    private string? _hostAddress;
+    private string? _username;
+    private string? _password;
+    private string? _publicKeyPin;
+    private int _pollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
+    private int _retryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
+
+    private string _originalName = string.Empty;
+    private string? _originalHostAddress;
+    private string? _originalUsername;
+    private string? _originalPublicKeyPin;
+    private int _originalPollingIntervalSeconds = FritzBox.DefaultPollingIntervalSeconds;
+    private int _originalRetryIntervalSeconds = FritzBox.DefaultRetryIntervalSeconds;
+
+    // Keeps the browser from autofilling a stored password into the router password.
+    private readonly Dictionary<string, object?> _passwordAttributes = new() { ["autocomplete"] = "new-password" };
+
+    public bool IsValid => FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _) &&
+                           _pollingIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds &&
+                           _retryIntervalSeconds is >= FritzBox.MinimumIntervalSeconds and <= FritzBox.MaximumIntervalSeconds;
+
+    public bool IsDirty => IsNameChanged ||
+                           IsHostAddressChanged ||
+                           IsUsernameChanged ||
+                           IsPasswordChanged ||
+                           IsPublicKeyPinChanged ||
+                           IsPollingIntervalChanged ||
+                           IsRetryIntervalChanged;
+
+    private bool IsNameChanged => _name != _originalName;
+
+    private bool IsHostAddressChanged => NormalizeHostAddress(_hostAddress) != NormalizeHostAddress(_originalHostAddress);
+
+    private bool IsUsernameChanged => Normalize(_username) != Normalize(_originalUsername);
+
+    private bool IsPasswordChanged => !string.IsNullOrEmpty(_password);
+
+    private bool IsPublicKeyPinChanged => _publicKeyPin != _originalPublicKeyPin;
+
+    private bool IsPollingIntervalChanged => _pollingIntervalSeconds != _originalPollingIntervalSeconds;
+
+    private bool IsRetryIntervalChanged => _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    /// <summary>
+    /// The pin entered here, or while it is unchanged the live one, which the router trusts on its own while the
+    /// dialog is open.
+    /// </summary>
+    private string? TrustedPublicKeyPin =>
+        RouterSubject is null || IsPublicKeyPinChanged ? _publicKeyPin : RouterSubject.PublicKeyPin;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (RouterSubject != null)
+        {
+            _name = RouterSubject.Name;
+            _hostAddress = RouterSubject.HostAddress;
+            _username = RouterSubject.Username;
+            _publicKeyPin = RouterSubject.PublicKeyPin;
+
+            _pollingIntervalSeconds = LoadInterval(RouterSubject.PollingInterval, FritzBox.DefaultPollingIntervalSeconds);
+            _retryIntervalSeconds = LoadInterval(RouterSubject.RetryInterval, FritzBox.DefaultRetryIntervalSeconds);
+        }
+
+        RememberOriginals();
+    }
+
+    /// <summary>
+    /// Matches the runtime clamp (<c>FritzBox.GetEffectiveInterval</c>).
+    /// </summary>
+    private static int LoadInterval(TimeSpan stored, int defaultSeconds) =>
+        stored <= TimeSpan.Zero
+            ? defaultSeconds
+            : Math.Clamp((int)stored.TotalSeconds, FritzBox.MinimumIntervalSeconds, FritzBox.MaximumIntervalSeconds);
+
+    /// <summary>
+    /// Trims and collapses blank to null, so clearing a field that loaded as null is no change and is not saved as "".
+    /// </summary>
+    private static string? Normalize(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+    }
+
+    /// <summary>
+    /// Normalizes a valid host address as the connection check does, and any other value with <see cref="Normalize"/>.
+    /// </summary>
+    private static string? NormalizeHostAddress(string? value) =>
+        FritzBoxConnectionCheck.TryNormalizeHostAddress(value, out var normalized) ? normalized : Normalize(value);
+
+    /// <summary>
+    /// Leaves an empty field to the required check, so only one error shows.
+    /// </summary>
+    private bool IsHostAddressRejected =>
+        !string.IsNullOrWhiteSpace(_hostAddress) && !FritzBoxConnectionCheck.TryNormalizeHostAddress(_hostAddress, out _);
+
+    private void RememberOriginals()
+    {
+        _originalName = _name;
+        _originalHostAddress = _hostAddress;
+        _originalUsername = _username;
+        _originalPublicKeyPin = _publicKeyPin;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        _originalRetryIntervalSeconds = _retryIntervalSeconds;
+    }
+
+    private void AcceptPresentedCertificate(string presentedPin)
+    {
+        _publicKeyPin = presentedPin;
+        OnFieldChanged();
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (RouterSubject != null && IsValid)
+        {
+            // Writes only what changed here: the router can update PublicKeyPin while the dialog is open.
+            if (IsNameChanged)
+            {
+                RouterSubject.Name = _name;
+            }
+
+            if (IsHostAddressChanged)
+            {
+                RouterSubject.HostAddress = NormalizeHostAddress(_hostAddress);
+            }
+
+            if (IsUsernameChanged)
+            {
+                RouterSubject.Username = Normalize(_username);
+            }
+
+            if (IsPasswordChanged)
+            {
+                RouterSubject.Password = _password;
+            }
+
+            if (IsPublicKeyPinChanged)
+            {
+                RouterSubject.PublicKeyPin = _publicKeyPin;
+            }
+
+            if (IsPollingIntervalChanged)
+            {
+                RouterSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            }
+
+            if (IsRetryIntervalChanged)
+            {
+                RouterSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+            }
+
+            _password = null;
+            RememberOriginals();
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

@@ -1,0 +1,7 @@
+{
+  "$type": "Namotion.Devices.Luxtronik.LuxtronikHeatPump",
+  "name": "Heat Pump",
+  "hostAddress": "",
+  "port": 502,
+  "pollingInterval": "00:00:05"
+}

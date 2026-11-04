@@ -1,0 +1,26 @@
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Storage.Internal
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HtmlSegment))]
+@implements ISubjectComponent
+@implements ITextBlockWidget
+
+@* A block of text of a page that is edited inline, with the HTML and the values of the expressions of the block, which the
+   content joined. The class is what the page styles use, see MarkdownFilePageComponent.razor.css. *@
+<div class="markdown-text">@((MarkupString)(Html ?? string.Empty))</div>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    /// <summary>The markup of the text block.</summary>
+    [Parameter]
+    public string? Html { get; set; }
+
+    /// <summary>The kind of a text block that cannot be edited as text, which names it, see ITextBlockWidget.</summary>
+    [Parameter]
+    public string? Kind { get; set; }
+}

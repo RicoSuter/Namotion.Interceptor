@@ -16,6 +16,27 @@ internal struct PropertyReferenceSet
         get => First.Subject is null;
     }
 
+    public readonly bool ContainsSubject(IInterceptorSubject subject)
+    {
+        if (ReferenceEquals(First.Subject, subject))
+        {
+            return true;
+        }
+
+        if (Additional is not null)
+        {
+            foreach (var propertyRef in Additional)
+            {
+                if (ReferenceEquals(propertyRef.Subject, subject))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public bool Add(PropertyReference propertyRef)
     {
         if (First.Subject is null)
@@ -43,16 +64,10 @@ internal struct PropertyReferenceSet
                 return true;
             }
 
-            // Promote an arbitrary element from Additional into the First slot.
-            // Set semantics: callers only Add/Remove/check IsEmpty, never iterate,
-            // so promotion order does not matter. foreach-break avoids the enumerator
-            // heap allocation that Enumerable.First() would incur.
-            PropertyReference promoted = default;
-            foreach (var item in Additional)
-            {
-                promoted = item;
-                break;
-            }
+            // Set semantics make promotion order irrelevant. Count guarantees a current element.
+            var enumerator = Additional.GetEnumerator();
+            enumerator.MoveNext();
+            var promoted = enumerator.Current;
             Additional.Remove(promoted);
             First = promoted;
             if (Additional.Count == 0)

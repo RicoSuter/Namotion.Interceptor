@@ -1,9 +1,11 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices.Covers;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Shelly;
 
@@ -24,21 +26,31 @@ public partial class ShellyCover :
     internal int Index { get; }
 
     [State(Unit = StateUnit.Watt)]
+    [Category("Energy")]
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    public partial decimal? MeasuredEnergyConsumed { get; internal set; }
+    [Category("Energy")]
+    public partial decimal? TotalImportedEnergy { get; internal set; }
+
+    [Derived]
+    [Category("Energy")]
+    public decimal? TotalExportedEnergy => null;
 
     [State(Unit = StateUnit.Volt)]
+    [Category("Energy")]
     public partial decimal? ElectricalVoltage { get; internal set; }
 
     [State(Unit = StateUnit.Ampere)]
+    [Category("Energy")]
     public partial decimal? ElectricalCurrent { get; internal set; }
 
     [State(Unit = StateUnit.Hertz)]
+    [Category("Energy")]
     public partial decimal? ElectricalFrequency { get; internal set; }
 
     [State(Position = 350)]
+    [Category("Energy")]
     public partial decimal? PowerFactor { get; internal set; }
 
     [State(Unit = StateUnit.DegreeCelsius)]
@@ -99,12 +111,27 @@ public partial class ShellyCover :
     [Derived]
     public string? IconColor => IsMoving == true ? "Warning" : null;
 
+    [Derived]
+    [PropertyAttribute("Open", KnownAttributes.IsEnabled)]
+    public bool Open_IsEnabled => _device.IsConnected && ShutterState is not (RollerShutterState.Open or RollerShutterState.Opening);
+
+    [Derived]
+    [PropertyAttribute("Close", KnownAttributes.IsEnabled)]
+    public bool Close_IsEnabled => _device.IsConnected && ShutterState is not (RollerShutterState.Closed or RollerShutterState.Closing);
+
+    // Disabled only while the cover is known to stand still, so a state that is not known yet or lags behind the
+    // motor never blocks stopping it.
+    [Derived]
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => _device.IsConnected &&
+        (IsMoving == true || ShutterState is not (RollerShutterState.Open or RollerShutterState.Closed or RollerShutterState.PartiallyOpen));
+
     public ShellyCover(ShellyDevice device, int index)
     {
         _device = device;
         Index = index;
         MeasuredPower = null;
-        MeasuredEnergyConsumed = null;
+        TotalImportedEnergy = null;
         ElectricalVoltage = null;
         ElectricalCurrent = null;
         ElectricalFrequency = null;

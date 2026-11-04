@@ -1,0 +1,67 @@
+@using System.Collections.Immutable
+@using System.Text.Json
+@using HomeBlaze.Host.Components.Browser
+
+@implements IDisposable
+
+@inject IDialogService DialogService
+@inject NavigationManager NavigationManager
+
+<MudDialog data-testid="metadata-summary-dialog">
+    <DialogContent>
+        <MetadataSummary Metadata="@Metadata" OnTagClick="@OpenTagFilterAsync" Class="py-2" />
+    </DialogContent>
+    <DialogActions>
+        @if (Edit is not null)
+        {
+            <MudButton OnClick="EditAsync" data-testid="metadata-summary-edit">Edit</MudButton>
+        }
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>The metadata whose notes, links and tags are shown.</summary>
+    [Parameter, EditorRequired] public ImmutableDictionary<string, JsonElement>? Metadata { get; set; }
+
+    /// <summary>Opens the editor of the metadata, after this dialog closed; null when it cannot be edited.</summary>
+    [Parameter] public Func<Task>? Edit { get; set; }
+
+    protected override void OnInitialized() => NavigationManager.LocationChanged += OnLocationChanged;
+
+    // A link that opens in place leaves the dialog behind.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(Close);
+
+    private void Close() => MudDialog?.Close();
+
+    private async Task EditAsync()
+    {
+        Close();
+        if (Edit is not null)
+            await Edit();
+    }
+
+    private Task OpenTagFilterAsync(string tag)
+    {
+        Close();
+        return MetadataTagFilterDialog.ShowAsync(DialogService, tag);
+    }
+
+    public void Dispose() => NavigationManager.LocationChanged -= OnLocationChanged;
+
+    /// <summary>Shows the notes, links and tags of metadata, where links and tags can be opened.</summary>
+    public static Task<IDialogReference> ShowAsync(
+        IDialogService dialogService, string title, ImmutableDictionary<string, JsonElement>? metadata, Func<Task>? edit)
+    {
+        var parameters = new DialogParameters<MetadataSummaryDialog>
+        {
+            { x => x.Metadata, metadata },
+            { x => x.Edit, edit }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        return dialogService.ShowAsync<MetadataSummaryDialog>(title, parameters, options);
+    }
+}

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
@@ -32,8 +33,8 @@ internal enum FailedMonitoredItemDisposition
 
 internal class SubscriptionManager : IAsyncDisposable
 {
-    private static readonly ObjectPool<List<PropertyUpdate>> ChangesPool
-        = new(() => new List<PropertyUpdate>(16));
+    private static readonly ObjectPool<List<NotificationUpdate>> ChangesPool
+        = new(() => new List<NotificationUpdate>(16));
 
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter _propertyWriter;
@@ -44,7 +45,11 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
 
-    private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
+    private readonly ConcurrentDictionary<uint, MonitoredItemState> _monitoredItems = new();
+    // Keyed by object, not by the server-assigned id: a subscription recreated after a failed transfer
+    // is a new object numbering from 1 again, possibly under the same id, while a transferred one keeps
+    // its object and its numbering.
+    private readonly ConditionalWeakTable<Subscription, SubscriptionApplyState> _applyStates = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
     private readonly ConcurrentDictionary<uint, int> _healAttempts = new();
     private readonly Lock _trackingMutationLock = new();
@@ -84,11 +89,6 @@ internal class SubscriptionManager : IAsyncDisposable
     /// would allocate, because the underlying concurrent dictionary snapshots its keys.
     /// </summary>
     public int SubscriptionCount => Volatile.Read(ref _subscriptionCount);
-
-    /// <summary>
-    /// Gets the current monitored items (thread-safe dictionary).
-    /// </summary>
-    public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
     /// <summary>
     /// Gets how many monitored items are currently held without locking their backing dictionary.
@@ -278,14 +278,12 @@ internal class SubscriptionManager : IAsyncDisposable
             for (var i = 0; i < monitoredItemsCount; i++)
             {
                 var item = notification.MonitoredItems[i];
-                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+                if (_monitoredItems.TryGetValue(item.ClientHandle, out var monitoredItem))
                 {
-                    changes.Add(new PropertyUpdate
-                    {
-                        Property = property,
-                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                        Timestamp = item.Value.SourceTimestamp
-                    });
+                    changes.Add(new NotificationUpdate(
+                        monitoredItem,
+                        _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, monitoredItem.Property),
+                        item.Value.SourceTimestamp));
                 }
             }
         }
@@ -298,46 +296,76 @@ internal class SubscriptionManager : IAsyncDisposable
             throw;
         }
 
-        ApplyChanges(changes, receivedTimestamp);
-    }
+        if (changes.Count > 0)
+        {
+            _source.IncomingThroughput.Add(changes.Count);
 
-    /// <summary>
-    /// Writes a batch of property updates through the property writer and returns the pooled
-    /// list, whether or not the batch was empty. A single property write that throws is logged
-    /// and the remaining changes in the batch still apply.
-    /// </summary>
-    private void ApplyChanges(List<PropertyUpdate> changes, DateTimeOffset receivedTimestamp)
-    {
-        if (changes.Count == 0)
+            var applyState = _applyStates.GetValue(subscription, static _ => new SubscriptionApplyState());
+
+            // Pool item returned inside callback. Safe because ApplyUpdate never throws:
+            // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
+            var state = (manager: this, source: _source, applyState, sequenceNumber: notification.SequenceNumber, receivedTimestamp, changes, logger: _logger);
+            _propertyWriter.Write(state, static s =>
+            {
+                // The ranking and the apply share one lock because the SDK briefly runs two workers for
+                // one subscription when it restarts its worker. Taken inside the writer's lock during
+                // replay, so nothing may take the writer's lock while holding this one.
+                lock (s.applyState.Lock)
+                {
+                    var stamp = s.applyState.GetStamp(s.sequenceNumber);
+                    for (var i = 0; i < s.changes.Count; i++)
+                    {
+                        var change = s.changes[i];
+                        var monitoredItem = change.MonitoredItem;
+                        if (stamp != 0)
+                        {
+                            var lastApplied = Interlocked.Read(ref monitoredItem.LastAppliedStamp);
+                            if (SubscriptionApplyState.IsOlder(stamp, lastApplied))
+                            {
+                                if (s.logger.IsEnabled(LogLevel.Debug))
+                                {
+                                    s.logger.LogDebug(
+                                        "Skipped a stale value for property {PropertyName}: notification message {SequenceNumber} is older than the applied message {LastAppliedSequenceNumber}.",
+                                        monitoredItem.Property.Name, s.sequenceNumber, SubscriptionApplyState.GetSequenceNumber(lastApplied));
+                                }
+
+                                continue;
+                            }
+                        }
+
+                        try
+                        {
+                            monitoredItem.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
+
+                            // Only once the value landed: a rejected value must not outrank a late message
+                            // that is still newer than the shown value.
+                            if (stamp != 0)
+                            {
+                                Interlocked.Exchange(ref monitoredItem.LastAppliedStamp, stamp);
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            // A change observer can throw after the value was stored, which still counts as applied.
+                            if (stamp != 0 && Equals(monitoredItem.Property.GetValue(), change.Value))
+                            {
+                                Interlocked.Exchange(ref monitoredItem.LastAppliedStamp, stamp);
+                            }
+
+                            s.manager.ReportErrorIfRunning(e);
+                            s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", monitoredItem.Property.Name);
+                        }
+                    }
+                }
+
+                s.changes.Clear();
+                ChangesPool.Return(s.changes);
+            });
+        }
+        else
         {
             ChangesPool.Return(changes);
-            return;
         }
-
-        _source.IncomingThroughput.Add(changes.Count);
-
-        // Pool item returned inside callback. Safe because ApplyUpdate never throws:
-        // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
-        var state = (manager: this, source: _source, receivedTimestamp, changes, logger: _logger);
-        _propertyWriter.Write(state, static s =>
-        {
-            for (var i = 0; i < s.changes.Count; i++)
-            {
-                var change = s.changes[i];
-                try
-                {
-                    change.Property.SetValueFromSource(s.source, change.Timestamp, s.receivedTimestamp, change.Value);
-                }
-                catch (Exception e)
-                {
-                    s.manager.ReportErrorIfRunning(e);
-                    s.logger.LogError(e, "Failed to apply change for property {PropertyName}.", change.Property.Name);
-                }
-            }
-
-            s.changes.Clear();
-            ChangesPool.Return(s.changes);
-        });
     }
 
     private void ReportErrorIfRunning(Exception error, CancellationToken cancellationToken = default)
@@ -349,28 +377,41 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
-    /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
+    /// Replaces the tracked subscriptions with the ones the reconnected session holds. Subscriptions
+    /// already tracked are left as they are, new ones are hooked exactly once, and the ones missing
+    /// from the new set are unhooked and dropped.
     /// </summary>
     public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
     {
-        var oldSubscriptions = _subscriptions.Keys.ToArray();
+        var oldSubscriptions = _subscriptions.Keys;
         foreach (var subscription in transferredSubscriptions)
         {
-            subscription.FastDataChangeCallback -= OnFastDataChange;
-            subscription.FastDataChangeCallback += OnFastDataChange;
-            TryAddSubscription(subscription);
+            if (TryAddSubscription(subscription))
+            {
+                // A subscription the SDK recreated is a clone that already carries the original's
+                // callback and may be publishing. Replace it in one write: a plain += would deliver
+                // twice, and a -= followed by += leaves the callback null in between, which drops a batch.
+                FastDataChangeNotificationEventHandler handler = OnFastDataChange;
+                subscription.FastDataChangeCallback = (FastDataChangeNotificationEventHandler?)Delegate.Combine(
+                    Delegate.Remove(subscription.FastDataChangeCallback, handler), handler);
+            }
         }
 
+        var removedCount = 0;
         foreach (var oldSubscription in oldSubscriptions)
         {
+            if (transferredSubscriptions.Contains(oldSubscription))
+            {
+                continue;
+            }
+
             TryRemoveSubscription(oldSubscription);
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            removedCount++;
         }
 
-
-        _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
-            transferredSubscriptions.Count, oldSubscriptions.Length);
+        _logger.LogInformation("Reconnected session holds {Count} subscriptions, dropped {RemovedCount} previous ones.",
+            transferredSubscriptions.Count, removedCount);
     }
 
     internal async Task ApplyChangesAndFilterFailedMonitoredItemsAsync(
@@ -616,7 +657,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
         foreach (var kvp in _monitoredItems)
         {
-            if (kvp.Value.Reference.Subject == subject)
+            if (kvp.Value.Property.Reference.Subject == subject)
             {
                 TryRemoveMonitoredItem(kvp.Key);
                 _healAttempts.TryRemove(kvp.Key, out _);
@@ -653,7 +694,7 @@ internal class SubscriptionManager : IAsyncDisposable
         var seen = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         foreach (var entry in _monitoredItems)
         {
-            var subject = entry.Value.Reference.Subject;
+            var subject = entry.Value.Property.Reference.Subject;
             if (seen.Add(subject) && subject.TryGetRegisteredSubject() is null)
             {
                 RemoveItemsForSubject(subject);
@@ -708,6 +749,8 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     internal int DetachedDuringSetupCountForTesting => _detachedDuringSetup.Count;
 
+    internal bool IsTrackingForTesting(uint clientHandle) => _monitoredItems.ContainsKey(clientHandle);
+
     private bool TryAddSubscription(Subscription subscription)
     {
         lock (_trackingMutationLock)
@@ -737,13 +780,14 @@ internal class SubscriptionManager : IAsyncDisposable
     {
         lock (_trackingMutationLock)
         {
-            if (_monitoredItems.TryAdd(clientHandle, property))
+            var monitoredItem = new MonitoredItemState(property);
+            if (_monitoredItems.TryAdd(clientHandle, monitoredItem))
             {
                 Volatile.Write(ref _monitoredItemCount, _monitoredItemCount + 1);
             }
             else
             {
-                _monitoredItems[clientHandle] = property;
+                _monitoredItems[clientHandle] = monitoredItem;
             }
         }
     }
@@ -803,6 +847,78 @@ internal class SubscriptionManager : IAsyncDisposable
                     _logger.LogWarning(ex, "Failed to remove subscriptions during disposal.");
                 }
             }
+        }
+    }
+
+    private readonly struct NotificationUpdate(MonitoredItemState monitoredItem, object? value, DateTimeOffset timestamp)
+    {
+        public readonly MonitoredItemState MonitoredItem = monitoredItem;
+        public readonly object? Value = value;
+        public readonly DateTimeOffset Timestamp = timestamp;
+    }
+
+    private sealed class MonitoredItemState(RegisteredSubjectProperty property)
+    {
+        public RegisteredSubjectProperty Property { get; } = property;
+
+        /// <summary>
+        /// The stamp of the last message applied to this item, 0 before the first. Read and written with
+        /// <see cref="Interlocked"/>.
+        /// </summary>
+        // Interlocked rather than the subscription's lock alone: a replaced subscription's late callback
+        // writes it under its own lock.
+        public ulong LastAppliedStamp;
+    }
+
+    /// <summary>
+    /// Ranks the notification messages of one subscription object. A stamp packs a 24-bit epoch that
+    /// identifies the object into the high bits and the message's sequence number, extended past the
+    /// 32-bit wrap, into the low 40 bits, which last about 2^40 messages per subscription object.
+    /// </summary>
+    private sealed class SubscriptionApplyState
+    {
+        private const int SequenceBits = 40;
+        private const ulong SequenceMask = (1UL << SequenceBits) - 1;
+
+        private static int _lastEpoch;
+
+        private readonly ulong _epoch = ((ulong)(uint)Interlocked.Increment(ref _lastEpoch) & 0xFF_FFFF) << SequenceBits;
+        private ulong _highestSequenceNumber;
+
+        public Lock Lock { get; } = new();
+
+        /// <summary>
+        /// Whether <paramref name="stamp"/> belongs to an older message of the same subscription object than
+        /// <paramref name="lastApplied"/>. A stamp of another subscription object ranks against nothing.
+        /// </summary>
+        public static bool IsOlder(ulong stamp, ulong lastApplied) =>
+            (stamp & ~SequenceMask) == (lastApplied & ~SequenceMask) && stamp < lastApplied;
+
+        public static uint GetSequenceNumber(ulong stamp) => (uint)(stamp & SequenceMask);
+
+        /// <summary>
+        /// Returns the stamp for a message, or 0 for an unnumbered one. Must be called under <see cref="Lock"/>.
+        /// </summary>
+        public ulong GetStamp(uint sequenceNumber)
+        {
+            if (sequenceNumber == 0)
+            {
+                return 0;
+            }
+
+            // Extended relative to the highest number seen rather than per item, so an item that stays
+            // unchanged for more than half the 32-bit range is not ranked against a wrapped number. Starts
+            // one wrap in, so a message older than the first one seen still maps above 0.
+            var extended = _highestSequenceNumber == 0
+                ? (1UL << 32) + sequenceNumber
+                : (ulong)((long)_highestSequenceNumber + (int)(sequenceNumber - (uint)_highestSequenceNumber));
+
+            if (extended > _highestSequenceNumber)
+            {
+                _highestSequenceNumber = extended;
+            }
+
+            return _epoch | (extended & SequenceMask);
         }
     }
 }

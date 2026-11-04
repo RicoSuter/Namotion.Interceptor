@@ -1,0 +1,96 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Host.Services.Display
+{
+    public enum PropertyRowLayout
+    {
+        Automatic = 0,
+        SideBySide = 1,
+        Stacked = 2,
+    }
+    public class PropertyRowLayoutService
+    {
+        public PropertyRowLayoutService() { }
+        public HomeBlaze.Host.Services.Display.PropertyRowLayout Layout { get; }
+        public string StoredValue { get; }
+        public event System.Action? OnChange;
+        public void Load(string? storedValue) { }
+        public void SetLayout(HomeBlaze.Host.Services.Display.PropertyRowLayout layout) { }
+    }
+    public static class SubjectDisplayExtensions
+    {
+        public static string GetChildDisplayName(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild child) { }
+        public static string GetIdentifyingDisplayName(string displayName, object? index) { }
+        public static string GetTitle(this Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool IsShownAsValue(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
+    public sealed class SubjectMemberCategory<TValue, TMethod>
+    {
+        public System.Collections.Generic.IReadOnlyList<TMethod> Methods { get; }
+        public string Name { get; }
+        public System.Collections.Generic.IReadOnlyList<TValue> Values { get; }
+    }
+    public static class SubjectMemberGrouping
+    {
+        public static HomeBlaze.Host.Services.Display.SubjectMemberGroups<TValue, TMethod> Group<TValue, TMethod>(System.Collections.Generic.IReadOnlyList<TValue> values, System.Func<TValue, string?> getValueCategory, System.Func<TValue, int> getValuePosition, System.Collections.Generic.IReadOnlyList<TMethod> methods, System.Func<TMethod, string?> getMethodCategory, System.Func<TMethod, int> getMethodPosition) { }
+    }
+    public sealed class SubjectMemberGroups<TValue, TMethod>
+    {
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Host.Services.Display.SubjectMemberCategory<TValue, TMethod>> Categories { get; }
+        public System.Collections.Generic.IReadOnlyList<TMethod> UncategorizedMethods { get; }
+        public System.Collections.Generic.IReadOnlyList<TValue> UncategorizedValues { get; }
+    }
+}
+namespace HomeBlaze.Host.Services.Navigation
+{
+    public static class BrowserUrls
+    {
+        public const string Root = "/browser";
+        public static string Create(System.Collections.Generic.IEnumerable<string> segments) { }
+        public static string FromRoutePath(string routePath) { }
+    }
+    public sealed class MetadataLinkResolver
+    {
+        public const string PropertyQueryParameter = "property";
+        public MetadataLinkResolver(HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry) { }
+        public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(HomeBlaze.Services.Metadata.MetadataLink link) { }
+        public HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink Resolve(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName, string? title = null) { }
+    }
+    public class NavigationItem
+    {
+        public NavigationItem() { }
+        public HomeBlaze.Components.Abstractions.Pages.AppBarAlignment Alignment { get; init; }
+        public bool HasNavigationBarPages { get; init; }
+        public required string Icon { get; init; }
+        public bool IsFolder { get; init; }
+        public bool IsPage { get; init; }
+        public HomeBlaze.Components.Abstractions.Pages.NavigationLocation Location { get; init; }
+        public string PageUrl { get; }
+        public required string Path { get; init; }
+        public required Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
+        public required string Title { get; init; }
+        public bool IsPageUrlOf(string baseRelativeUrl) { }
+    }
+    public class NavigationItemResolver
+    {
+        public NavigationItemResolver(HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Host.Services.Navigation.NavigationItem> GetAppBarItems(Namotion.Interceptor.IInterceptorSubject root) { }
+        public System.Collections.Generic.IEnumerable<HomeBlaze.Host.Services.Navigation.NavigationItem> GetChildItems(Namotion.Interceptor.IInterceptorSubject parent) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Host.Services.Navigation.NavigationItem> GetRecentAppBarItems(Namotion.Interceptor.IInterceptorSubject root, System.TimeSpan maximumAge) { }
+    }
+    public sealed class ResolvedMetadataLink : System.IEquatable<HomeBlaze.Host.Services.Navigation.ResolvedMetadataLink>
+    {
+        public ResolvedMetadataLink(string Title, string? Href, bool IsExternal) { }
+        public string? Href { get; init; }
+        public bool IsBroken { get; }
+        public bool IsExternal { get; init; }
+        public string Title { get; init; }
+    }
+}
+namespace HomeBlaze.Host.Services
+{
+    public static class ServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeHostServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+}

@@ -4,9 +4,6 @@ using MudBlazor;
 
 namespace HomeBlaze.Storage.Blazor;
 
-/// <summary>
-/// Blazor implementation of ISubjectSetupService that opens the SubjectSetupDialog dialog.
-/// </summary>
 public class BlazorSubjectSetupService : ISubjectSetupService
 {
     private readonly IDialogService _dialogService;
@@ -16,8 +13,11 @@ public class BlazorSubjectSetupService : ISubjectSetupService
         _dialogService = dialogService;
     }
 
-    public Task<CreateSubjectResult?> CreateSubjectAsync(CancellationToken cancellationToken)
+    public Task<CreateSubjectResult?> CreateSubjectAsync(IStorageContainer target, CancellationToken cancellationToken)
     {
-        return SubjectSetupDialog.ShowAsync(_dialogService);
+        return SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
+        {
+            NameField = new SubjectNameOptions("File name", FileExtensions.Json, target.ChildNames)
+        });
     }
 }

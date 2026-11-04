@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Models;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -32,16 +33,19 @@ internal class ListTypesTool
                       "Call this first, then pass the returned type names to search's types parameter (full names with namespace preferred). " +
                       "Filter with kind ('interfaces'/'concrete').",
         InputSchema = Schema,
-        Handler = HandleListTypesAsync
+        Handler = HandleListTypesAsync,
+        Annotations = McpToolAnnotations.ReadOnly
     };
 
     private Task<object?> HandleListTypesAsync(JsonElement input, CancellationToken cancellationToken)
     {
+        // A type whose subjects browse and search leave out is not offered either.
         var allTypes = _configuration.TypeProviders
             .SelectMany(provider => provider.GetTypes())
+            .Where(typeInfo => !_configuration.ExcludeTypes.Any(excludedType => excludedType.IsAssignableFrom(typeInfo.Type)))
             .ToList();
 
-        // Build interfaceNames from ALL types (before filtering)
+        // From the types before the kind and type filters, so that a concrete type names its interfaces.
         var interfaceNames = new HashSet<string>(
             allTypes.Where(t => t.IsInterface).Select(t => t.Type.FullName!));
 
@@ -76,7 +80,7 @@ internal class ListTypesTool
                     isInterface = true,
                     
                     // TODO: Properties and methods are currently dangerous, should only include state properties and query/operation methods (need a way to filter here) - maybe add to McpTypeInfo?
-                    // TODO: Also parameters should only include HomeBlaze required parameters (also add to McpTypeInfo? so provider can control what is included?
+                    // TODO: Also parameters should only include the parameters the host application requires (also add to McpTypeInfo? so provider can control what is included?
                     properties = typeInfo.Type.GetProperties()
                         .Select(property => new
                         {
@@ -94,11 +98,8 @@ internal class ListTypesTool
                                 method.ReturnType == typeof(void) ? null : method.ReturnType),
                             parameters = method.GetParameters()
                                 .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
-                                .Select(parameter => new
-                                {
-                                    name = parameter.Name,
-                                    type = JsonSchemaTypeMapper.ToJsonSchemaType(parameter.ParameterType)
-                                })
+                                .Select(parameter => McpMethodParameter.Create(
+                                    parameter.Name ?? $"arg{parameter.Position}", parameter.ParameterType))
                                 .ToArray()
                         })
                         .ToArray()

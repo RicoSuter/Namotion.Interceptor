@@ -10,6 +10,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
@@ -342,13 +343,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _subject.ApplySubjectUpdate(_initialState, factory, ChangeOrigin.FromSource(this));
 
             // Claim ownership of all properties matching the path provider
-            ClaimPropertyOwnership();
+            ClaimPropertyOwnership(cancellationToken);
 
             _initialState = null;
         });
     }
 
-    private void ClaimPropertyOwnership()
+    private void ClaimPropertyOwnership(CancellationToken cancellationToken)
     {
         var pathProvider = _configuration.PathProvider;
 
@@ -371,7 +372,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             {
                 claimedCount++;
             }
-            else
+            // A disposal cancels before it disposes the ownership, which then rejects every claim.
+            else if (!cancellationToken.IsCancellationRequested)
             {
                 _logger.LogWarning(
                     "Property {Subject}.{Property} already owned by another source.",

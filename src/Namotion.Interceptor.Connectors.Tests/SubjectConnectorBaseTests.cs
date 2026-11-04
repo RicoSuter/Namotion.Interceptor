@@ -169,6 +169,30 @@ public class SubjectConnectorBaseTests
     }
 
     [Fact]
+    public async Task WhenStartedWithACancelledToken_ThenItCanBeStartedAgain()
+    {
+        // Arrange: a start with a cancelled token completes its execution at once and must still release
+        // the start, or every later start is rejected as overlapping a live execution.
+        using var connector = new TestConnector();
+        var hostedService = (IHostedService)connector;
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await hostedService.StartAsync(cancelled.Token);
+        var firstExecution = connector.ExecuteTask!;
+        Assert.True(firstExecution.IsCompleted);
+        Assert.False(connector.Diagnostics.IsOperational);
+
+        // Act
+        connector.Reopen();
+        await hostedService.StartAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotSame(firstExecution, connector.ExecuteTask);
+        connector.Release();
+        await hostedService.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task WhenARegisteredResettableThrowsOnStart_ThenTheErrorIsRecordedAndTheConnectorIsNotOperational()
     {
         // Arrange: RegisterResettable and IResettableMetrics are public, so a third-party Reset that

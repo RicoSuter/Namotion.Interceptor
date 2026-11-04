@@ -1,7 +1,7 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Benchmark")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Registry.Tests")]
-[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Registry.Abstractions
 {
     public interface ISubjectIdRegistry
@@ -42,6 +42,7 @@ namespace Namotion.Interceptor.Registry.Abstractions
         public bool CanContainSubjects { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.SubjectPropertyChild> Children { get; }
         public bool HasGetter { get; }
+        public bool HasPublicSetter { get; }
         public bool HasSetter { get; }
         public bool IsAttribute { get; }
         public bool IsSubjectCollection { get; }
@@ -107,7 +108,7 @@ namespace Namotion.Interceptor.Registry
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Parent.ParentTrackingHandler),
             typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler)})]
-    public class SubjectRegistry : Namotion.Interceptor.Registry.Abstractions.ISubjectIdRegistry, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    public class SubjectRegistry : Namotion.Interceptor.Registry.Abstractions.ISubjectIdRegistry, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry, Namotion.Interceptor.Tracking.Lifecycle.IChildIndexHandler, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectRegistry() { }
         public System.Collections.Generic.IReadOnlyDictionary<Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject> KnownSubjects { get; }
@@ -135,16 +136,14 @@ namespace Namotion.Interceptor.Registry.Paths
         public AttributeBasedPathProvider(string name, char pathSeparator = .) { }
         public string Name { get; }
         public override char PathSeparator { get; }
-        public override bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public override string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public override bool TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
     }
     public class CamelCasePathProvider : Namotion.Interceptor.Registry.Paths.IPathProvider
     {
         public CamelCasePathProvider(Namotion.Interceptor.Registry.Paths.IPathProvider inner) { }
         public static Namotion.Interceptor.Registry.Paths.CamelCasePathProvider Instance { get; }
-        public bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment) { }
-        public string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public bool TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property) { }
+        public bool TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
     }
     public class DefaultPathProvider : Namotion.Interceptor.Registry.Paths.PathProviderBase
     {
@@ -154,12 +153,12 @@ namespace Namotion.Interceptor.Registry.Paths
     }
     public interface IPathProvider
     {
-        bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
-        Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment);
-        string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
+        bool TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property);
+        bool TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment);
     }
     public static class PathExtensions
     {
+        public static string FormatPathIndex(object key) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "path",
                 "property"})]
@@ -172,17 +171,25 @@ namespace Namotion.Interceptor.Registry.Paths
                 "Property",
                 "Index"})]
         public static System.Collections.Generic.IEnumerable<System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>> GetPropertiesFromPaths(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, System.Collections.Generic.IEnumerable<string> paths) { }
+        public static bool HasPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject rootSubject) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "segment",
                 "index"})]
-        public static System.Collections.Generic.List<System.ValueTuple<string, object?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
+        public static System.Collections.Generic.List<System.ValueTuple<string, string?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Property",
                 "Index"})]
         public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetPropertyFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Property",
+                "Index"})]
+        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, object?>? TryGetPropertyFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.IInterceptorSubject?>? createMissingSubject) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetSubjectFromPath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject rootSubject, string path) { }
+        public static bool TryParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "segment",
+                "index"})] out System.Collections.Generic.List<System.ValueTuple<string, string?>>? segments, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     public abstract class PathProviderBase : Namotion.Interceptor.Registry.Paths.IPathProvider
     {
@@ -190,8 +197,12 @@ namespace Namotion.Interceptor.Registry.Paths
         public virtual char IndexClose { get; }
         public virtual char IndexOpen { get; }
         public virtual char PathSeparator { get; }
-        public virtual bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-        public virtual Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment) { }
-        public virtual string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public virtual bool TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property) { }
+        public virtual bool TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
+    }
+    public static class PathProviderExtensions
+    {
+        public static bool IsPropertyEffectivelyIncluded(this Namotion.Interceptor.Registry.Paths.IPathProvider pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public static bool IsPropertyIncluded(this Namotion.Interceptor.Registry.Paths.IPathProvider pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
     }
 }

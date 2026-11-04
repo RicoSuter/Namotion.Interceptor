@@ -826,52 +826,6 @@ internal sealed class ThrowingScopeSource : TestStateSource
     public override IInterceptorSubject RootSubject => throw new InvalidOperationException("scope check failed");
 }
 
-/// <summary>Captures warning and error messages logged through it, to assert on diagnostics.</summary>
-internal sealed class RecordingLogger : ILogger
-{
-    public List<string> Warnings { get; } = [];
-
-    public List<string> Errors { get; } = [];
-
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-    public bool IsEnabled(LogLevel logLevel) => true;
-
-    public void Log<TState>(
-        LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        if (logLevel == LogLevel.Warning)
-        {
-            lock (Warnings)
-            {
-                Warnings.Add(formatter(state, exception));
-            }
-        }
-        else if (logLevel == LogLevel.Error)
-        {
-            lock (Errors)
-            {
-                Errors.Add(formatter(state, exception));
-            }
-        }
-    }
-}
-
-/// <summary>Always resolves to the same <see cref="RecordingLogger"/>, regardless of category.</summary>
-internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFactory
-{
-    public void AddProvider(ILoggerProvider provider)
-    {
-    }
-
-    public ILogger CreateLogger(string categoryName) => logger;
-
-    public void Dispose()
-    {
-    }
-}
-
 /// <summary>
 /// A subject whose <see cref="Data"/> getter throws, so any parent walk that reaches it fails.
 /// </summary>

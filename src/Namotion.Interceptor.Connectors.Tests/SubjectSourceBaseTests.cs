@@ -651,6 +651,29 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenStartedWithACancelledToken_ThenTheSourceStopsAndReleasesItsChangeSubscription()
+    {
+        // Arrange: a start with a cancelled token must still release the change subscription and
+        // publish Stopped.
+        var propertyChangeInterceptor = new PropertyChangeInterceptor();
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.AddService(propertyChangeInterceptor);
+        var source = new TestSubjectSource(new Person(context), context, NullLogger.Instance);
+        Assert.True(propertyChangeInterceptor.IsIdle);
+
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        // Act
+        await source.StartAsync(cancelled.Token);
+
+        // Assert
+        Assert.Equal(SourceState.Stopped, source.State);
+        Assert.True(propertyChangeInterceptor.IsIdle);
+    }
+
+    [Fact]
     public async Task WhenContextHasNoPropertyChangeInterceptor_ThenSourceFailsFastWithActionableMessage()
     {
         // Arrange: without WithFullPropertyTracking/WithPropertyChangeSubscriptions the source cannot capture
@@ -1392,6 +1415,7 @@ public class SubjectSourceBaseTests
             .WithRegistry();
         var subject = new Person(context);
         var warmupWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var warmupFenceWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var currentWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCurrentWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var currentWriteFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1413,12 +1437,17 @@ public class SubjectSourceBaseTests
                     return WriteResult.Failure(changes, new InvalidOperationException("late failure"));
                 }
 
+                if (changes.ToArray().Any(change => change.Property.Name == nameof(Person.FirstName_MaxLength)))
+                {
+                    warmupFenceWritten.TrySetResult();
+                }
                 warmupWritten.TrySetResult();
                 return WriteResult.Success;
             }
         };
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
         new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.FirstName_MaxLength)).SetSource(source);
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCurrentWrite.TrySetResult());
@@ -1430,9 +1459,10 @@ public class SubjectSourceBaseTests
             return source.Diagnostics.OutboundChanges.Depth > 0;
         }, message: "The connected processor did not start buffering the warmup write.");
         await warmupWritten.Task.WaitAsync(TestTimeout);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.OutboundChanges.Depth == 0,
-            message: "The warmup write did not leave the processor queue.");
+        // Changes are delivered in order, so once the fence is written no probe is left to share the
+        // current write's batch, which the single drop asserted below relies on.
+        subject.FirstName_MaxLength = -probeValue;
+        await warmupFenceWritten.Task.WaitAsync(TestTimeout);
 
         Volatile.Write(ref failCurrentWrite, true);
         subject.FirstName = "blocked";

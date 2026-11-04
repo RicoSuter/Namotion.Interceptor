@@ -264,6 +264,34 @@ public class DetachCleanupTests
         Assert.Equal(nameof(Person.Mother), sharedRegistered.Parents[0].Property.Name);
     }
 
+    // === Subject constructed with the graph's context ===
+
+    [Fact]
+    public void WhenSubjectConstructedWithContextIsRemovedFromCollectionAndWritten_ThenItIsNotRegisteredAgain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var root = new Person(context) { FirstName = "Root" };
+        var child = new Person(context) { FirstName = "Kid" };
+        root.Children = [child];
+        root.Children = [];
+
+        // Sanity: the removal already unregistered it, so the write below is what is under test
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+
+        // Act
+        child.Mother = new Person { FirstName = "Mom" };
+
+        // Assert
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+        Assert.DoesNotContain(child, registry.KnownSubjects.Keys);
+        Assert.Single(registry.KnownSubjects); // only root
+    }
+
     // === Reattach after detach ===
 
     [Fact]

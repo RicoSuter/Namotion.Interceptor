@@ -74,7 +74,7 @@ public class SubjectTransactionPumpTests
             await source.StopAsync(CancellationToken.None);
         }
 
-        // Assert: stage 1 wrote FirstName once; the local apply must not be re-pushed.
+        // Assert: stage 4 wrote FirstName once; the local apply must not be re-pushed.
         // The exactly-once probe uses LastName as the sentinel (different from the committed FirstName)
         // so the queue deduplicator can never merge them; keep the two properties distinct in future edits.
         Assert.Equal(1, CountWrites(receivedBatches, nameof(Person.FirstName)));

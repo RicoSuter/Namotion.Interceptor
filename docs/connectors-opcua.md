@@ -2,6 +2,8 @@
 
 The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.Interceptor and OPC UA (Open Platform Communications Unified Architecture), enabling bidirectional synchronization between C# objects and industrial automation systems. It supports both client and server modes.
 
+Dependencies: [OPC UA .NET Standard](https://github.com/OPCFoundation/UA-.NETStandard) (MIT)
+
 Both built-in OPC UA connectors implement liveness monitoring. Before their first protocol-specific liveness observation, `IsOperational` can be `null`; after that observation, they publish explicit `true` or `false` values. The client registers the `ClaimedPropertyCount` gauge, so its count is measured, including zero.
 
 - [OPC UA Client](connectors-opcua-client.md) - Configuration, authentication, monitoring, resilience, extensibility
@@ -153,6 +155,8 @@ The OPC UA integration takes a snapshot of the object model at startup. Both cli
 - Does NOT dynamically add new subjects to OPC UA after initialization
 - Does NOT update the OPC UA address space when subjects are attached
 - New subjects added after startup require a restart to appear in OPC UA
+
+Neither side follows [structural changes](connectors.md#structural-changes) yet: the client does not claim structural properties, and the server removes the nodes of a detached subject but creates none for an attached one.
 
 For side-specific cleanup behavior, see [Client Lifecycle](connectors-opcua-client.md#lifecycle) and [Server Lifecycle](connectors-opcua-server.md#lifecycle).
 

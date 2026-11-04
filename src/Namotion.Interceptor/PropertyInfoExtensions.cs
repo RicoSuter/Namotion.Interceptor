@@ -45,7 +45,7 @@ public static class PropertyInfoExtensions
         // 1. Get class attributes WITH class inheritance
         //    Note: Use parameterless GetCustomAttributes() which correctly includes
         //    inherited attributes from base classes
-        var classAttributes = property.GetCustomAttributes().Cast<Attribute>().ToList();
+        var classAttributes = property.GetCustomAttributes().ToList();
 
         // 2. Get the declaring type to find interfaces
         var declaringType = property.DeclaringType;
@@ -64,7 +64,7 @@ public static class PropertyInfoExtensions
                 continue;
             }
 
-            foreach (var attribute in interfaceProperty.GetCustomAttributes().Cast<Attribute>())
+            foreach (var attribute in interfaceProperty.GetCustomAttributes())
             {
                 interfaceAttributes.Add(attribute);
             }

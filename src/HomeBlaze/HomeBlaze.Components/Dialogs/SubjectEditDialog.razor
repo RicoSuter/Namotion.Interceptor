@@ -3,15 +3,27 @@
 @using HomeBlaze.Components.Abstractions
 @using Namotion.Interceptor
 
-<MudDialog>
+<MudDialog AriaLabelledBy="@_titleId">
+    <TitleContent>
+        <MudText Typo="Typo.h6" id="@_titleId">@MudDialog?.Title</MudText>
+        @if (Subject is not null)
+        {
+            var typeName = SubjectNames.GetTypeName(Subject.GetType());
+            <MudText Typo="Typo.caption"
+                     Class="mud-text-secondary"
+                     Style="display: block; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                     title="@typeName"
+                     data-testid="subject-edit-dialog-type">@typeName</MudText>
+        }
+    </TitleContent>
     <DialogContent>
-        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" />
+        <SubjectEditPanel @ref="_editPanel" Subject="@Subject" IsValidChanged="OnEditPanelIsValidChanged" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Color="Color.Primary"
                    OnClick="OnSaveClicked"
-                   Disabled="@(!(_editPanel?.IsValid ?? true))">Save</MudButton>
+                   Disabled="@(!_isEditPanelValid)">Save</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -22,6 +34,11 @@
 
     private SubjectEditPanel? _editPanel;
 
+    private readonly string _titleId = $"subject-edit-dialog-title-{Guid.NewGuid():N}";
+
+    // Stays false until the panel reports, which it does once its editor is ready and can be saved.
+    private bool _isEditPanelValid;
+
     public MaxWidth GetPreferredDialogSize()
     {
         return MaxWidth.Small;
@@ -29,14 +46,40 @@
 
     private void Cancel() => MudDialog?.Cancel();
 
+    private void OnEditPanelIsValidChanged(bool isValid)
+    {
+        _isEditPanelValid = isValid;
+    }
+
     private async Task OnSaveClicked()
     {
-        if (_editPanel != null)
+        if (_editPanel is not { } editPanel)
         {
-            await _editPanel.SaveAsync(CancellationToken.None);
+            return;
+        }
+
+        if (await editPanel.SaveAsync(CancellationToken.None))
+        {
             MudDialog?.Close(DialogResult.Ok(true));
         }
+        else
+        {
+            // The button may have been enabled from a validity the form no longer has.
+            await editPanel.RefreshIsValidAsync();
+        }
     }
+
+    /// <summary>
+    /// Gets the title of the dialog that edits a widget, "Edit" or "Edit {title}", or an item of a layout, such as
+    /// "Edit Cell" or "Edit Cell: {title}".
+    /// </summary>
+    internal static string GetTitle(string? itemName, string? title) => (itemName, title) switch
+    {
+        (null, null) => "Edit",
+        (null, _) => $"Edit {title}",
+        (_, null) => $"Edit {itemName}",
+        _ => $"Edit {itemName}: {title}"
+    };
 
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,

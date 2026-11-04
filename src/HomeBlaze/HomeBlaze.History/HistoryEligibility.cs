@@ -7,7 +7,7 @@ namespace HomeBlaze.History;
 /// <summary>
 /// Single source of truth for whether a property is recorded and whether the UI offers the history
 /// action. Reads the HomeBlaze registry attribute (there is no IsState member on
-/// <see cref="RegisteredSubjectProperty"/>: "is state" is the presence of the HB:State attribute, and
+/// <see cref="RegisteredSubjectProperty"/>: "is state" is the presence of the HomeBlaze:State attribute, and
 /// "has children" is <see cref="RegisteredSubjectProperty.CanContainSubjects"/>), then defers to
 /// <see cref="HistoryColumns.IsRecordable"/> for the type half.
 ///
@@ -21,8 +21,9 @@ public static class HistoryEligibility
     /// </summary>
     public static bool HasHistory(this RegisteredSubjectProperty property)
     {
-        if (property.TryGetAttribute(KnownAttributes.State) is null) return false; // not [State]
+        // The type checks first: the attribute lookup walks the properties of the subject.
         if (property.CanContainSubjects) return false;                             // structural (v1.1)
-        return HistoryColumns.IsRecordable(property.Type);
+        if (!HistoryColumns.IsRecordable(property.Type)) return false;
+        return property.TryGetAttribute(KnownAttributes.State) is not null;       // [State]
     }
 }

@@ -1,0 +1,83 @@
+using System.Net.Security;
+using Namotion.Devices.FritzBox.Client;
+using Namotion.Devices.FritzBox.Tests.Testing;
+using Xunit;
+
+namespace Namotion.Devices.FritzBox.Tests;
+
+public class PinnedCertificateValidatorTests
+{
+    [Fact]
+    public void WhenCreatedWithoutAPin_ThenTheFirstKeyIsTrustedForLaterHandshakes()
+    {
+        // Arrange
+        using var first = FakeFritzBox.CreateCertificate();
+        var validator = new PinnedCertificateValidator(null);
+        var pinBeforeHandshake = validator.TrustedPin;
+
+        // Act
+        var isFirstAccepted = validator.Validate(this, first, null, SslPolicyErrors.RemoteCertificateChainErrors);
+        var isRepeatedAccepted = validator.Validate(this, first, null, SslPolicyErrors.RemoteCertificateChainErrors);
+
+        // Assert
+        Assert.True(isFirstAccepted);
+        Assert.True(isRepeatedAccepted);
+        Assert.Null(validator.Rejected);
+        Assert.Null(pinBeforeHandshake);
+        Assert.Equal(CertificateInfo.Create(first).Pin, validator.TrustedPin);
+    }
+
+    [Fact]
+    public void WhenCreatedWithoutAPinAndALaterHandshakePresentsAnotherKey_ThenItIsRejected()
+    {
+        // Arrange
+        using var first = FakeFritzBox.CreateCertificate();
+        using var other = FakeFritzBox.CreateCertificate();
+        var validator = new PinnedCertificateValidator(null);
+        validator.Validate(this, first, null, SslPolicyErrors.None);
+
+        // Act
+        var isAccepted = validator.Validate(this, other, null, SslPolicyErrors.None);
+
+        // Assert
+        Assert.False(isAccepted);
+        Assert.Equal(CertificateInfo.Create(other), validator.Rejected);
+        Assert.Equal(CertificateInfo.Create(other), validator.Presented);
+        Assert.Equal(CertificateInfo.Create(first).Pin, validator.TrustedPin);
+    }
+
+    [Fact]
+    public void WhenCreatedWithAPin_ThenOnlyThatKeyIsAccepted()
+    {
+        // Arrange
+        using var pinned = FakeFritzBox.CreateCertificate();
+        using var other = FakeFritzBox.CreateCertificate();
+        var validator = new PinnedCertificateValidator(CertificateInfo.Create(pinned).Pin);
+
+        // Act
+        var isOtherAccepted = validator.Validate(this, other, null, SslPolicyErrors.None);
+        var isPinnedAccepted = validator.Validate(this, pinned, null, SslPolicyErrors.None);
+
+        // Assert
+        Assert.False(isOtherAccepted);
+        Assert.True(isPinnedAccepted);
+        Assert.Equal(CertificateInfo.Create(pinned).Pin, validator.TrustedPin);
+    }
+
+    [Fact]
+    public void WhenAnAcceptedHandshakeFollowsARejectedOne_ThenTheRejectedCertificateIsStillReported()
+    {
+        // Arrange
+        using var pinned = FakeFritzBox.CreateCertificate();
+        using var other = FakeFritzBox.CreateCertificate();
+        var validator = new PinnedCertificateValidator(CertificateInfo.Create(pinned).Pin);
+        validator.Validate(this, other, null, SslPolicyErrors.None);
+
+        // Act
+        validator.Validate(this, pinned, null, SslPolicyErrors.None);
+
+        // Assert
+        Assert.Equal(CertificateInfo.Create(other), validator.Rejected);
+        Assert.Equal(CertificateInfo.Create(pinned), validator.Presented);
+    }
+}

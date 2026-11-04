@@ -1,0 +1,113 @@
+{
+    "group": {
+        "desc": "Include this block to allow for a proxy server",
+        "label": "Proxy Server",
+        "name": "model_14",
+        "points": [
+            {
+                "desc": "Model identifier",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 14
+            },
+            {
+                "desc": "Model length",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Interface name (8 chars)",
+                "label": "name",
+                "name": "Nam",
+                "size": 4,
+                "type": "string"
+            },
+            {
+                "access": "RW",
+                "desc": "Proxy configuration capabilities",
+                "label": "Capabilities",
+                "mandatory": "M",
+                "name": "Cap",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "NO_PROXY",
+                        "value": 0
+                    },
+                    {
+                        "name": "IPV4_PROXY",
+                        "value": 1
+                    },
+                    {
+                        "name": "IPV6_PROXY",
+                        "value": 2
+                    }
+                ],
+                "type": "bitfield16"
+            },
+            {
+                "access": "RW",
+                "desc": "Set proxy address type",
+                "label": "Config",
+                "mandatory": "M",
+                "name": "Cfg",
+                "size": 1,
+                "type": "enum16"
+            },
+            {
+                "access": "RW",
+                "desc": "Enumerate value. Proxy server type",
+                "label": "Type",
+                "mandatory": "M",
+                "name": "Typ",
+                "size": 1,
+                "type": "bitfield16"
+            },
+            {
+                "access": "RW",
+                "desc": "IPv4 or IPv6 proxy hostname or dotted address (40 chars)",
+                "label": "Address",
+                "mandatory": "M",
+                "name": "Addr",
+                "size": 20,
+                "type": "string"
+            },
+            {
+                "access": "RW",
+                "desc": "Proxy port number",
+                "label": "Port",
+                "mandatory": "M",
+                "name": "Port",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Proxy user name",
+                "label": "Username",
+                "name": "User",
+                "size": 12,
+                "type": "string"
+            },
+            {
+                "access": "RW",
+                "desc": "Proxy password",
+                "label": "Password",
+                "name": "Pw",
+                "size": 12,
+                "type": "string"
+            }
+        ],
+        "type": "group"
+    },
+    "id": 14
+}

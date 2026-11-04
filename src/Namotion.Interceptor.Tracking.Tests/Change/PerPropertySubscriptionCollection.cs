@@ -8,7 +8,11 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 // and take the listener-lookup branch, poisoning the assertion. Keeping every such assertion inside
 // this one serialized collection means no per-property Subscribe can run concurrently with it.
 [CollectionDefinition(Name, DisableParallelization = true)]
-public class PerPropertySubscriptionCollection
+public sealed class PerPropertySubscriptionCollection
 {
+    private PerPropertySubscriptionCollection()
+    {
+    }
+
     public const string Name = "PerPropertySubscription";
 }

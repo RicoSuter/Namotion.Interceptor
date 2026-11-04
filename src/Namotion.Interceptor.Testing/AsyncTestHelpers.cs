@@ -17,11 +17,34 @@ public static class AsyncTestHelpers
     /// <param name="pollInterval">Interval between condition checks. Defaults to 100ms.</param>
     /// <param name="message">Optional message to include in the timeout exception.</param>
     /// <exception cref="TimeoutException">Thrown when the condition is not met within the timeout.</exception>
-    public static async Task WaitUntilAsync(
+    [AssertionMethod]
+    public static Task WaitUntilAsync(
         Func<bool> condition,
         TimeSpan? timeout = null,
         TimeSpan? pollInterval = null,
         string? message = null)
+    {
+        return WaitUntilAsync(condition, () => message, timeout, pollInterval);
+    }
+
+    /// <summary>
+    /// Waits until the specified condition becomes true, polling at regular intervals.
+    /// Throws TimeoutException if the condition is not met within the timeout period.
+    /// </summary>
+    /// <param name="condition">The condition to wait for.</param>
+    /// <param name="message">
+    /// Builds the message included in the timeout exception. Called only on timeout, so it can report
+    /// the state at that point.
+    /// </param>
+    /// <param name="timeout">Maximum time to wait. Defaults to 30 seconds.</param>
+    /// <param name="pollInterval">Interval between condition checks. Defaults to 100ms.</param>
+    /// <exception cref="TimeoutException">Thrown when the condition is not met within the timeout.</exception>
+    [AssertionMethod]
+    public static async Task WaitUntilAsync(
+        Func<bool> condition,
+        Func<string?> message,
+        TimeSpan? timeout = null,
+        TimeSpan? pollInterval = null)
     {
         var actualTimeout = timeout ?? DefaultTimeout;
         var actualPollInterval = pollInterval ?? DefaultPollInterval;
@@ -41,9 +64,10 @@ public static class AsyncTestHelpers
             await Task.Delay(actualPollInterval).ConfigureAwait(false);
         }
 
-        var errorMessage = string.IsNullOrEmpty(message)
+        var messageText = message();
+        var errorMessage = string.IsNullOrEmpty(messageText)
             ? $"Condition was not met within {actualTimeout.TotalSeconds:F1} seconds."
-            : $"{message} (timed out after {actualTimeout.TotalSeconds:F1} seconds)";
+            : $"{messageText} (timed out after {actualTimeout.TotalSeconds:F1} seconds)";
 
         throw new TimeoutException(errorMessage);
     }

@@ -315,4 +315,121 @@ public sealed class SqliteHistorySchemaTests : IDisposable
         Assert.Equal((long)ValueColumn.Double, Scalar(partition, "SELECT value_column FROM paths;"));
         Assert.Equal(1, Scalar(partition, "SELECT COUNT(*) FROM paths;"));
     }
+
+    [Fact]
+    public async Task WhenALateSampleOfTheOldTypeIsFlushed_ThenTheStoredColumnKindKeepsTheNewestType()
+    {
+        // Arrange - the property changed from string to double, then a device reports a string sample
+        // older than the doubles already in the file. The file's newest row is still a double. The store
+        // opens before the first sample, so the samples are inside its coverage.
+        var now = Base.AddSeconds(-60);
+        using var core = new SqliteHistoryStore(
+            priority: 50, databaseDirectory: _directory, PartitionInterval.Weekly,
+            TimeSpan.FromHours(1), maxJsonSize: 8192, () => now);
+        now = Base.AddSeconds(60);
+        core.Record("/a/Value", Base, "on", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+        core.Record("/a/Value", Base.AddSeconds(10), 1.5d, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(20), 2.5d, typeof(double));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Record("/a/Value", Base.AddSeconds(5), "off", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal((long)ValueColumn.Double, Scalar(partition, "SELECT value_column FROM paths;"));
+
+        var maximum = core.Query(new HistoryQuery(
+            "/a/Value", Base, Base.AddSeconds(30), TimeSpan.FromSeconds(30), HistoryAggregations.Maximum));
+        Assert.Equal(new double?[] { 2.5 }, maximum.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenALateSampleOfTheOldTypeIsFlushedAfterAUlongChange_ThenRawQueryReadsTheOverflowAsANumber()
+    {
+        // Arrange - a ulong above long.MaxValue is stored in value_json and only reads back as a number
+        // when the stored flag says the property is ulong, so a late long sample must not clear it.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, 7L, typeof(long));
+        await core.FlushAsync(CancellationToken.None);
+        core.Record("/a/Value", Base.AddSeconds(10), ulong.MaxValue, typeof(ulong));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Record("/a/Value", Base.AddSeconds(5), 8L, typeof(long));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(30)));
+        Assert.Equal(
+            new double?[] { 7, 8, ulong.MaxValue },
+            series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenTheTypeChangesBackWithANewerSample_ThenTheStoredColumnKindFollowsIt()
+    {
+        // Arrange - a late string sample left the double kind in place; a string sample newer than every
+        // double is a genuine type change and still updates the kind.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, "on", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+        core.Record("/a/Value", Base.AddSeconds(10), 1.5d, typeof(double));
+        await core.FlushAsync(CancellationToken.None);
+        core.Record("/a/Value", Base.AddSeconds(5), "off", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Record("/a/Value", Base.AddSeconds(20), "on", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal((long)ValueColumn.Json, Scalar(partition, "SELECT value_column FROM paths;"));
+        Assert.Throws<HistoryAggregationNotSupportedException>(() => core.Query(new HistoryQuery(
+            "/a/Value", Base, Base.AddSeconds(30), TimeSpan.FromSeconds(30), HistoryAggregations.Maximum)));
+    }
+
+    [Fact]
+    public async Task WhenTwoSamplesOfDifferentTypesShareAnInstantInOneFlush_ThenTheLaterOneOwnsTheStoredColumnKind()
+    {
+        // Arrange - the second write at the same timestamp replaces the first row, so the string is the
+        // only row left and must be the one that decides the kind.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, 1.5d, typeof(double));
+        core.Record("/a/Value", Base, "on", typeof(string));
+
+        // Act
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal((long)ValueColumn.Json, Scalar(partition, "SELECT value_column FROM paths;"));
+        Assert.Throws<HistoryAggregationNotSupportedException>(() => core.Query(new HistoryQuery(
+            "/a/Value", Base, Base.AddSeconds(30), TimeSpan.FromSeconds(30), HistoryAggregations.Maximum)));
+    }
+
+    [Fact]
+    public async Task WhenTheNewestRowIsReplacedWithANewType_ThenTheStoredColumnKindFollowsIt()
+    {
+        // Arrange - a sample at the same timestamp as the file's newest row replaces that row, so its
+        // type becomes the newest one.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, 1.5d, typeof(double));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Act
+        core.Record("/a/Value", Base, "on", typeof(string));
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal((long)ValueColumn.Json, Scalar(partition, "SELECT value_column FROM paths;"));
+    }
 }

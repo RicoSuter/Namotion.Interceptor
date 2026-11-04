@@ -1,0 +1,765 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Luxtronik.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Luxtronik.Attributes
+{
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
+    public sealed class LuxtronikHoldingRegisterAttribute : Namotion.Devices.Luxtronik.Attributes.LuxtronikRegisterAttribute
+    {
+        public LuxtronikHoldingRegisterAttribute(int address, Namotion.Interceptor.Modbus.ModbusDataType dataType) { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
+    public sealed class LuxtronikInputRegisterAttribute : Namotion.Devices.Luxtronik.Attributes.LuxtronikRegisterAttribute
+    {
+        public LuxtronikInputRegisterAttribute(int address, Namotion.Interceptor.Modbus.ModbusDataType dataType) { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=false, Inherited=true)]
+    public abstract class LuxtronikRegisterAttribute : Namotion.Interceptor.Modbus.Attributes.ModbusRegisterAttribute
+    {
+        protected LuxtronikRegisterAttribute(int address, Namotion.Interceptor.Modbus.ModbusDataType dataType) { }
+        public string? MinimumFirmware { get; init; }
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikFunction RequiredFunction { get; init; }
+    }
+}
+namespace Namotion.Devices.Luxtronik.Enums
+{
+    public enum LuxtronikBufferType : ushort
+    {
+        SeriesBuffer = 0,
+        SeparationBuffer = 1,
+        MultifunctionBuffer = 2,
+    }
+    public enum LuxtronikControlMode : ushort
+    {
+        NoInfluence = 0,
+        Setpoint = 1,
+        Offset = 2,
+        Level = 3,
+    }
+    public enum LuxtronikFunction
+    {
+        None = -1,
+        Heating = 0,
+        HotWater = 1,
+        Cooling = 2,
+        Pool = 3,
+        Solar = 4,
+        RoomControlUnit = 5,
+        MixingCircuit1Heating = 6,
+        MixingCircuit1Cooling = 7,
+        MixingCircuit2Heating = 8,
+        MixingCircuit2Cooling = 9,
+        MixingCircuit3Heating = 10,
+        MixingCircuit3Cooling = 11,
+    }
+    [System.Flags]
+    public enum LuxtronikHeatPumpStatus : ushort
+    {
+        None = 0,
+        Compressor1 = 1,
+        Compressor2 = 2,
+        AuxiliaryHeater1 = 4,
+        AuxiliaryHeater2 = 8,
+        AuxiliaryHeater3 = 16,
+    }
+    public enum LuxtronikLevelMode : ushort
+    {
+        NoInfluence = 0,
+        RaisedWithTimeProgram = 1,
+        RaisedIgnoringTimeProgram = 2,
+        Lowered = 3,
+    }
+    public enum LuxtronikModeStatus : ushort
+    {
+        Off = 0,
+        NoRequest = 1,
+        Requested = 2,
+        Running = 3,
+    }
+    public enum LuxtronikOperatingState : ushort
+    {
+        Heating = 0,
+        HotWater = 1,
+        PoolOrSolar = 2,
+        UtilityLockout = 3,
+        Defrost = 4,
+        NoRequest = 5,
+        HeatingExternalSource = 6,
+        Cooling = 7,
+    }
+    public enum LuxtronikOverallControlMode : ushort
+    {
+        Individual = 0,
+        Offset = 2,
+        Level = 3,
+    }
+    public enum LuxtronikPowerConsumptionLimitMode : ushort
+    {
+        NoLimit = 0,
+        SoftLimit = 1,
+        HardLimit = 2,
+    }
+    public enum LuxtronikSmartGridState
+    {
+        Locked = 0,
+        Reduced = 1,
+        Normal = 2,
+        Increased = 3,
+    }
+}
+namespace Namotion.Devices.Luxtronik
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("HeatPump")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Climate")]
+    [System.ComponentModel.Description("Luxtronik 2.1 heat pump (Alpha Innotec, Novelan) via the Smart Home Interface, re" +
+        "ad only")]
+    [System.ComponentModel.DisplayName("Luxtronik heat pump")]
+    public class LuxtronikHeatPump : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerSensor, HomeBlaze.Abstractions.Sensors.IThermalPowerSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.Client.IModbusDiscovery, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const int MaximumPollingIntervalSeconds = 3600;
+        public const int MinimumPollingIntervalSeconds = 10;
+        public LuxtronikHeatPump(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Luxtronik.LuxtronikHeatPump> logger) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikCooling? Cooling { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikEnergy Energy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikFunctions Functions { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikHeating Heating { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostAddress { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikHotWater HotWater { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=26)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikMixingCircuit? MixingCircuit1 { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=27)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikMixingCircuit? MixingCircuit2 { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=28)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikMixingCircuit? MixingCircuit3 { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikOperatingStatus OperatingStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPool? Pool { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int Port { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? Power { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPowerConsumptionLimit PowerConsumptionLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=25)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikRoomControl? RoomControl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikSmartGrid SmartGrid { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=24)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikSolar? Solar { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatures Temperatures { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? ThermalPower { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? TotalConsumedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? TotalProducedThermalEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task DiscoverAsync(Namotion.Interceptor.Modbus.Client.ModbusDiscoveryContext context, System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class LuxtronikServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddLuxtronikHeatPump(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Luxtronik.LuxtronikHeatPump>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+}
+namespace Namotion.Devices.Luxtronik.Model
+{
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikCooling : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikCooling() { }
+        public LuxtronikCooling(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10052, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsLocked { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10207, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsReleased { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10006, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikModeStatus? Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10316, Namotion.Interceptor.Modbus.ModbusDataType.S32, Scale=100D)]
+        public decimal? TotalElectricalEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10410, Namotion.Interceptor.Modbus.ModbusDataType.U32, MinimumFirmware="3.92.0")]
+        public decimal? TotalOperatingHours { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10326, Namotion.Interceptor.Modbus.ModbusDataType.S32, MinimumFirmware="3.92.0", Scale=100D)]
+        public decimal? TotalThermalEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikCoolingSmartHomeControl : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikCoolingSmartHomeControl(int baseAddress, Namotion.Devices.Luxtronik.Enums.LuxtronikFunction function) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikControlMode? Mode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kelvin)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? Offset { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=0.1D)]
+        public decimal? Setpoint { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikEnergy : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikEnergy() { }
+        public LuxtronikEnergy(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true, Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10301, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=100D)]
+        public decimal? ElectricalPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true, Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10302, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=100D)]
+        public decimal? MinimumPredictedElectricalPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true, Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10300, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=100D)]
+        public decimal? ThermalPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10310, Namotion.Interceptor.Modbus.ModbusDataType.S32, Scale=100D)]
+        public decimal? TotalElectricalEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10320, Namotion.Interceptor.Modbus.ModbusDataType.S32, MinimumFirmware="3.92.0", Scale=100D)]
+        public decimal? TotalThermalEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikExtraHotWater : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikExtraHotWater() { }
+        public LuxtronikExtraHotWater(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Minute)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10501, Namotion.Interceptor.Modbus.ModbusDataType.S16)]
+        public int? Duration { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10071, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsRequested { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Minute)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10502, Namotion.Interceptor.Modbus.ModbusDataType.S16)]
+        public int? RemainingDuration { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10500, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? Target { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikFunctions : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikFunctions() { }
+        public LuxtronikFunctions(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        public bool? IsCoolingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        public bool? IsHeatingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        public bool? IsHotWaterEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=8)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(7, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        [System.ComponentModel.Category("Mixing Circuits")]
+        public bool? IsMixingCircuit1CoolingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(6, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        [System.ComponentModel.Category("Mixing Circuits")]
+        public bool? IsMixingCircuit1HeatingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(9, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        [System.ComponentModel.Category("Mixing Circuits")]
+        public bool? IsMixingCircuit2CoolingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(8, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        [System.ComponentModel.Category("Mixing Circuits")]
+        public bool? IsMixingCircuit2HeatingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=12)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(11, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        [System.ComponentModel.Category("Mixing Circuits")]
+        public bool? IsMixingCircuit3CoolingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=11)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(10, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        [System.ComponentModel.Category("Mixing Circuits")]
+        public bool? IsMixingCircuit3HeatingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        public bool? IsPoolEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(5, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        public bool? IsRoomControlUnitConfigured { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
+        [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(4, Namotion.Interceptor.Modbus.ModbusDataType.Boolean, AddressSpace=Namotion.Interceptor.Modbus.ModbusAddressSpace.DiscreteInput)]
+        public bool? IsSolarConfigured { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikHeating : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikHeating() { }
+        public LuxtronikHeating(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10113, Namotion.Interceptor.Modbus.ModbusDataType.S16, MinimumFirmware="3.92.0", Scale=0.1D)]
+        public decimal? CalculatedFlowTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPump CirculationPump { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor ExternalReturn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10050, Namotion.Interceptor.Modbus.ModbusDataType.U16, MinimumFirmware="3.92.0")]
+        public bool? IsLocked { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10107, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? LimitTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10104, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? MinimumReturnTarget { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikOverallSmartHomeControl OverallSmartHomeControl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10103, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? ReturnLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10101, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=0.1D)]
+        public decimal? ReturnTarget { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikSmartHomeControl SmartHomeControl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10003, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikModeStatus? Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10312, Namotion.Interceptor.Modbus.ModbusDataType.S32, Scale=100D)]
+        public decimal? TotalElectricalEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10406, Namotion.Interceptor.Modbus.ModbusDataType.U32, MinimumFirmware="3.92.0")]
+        public decimal? TotalOperatingHours { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=10, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10322, Namotion.Interceptor.Modbus.ModbusDataType.S32, MinimumFirmware="3.92.0", Scale=100D)]
+        public decimal? TotalThermalEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikHotWater : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikHotWater() { }
+        public LuxtronikHotWater(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPump CirculationPump { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=24)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikExtraHotWater ExtraHotWater { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10070, Namotion.Interceptor.Modbus.ModbusDataType.U16, MinimumFirmware="3.92.0")]
+        public bool? IsCirculationRequested { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10051, Namotion.Interceptor.Modbus.ModbusDataType.U16, MinimumFirmware="3.92.0")]
+        public bool? IsLocked { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10124, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? LimitTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPump LoadingPump { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10123, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? MaximumTarget { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10122, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? MinimumTarget { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikSmartHomeControl SmartHomeControl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10004, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikModeStatus? Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10121, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=0.1D)]
+        public decimal? Target { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor Temperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10314, Namotion.Interceptor.Modbus.ModbusDataType.S32, Scale=100D)]
+        public decimal? TotalElectricalEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10408, Namotion.Interceptor.Modbus.ModbusDataType.U32, MinimumFirmware="3.92.0")]
+        public decimal? TotalOperatingHours { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=10, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10324, Namotion.Interceptor.Modbus.ModbusDataType.S32, MinimumFirmware="3.92.0", Scale=100D)]
+        public decimal? TotalThermalEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikMixingCircuit : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikMixingCircuit(int index) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikCoolingSmartHomeControl CoolingSmartHomeControl { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikSmartHomeControl HeatingSmartHomeControl { get; }
+        public int Index { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10143, Namotion.Interceptor.Modbus.ModbusDataType.S16, RequiredFunction=Namotion.Devices.Luxtronik.Enums.LuxtronikFunction.MixingCircuit1Heating, Scale=0.1D)]
+        public decimal? MaximumTarget { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10142, Namotion.Interceptor.Modbus.ModbusDataType.S16, RequiredFunction=Namotion.Devices.Luxtronik.Enums.LuxtronikFunction.MixingCircuit1Heating, Scale=0.1D)]
+        public decimal? MinimumTarget { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPump Pump { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10141, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? Target { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor Temperature { get; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikOperatingStatus : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikOperatingStatus() { }
+        public LuxtronikOperatingStatus(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikPump BrinePump { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10202, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikBufferType? BufferType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10201, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public ushort? ErrorNumber { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10000, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikHeatPumpStatus? HeatPumpStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=21)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsAuxiliaryHeaterRunning { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=20)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsCompressorRunning { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Minute)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10203, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public int? MinimumOffTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Minute)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10204, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public int? MinimumRunTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10002, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikOperatingState? OperatingState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10404, Namotion.Interceptor.Modbus.ModbusDataType.U32, MinimumFirmware="3.92.0")]
+        public decimal? TotalOperatingHours { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikOverallSmartHomeControl : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikOverallSmartHomeControl() { }
+        public LuxtronikOverallSmartHomeControl(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikLevelMode? Level { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikOverallControlMode? Mode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kelvin)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? Offset { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikPool : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikPool() { }
+        public LuxtronikPool(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10053, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsLocked { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10007, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikModeStatus? Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10318, Namotion.Interceptor.Modbus.ModbusDataType.S32, Scale=100D)]
+        public decimal? TotalElectricalEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10412, Namotion.Interceptor.Modbus.ModbusDataType.U32, MinimumFirmware="3.92.0")]
+        public decimal? TotalOperatingHours { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, IsEstimated=true, Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10328, Namotion.Interceptor.Modbus.ModbusDataType.S32, MinimumFirmware="3.92.0", Scale=100D)]
+        public decimal? TotalThermalEnergy { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikPowerConsumptionLimit : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikPowerConsumptionLimit() { }
+        public LuxtronikPowerConsumptionLimit(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=100D)]
+        public decimal? Limit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikPowerConsumptionLimitMode? Mode { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikPump : HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikPump(int address, string title) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsOn { get; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikRoomControl : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikRoomControl() { }
+        public LuxtronikRoomControl(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor Temperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(10060, Namotion.Interceptor.Modbus.ModbusDataType.U16, MinimumFirmware="3.92.1", Scale=0.1D)]
+        public decimal? TemperatureSetpoint { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikSmartGrid : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikSmartGrid() { }
+        public LuxtronikSmartGrid(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsEvu1Active { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public bool? IsEvu2Active { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikSmartGridState? State { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikSmartHomeControl : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikSmartHomeControl(int baseAddress, Namotion.Devices.Luxtronik.Enums.LuxtronikFunction function) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(3, Namotion.Interceptor.Modbus.ModbusDataType.U16, MinimumFirmware="3.92.0")]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikLevelMode? Level { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16)]
+        public Namotion.Devices.Luxtronik.Enums.LuxtronikControlMode? Mode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kelvin)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(2, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? Offset { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikHoldingRegister(1, Namotion.Interceptor.Modbus.ModbusDataType.U16, Scale=0.1D)]
+        public decimal? Setpoint { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikSolar : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikSolar() { }
+        public LuxtronikSolar(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Hour)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10416, Namotion.Interceptor.Modbus.ModbusDataType.U32, MinimumFirmware="3.92.0")]
+        public decimal? TotalOperatingHours { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikTemperatureSensor : HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusBaseAddressProvider, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikTemperatureSensor(int address, string title, System.Version? minimumFirmwareVersion = null) { }
+        public int BaseAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.S16, Scale=0.1D)]
+        public decimal? Temperature { get; }
+        public string? Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class LuxtronikTemperatures : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public LuxtronikTemperatures() { }
+        public LuxtronikTemperatures(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor Flow { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor HeatSourceInlet { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor HeatSourceOutlet { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Devices.Luxtronik.Attributes.LuxtronikInputRegister(10112, Namotion.Interceptor.Modbus.ModbusDataType.S16, MinimumFirmware="3.92.0", Scale=0.1D)]
+        public decimal? MaximumFlowTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor Outside { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor OutsideAverage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public Namotion.Devices.Luxtronik.Model.LuxtronikTemperatureSensor Return { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+}

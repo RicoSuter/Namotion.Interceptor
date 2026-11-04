@@ -73,7 +73,7 @@ public sealed class HistoryChangeRecorder(IHistoryRecorder engine, ISubjectPathR
             }
 
             var propertyName = change.Property.Name;
-            var fullPath = JoinPath(subjectPath, propertyName);
+            var fullPath = HistoryPaths.Join(subjectPath, propertyName);
 
             lock (_pathCacheLock)
             {
@@ -85,7 +85,7 @@ public sealed class HistoryChangeRecorder(IHistoryRecorder engine, ISubjectPathR
                 {
                     engine.RecordMove(
                         change.ChangedTimestamp,
-                        JoinPath(previousSubjectPath, propertyName),
+                        HistoryPaths.Join(previousSubjectPath, propertyName),
                         fullPath);
                 }
 
@@ -112,9 +112,4 @@ public sealed class HistoryChangeRecorder(IHistoryRecorder engine, ISubjectPathR
             _lastSubjectPath.Remove(subject);
         }
     }
-
-    // Joins a canonical subject path with a property name. The root subject path is "/", so a root
-    // property is "/Temperature" (not "//Temperature"); a child at "/Child" yields "/Child/Pressure".
-    private static string JoinPath(string subjectPath, string propertyName) =>
-        subjectPath == "/" ? "/" + propertyName : subjectPath + "/" + propertyName;
 }

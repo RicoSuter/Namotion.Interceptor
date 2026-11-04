@@ -71,6 +71,7 @@ public class PendingOriginTests
         var property = CreateProperty();
         using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), null))
         {
+            // Leave the stamp unconsumed so disposal is the only operation that can clear it.
         }
 
         // Act

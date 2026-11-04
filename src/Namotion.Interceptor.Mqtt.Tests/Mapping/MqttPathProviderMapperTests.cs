@@ -106,6 +106,34 @@ public class MqttPathProviderMapperTests
         // Assert
         Assert.Null(found);
     }
+
+    [Theory]
+    [InlineData("kitchen", "kitchen/Temperature")]
+    [InlineData("floor/1", "Sensors[floor/1]/Temperature")]
+    public async Task WhenInlineKeyTopicIsLookedUp_ThenResolvesToSameProperty(string key, string expectedTopic)
+    {
+        // Arrange
+        var pathProvider = new AttributeBasedPathProvider("mqtt", '/');
+        var mapper = new MqttPathProviderMapper(pathProvider);
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var sensor = new MqttPathTestSensor(context);
+        var root = new MqttInlineTestRoot(context)
+        {
+            Sensors = new Dictionary<string, MqttPathTestSensor> { [key] = sensor }
+        };
+        var temperature = sensor.TryGetRegisteredSubject()!.TryGetProperty("Temperature")!;
+
+        // Act
+        var found = mapper.TryGetMapping(temperature, root, out var mapping);
+        var resolved = await mapper.TryGetPropertyAsync(
+            new MqttLookupKey(mapping!.Topic!), root.TryGetRegisteredSubject()!, CancellationToken.None);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(expectedTopic, mapping.Topic);
+        Assert.Same(sensor, resolved?.Subject);
+        Assert.Equal("Temperature", resolved?.Name);
+    }
 }
 
 [InterceptorSubject]
@@ -120,5 +148,17 @@ public partial class MqttPathTestSensor
     {
         Temperature = 0;
         Unmapped = 0;
+    }
+}
+
+[InterceptorSubject]
+public partial class MqttInlineTestRoot
+{
+    [InlinePaths]
+    public partial Dictionary<string, MqttPathTestSensor> Sensors { get; set; }
+
+    public MqttInlineTestRoot()
+    {
+        Sensors = new Dictionary<string, MqttPathTestSensor>();
     }
 }

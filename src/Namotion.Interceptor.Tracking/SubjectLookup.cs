@@ -17,14 +17,11 @@ public static class SubjectLookup
 {
     private static readonly ConcurrentDictionary<Type, Func<object, (object? key, object? value)>?> KvpAccessorCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object, object, object?>?> DictionaryLookupCache = new();
+    private static readonly ConcurrentDictionary<Type, Type?> DictionaryKeyTypeCache = new();
 
     private static readonly Func<Type, Func<object, object, object?>?> BuildDictionaryLookup = static type =>
     {
-        var interfaces = type.GetInterfaces();
-        var dictionaryInterface =
-            Array.Find(interfaces, static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>)) ??
-            Array.Find(interfaces, static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>));
-
+        var dictionaryInterface = FindDictionaryInterface(type);
         if (dictionaryInterface is null)
             return null;
 
@@ -54,11 +51,34 @@ public static class SubjectLookup
     };
 
     /// <summary>
+    /// Gets the key type of a generic dictionary type: the first type argument of the
+    /// <see cref="IDictionary{TKey,TValue}"/> it is or implements, else of
+    /// <see cref="IReadOnlyDictionary{TKey,TValue}"/>. Null for any other type, including a non-generic
+    /// <see cref="IDictionary"/>.
+    /// </summary>
+    public static Type? GetDictionaryKeyType(Type dictionaryType)
+        => DictionaryKeyTypeCache.GetOrAdd(dictionaryType, static type => FindDictionaryInterface(type)?.GenericTypeArguments[0]);
+
+    private static Type? FindDictionaryInterface(Type type)
+    {
+        if (IsGenericDefinition(type, typeof(IDictionary<,>)) || IsGenericDefinition(type, typeof(IReadOnlyDictionary<,>)))
+            return type;
+
+        var interfaces = type.GetInterfaces();
+        return Array.Find(interfaces, static i => IsGenericDefinition(i, typeof(IDictionary<,>))) ??
+               Array.Find(interfaces, static i => IsGenericDefinition(i, typeof(IReadOnlyDictionary<,>)));
+    }
+
+    private static bool IsGenericDefinition(Type type, Type definition)
+        => type.IsGenericType && type.GetGenericTypeDefinition() == definition;
+
+    /// <summary>
     /// Finds a single subject at the given <paramref name="index"/> inside
     /// a collection <paramref name="value"/>, using <see cref="IList"/>
-    /// fast path with <see cref="IEnumerable"/> fallback.
+    /// fast path with <see cref="IEnumerable"/> fallback. An index outside the collection answers null.
     /// </summary>
     /// <remarks>
+    /// When the collection is mutated concurrently, the lookup may throw instead of answering null.
     /// The IList fast path is split into its own tiny method body so the JIT can inline
     /// it at every call site. The IEnumerable fallback is extracted into a separate
     /// non-inlined method to keep the entry point under the inlining size budget.
@@ -67,7 +87,7 @@ public static class SubjectLookup
     public static IInterceptorSubject? FindSubjectInCollection(object value, int index)
     {
         if (value is IList list)
-            return list[index] as IInterceptorSubject;
+            return (uint)index < (uint)list.Count ? list[index] as IInterceptorSubject : null;
 
         return FindSubjectInCollectionSlow(value, index);
     }
