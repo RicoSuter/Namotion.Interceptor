@@ -8,10 +8,10 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 public class SubscriptionManagerSetupTests
 {
     [Fact]
-    public void WhenDataChangeArrivesBeforeSetupCompletes_ThenNotificationIsIgnored()
+    public async Task WhenDataChangeArrivesBeforeSetupCompletes_ThenNotificationIsIgnored()
     {
         // Arrange
-        var harness = SubscriptionManagerTestHarness.Create();
+        await using var harness = SubscriptionManagerTestHarness.Create();
         harness.RegisterMonitoredItem(clientHandle: 7, propertyName: "Value");
 
         var notification = SubscriptionManagerTestHarness.CreateNotification(clientHandle: 7, value: 42d);
@@ -31,10 +31,10 @@ public class SubscriptionManagerSetupTests
     }
 
     [Fact]
-    public void WhenSubscriptionsAreTransferred_ThenTheCallbackGateStaysOpen()
+    public async Task WhenSubscriptionsAreTransferred_ThenTheCallbackGateStaysOpen()
     {
         // Arrange: setup has completed, then the reconnect handler hands over a transferred subscription.
-        var harness = SubscriptionManagerTestHarness.Create();
+        await using var harness = SubscriptionManagerTestHarness.Create();
         harness.RegisterMonitoredItem(clientHandle: 7, propertyName: "Value");
         harness.Manager.CompleteSetup([]);
         harness.Manager.UpdateTransferredSubscriptions([new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions())]);
@@ -53,7 +53,7 @@ public class SubscriptionManagerSetupTests
     public async Task WhenDisposedManagerRunsSubscriptionSetup_ThenCallbacksStaySuppressed()
     {
         // Arrange
-        var harness = SubscriptionManagerTestHarness.Create();
+        await using var harness = SubscriptionManagerTestHarness.Create();
         await harness.Manager.DisposeAsync();
 
         // Act: a reconnect that starts after disposal runs subscription setup again. Passing no
@@ -71,14 +71,14 @@ public class SubscriptionManagerSetupTests
     }
 
     [Fact]
-    public void WhenSubjectDetachesBeforeItsItemsAreRegistered_ThenTheSweepStillDropsThem()
+    public async Task WhenSubjectDetachesBeforeItsItemsAreRegistered_ThenTheSweepStillDropsThem()
     {
         // Arrange: enter the state CreateBatchedSubscriptionsAsync establishes, with the callback
         // gate closed, the monitored-item dictionary cleared, and setup marked as in progress. Both
         // child subjects are still in the registry, because the lifecycle interceptor raises
         // SubjectDetaching before the registry handler runs, so a subject detaching right now looks
         // exactly like one that is staying.
-        var harness = SubscriptionManagerTestHarness.Create();
+        await using var harness = SubscriptionManagerTestHarness.Create();
         harness.Manager.BeginSetup();
 
         var survivorProperty = harness.CreateAttachedChildSubjectProperty("Kept");
@@ -106,12 +106,12 @@ public class SubscriptionManagerSetupTests
     }
 
     [Fact]
-    public void WhenSubjectDetachesDuringSetup_ThenItIsSweptAndNeverRegisteredForReadAfterWrite()
+    public async Task WhenSubjectDetachesDuringSetup_ThenItIsSweptAndNeverRegisteredForReadAfterWrite()
     {
         // Arrange: mid-setup, the state production is in when CompleteSetup runs. Both items pass
         // the read-after-write filter (requested interval zero, revised positive), so only the
         // sweep keeps the detached one out of the index.
-        var harness = SubscriptionManagerTestHarness.Create();
+        await using var harness = SubscriptionManagerTestHarness.Create();
         harness.Manager.BeginSetup();
 
         var survivorItem = harness.RegisterMonitoredItem(clientHandle: 1, propertyName: "Kept", revisedSamplingIntervalMs: 100);
@@ -139,7 +139,7 @@ public class SubscriptionManagerSetupTests
     {
         // Arrange: the SDK subscription still holds an item whose handle the sweep dropped, and the
         // item keeps failing with a status the health monitor would retry.
-        var harness = SubscriptionManagerTestHarness.Create(withPollingFallback: true);
+        await using var harness = SubscriptionManagerTestHarness.Create(withPollingFallback: true);
         var sweptItem = new MonitoredItem(NullTelemetryContext.Instance)
         {
             StartNodeId = new NodeId(1u, 2),

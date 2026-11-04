@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 /// The configuration requests sampling interval zero, so a monitored item whose server-revised
 /// interval is positive passes the read-after-write filter.
 /// </summary>
-internal sealed class SubscriptionManagerTestHarness
+internal sealed class SubscriptionManagerTestHarness : IAsyncDisposable
 {
     private readonly IInterceptorSubject _subject;
 
@@ -46,6 +46,16 @@ internal sealed class SubscriptionManagerTestHarness
         Manager = manager;
         ReadAfterWriteManager = readAfterWriteManager;
         PollingManager = pollingManager;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Manager.DisposeAsync();
+        await ReadAfterWriteManager.DisposeAsync();
+        if (PollingManager is not null)
+        {
+            await PollingManager.DisposeAsync();
+        }
     }
 
     public static SubscriptionManagerTestHarness Create(bool withPollingFallback = false)

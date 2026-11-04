@@ -143,6 +143,58 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
+    public async Task WhenTheApplicationDetachesAParentDuringTheLoad_ThenItsNewChildIsNotLeftRegisteredOrMonitored()
+    {
+        // Arrange: the first load binds Sensor. On the reload Sensor has gained Extra, which carries
+        // the Level variable, and the application removes Sensor from the root while Level's type is
+        // being read, so Extra is already staged under a subject that is no longer attached.
+        var extraId = new NodeId(2003, 2);
+        var levelId = new NodeId(2004, 2);
+        var subjectFactory = new RecordingOpcUaSubjectFactory();
+        var (loader, source, subject) = CreateFixture(subjectFactory);
+        var rootNode = CreateObjectReferenceDescription("Root", RootId);
+        var dataTypes = new Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)>(SensorTreeDataTypes)
+        {
+            [levelId] = (DataTypeIds.Double, -1)
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, SensorTree);
+        SetupReadAsync(mockSession, dataTypes);
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        var sensorProperty = subject.TryGetRegisteredSubject()!.Properties.Single(property => property.Name == "Sensor");
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>(SensorTree)
+        {
+            [SensorId] =
+            [
+                CreateObjectReferenceDescription("Status", StatusId),
+                CreateObjectReferenceDescription("Extra", extraId)
+            ],
+            [extraId] = [CreateTestReferenceDescription("Level", levelId)]
+        });
+        SetupReadAsync(mockSession, dataTypes, failWhile: nodeId =>
+        {
+            if (nodeId == levelId && sensorProperty.GetValue() is not null)
+            {
+                Assert.NotNull(subjectFactory.GetCreatedSubject("Extra").TryGetRegisteredSubject());
+                sensorProperty.SetValue(null);
+            }
+            return false;
+        });
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        var extra = subjectFactory.GetCreatedSubject("Extra");
+        Assert.Null(sensorProperty.GetValue());
+        Assert.Null(extra.TryGetRegisteredSubject());
+        Assert.DoesNotContain(monitoredItems, item => item.StartNodeId == levelId);
+        Assert.DoesNotContain(source.Ownership.Properties, property => ReferenceEquals(property.Subject, extra));
+    }
+
+    [Fact]
     public async Task WhenLoadIsCancelledWhileAChildIsStaged_ThenRollbackIsCompleteAndALaterLoadSucceeds()
     {
         // Arrange: the mock cancels the load's token from inside the browse of Status, the first
