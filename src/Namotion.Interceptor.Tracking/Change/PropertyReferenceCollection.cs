@@ -1,16 +1,29 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Lock-free, copy-on-write collection for backward property dependencies (UsedByProperties).
-/// Concurrency Model:
-/// - Reads: Allocation-free via <see cref="Items"/>. Always returns a stable snapshot.
-/// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
-/// Design: Copy-on-write ensures readers never see partial updates.
-/// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free.
+/// Thread-safe collection for backward property dependencies (UsedByProperties).
+/// Reads via <see cref="Items"/> return a stable snapshot without locking and without allocating,
+/// except that the first read after a change to a large collection rebuilds the snapshot once under a lock.
+/// The order of <see cref="Items"/> is unspecified.
 /// </summary>
 public sealed class PropertyReferenceCollection
 {
-    private PropertyReference[] _items;
+    private const int MaxSmallCount = 32;
+    private const int MaxDemotedCount = 16;
+
+    // Must be a power of two because Sync masks with LockCount - 1.
+    private const int LockCount = 64;
+
+    // Collections share a fixed set of locks instead of allocating one each. This is safe because the lock
+    // is a leaf: nothing that runs under it takes another lock, so no thread ever holds two of them. Readers
+    // also take it to rebuild a large collection's snapshot, which copies the whole collection.
+    private static readonly Lock[] Locks = CreateLocks(LockCount);
+
+    // A PropertyReference[] (small mode: copy-on-write, the array is the snapshot) or a LargeStorage.
+    // Replaced only under Sync, so writers never race each other on it.
+    private object _state;
 
     /// <summary>
     /// Shared empty instance for read-only queries when no data exists.
@@ -20,112 +33,158 @@ public sealed class PropertyReferenceCollection
 
     internal PropertyReferenceCollection()
     {
-        _items = [];
+        _state = Array.Empty<PropertyReference>();
     }
 
     /// <summary>
     /// Creates a collection pre-populated with a single item.
-    /// Avoids a separate Add call (and its CAS array allocation) for the common 0→1 transition.
+    /// Avoids a separate Add call (and its array allocation) for the common 0→1 transition.
     /// </summary>
     internal PropertyReferenceCollection(in PropertyReference initialItem)
     {
-        _items = [initialItem];
+        _state = new[] { initialItem };
     }
 
     /// <summary>
     /// Gets the count of dependencies (thread-safe, allocation-free).
     /// </summary>
-    public int Count => Volatile.Read(ref _items).Length;
+    public int Count
+    {
+        get
+        {
+            var state = Volatile.Read(ref _state);
+            return state is PropertyReference[] array ? array.Length : ((LargeStorage)state).Count;
+        }
+    }
 
     /// <summary>
-    /// Gets a stable snapshot for iteration (thread-safe, allocation-free).
-    /// <para>Snapshot won't change even if a collection is modified concurrently - copy-on-write semantics.</para>
+    /// Gets a stable snapshot for iteration (thread-safe).
+    /// <para>The snapshot does not change when the collection is modified concurrently. The order is unspecified.</para>
     /// </summary>
-    public ReadOnlySpan<PropertyReference> Items => Volatile.Read(ref _items);
+    public ReadOnlySpan<PropertyReference> Items => ItemsArray;
 
     /// <summary>
     /// Gets the underlying snapshot array (thread-safe). Use when a span cannot be stored
     /// (e.g., across lock boundaries where ref structs are not allowed).
     /// </summary>
-    internal PropertyReference[] ItemsArray => Volatile.Read(ref _items);
+    internal PropertyReference[] ItemsArray
+    {
+        get
+        {
+            var state = Volatile.Read(ref _state);
+            if (state is PropertyReference[] array)
+            {
+                return array;
+            }
+
+            return ((LargeStorage)state).Snapshot ?? RebuildSnapshot();
+        }
+    }
+
+    private Lock Sync => Locks[RuntimeHelpers.GetHashCode(this) & (LockCount - 1)];
 
     /// <summary>
     /// Returns whether the collection contains the property (thread-safe, allocation-free).
+    /// Takes the collection's lock while the collection is large.
     /// </summary>
     internal bool Contains(in PropertyReference property)
     {
-        return Array.IndexOf(Volatile.Read(ref _items), property) >= 0;
+        if (Volatile.Read(ref _state) is PropertyReference[] array)
+        {
+            return Array.IndexOf(array, property) >= 0;
+        }
+
+        lock (Sync)
+        {
+            var state = _state;
+            return state is PropertyReference[] current
+                ? Array.IndexOf(current, property) >= 0
+                : ((LargeStorage)state).Contains(property);
+        }
     }
 
     /// <summary>
-    /// Adds a dependency using lock-free CAS (compare-and-swap).
-    /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
-    /// Idempotent: Adding the same property multiple times is safe (no duplicates).
+    /// Adds a dependency. Thread-safe and idempotent.
     /// </summary>
     /// <returns>True if property was added; false if already exists.</returns>
     internal bool Add(in PropertyReference property)
     {
-        while (true)
+        lock (Sync)
         {
-            var snapshot = Volatile.Read(ref _items);
+            if (_state is not PropertyReference[] array)
+            {
+                return ((LargeStorage)_state).Add(property);
+            }
 
-            // Idempotency check: Skip if already present
-            if (Array.IndexOf(snapshot, property) >= 0)
+            if (Array.IndexOf(array, property) >= 0)
             {
                 return false;
             }
 
-            // Create a new array with property appended
-            var newArray = new PropertyReference[snapshot.Length + 1];
-            Array.Copy(snapshot, newArray, snapshot.Length);
-            newArray[^1] = property;
-
-            // Atomic swap: Succeeds if no other thread modified _items
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArray, snapshot), snapshot))
+            if (array.Length < MaxSmallCount)
             {
-                return true;
+                var newArray = new PropertyReference[array.Length + 1];
+                Array.Copy(array, newArray, array.Length);
+                newArray[^1] = property;
+                Volatile.Write(ref _state, newArray);
+            }
+            else
+            {
+                Volatile.Write(ref _state, new LargeStorage(array, property));
             }
 
-            // Another thread won the race - retry with a new snapshot
+            return true;
         }
     }
 
     /// <summary>
-    /// Removes a dependency using lock-free CAS (compare-and-swap).
-    /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
+    /// Removes a dependency. Thread-safe.
     /// </summary>
     /// <returns>True if property was removed; false if not found.</returns>
     internal bool Remove(in PropertyReference property)
     {
-        while (true)
+        lock (Sync)
         {
-            var snapshot = Volatile.Read(ref _items);
-
-            // Find property to remove
-            var idx = Array.IndexOf(snapshot, property);
-            if (idx < 0)
+            if (_state is PropertyReference[] array)
             {
-                return false; // Not found
-            }
+                var index = Array.IndexOf(array, property);
+                if (index < 0)
+                {
+                    return false;
+                }
 
-            // Create a new array without the property
-            var newArray = snapshot.Length == 1 ? [] : RemoveAt(snapshot, idx);
-
-            // Atomic swap: Succeeds if no other thread modified _items
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArray, snapshot), snapshot))
-            {
+                Volatile.Write(ref _state, array.Length == 1 ? Array.Empty<PropertyReference>() : RemoveAt(array, index));
                 return true;
             }
 
-            // Another thread won the race - retry with a new snapshot
+            var storage = (LargeStorage)_state;
+            if (!storage.Remove(property))
+            {
+                return false;
+            }
+
+            if (storage.Count <= MaxDemotedCount)
+            {
+                Volatile.Write(ref _state, storage.ToArray());
+            }
+
+            return true;
         }
     }
 
-    // Helper: Creates a new array with item at index removed
+    private PropertyReference[] RebuildSnapshot()
+    {
+        lock (Sync)
+        {
+            var state = _state;
+            return state as PropertyReference[] ?? ((LargeStorage)state).GetOrCreateSnapshot();
+        }
+    }
+
     private static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
     {
         var result = new PropertyReference[source.Length - 1];
-       
+
         if (index > 0)
         {
             Array.Copy(source, 0, result, 0, index);
@@ -137,5 +196,114 @@ public sealed class PropertyReferenceCollection
         }
 
         return result;
+    }
+
+    private static Lock[] CreateLocks(int count)
+    {
+        var locks = new Lock[count];
+        for (var index = 0; index < locks.Length; index++)
+        {
+            locks[index] = new Lock();
+        }
+
+        return locks;
+    }
+
+    /// <summary>
+    /// Storage above <see cref="MaxSmallCount"/>. Members other than <see cref="Count"/> and
+    /// <see cref="Snapshot"/> must be called under the owning collection's lock.
+    /// </summary>
+    private sealed class LargeStorage
+    {
+        private readonly Dictionary<PropertyReference, int> _indices;
+
+        // Private: readers only ever see copies made by ToArray, so slots may be overwritten in place.
+        private PropertyReference[] _buffer;
+        private int _count;
+        private PropertyReference[]? _snapshot;
+
+        internal LargeStorage(PropertyReference[] items, in PropertyReference item)
+        {
+            _indices = new Dictionary<PropertyReference, int>(items.Length * 2, PropertyReference.Comparer);
+            _buffer = new PropertyReference[items.Length * 2];
+            for (var index = 0; index < items.Length; index++)
+            {
+                _indices.Add(items[index], index);
+                _buffer[index] = items[index];
+            }
+
+            _count = items.Length;
+            Add(item);
+        }
+
+        internal int Count => Volatile.Read(ref _count);
+
+        internal PropertyReference[]? Snapshot => Volatile.Read(ref _snapshot);
+
+        internal bool Contains(in PropertyReference property)
+        {
+            return _indices.ContainsKey(property);
+        }
+
+        internal bool Add(in PropertyReference property)
+        {
+            if (_indices.ContainsKey(property))
+            {
+                return false;
+            }
+
+            if (_count == _buffer.Length)
+            {
+                Array.Resize(ref _buffer, _buffer.Length * 2);
+            }
+
+            _indices.Add(property, _count);
+
+            // Cleared before the count changes so a reader that sees the new count cannot get the old snapshot.
+            Volatile.Write(ref _snapshot, null);
+            _buffer[_count] = property;
+            Volatile.Write(ref _count, _count + 1);
+            return true;
+        }
+
+        internal bool Remove(in PropertyReference property)
+        {
+            if (!_indices.Remove(property, out var index))
+            {
+                return false;
+            }
+
+            // Cleared before the count changes so a reader that sees the new count cannot get the old snapshot.
+            Volatile.Write(ref _snapshot, null);
+
+            var lastIndex = _count - 1;
+            if (index < lastIndex)
+            {
+                var moved = _buffer[lastIndex];
+                _buffer[index] = moved;
+                _indices[moved] = index;
+            }
+
+            _buffer[lastIndex] = default;
+            Volatile.Write(ref _count, lastIndex);
+            return true;
+        }
+
+        internal PropertyReference[] GetOrCreateSnapshot()
+        {
+            var snapshot = _snapshot;
+            if (snapshot is null)
+            {
+                snapshot = ToArray();
+                Volatile.Write(ref _snapshot, snapshot);
+            }
+
+            return snapshot;
+        }
+
+        internal PropertyReference[] ToArray()
+        {
+            return _buffer.AsSpan(0, _count).ToArray();
+        }
     }
 }
