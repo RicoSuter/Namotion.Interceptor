@@ -583,7 +583,7 @@ public class CustomTypeResolver : OpcUaTypeResolver
 }
 ```
 
-Both per-node seams are asynchronous so an override can read the server to classify a node, and every such read costs one round-trip per node. The base object seam never reads the server; the base variable seam reads it only to walk a custom DataType up the type tree to its built-in type. `ResolveVariableNodeTypeAsync` returns null when the type cannot be inferred, and the loader then skips that node. Its two attribute values have already been classified, so a bad status reaching it is permanent and null is the right answer. A transient status never reaches it: `ResolveVariableNodeTypesAsync` throws `OpcUaTransientServiceException` first, which aborts the load so the source retries it, and an override that replaces the batched read must do the same.
+Both per-node seams are asynchronous so an override can read the server to classify a node, and every such read costs one round-trip per node. The base object seam never reads the server; the base variable seam reads it only to walk a custom DataType up the type tree to its built-in type. `ResolveVariableNodeTypeAsync` returns null when the type cannot be inferred, and the loader then skips that node. Its two attribute values have already been classified, so a bad status reaching it describes the node and null is the right answer. A status about the session, the connection or the server never reaches it: `ResolveVariableNodeTypesAsync` throws `OpcUaTransientServiceException` first, which aborts the load so the source retries it, and an override that replaces the batched read must do the same.
 
 The two decoration seams, `GetAttributesForDynamicProperty` and `GetAttributesForDynamicAttribute`, return the attributes stamped on a member the loader adds for a discovered node: the base `OpcUaNodeAttribute` is what makes the member addressable by the mapper and re-matches it to the same node on the next load, so an override that drops it unmaps the member. An application can override both to stamp its own attribute alongside the base one.
 
@@ -893,6 +893,13 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 
 A load discovers the address space first and changes the model only at the end. Ownership claims and property bindings are queued while browsing and applied by a single commit, claims first, then the bindings deepest level first. A failure before that commit therefore leaves the model at its pre-load state, with one exception: dynamic properties and dynamic attributes are added eagerly during discovery and survive a failed load. They are transient rather than torn state, because the next load re-matches each of them through the OPC UA node attribute it carries and monitors it again.
 
-A failure inside the commit undoes what that commit did: the ownership claims it established are released, while ownership from a previous successful load is kept, and the bindings it applied are restored in reverse order, except where the application has since written the property itself, in which case the newer value wins.
+A failure inside the commit undoes what that commit did: the ownership claims it established are released, while ownership from a previous successful load is kept, and the bindings it applied are restored in reverse order, except where the application has since written the property itself, in which case the newer value wins. A binding that replaced an existing child detached that child, which released its ownership, so the restored child comes back without ownership or monitoring. The source retries the failed load right away, and that load claims and monitors it again.
 
 A subject whose browse did not complete this load is skipped rather than loaded from a truncated child list. Its properties keep their current values and the next load reloads it.
+
+A browse or read that fails for a reason about the session, the connection or the server as a whole, such as a timeout, a busy or halted server or a closed session, aborts the load, and the source retries it. Any other failure describes the node or a device behind it, for example a gateway reporting an offline device with `BadNoCommunication`, so the loader logs it and skips that node while the rest of the address space loads.
+
+### Known Limitations
+
+- A subject the application detaches at the moment a failing monitored item of it is escalated to polling can have that item polled until the next reconnect.
+- A subject the application detaches at the moment subscription setup starts can keep its monitored items until the next reconnect.

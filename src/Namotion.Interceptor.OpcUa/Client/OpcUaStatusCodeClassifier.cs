@@ -4,15 +4,15 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
 /// Classifies OPC UA <see cref="StatusCode"/>s for retry decisions. The two predicates cannot share
-/// one list: the access-scoped codes are recoverable for the first and a skip for the second.
+/// one list: a per-node status the subscribe path keeps retrying is usually one a load should skip.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="IsRecoverableWithinSession"/> answers whether a status can recover without a new
 /// session and backs the subscribe and write paths. <see cref="ThrowIfLoadMustRetry"/> answers
-/// whether the load must abort and retry and backs the browse and read paths; its load-skip set is
-/// the session-permanent set plus <c>BadUserAccessDenied</c>, <c>BadNotReadable</c> and
-/// <c>BadNotImplemented</c>. The reasoning is in docs/design/opcua-client-loader.md.
+/// whether the load must abort and retry and backs the browse and read paths; it aborts only for
+/// statuses about the session, the connection or the server as a whole, and skips the node for every
+/// other bad status. The reasoning is in docs/design/opcua-client-loader.md.
 /// </para>
 /// <para>
 /// The write path uses <see cref="IsRecoverableWithinSession"/> for diagnostics only:
@@ -38,17 +38,33 @@ internal static class OpcUaStatusCodeClassifier
     ];
 
     /// <summary>
-    /// Bad statuses where reloading the structure now cannot help, so the browse/read caller skips
-    /// the node instead of aborting the load. Superset of <see cref="SessionPermanentCodes"/> by the
-    /// access-scoped codes, which are deterministic for the current session even though they may
-    /// recover over a longer horizon.
+    /// Bad statuses about the session, the connection or the server as a whole, which a fresh load
+    /// can clear. Any other bad status on a browse or read describes the node or a device behind it,
+    /// such as a gateway reporting an offline device, and would fail every reload the same way.
     /// </summary>
-    private static readonly HashSet<uint> LoadSkipCodes =
+    private static readonly HashSet<uint> LoadRetryCodes =
     [
-        .. SessionPermanentCodes,
-        StatusCodes.BadUserAccessDenied,
-        StatusCodes.BadNotReadable,
-        StatusCodes.BadNotImplemented
+        StatusCodes.BadTimeout,
+        StatusCodes.BadRequestTimeout,
+        StatusCodes.BadServerHalted,
+        StatusCodes.BadShutdown,
+        StatusCodes.BadResourceUnavailable,
+        StatusCodes.BadOutOfMemory,
+        StatusCodes.BadTooManyOperations,
+        StatusCodes.BadTcpServerTooBusy,
+        StatusCodes.BadNoContinuationPoints,
+        StatusCodes.BadContinuationPointInvalid,
+        StatusCodes.BadCommunicationError,
+        StatusCodes.BadConnectionClosed,
+        StatusCodes.BadNotConnected,
+        StatusCodes.BadDisconnect,
+        StatusCodes.BadSecureChannelClosed,
+        StatusCodes.BadSecureChannelIdInvalid,
+        StatusCodes.BadSessionClosed,
+        StatusCodes.BadSessionIdInvalid,
+        StatusCodes.BadSessionNotActivated,
+        // Also what ReadNodesAsync pads a short read response with.
+        StatusCodes.BadUnexpectedError
     ];
 
     /// <summary>
@@ -63,13 +79,13 @@ internal static class OpcUaStatusCodeClassifier
 
     /// <summary>
     /// Throws <see cref="OpcUaTransientServiceException"/> if <paramref name="statusCode"/> is a bad
-    /// status that a fresh load could clear, so the browse/read caller aborts and lets reconnect
-    /// retry. Statuses that would repeat immediately on reload (permanent design-time and
-    /// access-scoped codes) and non-bad statuses are ignored, so the caller logs and skips the node.
+    /// status about the session, the connection or the server that a fresh load could clear, so the
+    /// browse/read caller aborts and lets the source retry. Every other status is ignored, so for a
+    /// bad one the caller logs and skips the node.
     /// </summary>
     public static void ThrowIfLoadMustRetry(StatusCode statusCode, string operation, NodeId? nodeId)
     {
-        if (StatusCode.IsBad(statusCode) && !LoadSkipCodes.Contains(statusCode.Code))
+        if (StatusCode.IsBad(statusCode) && LoadRetryCodes.Contains(statusCode.Code))
         {
             throw new OpcUaTransientServiceException(operation, nodeId, statusCode);
         }

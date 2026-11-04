@@ -267,7 +267,7 @@ public class OpcUaTypeResolverTests
             {
                 Results =
                 [
-                    new DataValue { StatusCode = StatusCodes.BadServerNotConnected },
+                    new DataValue { StatusCode = StatusCodes.BadTimeout },
                     new DataValue { Value = -1, StatusCode = StatusCodes.Good }
                 ],
                 DiagnosticInfos = []
@@ -279,7 +279,7 @@ public class OpcUaTypeResolverTests
 
         Assert.Equal("Read", exception.Operation);
         Assert.Equal(variableNodeId, exception.NodeId);
-        Assert.Equal((StatusCode)StatusCodes.BadServerNotConnected, exception.StatusCode);
+        Assert.Equal((StatusCode)StatusCodes.BadTimeout, exception.StatusCode);
     }
 
     [Fact]

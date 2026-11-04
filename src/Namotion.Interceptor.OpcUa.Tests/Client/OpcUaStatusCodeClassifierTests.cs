@@ -102,9 +102,9 @@ public class OpcUaStatusCodeClassifierTests
 
     [Theory]
     [InlineData(StatusCodes.BadTimeout)]
-    [InlineData(StatusCodes.BadOutOfService)]
-    [InlineData(StatusCodes.BadTooManyMonitoredItems)]
-    [InlineData(StatusCodes.BadServerNotConnected)]
+    [InlineData(StatusCodes.BadServerHalted)]
+    [InlineData(StatusCodes.BadSessionIdInvalid)]
+    [InlineData(StatusCodes.BadContinuationPointInvalid)]
     public void WhenBrowseStatusCanClearOnReload_ThenThrowIfLoadMustRetryThrows(uint statusCode)
     {
         // Arrange
@@ -128,6 +128,15 @@ public class OpcUaStatusCodeClassifierTests
     [InlineData(StatusCodes.BadUserAccessDenied)]
     [InlineData(StatusCodes.BadNotReadable)]
     [InlineData(StatusCodes.BadNotImplemented)]
+    // Node- and device-scoped codes, including a gateway reporting an offline device: one such
+    // node must not hold back the rest of the address space.
+    [InlineData(StatusCodes.BadOutOfService)]
+    [InlineData(StatusCodes.BadServerNotConnected)]
+    [InlineData(StatusCodes.BadNoCommunication)]
+    [InlineData(StatusCodes.BadDeviceFailure)]
+    [InlineData(StatusCodes.BadNotSupported)]
+    [InlineData(StatusCodes.BadNodeNotInView)]
+    [InlineData(StatusCodes.BadTooManyMonitoredItems)]
     // Non-bad statuses never throw.
     [InlineData(StatusCodes.Good)]
     [InlineData(StatusCodes.Uncertain)]

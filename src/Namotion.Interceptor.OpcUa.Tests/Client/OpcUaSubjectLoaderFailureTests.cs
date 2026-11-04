@@ -299,11 +299,30 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
     }
 
     [Fact]
+    public async Task WhenOneNodeReportsAnOfflineDevice_ThenTheRestOfTheAddressSpaceLoads()
+    {
+        // Arrange: a gateway reports the device behind Status as unreachable, which can last for
+        // hours, so it must skip that node rather than abort the load.
+        var (loader, source, subject) = CreateFixture();
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, SensorTree, failWhile: nodeId => nodeId == StatusId, failStatusCode: StatusCodes.BadNoCommunication);
+        SetupReadAsync(mockSession, SensorTreeDataTypes);
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, CreateObjectReferenceDescription("Root", RootId), mockSession.Object, CancellationToken.None);
+
+        // Assert: only the unreachable node is left out.
+        AssertMonitoredAndClaimed(source, monitoredItems, TemperatureId);
+        var sensor = (IInterceptorSubject)subject.TryGetRegisteredSubject()!.Properties.Single(property => property.Name == "Sensor").GetValue()!;
+        Assert.DoesNotContain(sensor.TryGetRegisteredSubject()!.Properties, property => property.Name == "Status");
+    }
+
+    [Fact]
     public async Task WhenAReadFailsTransientlyUnderAStagedChild_ThenRollbackIsCompleteAndALaterLoadSucceeds()
     {
         // Arrange: Sensor is staged while Root's level is loaded. On Sensor's own level its Reading
         // variable is typed by reading DataType and ValueRank, and that read returns
-        // BadServerNotConnected, which the type resolver classifies as transient and rethrows.
+        // BadTimeout, which the type resolver classifies as transient and rethrows.
         var readingId = new NodeId(2003, 2);
         var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
         {
@@ -326,7 +345,7 @@ public class OpcUaSubjectLoaderFailureTests : OpcUaSubjectLoaderTestsBase
                 [readingId] = (DataTypeIds.Double, -1)
             },
             failWhile: nodeId => failReadingRead && nodeId == readingId,
-            failStatusCode: StatusCodes.BadServerNotConnected);
+            failStatusCode: StatusCodes.BadTimeout);
 
         var rootNode = CreateObjectReferenceDescription("Root", RootId);
 
