@@ -69,19 +69,20 @@ public sealed class PropertyReferenceCollection
     /// </summary>
     internal PropertyReference[] ItemsArray
     {
-        get
-        {
-            var state = Volatile.Read(ref _state);
-            if (state is PropertyReference[] array)
-            {
-                return array;
-            }
-
-            return ((LargeStorage)state).Snapshot ?? RebuildSnapshot();
-        }
+        // Inlined into the write path, so the large-mode branch stays out of line.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Volatile.Read(ref _state) as PropertyReference[] ?? GetLargeSnapshot();
     }
 
     private Lock Sync => Locks[RuntimeHelpers.GetHashCode(this) & (LockCount - 1)];
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private PropertyReference[] GetLargeSnapshot()
+    {
+        // Re-read, since the collection may have been demoted to an array after the caller's read.
+        var state = Volatile.Read(ref _state);
+        return state as PropertyReference[] ?? ((LargeStorage)state).Snapshot ?? RebuildSnapshot();
+    }
 
     /// <summary>
     /// Returns whether the collection contains the property (thread-safe, allocation-free).
