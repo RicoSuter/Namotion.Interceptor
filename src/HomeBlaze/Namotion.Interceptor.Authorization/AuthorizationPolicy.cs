@@ -322,7 +322,7 @@ public sealed class AuthorizationPolicy
         }
 
         // The answer for a root or a detached subject rests on one subject's parents and attachment, which hold together
-        // at the second read, so nothing needs to be checked again.
+        // at the first read (the attachment only goes from true to false), so nothing needs to be checked again.
         var parents = subject.Parents;
         var isAttached = subject.IsAttached;
         if (!isAttached || parents.Length == 0)

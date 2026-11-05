@@ -2,14 +2,19 @@ using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Authorization.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Xunit.Abstractions;
 using static Namotion.Interceptor.Authorization.Tests.TestGraph;
 
 namespace Namotion.Interceptor.Authorization.Tests;
 
-public class ConcurrentGraphChangeTests
+public class ConcurrentGraphChangeTests(ITestOutputHelper output)
 {
     private const int StressMutatorCycles = 20_000;
     private const int StressReaderCount = 4;
+
+    // Widens the deny readers' window between reads, so a search that joins two states is likely; the allow readers do
+    // not spin, so most of their evaluations complete while the parents move.
+    private const int DenyReaderSpinIterations = 20;
 
     private static readonly PermissionAction[] KnownActions = [PermissionAction.Read, PermissionAction.Write];
 
@@ -119,32 +124,69 @@ public class ConcurrentGraphChangeTests
     }
 
     [Fact]
-    public void WhenParentsMoveConcurrentlyWithoutDetaching_ThenAPathDenyNeverLapses()
+    public void WhenTheGraphChangesDuringTheFirstAttempt_ThenAPathAllowAnswersForTheChangedGraph()
     {
-        // Arrange: every state of the move cycle has a path of S below R.Mother.
-        var pathProvider = new HookPathProvider(spinIterations: 200);
-        var policy = Compile(pathProvider, allowPaths: null, denyPaths: ["Mother.**"]);
+        // Arrange: S moves from R.Father to R.Mother, keeping its registered instance, after the first attempt read S.
+        var pathProvider = new HookPathProvider();
+        var policy = Compile(pathProvider, allowPaths: ["Mother.**"], denyPaths: null);
+        var root = new Person(CreateContext());
+        var s = new Person();
+        root.Father = s;
+        var member = Member(s, nameof(Person.Children));
+        Assert.False(policy.CanRead(member));
+        pathProvider.SetHook(() =>
+        {
+            root.Mother = s;
+            root.Father = null;
+        });
+
+        // Act
+        var allowed = policy.CanRead(member);
+
+        // Assert
+        Assert.True(allowed);
+    }
+
+    [Fact]
+    public void WhenTheGraphChangesDuringTheFirstAttempt_ThenAPathDenyAnswersForTheChangedGraph()
+    {
+        // Arrange: S moves from R.Father, which the deny names, to R.Mother after the first attempt read S.
+        var pathProvider = new HookPathProvider();
+        var policy = Compile(pathProvider, allowPaths: null, denyPaths: ["Father.**"]);
+        var root = new Person(CreateContext());
+        var s = new Person();
+        root.Father = s;
+        var member = Member(s, nameof(Person.Children));
+        Assert.False(policy.CanRead(member));
+        pathProvider.SetHook(() =>
+        {
+            root.Mother = s;
+            root.Father = null;
+        });
+
+        // Act
+        var allowed = policy.CanRead(member);
+
+        // Assert
+        Assert.True(allowed);
+    }
+
+    [Fact]
+    public void WhenParentsMoveConcurrentlyWithoutDetaching_ThenAPathDenyNeverLapsesAndEvaluationsComplete()
+    {
+        // Arrange: every state of the move cycle has a path of S below R.Mother, so a completed evaluation is denied by
+        // the deny policy and allowed by the allow policy; only an evaluation that failed closed is denied by both.
+        var denyPolicy = Compile(new HookPathProvider(DenyReaderSpinIterations), allowPaths: null, denyPaths: ["Mother.**"]);
+        var allowPolicy = Compile(new HookPathProvider(), allowPaths: ["Mother.**"], denyPaths: null);
         var graph = MoveGraph.Create();
         var member = Member(graph.S, nameof(Person.Children));
         using var start = new ManualResetEventSlim();
-        var mutatorDone = 0;
-        var wrongAllows = 0;
-        var readers = new Thread[StressReaderCount];
-        for (var i = 0; i < readers.Length; i++)
-        {
-            readers[i] = new Thread(() =>
-            {
-                start.Wait();
-                while (Volatile.Read(ref mutatorDone) == 0)
-                {
-                    if (policy.CanRead(member))
-                    {
-                        Interlocked.Increment(ref wrongAllows);
-                    }
-                }
-            });
-            readers[i].Start();
-        }
+        using var mutatorDone = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, StressReaderCount)
+            .Select(i => new StressReader(i % 2 == 0 ? denyPolicy : allowPolicy, member, start, mutatorDone))
+            .ToArray();
+        var denyReaders = readers.Where((_, i) => i % 2 == 0).ToArray();
+        var allowReaders = readers.Where((_, i) => i % 2 != 0).ToArray();
 
         // Act
         start.Set();
@@ -154,14 +196,18 @@ public class ConcurrentGraphChangeTests
             graph.Step4To6();
         }
 
-        Volatile.Write(ref mutatorDone, 1);
+        mutatorDone.Set();
         foreach (var reader in readers)
         {
             reader.Join();
         }
 
         // Assert
-        Assert.Equal(0, wrongAllows);
+        output.WriteLine($"evaluations={readers.Sum(r => r.Evaluations)} completedAllows={allowReaders.Sum(r => r.Allowed)} wrongAllows={denyReaders.Sum(r => r.Allowed)}");
+        Assert.All(readers, reader => Assert.Null(reader.Exception));
+        Assert.All(readers, reader => Assert.True(reader.Evaluations > 0));
+        Assert.Equal(0, denyReaders.Sum(reader => reader.Allowed));
+        Assert.True(allowReaders.Sum(reader => reader.Allowed) > 0, "No evaluation of the allow policy completed while the parents moved.");
     }
 
     private static AuthorizationPolicy Compile(PathProviderBase pathProvider, string[]? allowPaths, string[]? denyPaths)
@@ -171,6 +217,58 @@ public class ConcurrentGraphChangeTests
                 allow: [Policies.Rule([PermissionAction.Read], paths: allowPaths)],
                 deny: denyPaths is null ? null : [Policies.Rule([PermissionAction.Read], paths: denyPaths)])],
             ["Role"], [], KnownActions, TestTags.Default, pathProvider);
+
+    /// <summary>
+    /// Asks the policy about the member on its own thread from the start signal until the mutator is done, at least once,
+    /// and keeps its counts and any exception for the test thread to read after <see cref="Join"/>.
+    /// </summary>
+    private sealed class StressReader
+    {
+        private readonly AuthorizationPolicy _policy;
+        private readonly RegisteredSubjectProperty _member;
+        private readonly ManualResetEventSlim _start;
+        private readonly ManualResetEventSlim _mutatorDone;
+        private readonly Thread _thread;
+
+        public StressReader(AuthorizationPolicy policy, RegisteredSubjectProperty member, ManualResetEventSlim start, ManualResetEventSlim mutatorDone)
+        {
+            _policy = policy;
+            _member = member;
+            _start = start;
+            _mutatorDone = mutatorDone;
+            _thread = new Thread(Run);
+            _thread.Start();
+        }
+
+        public int Evaluations { get; private set; }
+
+        public int Allowed { get; private set; }
+
+        public Exception? Exception { get; private set; }
+
+        public void Join() => _thread.Join();
+
+        private void Run()
+        {
+            try
+            {
+                _start.Wait();
+                do
+                {
+                    Evaluations++;
+                    if (_policy.CanRead(_member))
+                    {
+                        Allowed++;
+                    }
+                }
+                while (!_mutatorDone.IsSet);
+            }
+            catch (Exception exception)
+            {
+                Exception = exception;
+            }
+        }
+    }
 
     /// <summary>A path provider that runs a callback when a segment is looked up, to change the graph in the middle of a path search.</summary>
     private sealed class HookPathProvider(int spinIterations = 0) : DefaultPathProvider('.')

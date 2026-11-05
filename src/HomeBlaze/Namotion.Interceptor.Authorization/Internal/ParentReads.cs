@@ -13,6 +13,9 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// </summary>
 internal sealed class ParentReads
 {
+    // Larger lists are dropped on return, so a search that used the whole budget does not pin its list to the thread.
+    private const int MaxCachedCapacity = 256;
+
     [ThreadStatic]
     private static ParentReads? _cached;
 
@@ -32,6 +35,11 @@ internal sealed class ParentReads
     /// <summary>Clears the instance and caches it for the thread's next evaluation; it must not be used afterwards.</summary>
     public static void Return(ParentReads reads)
     {
+        if (reads._reads.Capacity > MaxCachedCapacity)
+        {
+            return;
+        }
+
         reads.Clear();
         _cached = reads;
     }
