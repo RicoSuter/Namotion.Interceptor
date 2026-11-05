@@ -2,10 +2,20 @@
 
 <form method="post" action="@AccountEndpoints.LogoutPath.TrimStart('/')" data-testid="@TestId">
     <AntiforgeryToken />
-    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text" FullWidth="@FullWidth" Class="@Class"
-               StartIcon="@Icons.Material.Filled.Logout">
-        Sign out
-    </MudButton>
+    @if (IsMenuItem)
+    {
+        @* The markup of a MudMenuItem, which cannot submit a form, so that the entry lines up with the other entries. *@
+        <button type="submit" role="menuitem" class="sign-out-menu-item mud-menu-item mud-ripple mud-list-item-clickable">
+            <MudIcon Icon="@Icons.Material.Filled.Logout" Class="mud-menu-item-icon"/>
+            <MudText Class="mud-menu-item-text">Sign out</MudText>
+        </button>
+    }
+    else
+    {
+        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Logout">
+            Sign out
+        </MudButton>
+    }
 </form>
 
 @code {
@@ -13,11 +23,7 @@
     [Parameter]
     public string? TestId { get; set; }
 
-    /// <summary>Whether the button takes the whole width.</summary>
+    /// <summary>Whether the button is shown as an entry of a menu.</summary>
     [Parameter]
-    public bool FullWidth { get; set; }
-
-    /// <summary>The classes of the button.</summary>
-    [Parameter]
-    public string? Class { get; set; }
+    public bool IsMenuItem { get; set; }
 }

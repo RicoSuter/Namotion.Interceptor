@@ -251,7 +251,7 @@ public class SignInTests
 
             // Act: the form in the menu posts the antiforgery token of the prerendered page.
             await page.GetByTestId("user-menu").ClickAsync();
-            await page.Locator(".mud-popover-open").GetByRole(AriaRole.Button, new() { Name = "Sign out" }).ClickAsync();
+            await page.Locator(".mud-popover-open").GetByRole(AriaRole.Menuitem, new() { Name = "Sign out" }).ClickAsync();
 
             // Assert
             await _fixture.WaitForUrlAsync(page, url => new Uri(url).AbsolutePath == "/");
