@@ -13,7 +13,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
 /// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
-/// <see cref="DetachProperty"/> never holds two locks simultaneously.
+/// <see cref="DetachProperty"/> never holds lock(data) and lock(derivedData) at the same time;
+/// the used-by collection's leaf lock it may take acquires nothing further.
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
@@ -147,8 +148,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     private static bool IsUsedByCurrentData(in PropertyReference property, in PropertyReference derivedProperty)
     {
-        var currentData = property.TryGetDerivedPropertyData();
-        return currentData is not null && currentData.GetUsedByProperties().Contains(derivedProperty);
+        return property.TryGetDerivedPropertyData()?.UsedByDependencies?.Contains(derivedProperty) is true;
     }
 
     /// <inheritdoc />

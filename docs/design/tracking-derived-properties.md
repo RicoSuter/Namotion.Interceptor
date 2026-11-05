@@ -36,7 +36,7 @@ The system consists of five internal types, all in `Namotion.Interceptor.Trackin
 |------|------|
 | `DerivedPropertyChangeHandler` | Main interceptor. Implements `IReadInterceptor`, `IWriteInterceptor`, `IPropertyLifecycleHandler`. Coordinates recording, recalculation, and cleanup. |
 | `DerivedPropertyData` | Per-property state. Stores dependencies and used-by properties, cached value, and lifecycle flags. Stored in `Subject.Data` under key `"ni.dpd"`. |
-| `PropertyReferenceCollection` | Lock-free copy-on-write collection for used-by properties (`UsedByProperties`). Uses CAS for thread-safe mutation. |
+| `PropertyReferenceCollection` | Collection for used-by properties (`UsedByProperties`) with lock-free snapshot reads and writes under its own leaf lock. See [Used-by properties collection](#used-by-properties-collection). |
 | `DerivedPropertyRecorder` | Thread-static recording buffer. Captures which properties are read during getter evaluation. Uses `ArrayPool` to avoid allocations in steady state. |
 | `DerivedPropertyChangeHandlerExtensions` | Extension methods for accessing `DerivedPropertyData` via `PropertyReference`. |
 
@@ -51,9 +51,9 @@ Dependencies (RequiredProperties):      Used-by properties (UsedByProperties):
 ```
 
 - **Dependencies** (`data.RequiredPropertiesSpan`): Which properties a derived property reads. Stored as a private `PropertyReference[]` with separate count, accessed via `ReadOnlySpan` under `lock(data)`. Buffer is reused when capacity is sufficient to avoid allocation on re-evaluation.
-- **Used-by properties** (`data.GetUsedByProperties()`): Which derived properties depend on this property. Stored as private `PropertyReferenceCollection`, updated via lock-free CAS.
+- **Used-by properties** (`data.GetUsedByProperties()`): Which derived properties depend on this property. Stored as private `PropertyReferenceCollection`, which synchronizes its own writes (see [Used-by properties collection](#used-by-properties-collection)).
 
-The two use different data structures because of their access patterns. Dependencies are always read and written under `lock(data)` (the derived property's own data), so a plain array with buffer reuse is sufficient. Used-by properties are read without any lock (`WriteProperty` iterates dependents via `GetUsedByProperties()` which does `Volatile.Read`) and mutated from multiple lock scopes (`Remove` is called under the *derived* property's lock, not the *source* property's lock, so two derived properties detaching concurrently can call `Remove` on the same source's `UsedByProperties`). This requires the lock-free CAS copy-on-write wrapper.
+The two use different data structures because of their access patterns. Dependencies are always read and written under `lock(data)` (the derived property's own data), so a plain array with buffer reuse is sufficient. Used-by properties are read without a caller's lock (`WriteProperty` iterates dependents via `GetUsedByProperties()` which does `Volatile.Read`) and mutated from multiple lock scopes (`Remove` is called under the *derived* property's lock, not the *source* property's lock, so two derived properties detaching concurrently can call `Remove` on the same source's `UsedByProperties`). No caller's lock covers every write, so the collection synchronizes its own writes with a leaf lock and never relies on a caller's lock.
 
 Both directions are needed:
 - Dependencies enable cleanup when a derived property is detached (remove itself from all dependencies' used-by properties).
@@ -369,7 +369,7 @@ DetachProperty(property)
   lock(data)
     usedBySnapshot = data.DetachAndSnapshotUsedBy(property)
       // sets IsAttached = false
-      // Case 1 (derived only): removes from each dependency's UsedByProperties (CAS)
+      // Case 1 (derived only): removes from each dependency's UsedByProperties
       // clears RequiredProperties and LastKnownValue
       // Case 2: snapshots UsedByProperties.ItemsArray, clears UsedByProperties
     if data.IsRecalculating:
@@ -397,7 +397,7 @@ This method is called under `lock(data)` (the derived property's data) and maint
 
 1. **Fast path**: If `previousDeps.SequenceEqual(recordedDeps)` → clear recorder, return `false` (no allocation).
 2. **Slow path**, return `true` (dependencies changed, caller should re-evaluate):
-   - `RemoveStaleUsedByProperties`: For each old dependency no longer used, `Remove(derivedProperty)` from its `UsedByProperties` (CAS).
+   - `RemoveStaleUsedByProperties`: For each old dependency no longer used, `Remove(derivedProperty)` from its `UsedByProperties`.
    - `AddNewUsedByProperties`: For each new dependency not previously tracked, fetch its data (creating it if needed), `lock(depData)` → if `depData` is no longer the current data, a concurrent detach removed it after the fetch, so fetch the current data and retry; otherwise `Add(derivedProperty)` to its `UsedByProperties`. The lock serializes with `DetachProperty` on the same dependency data. Lock ordering is safe (derived → dependency).
    - `SetRequiredProperties(recordedDeps)` reuses the existing buffer when capacity is sufficient (zero allocation), then clears the recorder.
 
@@ -417,32 +417,18 @@ In `RecalculateDerivedProperty`, the lock is acquired briefly for state transiti
 
 This is a fine-grained lock (per derived property), so different derived properties can recalculate concurrently.
 
-### Lock-free used-by properties
+### Used-by properties collection
 
-`PropertyReferenceCollection` uses copy-on-write with CAS:
+`PropertyReferenceCollection` is written by multiple derived properties on different threads, each under its own lock scope (see [Dependency Graph](#dependency-graph)), and read on every write of the source property without any lock. It stores its entries in one of two modes:
 
-```csharp
-internal bool Add(in PropertyReference item)
-{
-    while (true)
-    {
-        var snapshot = Volatile.Read(ref _items);
-        if (Array.IndexOf(snapshot, item) >= 0)
-            return false;                        // already present
+- **Small** (up to 32 entries): a copy-on-write `PropertyReference[]`. Every add or remove publishes a new array, and the published array is the snapshot that readers get.
+- **Large** (above 32 entries): a dictionary from entry to buffer index plus a private buffer, so an add or remove is O(1) (a remove moves the last entry into the freed slot). Readers get a snapshot array that a change clears and a later read rebuilds. The collection returns to small mode when a remove leaves 16 entries or fewer, so a count oscillating around the threshold does not switch modes on every change.
 
-        var newArr = new PropertyReference[snapshot.Length + 1];
-        Array.Copy(snapshot, newArr, snapshot.Length);
-        newArr[^1] = item;
+Every add, remove, and mode switch runs under one lock. Collections share a static pool of 64 locks, chosen by the collection's identity hash, instead of allocating one each. The lock is a leaf: nothing that runs under it takes another lock, so it cannot take part in a lock cycle with `lock(data)` or any other lock. The trade-off of sharing is that rebuilding the snapshot of one large collection, an O(n) copy under its lock, can briefly block writers, `Contains` and rebuilds of unrelated collections that use the same lock (and the lock objects may share cache lines); the wait is bounded and runs no user code.
 
-        if (ReferenceEquals(
-            Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
-            return true;
-        // CAS failed - retry
-    }
-}
-```
+`Count` never locks. `Items` and `ItemsArray` never lock in small mode; in large mode, a read that finds the snapshot cleared by a change takes the lock, and the first such read rebuilds the snapshot while the others wait for that copy. `Contains` locks while the collection is large. A snapshot never changes after it is handed out, so callers can iterate it outside any lock. The order of entries is unspecified.
 
-This is necessary because multiple derived properties on different threads may concurrently add themselves to the same source property's `UsedByProperties`.
+Because each add and remove is O(1) once the collection is large, attaching or detaching N derived properties that read one property costs O(N) in total instead of the O(N²) of copying the whole array on every change.
 
 ### Thread-static recorder
 
@@ -454,7 +440,7 @@ This is necessary because multiple derived properties on different threads may c
 
 `RecalculateDerivedProperty` does **not** hold `lock(data)` during getter evaluation or notification delivery. The `IsRecalculating` flag stays true during both (serializing concurrent recalculations and notifications), but no lock is held, so getter side effects and notification interceptors can safely acquire `lock(_attachedSubjects)` in `LifecycleInterceptor` without lock ordering inversion. `AttachProperty` holds both `lock(_attachedSubjects)` (from LifecycleInterceptor, outer) and `lock(data)` (inner) during evaluation: correct ordering, and reentrant for getter side effects on the same thread.
 
-`DetachProperty` uses a single `lock(data)` for all local cleanup (`IsAttached`, `RecalculationNeeded` signaling, dependencies, used-by snapshot), then acquires `lock(derivedData)` sequentially for `RequiredProperties` cleanup. Because it never holds two locks simultaneously, it cannot participate in a lock cycle. Case 1's dependency cleanup (removing from dependencies' `UsedByProperties`) uses CAS inside the lock, with no nested lock acquisition.
+`DetachProperty` uses a single `lock(data)` for all local cleanup (`IsAttached`, `RecalculationNeeded` signaling, dependencies, used-by snapshot), then acquires `lock(derivedData)` sequentially for `RequiredProperties` cleanup. Because it never holds `lock(data)` and `lock(derivedData)` at the same time, it cannot participate in a lock cycle. Case 1's dependency cleanup (removing from dependencies' `UsedByProperties`) takes only the collection's leaf lock inside `lock(data)`, which acquires nothing further.
 
 ## Concurrency Scenarios
 
@@ -543,6 +529,8 @@ Both `AttachProperty` and `RecalculateDerivedProperty` use a generation-based de
 4. If changed → a concurrent write happened → fall back to the full stabilization loop.
 
 `Interlocked.Increment` provides a full memory fence, pairing with `Volatile.Read`'s acquire semantics: if the counter change is observed, all prior writes (including the committed property value) are guaranteed visible to the reading thread. Each concurrent writer produces a unique counter value: no lost increments.
+
+The scheme is a store-buffer pairing between a writer and a dependent that registers concurrently. The writer stores the value, increments the generation, and then reads the used-by snapshot; the dependent adds itself to the used-by collection and then reads the generation. Because each side has a full fence between its store and its load, at least one side observes the other: either the writer sees the new dependent and recalculates it, or the dependent sees the new generation and stabilizes. The writer's fence is `Interlocked.Increment`; the dependent's is the explicit `Interlocked.MemoryBarrier` that every successful `PropertyReferenceCollection.Add` executes, or the `Interlocked.CompareExchange` that publishes a new collection with its first entry. An `Add` that returns false needs no barrier: every add of a dependent D runs under `lock(D_data)` (`UpdateDependencies` → `AddUsedByPropertyToCurrentData`), so the successful `Add` or `CompareExchange` that inserted D, including its fence, happens-before any later attempt to add D again. Replacing the dependent's fence with anything weaker, such as relying on the release of the collection's lock, means quiescent consistency is no longer guaranteed by the memory model: the `Volatile.Read` of the generation is an acquire load (`ldapr` on arm64), which a plain release store before it does not order against. That the current `Lock.Exit` happens to be an interlocked operation is an implementation detail.
 
 `_writeGeneration` is a static field, shared across all handler instances. This ensures writes from any context are detected, even when dependencies span contexts (e.g., via context inheritance). The tradeoff is that unrelated writes (from other contexts) may cause false positives, triggering the stabilization loop when no relevant concurrent write occurred. False positives only affect `AttachProperty` and `RecalculateDerivedProperty` when dependencies change; the steady-state write path (`dependenciesChanged = false`) never checks the generation, so there is zero overhead from false positives in the common case. A false positive costs one extra getter evaluation that exits immediately (deps unchanged).
 
@@ -634,7 +622,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.RecalculationNeeded` | `lock(data)` | `RecalculateDerivedProperty` (Phase 1 bail, Phase 3, outer loop check, finally re-trigger check), `AttachProperty`, `DetachProperty`, `EvaluateAndStabilize` (bail check) |
 | `data.IsAttached` | `lock(data)` | `DetachAndSnapshotUsedBy`, `RecalculateDerivedProperty` (Phase 1, Phase 3), `AttachProperty`, `EvaluateAndStabilize` (bail check) |
 | Removal from the subject's data | `lock(data)` | `DetachProperty` (removes), `AttachProperty` and `UpdateDependencies` (used-by loop) check identity with the current data and retry on it |
-| `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `UpdateDependencies`, `DetachAndSnapshotUsedBy`, `DetachProperty` Case 2 (lock-free read) |
+| `data.UsedByProperties` (collection contents) | The collection's own leaf lock (writes) / lock-free snapshot (reads), see [Used-by properties collection](#used-by-properties-collection) | `UpdateDependencies`, `DetachAndSnapshotUsedBy`, `DetachProperty` Case 2 (`Contains`: lock-free while small, under the collection's lock while large) |
 | `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachAndSnapshotUsedBy` (nulls under lock), `AddUsedByProperty` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `UpdateDependencies` (via parameter) |
 | `data.RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (read) | `RecalculateDerivedProperty` (increment under lock, read outside lock for stale notification check) |
@@ -665,7 +653,7 @@ Because `_writeGeneration` is static (global), writes from any context are detec
 
 When a property is detached, no stale references remain in the dependency graph:
 
-- **Dependencies cleaned (Case 1)**: Inside the single `lock(data)`, `DetachAndSnapshotUsedBy` iterates `RequiredProperties` and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove` (no nested lock). Then clears `RequiredProperties` and `LastKnownValue`.
+- **Dependencies cleaned (Case 1)**: Inside the single `lock(data)`, `DetachAndSnapshotUsedBy` iterates `RequiredProperties` and removes the derived property from each dependency's `UsedByProperties` via `Remove`, which takes only the collection's leaf lock. Then clears `RequiredProperties` and `LastKnownValue`.
 - **Used-by properties cleaned (Case 2)**: Inside the same `lock(data)`, `DetachAndSnapshotUsedBy` takes a `UsedByProperties` snapshot and clears it. After releasing the lock, `DetachProperty` iterates the snapshot and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
 - **Atomic state transition**: The single lock ensures `IsAttached = false`, dependency cleanup (Case 1), and used-by snapshot (Case 2) happen atomically. No concurrent thread can observe `IsAttached = false` while the used-by properties from before the detach are still populated. Data kept during an in-flight recalculation accepts new used-by properties afterwards; its next detach cleans them up.
 - **No resurrection (Case 1)**: `DetachProperty` sets `IsAttached = false` and `RecalculationNeeded = true` (if `IsRecalculating`) inside the lock. Any concurrent `RecalculateDerivedProperty` with an in-flight evaluation sees `!IsAttached` or `RecalculationNeeded` at the next lock acquisition (`EvaluateAndStabilize` bail check or Phase 3) and either bails or re-evaluates. No stale used-by entries are committed.
@@ -693,7 +681,7 @@ In all cases for tracked properties, both dependencies and used-by properties ar
 | Recording | Zero (pooled buffers) | Stack push/pop per frame |
 | Recalculation | Zero (beyond getter) | Brief `lock(data)` acquisitions (Phase 1, UpdateDependencies, Phase 3, outer loop check, finally) + getter invocation + two `Volatile.Read` (~2ns). Lock not held during getter evaluation or notification delivery; `IsRecalculating` flag serializes concurrent access. |
 | Attach (common path) | Zero (beyond initial) | One `lock(data)` + getter invocation + two `Volatile.Read` (~2ns) |
-| Used-by read (`UsedByProperties.Items`) | Zero | Returns stable `ReadOnlySpan` snapshot |
+| Used-by read (`UsedByProperties.Items`) | Zero (one snapshot copy after a change to a collection in large mode, made by the first read that finds the snapshot cleared) | Returns stable `ReadOnlySpan` snapshot |
 
 ## Interaction with Other Interceptors
 
