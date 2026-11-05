@@ -143,6 +143,12 @@ internal static class PolicyCompiler
             {
                 throw new AuthorizationException($"A rule of role '{role.Name}' has an empty {kind}.");
             }
+
+            if (SelectorText.IsInvalid(value))
+            {
+                throw new AuthorizationException(
+                    $"A rule of role '{role.Name}' has the {kind} '{value}' with leading or trailing whitespace or an invisible character.");
+            }
         }
 
         return [.. values];

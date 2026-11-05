@@ -28,6 +28,11 @@ internal sealed class PathPattern
             throw new AuthorizationException($"A path pattern of role '{roleName}' is empty.");
         }
 
+        if (SelectorText.ContainsInvisibleCharacter(pattern))
+        {
+            throw new AuthorizationException($"Path pattern '{pattern}' of role '{roleName}' contains an invisible (control or format) character.");
+        }
+
         ThrowIfStartsWithForeignSeparator(pattern, pathProvider.PathSeparator, roleName);
 
         if (!pathProvider.TryParsePath(pattern, out var parsed, out var error))

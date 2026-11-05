@@ -67,10 +67,10 @@ public sealed class AuthorizationPolicy
     /// <param name="pathProvider">Defines path syntax and builds the paths that patterns are matched against.</param>
     /// <exception cref="AuthorizationException">
     /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
-    /// A role or include name is unknown or empty, includes form a cycle, or includes are nested more than 64 levels deep.
-    /// A rule is null, has no actions, names an unknown action or has an empty selector value.
+    /// A role or include name is unknown or empty, has leading or trailing whitespace or a control or format character, includes form a cycle, or includes are nested more than 64 levels deep.
+    /// A rule is null, has no actions, names an unknown action, or has a member, type or tag value that is empty, has leading or trailing whitespace or contains a control or format character.
     /// A path pattern starts with '/' or '\' that is not the provider's separator, is malformed, has an empty segment
-    /// (a doubled or trailing separator), has a segment with leading or trailing whitespace, or matches no member
+    /// (a doubled or trailing separator), has a segment with leading or trailing whitespace, contains a control or format character, or matches no member
     /// because it is the separator alone or its last segment has an index.
     /// A known action has no name, or there are more than 64 known actions.
     /// </exception>

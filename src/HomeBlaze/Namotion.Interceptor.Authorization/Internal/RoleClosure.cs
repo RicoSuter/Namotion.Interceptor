@@ -20,6 +20,11 @@ internal static class RoleClosure
                 throw new AuthorizationException("A role has no name.");
             }
 
+            if (SelectorText.IsInvalid(role.Name))
+            {
+                throw new AuthorizationException($"Role name '{role.Name}' has leading or trailing whitespace or an invisible character.");
+            }
+
             if (string.Equals(role.Name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
             {
                 throw new AuthorizationException($"Role name '{AuthorizationPolicy.SystemRoleName}' is reserved.");
@@ -42,12 +47,7 @@ internal static class RoleClosure
         return result;
     }
 
-    private static void Visit(
-        string? name,
-        Dictionary<string, AuthorizationRole> rolesByName,
-        List<AuthorizationRole> result,
-        HashSet<string> visited,
-        List<string> path)
+    private static AuthorizationRole Lookup(string? name, Dictionary<string, AuthorizationRole> rolesByName, List<string> path)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -56,12 +56,31 @@ internal static class RoleClosure
                 : $"Role '{path[^1]}' includes a role with no name.");
         }
 
+        if (SelectorText.IsInvalid(name))
+        {
+            throw new AuthorizationException(path.Count == 0
+                ? $"Role name '{name}' has leading or trailing whitespace or an invisible character."
+                : $"Role '{path[^1]}' includes '{name}', which has leading or trailing whitespace or an invisible character.");
+        }
+
         if (!rolesByName.TryGetValue(name, out var role))
         {
             throw new AuthorizationException(path.Count == 0
                 ? $"Role '{name}' is not defined."
                 : $"Role '{path[^1]}' includes '{name}', which is not defined.");
         }
+
+        return role;
+    }
+
+    private static void Visit(
+        string? name,
+        Dictionary<string, AuthorizationRole> rolesByName,
+        List<AuthorizationRole> result,
+        HashSet<string> visited,
+        List<string> path)
+    {
+        var role = Lookup(name, rolesByName, path);
 
         var cycleStart = path.FindIndex(entry => string.Equals(entry, role.Name, StringComparison.OrdinalIgnoreCase));
         if (cycleStart >= 0)
@@ -75,8 +94,9 @@ internal static class RoleClosure
             return;
         }
 
+        // The path holds the principal's role plus one entry per include level.
         path.Add(role.Name);
-        if (path.Count > MaxDepth)
+        if (path.Count > MaxDepth + 1)
         {
             throw new AuthorizationException($"Role '{role.Name}' is nested more than {MaxDepth} levels deep.");
         }

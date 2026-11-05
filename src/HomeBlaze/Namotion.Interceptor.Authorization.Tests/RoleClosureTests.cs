@@ -142,6 +142,6 @@ public class RoleClosureTests
         var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(roles, ["Role0"]));
 
         // Assert
-        Assert.Equal("Role 'Role64' is nested more than 64 levels deep.", exception.Message);
+        Assert.Equal("Role 'Role65' is nested more than 64 levels deep.", exception.Message);
     }
 }
