@@ -13,7 +13,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
 /// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
-/// <see cref="DetachProperty"/> never holds two locks simultaneously.
+/// <see cref="DetachProperty"/> never holds lock(data) and lock(derivedData) at the same time;
+/// the used-by collection's leaf lock it may take acquires nothing further.
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
@@ -24,8 +25,6 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsBefore(typeof(PropertyChangeInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
-    private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
-
     // Safety limit for stabilization loops. Prevents infinite loops from getters
     // with side effects that mutate the tracked state (a user error but shouldn't hang).
     // In correct code, the loop runs 1-2 iterations max.
@@ -149,8 +148,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     private static bool IsUsedByCurrentData(in PropertyReference property, in PropertyReference derivedProperty)
     {
-        var currentData = property.TryGetDerivedPropertyData();
-        return currentData is not null && currentData.GetUsedByProperties().Contains(derivedProperty);
+        return property.TryGetDerivedPropertyData()?.UsedByDependencies?.Contains(derivedProperty) is true;
     }
 
     /// <inheritdoc />
@@ -423,10 +421,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
         // not need a WithChangedTimestamp scope active to share the time with the dependent).
         // newValue is the value the stabilization loop settled on and the value paired with
-        // oldValue by the guards above. The cascade re-entry path publishes it rather than
-        // re-invoking the getter, which could return a later value that never coexisted with
-        // oldValue (see PropertyWriteContext.FinalValueIsNewValue).
-        derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
+        // oldValue by the guards above, so finalValueIsNewValue publishes it rather than
+        // re-invoking the getter (see PropertyWriteContext.FinalValueIsNewValue).
+        derivedProperty.PublishDerivedPropertyValue(newValue, oldValue, rawTimestamp, finalValueIsNewValue: true);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {

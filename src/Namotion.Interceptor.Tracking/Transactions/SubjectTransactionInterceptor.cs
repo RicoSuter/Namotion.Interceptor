@@ -116,7 +116,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!SubjectTransaction.HasActiveTransaction)
+        // A derived recalculation publishes an already committed value, so it is neither captured nor rejected.
+        if (!SubjectTransaction.HasActiveTransaction || context.IsDerivedRecalculation)
         {
             next(ref context);
             return;
