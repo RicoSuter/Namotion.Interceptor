@@ -19,7 +19,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(grandfather), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(grandfather), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -37,7 +37,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(shared), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(shared), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -57,7 +57,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(leaf), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(leaf), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -77,7 +77,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(root), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(root), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -97,7 +97,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(leaf), new ExcludingPathProvider(nameof(Person.Mother)), paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(leaf), new ExcludingPathProvider(nameof(Person.Mother)), paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.False(complete);
@@ -116,7 +116,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(first), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(first), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -134,7 +134,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(shared), DefaultPathProvider.Instance, paths, maxPaths: 2);
+        var complete = SubjectPaths.TryGetPaths(Registered(shared), DefaultPathProvider.Instance, paths, maxPaths: 2, new ParentReads());
 
         // Assert
         Assert.False(complete);
@@ -152,7 +152,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(shared), DefaultPathProvider.Instance, paths, maxPaths: 3);
+        var complete = SubjectPaths.TryGetPaths(Registered(shared), DefaultPathProvider.Instance, paths, maxPaths: 3, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -177,7 +177,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(items[0]), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(items[0]), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.False(complete);
@@ -203,7 +203,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(light), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(light), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -224,7 +224,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(child), DefaultPathProvider.Instance, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(child), DefaultPathProvider.Instance, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.True(complete);
@@ -253,7 +253,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(Registered(child), pathProvider, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(Registered(child), pathProvider, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.False(complete);
@@ -411,7 +411,7 @@ public class SubjectPathsTests
         var paths = new List<PathLink[]>();
 
         // Act
-        var complete = SubjectPaths.TryGetPaths(registeredProbe, pathProvider, paths, MaxPaths);
+        var complete = SubjectPaths.TryGetPaths(registeredProbe, pathProvider, paths, MaxPaths, new ParentReads());
 
         // Assert
         Assert.False(complete);
@@ -430,7 +430,7 @@ public class SubjectPathsTests
         var registeredRoot = Registered(root);
         var registeredSubject = Registered(subject);
 
-        Assert.True(SubjectPaths.TryGetPaths(registeredSubject, pathProvider, paths, MaxPaths));
+        Assert.True(SubjectPaths.TryGetPaths(registeredSubject, pathProvider, paths, MaxPaths, new ParentReads()));
         Assert.Equal(expectedPaths, paths);
 
         foreach (var spelling in paths.SelectMany(path => GetSpellings(path, pathProvider)))

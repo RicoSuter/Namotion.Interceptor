@@ -81,6 +81,7 @@ The policy enumerates every path of a member's subject, at most 64, and an allow
 - a path passes a property the path provider excludes, or an attribute of an excluded property, through which the registry builds and resolves no path either;
 - the subject has parents but no chain to a root;
 - the subject or one on a chain is no longer attached because it is being detached or was detached;
+- the parents kept changing while the paths were listed, in which case no path is listed at all;
 - more than 64 paths exist; or
 - the parents are too densely connected for the search budget of 64 parent links per allowed path.
 

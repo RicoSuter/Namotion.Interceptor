@@ -21,6 +21,8 @@ public sealed class AuthorizationPolicy
 
     private const int MaxPaths = 64;
 
+    private const int MaxConsistencyAttempts = 3;
+
     // The root's single empty path, which a member of the root follows; never mutated, so it is shared.
     private static readonly List<PathLink[]> RootPaths = [[]];
 
@@ -123,7 +125,7 @@ public sealed class AuthorizationPolicy
     {
         ArgumentNullException.ThrowIfNull(member);
         var bit = GetBit(action);
-        MatchContext context = default;
+        var context = new MatchContext { SharedReads = null };
         context.SetMember(member);
         var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
         var denied = FindMatch(_deny, bit, isDeny: true, ref context);
@@ -162,7 +164,7 @@ public sealed class AuthorizationPolicy
 
     private bool IsAllowed(RegisteredSubjectProperty member, ulong bit)
     {
-        MatchContext context = default;
+        var context = new MatchContext { SharedReads = null };
         context.SetMember(member);
         return IsAllowed(bit, ref context);
     }
@@ -225,7 +227,7 @@ public sealed class AuthorizationPolicy
             return true;
         }
 
-        context.Paths ??= GetPaths(context.Member.Parent, out context.PathsComplete);
+        context.Paths ??= GetPaths(context.Member.Parent, context.SharedReads, out context.PathsComplete);
         if (isDeny && !context.PathsComplete)
         {
             return true;
@@ -308,30 +310,66 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // Every path of the subject; a root has the single empty path. Incomplete when a path could not be written, more
-    // than MaxPaths exist, the subject has parents but no path was found, or the subject or one on a path is no longer
-    // attached.
-    private List<PathLink[]> GetPaths(RegisteredSubject subject, out bool isComplete)
+    // Every path of the subject as of one instant of the graph; a root has the single empty path. Incomplete when a path
+    // could not be written, more than MaxPaths exist, the subject has parents but no path was found, the subject or one
+    // on a path is no longer attached, or the graph changed during every attempt, which also lists no path, so an allow
+    // cannot match a path that never existed. With sharedReads the reads are only recorded, for the caller to check.
+    private List<PathLink[]> GetPaths(RegisteredSubject subject, ParentReads? sharedReads, out bool isComplete)
     {
-        var hasParents = subject.Parents.Length > 0;
-
-        // Read after the parents: the registry clears it before it removes the last parent, so a subject that lost
-        // its parents to a detach has unknown paths rather than the root's.
-        if (!subject.IsAttached)
+        if (sharedReads is not null)
         {
+            return GetPathsOnce(subject, sharedReads, out isComplete);
+        }
+
+        // The answer for a root or a detached subject rests on one subject's parents and attachment, which hold together
+        // at the second read, so nothing needs to be checked again.
+        var parents = subject.Parents;
+        var isAttached = subject.IsAttached;
+        if (!isAttached || parents.Length == 0)
+        {
+            return GetPathsWithoutParents(isAttached, out isComplete);
+        }
+
+        var reads = ParentReads.Rent();
+        try
+        {
+            for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
+            {
+                reads.Clear();
+                var paths = GetPathsOnce(subject, reads, out isComplete);
+                if (reads.AreUnchanged())
+                {
+                    return paths;
+                }
+            }
+
             isComplete = false;
             return NoPaths;
         }
-
-        if (!hasParents)
+        finally
         {
-            isComplete = true;
-            return RootPaths;
+            ParentReads.Return(reads);
+        }
+    }
+
+    private List<PathLink[]> GetPathsOnce(RegisteredSubject subject, ParentReads reads, out bool isComplete)
+    {
+        var parents = reads.GetParents(subject, out var isAttached);
+        if (!isAttached || parents.Length == 0)
+        {
+            return GetPathsWithoutParents(isAttached, out isComplete);
         }
 
         var paths = new List<PathLink[]>(1);
-        isComplete = SubjectPaths.TryGetPaths(subject, _pathProvider!, paths, MaxPaths) && paths.Count > 0;
+        isComplete = SubjectPaths.TryGetPaths(subject, _pathProvider!, paths, MaxPaths, reads) && paths.Count > 0;
         return paths;
+    }
+
+    // A detached subject has unknown paths, also when it lost its parents, rather than the root's.
+    private static List<PathLink[]> GetPathsWithoutParents(bool isAttached, out bool isComplete)
+    {
+        isComplete = isAttached;
+        return isAttached ? RootPaths : NoPaths;
     }
 
     private static bool AnyPathMatches(PathPattern[] patterns, List<PathLink[]> paths, in PathLink member)
@@ -352,7 +390,7 @@ public sealed class AuthorizationPolicy
 
     private bool HasReadableMember(RegisteredSubject subject)
     {
-        MatchContext context = default;
+        var context = new MatchContext { SharedReads = null };
         foreach (var member in subject.Properties)
         {
             context.SetMember(member);
@@ -415,7 +453,7 @@ public sealed class AuthorizationPolicy
         isRoot = false;
         var parents = subject.Parents;
 
-        // Read after the parents, see GetPaths.
+        // Read after the parents, see ParentReads.GetParents.
         if (!subject.IsAttached)
         {
             return false;
@@ -449,6 +487,9 @@ public sealed class AuthorizationPolicy
         public string? MemberSegment;
         public List<PathLink[]>? Paths;
         public bool PathsComplete;
+
+        // When set, the paths' parent reads are recorded here for the caller to check, instead of being checked per enumeration.
+        public ParentReads? SharedReads;
 
         // The paths belong to the subject, not the member, so they are kept for the next member of the same subject.
         public void SetMember(RegisteredSubjectProperty member)
