@@ -232,6 +232,7 @@ public partial class Motor
 - Cannot be `partial` (they're computed, not stored)
 - Can combine with `[State]` to display in UI
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
+- Reads another subject through intercepted properties or through a field that holds its owner (see [Shared Child Subjects](#shared-child-subjects)). Through a field that holds any other subject, it stops following that subject once the subject is detached and attached again while this one stays attached
 
 ## Child Subject Collections
 

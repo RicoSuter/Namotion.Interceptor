@@ -80,25 +80,26 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
-    /// context's timestamp cache. Lets the cascade share the trigger's captured time without
-    /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
-    /// The new value is already the stabilized getter output on this path, so publishing reuses it
-    /// instead of invoking the getter again (see
-    /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
+    /// Publishes a derived property's calculated value through the write chain without storing anything, with
+    /// <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set. A nonzero
+    /// <paramref name="rawTimestamp"/> pre-populates the new write context's timestamp cache, which lets a
+    /// recalculation cascade share the trigger's captured time without pushing a
+    /// <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope. With
+    /// <paramref name="finalValueIsNewValue"/> set, publishing reuses the new value instead of invoking the
+    /// getter again (see <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
+    internal void PublishDerivedPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var context = new PropertyWriteContext<TProperty>(
             this,
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue,
-            rawTimestamp);
+            rawTimestamp,
+            finalValueIsNewValue);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
-        return context.IsWritten;
+        ExecuteInterceptedWrite(ref context, static (_, _) => { });
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
