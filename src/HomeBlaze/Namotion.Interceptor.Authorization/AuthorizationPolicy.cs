@@ -139,9 +139,8 @@ public sealed class AuthorizationPolicy
             return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
         }
 
-        HashSet<RegisteredSubject>? visited = null;
         RegisteredSubjectProperty? deniedProperty = null;
-        var isReachable = IsReachable(subject, 0, ref visited, ref deniedProperty);
+        var isReachable = IsReachable(subject, ref deniedProperty);
         return new SubjectReadDecision(isReachable, HasReadableMember: true, isReachable ? null : deniedProperty);
     }
 
@@ -367,10 +366,53 @@ public sealed class AuthorizationPolicy
     }
 
     // True when some chain of readable subject-holding properties of attached subjects leads to a root. Otherwise
-    // deniedProperty is the first unreadable link found, or stays null when every chain returns to a subject already
-    // walked or passes a subject that is no longer attached.
-    private bool IsReachable(RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, ref RegisteredSubjectProperty? deniedProperty)
+    // deniedProperty is the first unreadable link found in depth-first order, or stays null when every chain returns to
+    // a subject already walked or passes a subject that is no longer attached. Iterative, so a deep graph cannot
+    // overflow the stack; a cursor with untried parents waits in pending, which a single-parent chain never needs.
+    private bool IsReachable(RegisteredSubject subject, ref RegisteredSubjectProperty? deniedProperty)
     {
+        HashSet<RegisteredSubject>? visited = null;
+        List<ParentCursor>? pending = null;
+        var hasCursor = TryEnter(subject, 0, ref visited, out var cursor, out var isRoot);
+        while (!isRoot)
+        {
+            if (!hasCursor)
+            {
+                if (pending is null || pending.Count == 0)
+                {
+                    return false;
+                }
+
+                cursor = pending[^1];
+                pending.RemoveAt(pending.Count - 1);
+            }
+
+            var parent = cursor.Parents[cursor.Next];
+            if (cursor.Next + 1 < cursor.Parents.Length)
+            {
+                (pending ??= []).Add(cursor with { Next = cursor.Next + 1 });
+            }
+
+            if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit))
+            {
+                deniedProperty ??= parent.Property;
+                hasCursor = false;
+                continue;
+            }
+
+            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, ref visited, out cursor, out isRoot);
+        }
+
+        return true;
+    }
+
+    // Enters a subject: isRoot when it is an attached subject without parents; no cursor when it is no longer attached
+    // or was already explored.
+    private static bool TryEnter(
+        RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
+    {
+        cursor = default;
+        isRoot = false;
         var parents = subject.Parents;
 
         // Read after the parents, see GetPaths.
@@ -381,7 +423,8 @@ public sealed class AuthorizationPolicy
 
         if (parents.Length == 0)
         {
-            return true;
+            isRoot = true;
+            return false;
         }
 
         // Already explored from here, or a cycle: no new route to a root through this subject.
@@ -390,26 +433,11 @@ public sealed class AuthorizationPolicy
             return false;
         }
 
-        return IsAnyParentReachable(parents, depth, ref visited, ref deniedProperty);
+        cursor = new ParentCursor(parents, 0, depth);
+        return true;
     }
 
-    private bool IsAnyParentReachable(
-        ImmutableArray<SubjectPropertyParent> parents, int depth, ref HashSet<RegisteredSubject>? visited, ref RegisteredSubjectProperty? deniedProperty)
-    {
-        foreach (var parent in parents)
-        {
-            if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit))
-            {
-                deniedProperty ??= parent.Property;
-            }
-            else if (IsReachable(parent.Property.Parent, depth + 1, ref visited, ref deniedProperty))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private readonly record struct ParentCursor(ImmutableArray<SubjectPropertyParent> Parents, int Next, int Depth);
 
     // The facts one question derives, each at most once and only when a rule needs it.
     private struct MatchContext
