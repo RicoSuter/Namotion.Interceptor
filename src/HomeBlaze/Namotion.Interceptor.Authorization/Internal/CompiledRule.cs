@@ -3,7 +3,8 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>A rule with its actions as a bitmask and its selectors parsed; a null selector matches anything.</summary>
 internal sealed class CompiledRule
 {
-    public required AuthorizationRole Role { get; init; }
+    /// <summary>Gets the role the rule belongs to, or null for a system deny rule.</summary>
+    public required AuthorizationRole? Role { get; init; }
 
     public required PermissionRule Rule { get; init; }
 

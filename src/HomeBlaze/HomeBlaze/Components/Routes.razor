@@ -1,12 +1,16 @@
-<Router AppAssembly="@typeof(Routes).Assembly" AdditionalAssemblies="new[] { typeof(HomeBlaze.Host.Components.HomeBlazorComponentBase).Assembly }">
-    <Found Context="routeData">
-        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
-        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
-    </Found>
-    <NotFound>
-        <PageTitle>Not found</PageTitle>
-        <LayoutView Layout="@typeof(MainLayout)">
-            <p role="alert">Sorry, there's nothing at this address.</p>
-        </LayoutView>
-    </NotFound>
-</Router>
+@* The gate renders the router only to a visitor who may use the app, and otherwise the frame of the layout with the dialog
+   that signs them in. *@
+<HomeBlaze.Authentication.Blazor.Components.AccountGate ShellLayout="@typeof(MainLayout)">
+    <Router AppAssembly="@typeof(Routes).Assembly" AdditionalAssemblies="new[] { typeof(HomeBlaze.Host.Components.HomeBlazorComponentBase).Assembly, typeof(HomeBlaze.Authentication.Blazor.AuthenticationWebExtensions).Assembly }">
+        <Found Context="routeData">
+            <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <PageTitle>Not found</PageTitle>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <p role="alert">Sorry, there's nothing at this address.</p>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</HomeBlaze.Authentication.Blazor.Components.AccountGate>

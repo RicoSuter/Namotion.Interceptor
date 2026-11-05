@@ -1,0 +1,12 @@
+@* The warning of the dialogs that take a password or a setup code. It shows when the browser address is not HTTPS or the
+   server did not see the request as HTTPS: a proxy that terminates TLS and is not trusted leaves the cookie not secure. *@
+
+@inject NavigationManager Navigation
+@inject RequestTransport Transport
+
+@if (!Navigation.Uri.StartsWith("https:", StringComparison.OrdinalIgnoreCase) || !Transport.ServerSawHttps)
+{
+    <MudText Typo="Typo.body2" Color="Color.Warning" Class="mb-3" data-testid="unencrypted-http-warning">
+        This connection is unencrypted HTTP: anyone on the network can read the password and take over the session.
+    </MudText>
+}

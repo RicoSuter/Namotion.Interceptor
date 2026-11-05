@@ -1,8 +1,9 @@
 using System.Collections.Immutable;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
-using Namotion.Interceptor.Expressions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Services.Display;
 
@@ -49,7 +50,7 @@ public static class ExpressionDisplay
     internal const string RawPipe = "raw";
 
     /// <summary>The pipe that applies a value map to the value, <c>map:name</c>.</summary>
-    internal const string MapPipe = "map";
+    public const string MapPipe = "map";
 
     /// <summary>
     /// Gets the text that shows a result: the text of a pipe as it is, otherwise the value formatted for display with the
@@ -90,15 +91,17 @@ public static class ExpressionDisplay
     /// <param name="resolver">The resolver of the name of a map.</param>
     /// <param name="scope">The subject the name of a map resolves from, such as the page or the widget.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property of a case of the map that it may not read is missing.</param>
     public static ExpressionValue ApplyPipe(
         string name,
         ImmutableArray<string> arguments,
         ExpressionValue input,
         SubjectPathResolver resolver,
         IInterceptorSubject scope,
-        ITimeZoneDisplay? timeZone) =>
+        ITimeZoneDisplay? timeZone,
+        IUserPermissions permissions) =>
         name.Equals(MapPipe, StringComparison.OrdinalIgnoreCase)
-            ? ApplyMap(resolver, scope, arguments[0], input, timeZone)
+            ? ApplyMap(resolver, scope, arguments[0], input, timeZone, permissions)
             : ApplyFormat(name, input, timeZone);
 
     /// <summary>
@@ -110,12 +113,14 @@ public static class ExpressionDisplay
     /// <param name="mapName">The name or path of the map.</param>
     /// <param name="input">The value, bound as <see cref="ValueBinding.FromExpressionValue"/> binds it.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property of a case that it may not read is missing.</param>
     internal static ExpressionValue ApplyMap(
         SubjectPathResolver resolver,
         IInterceptorSubject scope,
         string mapName,
         ExpressionValue input,
-        ITimeZoneDisplay? timeZone)
+        ITimeZoneDisplay? timeZone,
+        IUserPermissions permissions)
     {
         IInterceptorSubject? map;
         try
@@ -139,7 +144,7 @@ public static class ExpressionDisplay
         }
 
         var binding = ValueBinding.FromExpressionValue(input);
-        return ExpressionValue.FromText(valueMap.GetText(binding, resolver, timeZone) ?? ToText(input, timeZone));
+        return ExpressionValue.FromText(valueMap.GetText(binding, resolver, timeZone, permissions) ?? ToText(input, timeZone));
     }
 
     /// <summary>Gets what is wrong with the pipes and variables of an expression where it stands, or null.</summary>

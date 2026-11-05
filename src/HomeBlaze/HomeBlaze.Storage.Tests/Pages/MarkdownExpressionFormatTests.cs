@@ -1,5 +1,6 @@
 using System.Globalization;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
@@ -34,7 +35,7 @@ public class MarkdownExpressionFormatTests
         var page = await AddPageAsync("{{ meter/Power }}");
 
         // Act
-        var text = GetExpression(page).GetText(null);
+        var text = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("1.23 kW", text);
@@ -47,7 +48,7 @@ public class MarkdownExpressionFormatTests
         var page = await AddPageAsync("{{ meter/Power | display }}");
 
         // Act
-        var text = GetExpression(page).GetText(null);
+        var text = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal("1.23 kW", text);
@@ -63,7 +64,7 @@ public class MarkdownExpressionFormatTests
         try
         {
             // Act
-            var text = GetExpression(page).GetText(null);
+            var text = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
             // Assert
             Assert.Equal("1234.5", text);
@@ -82,8 +83,8 @@ public class MarkdownExpressionFormatTests
         var rawPage = await AddPageAsync("{{ meter/Temperature | raw }}");
 
         // Act
-        var display = GetExpression(displayPage).GetText(null);
-        var raw = GetExpression(rawPage).GetText(null);
+        var display = GetExpression(displayPage).GetText(null, UnrestrictedPermissions.Instance);
+        var raw = GetExpression(rawPage).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(string.Empty, display);
@@ -97,7 +98,7 @@ public class MarkdownExpressionFormatTests
         var page = await AddPageAsync("{{ nothing/Power }}");
 
         // Act
-        var text = GetExpression(page).GetText(null);
+        var text = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(string.Empty, text);
@@ -115,7 +116,7 @@ public class MarkdownExpressionFormatTests
         var scope = ReadPropertyRecorder.Start();
 
         // Act
-        expression.GetText(null);
+        expression.GetText(null, UnrestrictedPermissions.Instance);
         var recorded = scope.GetPropertiesAndDispose();
 
         // Assert: this record is what makes the page render again when the value changes
@@ -174,7 +175,7 @@ public class MarkdownExpressionFormatTests
         var html = MarkdownPageFixture.Html(page.Children);
 
         // Assert
-        Assert.Equal("1234.5", expression.GetText(null));
+        Assert.Equal("1234.5", expression.GetText(null, UnrestrictedPermissions.Instance));
         Assert.Contains("<table", html);
     }
 
@@ -185,7 +186,7 @@ public class MarkdownExpressionFormatTests
         var page = await AddPageAsync("A {{ meter/Power }} B {{ meter/Power | raw }} C {{ meter/Power | rounded }}");
 
         // Act
-        var evaluated = page.ReadEvaluatedContent();
+        var evaluated = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Contains("A 1.23 kW B 1234.5 C {{ meter/Power | rounded }}", evaluated);
@@ -201,7 +202,7 @@ public class MarkdownExpressionFormatTests
         var page = await AddPageAsync(text);
 
         // Act
-        var evaluated = page.ReadEvaluatedContent();
+        var evaluated = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.EndsWith(expected, evaluated!.TrimEnd());
@@ -219,7 +220,7 @@ public class MarkdownExpressionFormatTests
         var page = await AddPageAsync(text);
 
         // Act
-        var result = GetExpression(page).GetText(null);
+        var result = GetExpression(page).GetText(null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(expected, result);
@@ -235,7 +236,7 @@ public class MarkdownExpressionFormatTests
         var scope = ReadPropertyRecorder.Start();
 
         // Act
-        expression.GetText(null);
+        expression.GetText(null, UnrestrictedPermissions.Instance);
         var recorded = scope.GetPropertiesAndDispose();
 
         // Assert: these records make the page render again when either value changes

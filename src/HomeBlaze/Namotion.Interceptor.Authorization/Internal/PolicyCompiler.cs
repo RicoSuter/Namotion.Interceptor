@@ -37,8 +37,7 @@ internal static class PolicyCompiler
             AddRules(role, role.Deny, deny, actionBits, pathProvider);
         }
 
-        var system = new AuthorizationRole { Name = AuthorizationPolicy.SystemRoleName, Deny = systemDenyRules.IsDefault ? [] : systemDenyRules };
-        AddRules(system, system.Deny, deny, actionBits, pathProvider);
+        AddRules(role: null, systemDenyRules, deny, actionBits, pathProvider);
 
         return new Result([.. closure], [.. allow], [.. deny], actionBits);
     }
@@ -75,8 +74,11 @@ internal static class PolicyCompiler
         return bits.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>Names the owner of a rule in an error: the role, or the system rules for a null role name.</summary>
+    public static string DescribeOwner(string? roleName) => roleName is null ? "the system rules" : $"role '{roleName}'";
+
     private static void AddRules(
-        AuthorizationRole role,
+        AuthorizationRole? role,
         ImmutableArray<PermissionRule> rules,
         List<CompiledRule> target,
         FrozenDictionary<string, ulong> actionBits,
@@ -91,7 +93,7 @@ internal static class PolicyCompiler
         {
             if (rule is null)
             {
-                throw new AuthorizationException($"A rule of role '{role.Name}' is null.");
+                throw new AuthorizationException($"A rule of {DescribeOwner(role?.Name)} is null.");
             }
 
             target.Add(CompileRule(role, rule, actionBits, pathProvider));
@@ -99,11 +101,11 @@ internal static class PolicyCompiler
     }
 
     private static CompiledRule CompileRule(
-        AuthorizationRole role, PermissionRule rule, FrozenDictionary<string, ulong> actionBits, PathProviderBase pathProvider)
+        AuthorizationRole? role, PermissionRule rule, FrozenDictionary<string, ulong> actionBits, PathProviderBase pathProvider)
     {
         if (rule.Actions.IsDefaultOrEmpty)
         {
-            throw new AuthorizationException($"A rule of role '{role.Name}' has no actions.");
+            throw new AuthorizationException($"A rule of {DescribeOwner(role?.Name)} has no actions.");
         }
 
         var actions = 0UL;
@@ -111,7 +113,7 @@ internal static class PolicyCompiler
         {
             if (string.IsNullOrWhiteSpace(action.Name) || !actionBits.TryGetValue(action.Name, out var bit))
             {
-                throw new AuthorizationException($"Action '{action.Name}' of role '{role.Name}' is not a known action.");
+                throw new AuthorizationException($"Action '{action.Name}' of {DescribeOwner(role?.Name)} is not a known action.");
             }
 
             actions |= bit;
@@ -123,14 +125,14 @@ internal static class PolicyCompiler
             Role = role,
             Rule = rule,
             Actions = actions,
-            Paths = paths is null ? null : Array.ConvertAll(paths, path => PathPattern.Parse(path, pathProvider, role.Name)),
+            Paths = paths is null ? null : Array.ConvertAll(paths, path => PathPattern.Parse(path, pathProvider, role?.Name)),
             Types = Normalize(rule.Types, role, "type"),
             Members = Normalize(rule.Members, role, "member"),
             Tags = Normalize(rule.Tags, role, "tag")
         };
     }
 
-    private static string[]? Normalize(ImmutableArray<string> values, AuthorizationRole role, string kind)
+    private static string[]? Normalize(ImmutableArray<string> values, AuthorizationRole? role, string kind)
     {
         if (values.IsDefaultOrEmpty)
         {
@@ -141,7 +143,7 @@ internal static class PolicyCompiler
         {
             if (string.IsNullOrWhiteSpace(value))
             {
-                throw new AuthorizationException($"A rule of role '{role.Name}' has an empty {kind}.");
+                throw new AuthorizationException($"A rule of {DescribeOwner(role?.Name)} has an empty {kind}.");
             }
         }
 

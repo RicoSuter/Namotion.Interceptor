@@ -113,7 +113,7 @@ namespace HomeBlaze.Storage.Files
         protected void RaisePropertyChanged(string propertyName) { }
         public System.Threading.Tasks.Task<System.IO.Stream> ReadAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Query(Description=@"Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon="Preview", Title="Read Evaluated Content")]
-        public string? ReadEvaluatedContent(bool? includeSourcePaths = default) { }
+        public string? ReadEvaluatedContent([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Authorization.Abstractions.IUserPermissions? permissions, bool? includeSourcePaths = default) { }
         [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown file source, including unevaluated {{ path }} expressions. S" +
             "ecret configuration values in blocks are shown as ***", Icon="Description", Title="Read Raw Content")]
         public string? ReadRawContent() { }
@@ -169,10 +169,10 @@ namespace HomeBlaze.Storage
         public void ApplyStoredMetadata(Namotion.Interceptor.IInterceptorSubject subject, string? propertyName) { }
         public bool CanStoreMetadata(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.Task ConnectAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, RequiresAdministration=true, Title="Create")]
         public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Creates a new markdown file with the given name (ending in .md) and content in th" +
-            "is folder.", Icon="NoteAdd", Position=2, Title="Create Markdown File")]
+            "is folder.", Icon="NoteAdd", Position=2, RequiresAdministration=true, Title="Create Markdown File")]
         public System.Threading.Tasks.Task CreateMarkdownFileAsync(string name, string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
@@ -235,10 +235,10 @@ namespace HomeBlaze.Storage
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task AddSubjectAsync(string path, Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, Title="Create")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Add", Position=1, RequiresAdministration=true, Title="Create")]
         public System.Threading.Tasks.Task CreateAsync([HomeBlaze.Abstractions.Attributes.FromServices] HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Creates a new markdown file with the given name (ending in .md) and content in th" +
-            "is folder.", Icon="NoteAdd", Position=2, Title="Create Markdown File")]
+            "is folder.", Icon="NoteAdd", Position=2, RequiresAdministration=true, Title="Create Markdown File")]
         public System.Threading.Tasks.Task CreateMarkdownFileAsync(string name, string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteBlobAsync(string path, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task DeleteSubjectAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
@@ -298,7 +298,7 @@ namespace HomeBlaze.Storage.Internal
     {
         public MarkdownContentParser(HomeBlaze.Services.ConfigurableSubjectSerializer serializer, HomeBlaze.Services.SubjectPathResolver pathResolver, HomeBlaze.Services.TypeProvider typeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Storage.Internal.MarkdownContentParser>? logger = null) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownParseResult> ParseAsync(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, System.Collections.Generic.IDictionary<string, Namotion.Interceptor.IInterceptorSubject> existingChildren, System.Threading.CancellationToken cancellationToken) { }
-        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, bool includeSourcePaths = false) { }
+        public string? RenderContent(string? content, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, bool includeSourcePaths = false) { }
         public string ResolveLink(string link, HomeBlaze.Storage.Files.MarkdownFile page) { }
     }
     public class MarkdownFrontmatter
@@ -319,7 +319,7 @@ namespace HomeBlaze.Storage.Internal
     }
     public static class MarkdownMarkup
     {
-        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, bool groupsText = false) { }
+        public static System.Collections.Generic.List<HomeBlaze.Storage.Internal.MarkdownRenderSegment> GetRenderSegments(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> children, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions, bool groupsText = false) { }
     }
     public readonly struct MarkdownRenderSegment : System.IEquatable<HomeBlaze.Storage.Internal.MarkdownRenderSegment>
     {
@@ -335,6 +335,7 @@ namespace HomeBlaze.Storage.Internal
         public RenderExpression(string text, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Services.SubjectPathResolver pathResolver) { }
         public string? Error { get; }
         public HomeBlaze.Storage.Files.MarkdownFile Parent { get; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> ReadProperties { get; }
         public string Text { get; }
         public string? Title { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -343,7 +344,7 @@ namespace HomeBlaze.Storage.Internal
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
-        public string GetText(HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone) { }
+        public string GetText(HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone, HomeBlaze.Authorization.Abstractions.IUserPermissions permissions) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }

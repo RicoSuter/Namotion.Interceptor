@@ -74,7 +74,7 @@ The MCP server provides 5 core tools:
 | `browse` | Browse the subject tree with depth control and property inclusion |
 | `search` | Search across all subjects by text and/or type names |
 | `get_property` | Read a property value by path (e.g., `Folder/Device/Temperature`) |
-| `set_property` | Write a property value by path (e.g., `Folder/Device/TargetSpeed`). Blocked when `IsReadOnly`; refused per property by the access policy |
+| `set_property` | Write a property value by path (e.g., `Folder/Device/TargetSpeed`). Refused per property by the access policy, which by default allows no writes |
 | `list_types` | List available types with interface property and method schemas |
 
 ### Path Format
@@ -257,7 +257,7 @@ Read a property value by path. Returns the value, JSON schema type, optional wri
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. An object binds its members in any case, rejects a member its type does not have, requires each constructor parameter without a default value, and reads an enum member, or an enum element of a collection, only by name. A value that cannot be converted returns an error and leaves the property unchanged.
+Write a property value by path. The default access policy is read-only, so `set_property` writes only with a policy that allows `write`, see [Access Policy](#access-policy). The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. An object binds its members in any case, rejects a member its type does not have, requires each constructor parameter without a default value, and reads an enum member, or an enum element of a collection, only by name. A value that cannot be converted returns an error and leaves the property unchanged.
 
 An application decides which properties may be written with the `AccessPolicy` of the configuration, see [Access Policy](#access-policy). `set_property` then returns the error `Property is not writable: <path>. The access policy does not allow it.` for a property the policy does not allow to write, and writes nothing. A refused property is not reported as writable by `get_property`, `browse` and `search`. To tell the client why a kind of property cannot be written, append it to the `set_property` description with `ToolDescriptionAdditions`.
 
@@ -292,7 +292,7 @@ var config = new McpServerConfiguration
     // Optional: text appended to a tool's description, keyed by tool name
     ToolDescriptionAdditions = { ["browse"] = "Subjects of type Document hold the manuals." },
 
-    // Optional: decide per member and action what the tools let a client read and change
+    // Optional: decide per member and action what the tools show and change (default: ReadOnlyMcpAccessPolicy.Instance)
     AccessPolicy = new MyAccessPolicy(),
 
     // Optional: subject types that browse, search and list_types leave out
@@ -300,8 +300,7 @@ var config = new McpServerConfiguration
 
     // Safety limits
     MaxDepth = 10,
-    MaxSubjectsPerResponse = 500,
-    IsReadOnly = true
+    MaxSubjectsPerResponse = 500
 };
 ```
 
@@ -309,7 +308,14 @@ var config = new McpServerConfiguration
 
 ### Access Policy
 
-Two settings decide what a client may do. `IsReadOnly` is the mode of the whole server: when true, `set_property` is blocked, and custom tools provided via `IMcpToolProvider` can read it and apply the same convention to their own mutating operations. `AccessPolicy` decides per member, a property, an attribute or a method registered as a property, and per action. It is optional; without one every action is allowed. In short, a subject other than the root whose properties the path provider includes, attributes aside, the policy all denies to read is hidden from every property, collection and dictionary that holds it, as if it were missing; the rules below define this precisely.
+`AccessPolicy` decides what a client may do, per member, a property, an attribute or a method registered as a property, and per action. The package has two policies:
+
+- `ReadOnlyMcpAccessPolicy.Instance`, the default: allows `read` and denies every other action, so `set_property` refuses every property and a custom tool that asks for an action of its own is refused too.
+- `AllowAllMcpAccessPolicy.Instance`: allows every action on every member.
+
+Setting `AccessPolicy` to null throws, so a configuration never ends up without a policy.
+
+In short, a subject other than the root whose properties the path provider includes, attributes aside, the policy all denies to read is hidden from every property, collection and dictionary that holds it, as if it were missing; the rules below define this precisely.
 
 ```csharp
 public sealed class MyAccessPolicy : IMcpAccessPolicy
@@ -319,23 +325,46 @@ public sealed class MyAccessPolicy : IMcpAccessPolicy
 }
 ```
 
-The tools ask for `McpAccessActions.Read` and `McpAccessActions.Write`. A custom tool may ask the same policy for actions of its own, for example `execute` before it runs a method, through `configuration.IsAllowed(member, action)`, which is true without a policy. `IsAllowed` may be called concurrently, so it must be thread-safe. An exception it throws fails the tool call.
+The tools ask for `McpAccessActions.Read` and `McpAccessActions.Write`. A custom tool may ask the same policy for actions of its own, for example `execute` before it runs a method, through `configuration.IsAllowed(member, action)`. `IsAllowed` may be called concurrently, so it must be thread-safe. An exception it throws fails the tool call.
 
-With a policy, the tools apply these rules. A policy that allows every read changes nothing about what the tools list or resolve, with one exception: a subject reached only through a link the registry does not track as a parent, such as a `[Derived]` property that returns it, has no registered parent and is therefore hidden with any policy, while without a policy the tools resolve paths through that link.
+The tools apply these rules. A policy that allows every read changes nothing about what the tools list or resolve, with one exception: a subject reached only through a link the registry does not track as a parent, such as a `[Derived]` property that returns it, has no registered parent and is therefore hidden with any policy other than `ReadOnlyMcpAccessPolicy` and `AllowAllMcpAccessPolicy`, while with those two the tools resolve paths through that link.
 
-- **Readable member**: the policy allows `read` on it; an attribute also needs its property to be readable, and attributes that belong to each other in a cycle are not readable. The read check never asks the path provider: the tools keep the [included properties](#path-format) they see without a policy and add the policy's `read`, so `browse` and `search` list, select and filter, and `get_property`, `set_property` and the helpers resolve, only properties the path provider effectively includes and the policy allows to read. The attributes listed with a property, by `browse` and `search` with `includeAttributes` and by `get_property`, are the exception: they are listed when the policy allows reading them, without asking the path provider.
+- **Readable member**: the policy allows `read` on it; an attribute also needs its property to be readable, and attributes that belong to each other in a cycle are not readable. The read check never asks the path provider: the tools keep the [included properties](#path-format) and add the policy's `read`, so `browse` and `search` list, select and filter, and `get_property`, `set_property` and the helpers resolve, only properties the path provider effectively includes and the policy allows to read. The attributes listed with a property, by `browse` and `search` with `includeAttributes` and by `get_property`, are the exception: they are listed when the policy allows reading them, without asking the path provider.
 - **Empty for the policy**: a subject that has at least one property other than an attribute that the path provider effectively includes, where the policy denies `read` on every one of them. A subject without such properties is not empty, and the policy's answer on a property the path provider excludes never decides whether a subject is readable.
 - **Readable subject**: the root, or a subject that is not empty for the policy and has a readable path, one from the tool root through readable properties the path provider effectively includes. A subject is readable when at least one of its paths is readable, and hidden otherwise, also when no path reaches it from the tool root at all, as for a subject without a registered parent; hiding a link hides only that link. Its path is built through the first parent, in parent order, from which a readable path can be built. A path the tools build is checked on the chain it is built through, so a subject moved behind a hidden property while a call runs never gets a path naming that property: `search` leaves it out and `browse` lists it without `$path`.
 - **Resolving a path**: every property on the path must be readable and every subject the path passes, including the one owning the resolved property, must be readable, so a subject that is not readable does not lead to the subjects it holds. This holds for `get_property`, `set_property`, `browse`, `where` paths and the helpers; `browse` and `TryGetReadableSubject` also require the resolved subject to be readable.
 - **Lookup of a segment**: a member the policy does not allow to read is treated as absent. The segment then names the next readable member other than the `[InlinePaths]` property whose `TryGetPropertySegment` is that segment, for example an attribute of the same name, or else, on a subject with an `[InlinePaths]` dictionary, that property: the dictionary itself when the segment is its own segment, and otherwise a key of the dictionary, as `PathProviderBase` answers a name that does not exist. Paths are built as if the member did not exist. A path provider that overrides `TryGetPropertyFromSegment` must answer as `PathProviderBase` does, or a hidden name and a missing one can get different answers: match a segment by `TryGetPropertySegment`, fall back to the `[InlinePaths]` property for a name no other member has, and let that property yield its own segment to every other member with that segment.
-- **Hidden reads as missing**: a property or subject that is not readable gets the same answer as one that does not exist. `get_property`, `set_property` and `browse` give the answer of a missing path, which is `Path not found` and, on a subject with an `[InlinePaths]` dictionary, the answer for a dictionary key of that name; `browse` and `search` leave it out and count only what they list, also in the `omittedCount` of a truncated `browse`, a `where` path through it reads as a missing value, a reference in a `where` filter whose subject is not readable reads as null, and a name in `properties` or `where` that only hidden properties have gets the warning of an unknown name. `set_property` returns `Server is in read-only mode.` before it resolves the path. One difference remains: a subject in a collection keeps its position in the path the tools build, so that the path resolves back, and a position such as `Items[2]` on the first readable item tells the client that hidden items come before it. Dictionary keys reveal nothing of that kind.
-- **Writable property**: readable, `IsReadOnly` is false, the property has a public setter and the policy allows `write`.
+- **Hidden reads as missing**: a property or subject that is not readable gets the same answer as one that does not exist. `get_property`, `set_property` and `browse` give the answer of a missing path, which is `Path not found` and, on a subject with an `[InlinePaths]` dictionary, the answer for a dictionary key of that name; `browse` and `search` leave it out and count only what they list, also in the `omittedCount` of a truncated `browse`, a `where` path through it reads as a missing value, a reference in a `where` filter whose subject is not readable reads as null, and a name in `properties` or `where` that only hidden properties have gets the warning of an unknown name. `set_property` resolves the path before it asks for `write`, so a hidden property is refused as a missing one, also by a policy that allows no writes. One difference remains: a subject in a collection keeps its position in the path the tools build, so that the path resolves back, and a position such as `Items[2]` on the first readable item tells the client that hidden items come before it. Dictionary keys reveal nothing of that kind.
+- **Writable property**: readable, the property has a public setter and the policy allows `write`.
 
-Without a policy nothing of this is evaluated or allocated.
+With `ReadOnlyMcpAccessPolicy` or `AllowAllMcpAccessPolicy`, which allow every read, nothing of the read rules is evaluated or allocated; a policy of the application is asked even when it allows every read.
 
 Declare properties that hold subjects with subject types, otherwise their values are listed as values and the policy is not asked about the subjects inside, for example the devices in a property typed as a dictionary of lists of devices.
 
 `list_types` is not filtered, because types are schema rather than data. Enrichments such as `$methods` come from the `IMcpSubjectEnricher` of the application, which filters them itself. A custom tool resolves paths the way the tools do with `configuration.TryGetReadableProperty(root, path)` and `configuration.TryGetReadableSubject(root, path)`, which return null for what is hidden. It builds the path `search` lists for a subject, which is also the `$path` `browse` returns for a subject it lists, with `configuration.TryGetSubjectPath(root, subject)`, which returns null for a subject that has no path, is not readable or is of a type in `ExcludeTypes`, so it lists exactly the subjects `search` can list. `TryGetReadableSubject` resolves a path it returns, for any subject but the root, back to that subject when the path provider resolves the path with the `PathPrefix`, as without a prefix or with the prefix `/` and the separator `/`. The three helpers take the tool root as `root`: it is readable, and paths are resolved and built from it.
+
+#### Migrating from `IsReadOnly`
+
+`McpServerConfiguration.IsReadOnly` was removed, and `AccessPolicy` is no longer nullable; the policy alone decides what a client may change.
+
+- **A policy of its own without setting `IsReadOnly`: the server becomes writable.** `IsReadOnly` defaulted to true, so such a server was read-only whatever the policy allowed. After the upgrade, `set_property` writes every property the policy allows `write` on. To stay read-only, deny `write` in the policy:
+
+  ```csharp
+  // Before: read-only through IsReadOnly; after the upgrade, every property but Password is writable.
+  public bool IsAllowed(RegisteredSubjectProperty member, string action) =>
+      member.Name != "Password";
+
+  // Read-only after the upgrade.
+  public bool IsAllowed(RegisteredSubjectProperty member, string action) =>
+      action != McpAccessActions.Write && member.Name != "Password";
+  ```
+
+  The same holds for a policy combined with an explicit `IsReadOnly = true`.
+- Without a policy and with the default `IsReadOnly = true`: nothing to change, the default policy is read-only. `configuration.IsAllowed` now denies every action but `read`, so a custom tool that asks for an action of its own, such as `execute`, is refused.
+- Without a policy and with `IsReadOnly = false`: set `AccessPolicy = AllowAllMcpAccessPolicy.Instance`.
+- A custom tool that read `configuration.IsReadOnly` before a mutating operation calls `configuration.IsAllowed(member, action)` instead, with `McpAccessActions.Write` or an action of its own.
+
+`set_property` refuses a property the policy does not allow to write with `Property is not writable: <path>. The access policy does not allow it.` and no longer returns `Server is in read-only mode.`.
 
 ## Extension Points
 

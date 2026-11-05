@@ -19,7 +19,7 @@ public sealed class AuthorizationServiceConcurrencyTests
         using var service = CreateService(registry);
 
         // Act
-        var result = service.GetPolicy(["Custom"]);
+        var result = service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Null(result.Error);
@@ -34,20 +34,24 @@ public sealed class AuthorizationServiceConcurrencyTests
         using var service = CreateService(registry);
 
         // Act
-        var custom = service.GetPolicy(["Custom"]);
+        var custom = service.GetPolicy(["custom"]);
         var builtIn = service.GetPolicy([BuiltInRoles.ReaderName]);
         registry.FailuresLeft = 0;
-        var customAfterwards = service.GetPolicy(["Custom"]);
+        var customAfterwards = service.GetPolicy(["custom"]);
 
         // Assert
         Assert.Same(AuthorizationPolicy.DenyAll, custom.Policy);
-        Assert.Contains("'Custom'", custom.Error);
+        Assert.Contains("'custom'", custom.Error);
         Assert.Null(builtIn.Error);
         Assert.Null(customAfterwards.Error);
     }
 
-    private static Authorization CreateAuthorization() =>
-        new() { Roles = new Dictionary<string, Role> { ["Custom"] = new() { Includes = [BuiltInRoles.ReaderName] } } };
+    private static Authorization CreateAuthorization()
+    {
+        var authorization = new Authorization();
+        authorization.ReplaceRoles([new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] }]);
+        return authorization;
+    }
 
     private static AuthorizationService CreateService(ConcurrentlyChangedRegistry registry)
     {

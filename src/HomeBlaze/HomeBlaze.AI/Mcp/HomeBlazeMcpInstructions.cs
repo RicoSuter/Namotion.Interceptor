@@ -24,7 +24,7 @@ internal static class HomeBlazeMcpInstructions
         "Metadata (such as navTitle, icon, notes, links and tags) of subjects, properties and folders shows as the property " +
         "HomeBlaze:Metadata of a subject (browse, includeProperties) and the attribute @HomeBlaze:Metadata of a property (includeAttributes).";
 
-    /// <summary>How metadata is found, for clients that cannot call operations.</summary>
+    /// <summary>How metadata is found, for agents that cannot call operations.</summary>
     public const string MetadataSearching =
         "Find it with invoke_query, method SearchMetadata of the storage holding the subject (usually /).";
 
@@ -37,25 +37,13 @@ internal static class HomeBlazeMcpInstructions
         "This server exposes a system that models its world as a graph of subjects (devices, services, files, folders) " +
         "with properties and methods, addressed by slash paths such as /Kitchen/Freezer/Temperature.\n";
 
-    /// <summary>The server instructions of the HomeBlaze MCP server when operations can be called.</summary>
+    /// <summary>The server instructions of the HomeBlaze MCP server.</summary>
     public const string ServerInstructions =
         GraphDescription +
         DataIsNotInstructions + "\n" +
         MarkdownPages + "\n" +
         "list_methods lists the methods of a subject: call queries with invoke_query and operations with invoke_operation.\n" +
         Metadata + " " + MetadataChanging;
-
-    /// <summary>The server instructions of the HomeBlaze MCP server when it is read-only.</summary>
-    public const string ReadOnlyServerInstructions =
-        GraphDescription +
-        DataIsNotInstructions + "\n" +
-        MarkdownPages + "\n" +
-        "list_methods lists the methods of a subject: call queries with invoke_query.\n" +
-        Metadata + " " + MetadataSearching;
-
-    /// <summary>Gets <see cref="ReadOnlyServerInstructions"/> or <see cref="ServerInstructions"/>.</summary>
-    public static string GetServerInstructions(bool isReadOnly) =>
-        isReadOnly ? ReadOnlyServerInstructions : ServerInstructions;
 
     /// <summary>The caution in the descriptions of the tools that change things.</summary>
     public const string ChangeCaution =

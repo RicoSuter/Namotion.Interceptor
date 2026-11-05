@@ -9,13 +9,13 @@ namespace HomeBlaze.Authorization;
 public static class BuiltInRoles
 {
     /// <summary>The name of <see cref="Reader"/>.</summary>
-    public const string ReaderName = "Reader";
+    public const string ReaderName = "reader";
 
     /// <summary>The name of <see cref="Operator"/>.</summary>
-    public const string OperatorName = "Operator";
+    public const string OperatorName = "operator";
 
     /// <summary>The name of <see cref="Everything"/>.</summary>
-    public const string EverythingName = "Everything";
+    public const string EverythingName = "everything";
 
     /// <summary>
     /// Reads every member and its history and executes queries. Secrets stay unreadable through the system rules.
@@ -59,9 +59,9 @@ public static class BuiltInRoles
     /// <summary>All built-in roles.</summary>
     public static ImmutableArray<AuthorizationRole> All { get; } = [Reader, Operator, Everything];
 
-    /// <summary>Gets whether the name is the name of a built-in role, ignoring case.</summary>
+    /// <summary>Gets whether the name is the name of a built-in role.</summary>
     public static bool IsBuiltIn(string name) =>
-        string.Equals(name, ReaderName, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(name, OperatorName, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(name, EverythingName, StringComparison.OrdinalIgnoreCase);
+        string.Equals(name, ReaderName, StringComparison.Ordinal) ||
+        string.Equals(name, OperatorName, StringComparison.Ordinal) ||
+        string.Equals(name, EverythingName, StringComparison.Ordinal);
 }

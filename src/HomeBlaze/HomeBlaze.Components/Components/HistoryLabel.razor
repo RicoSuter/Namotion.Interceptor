@@ -5,7 +5,7 @@
 @inject IServiceProvider ServiceProvider
 
 @{
-    var canShowHistory = _viewer.CanShow(Property, IsEditing);
+    var canShowHistory = _historyViewer.CanShow(Property, IsEditing);
 }
 
 <MudText Typo="@Typo" Class="@Class" aria-hidden="@(IsNamedElsewhere && !canShowHistory ? "true" : null)" data-testid="value-label">
@@ -20,7 +20,7 @@
 </MudText>
 
 @code {
-    private IPropertyHistoryViewer? _viewer;
+    private IPropertyHistoryViewer? _historyViewer;
     private EventCallback _showHistoryCallback;
 
     /// <summary>The property whose history the label shows, or null for a label that only shows its text.</summary>
@@ -49,10 +49,10 @@
 
     protected override void OnInitialized()
     {
-        _viewer = ServiceProvider.GetService<IPropertyHistoryViewer>();
+        _historyViewer = ServiceProvider.GetService<IPropertyHistoryViewer>();
         // Created once: binding the method group directly in the markup would allocate a new delegate on every render.
         _showHistoryCallback = EventCallback.Factory.Create(this, ShowHistoryAsync);
     }
 
-    private Task ShowHistoryAsync() => _viewer.TryShowAsync(Property, IsEditing, Text);
+    private Task ShowHistoryAsync() => _historyViewer.TryShowAsync(Property, IsEditing, Text);
 }

@@ -628,7 +628,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheConfigurationIsReadOnly_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
+    public async Task WhenCreatingTheTools_ThenSearchMarkdownIsOfferedAsAReadOnlyTool()
     {
         // Act
         var tool = await CreateToolAsync();
@@ -698,7 +698,7 @@ public sealed class HomeBlazeMarkdownSearchToolTests : IDisposable
 
     private static Dictionary<string, McpToolInfo> CreateTools(IServiceProvider services, AgentTestRoot root, IMcpAccessPolicy accessPolicy)
     {
-        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, isReadOnly: true, accessPolicy);
+        var configuration = HomeBlazeMcpConfigurationFactory.Create(services, () => root, accessPolicy);
         return new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name);
     }
 

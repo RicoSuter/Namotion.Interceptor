@@ -866,13 +866,14 @@ public class LlmAgentBaseTests
         await staleRun;
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            test.Agent.RunNow();
-            return test.Agent.RunCount == 2 && !test.Agent.IsBusy;
-        });
+        // The restart publishes its scheduler only once the stale turn released the turn gate; a manual run before that is dropped.
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Running);
+        test.Agent.RunNow();
+
+        // A turn clears IsBusy before it reports itself idle, so the idle report is what the wait ends on.
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent is { RunCount: 2, StatusMessage: "Idle" });
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
-        Assert.Equal("Idle", test.Agent.StatusMessage);
+        Assert.False(test.Agent.IsBusy);
     }
 
     [Fact]
@@ -1333,7 +1334,7 @@ public class LlmAgentBaseTests
 /// <summary>Offers tools whose result is whether the permission to edit page layout is granted where they run.</summary>
 internal sealed class PermissionRecordingToolSource : IAgentToolSource
 {
-    public IReadOnlyList<McpToolInfo> CreateTools(bool isReadOnly, IMcpAccessPolicy accessPolicy) =>
+    public IReadOnlyList<McpToolInfo> CreateTools(IMcpAccessPolicy accessPolicy) =>
         new[] { "browse", "edit_markdown", "invoke_operation" }.Select(name => new McpToolInfo
         {
             Name = name,

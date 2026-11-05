@@ -1,6 +1,7 @@
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
@@ -249,13 +250,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// Returns the content with each {{ path }} expression replaced by its current value. Secret configuration values
     /// in the blocks are replaced by "***" as in <see cref="ReadRawContent"/>, and an expression of a secret value renders empty,
-    /// as does one of a property that <see cref="PropertyReadAccess"/> refuses on the current flow, without its source path.
+    /// as does one of a property that <paramref name="permissions"/> do not allow to read, without its source path.
     /// </summary>
+    /// <param name="permissions">The permissions of the reader the content is shown to; null denies every property.</param>
     /// <param name="includeSourcePaths">When true, each resolved value is followed by the absolute path of its
     /// property in parentheses, for example "21.5 (/Devices/Kitchen/Temperature)". Null is treated as false.</param>
     [Query(Title = "Read Evaluated Content", Description = "Returns the markdown content with {{ path }} expressions evaluated against the current object graph. With includeSourcePaths set to true, each value is followed by the absolute path of its property in parentheses, which get_property reads when the property is exposed as state", Icon = "Preview")]
-    public string? ReadEvaluatedContent(bool? includeSourcePaths = null) =>
-        _parser.RenderContent(ReadRawContent(), this, includeSourcePaths == true);
+    public string? ReadEvaluatedContent([FromServices] IUserPermissions? permissions, bool? includeSourcePaths = null) =>
+        _parser.RenderContent(ReadRawContent(), this, permissions ?? DenyAllPermissions.Instance, includeSourcePaths == true);
 
     /// <summary>
     /// Replaces the whole Markdown source of the file as <see cref="ReadRawContent"/> shows it. Its blocks must stay

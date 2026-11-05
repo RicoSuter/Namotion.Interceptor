@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
-using Namotion.Interceptor.Expressions;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Services.Display;
@@ -36,9 +37,9 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
     /// <summary>
     /// Binds the path of a widget: the value of the property it ends at, or the subject it leads to when it ends at no
     /// property, such as the name of a block or an entry of a collection. A path that is null, empty, malformed or leads
-    /// nowhere gives an empty binding.
+    /// nowhere gives an empty binding, and so does a path that ends at a property the viewer may not read.
     /// </summary>
-    public static ValueBinding FromPath(SubjectPathResolver resolver, IInterceptorSubject from, string? path)
+    public static ValueBinding FromPath(SubjectPathResolver resolver, IInterceptorSubject from, string? path, IUserPermissions permissions)
     {
         if (string.IsNullOrEmpty(path))
         {
@@ -49,7 +50,8 @@ public readonly struct ValueBinding(RegisteredSubjectProperty? property, object?
         {
             if (resolver.ResolveScopedDisplayableProperty(path, PathStyle.Canonical, from) is { } property)
             {
-                return FromProperty(property);
+                // Not resolved as a subject instead, which would follow a reference the viewer may not read.
+                return permissions.CanRead(property) ? FromProperty(property) : default;
             }
 
             return resolver.ResolveScopedSubject(path, PathStyle.Canonical, from) is { } subject

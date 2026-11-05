@@ -28,7 +28,7 @@ internal class SetPropertyTool
     {
         Name = "set_property",
         Description = "Write a property value by its full path (e.g. /Devices/Motor/TargetSpeed). " +
-                      "Only writable properties can be set. Blocked when server is read-only.",
+                      "Only properties the server allows to write can be set.",
         InputSchema = Schema,
         Handler = HandleSetPropertyAsync,
         Annotations = McpToolAnnotations.Destructive
@@ -36,11 +36,6 @@ internal class SetPropertyTool
 
     private Task<object?> HandleSetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        if (_configuration.IsReadOnly)
-        {
-            return Task.FromResult<object?>(new { error = "Server is in read-only mode." });
-        }
-
         var pathProvider = _configuration.ToolPathProvider;
 
         var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()

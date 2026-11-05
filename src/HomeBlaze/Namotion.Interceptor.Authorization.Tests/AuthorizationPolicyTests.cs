@@ -210,13 +210,40 @@ public class AuthorizationPolicyTests
     }
 
     [Fact]
-    public void WhenRoleIsNamedSystem_ThenCompileThrows()
+    public void WhenARoleNamedSystemAllows_ThenTheSystemDenyRulesStillDeny()
     {
+        // Arrange
+        var home = Create();
+        var system = Role("system", allow: [Rule(Read), Rule(Read, tags: ["secret"])]);
+
         // Act
-        var exception = Assert.Throws<AuthorizationException>(() => Compile(Role("system")));
+        var policy = Compile([system], ["system"], systemDeny: [Rule(Read, tags: ["secret"])]);
 
         // Assert
-        Assert.Equal("Role name 'System' is reserved.", exception.Message);
+        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Password))));
+        Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+    }
+
+    [Fact]
+    public void WhenASystemDenyRuleIsInvalid_ThenCompileThrowsNamingTheSystemRules()
+    {
+        // Act
+        var exception = Assert.Throws<AuthorizationException>(
+            () => Compile([Role("Reader")], ["Reader"], systemDeny: [Rule([], tags: ["secret"])]));
+
+        // Assert
+        Assert.Equal("A rule of the system rules has no actions.", exception.Message);
+    }
+
+    [Fact]
+    public void WhenASystemDenyRuleHasAnInvalidPath_ThenCompileThrowsNamingTheSystemRules()
+    {
+        // Act
+        var exception = Assert.Throws<AuthorizationException>(
+            () => Compile([Role("Reader")], ["Reader"], systemDeny: [Rule(Read, paths: ["/"])]));
+
+        // Assert
+        Assert.StartsWith("Path pattern '/' of the system rules matches no member", exception.Message);
     }
 
     [Fact]

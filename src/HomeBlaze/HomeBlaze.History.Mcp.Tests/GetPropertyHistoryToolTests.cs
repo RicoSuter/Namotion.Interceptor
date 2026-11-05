@@ -37,7 +37,7 @@ public class GetPropertyHistoryToolTests
         }
 
         var provider = new HistoryMcpToolProvider(
-            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, NullLogger<HistoryMcpToolProvider>.Instance);
+            () => root, new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = AllowAllMcpAccessPolicy.Instance }, NullLogger<HistoryMcpToolProvider>.Instance);
 
         var tool = provider.GetTools().First(candidate => candidate.Name == "get_property_history");
         var input = JsonSerializer.SerializeToElement(inputObject);
@@ -318,7 +318,7 @@ public class GetPropertyHistoryToolTests
     {
         // Arrange
         var provider = new HistoryMcpToolProvider(
-            () => throw new InvalidOperationException("Not used."), new McpServerConfiguration { PathProvider = new StateAttributePathProvider() }, NullLogger<HistoryMcpToolProvider>.Instance);
+            () => throw new InvalidOperationException("Not used."), new McpServerConfiguration { PathProvider = new StateAttributePathProvider(), AccessPolicy = AllowAllMcpAccessPolicy.Instance }, NullLogger<HistoryMcpToolProvider>.Instance);
 
         // Act
         var tool = provider.GetTools().Single();

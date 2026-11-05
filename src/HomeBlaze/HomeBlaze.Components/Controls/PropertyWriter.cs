@@ -1,6 +1,8 @@
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Editors;
 using HomeBlaze.Services;
+using HomeBlaze.Components.Abstractions.Access;
+using HomeBlaze.Authorization.Abstractions;
 using MudBlazor;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -21,6 +23,7 @@ public sealed class PropertyWriter : IDisposable
     private readonly RootManager _rootManager;
     private readonly ISnackbar _snackbar;
     private readonly TimeProvider _timeProvider;
+    private readonly IUserPermissions _permissions;
     private readonly TimerCallback _onPersistDue;
 
     // Guards the dictionaries and _isDisposed: writes come from the circuit, the timers fire on the thread pool.
@@ -32,21 +35,35 @@ public sealed class PropertyWriter : IDisposable
     private readonly Dictionary<IInterceptorSubject, Task> _runningSaves = new(ReferenceEqualityComparer.Instance);
     private volatile bool _isDisposed;
 
-    public PropertyWriter(RootManager rootManager, ISnackbar snackbar, TimeProvider timeProvider)
+    public PropertyWriter(RootManager rootManager, ISnackbar snackbar, TimeProvider timeProvider, IUserPermissions permissions)
     {
         _rootManager = rootManager;
         _snackbar = snackbar;
         _timeProvider = timeProvider;
+        _permissions = permissions;
         _onPersistDue = OnPersistDue;
     }
 
     /// <summary>
     /// Gets whether a control may write the property: it has a public setter and its current value, which the caller
-    /// has already read, is no operation.
+    /// has already read, is no operation. Whether the viewer may change it is not part of this, see <see cref="MayWrite"/>.
     /// </summary>
     public static bool IsWritable(RegisteredSubjectProperty property, object? currentValue)
     {
         return property.HasPublicSetter && currentValue is not MethodMetadata;
+    }
+
+    /// <summary>
+    /// Gets whether the viewer may change the property through a control: a [Configuration] property is changed only by
+    /// a viewer who may administer it, see <see cref="IUserPermissions.CanAdminister"/>, any other one by a viewer who
+    /// may write it, see <see cref="IUserPermissions.CanWrite"/>.
+    /// </summary>
+    public static bool MayWrite(IUserPermissions permissions, RegisteredSubjectProperty property)
+    {
+        ArgumentNullException.ThrowIfNull(permissions);
+        ArgumentNullException.ThrowIfNull(property);
+
+        return property.IsConfigurationProperty() ? permissions.CanAdminister(property) : permissions.CanWrite(property);
     }
 
     /// <summary>
@@ -55,12 +72,19 @@ public sealed class PropertyWriter : IDisposable
     /// nothing shows a warning and one that fails shows an error, both leave the value applied. Nothing is rolled back.
     /// </summary>
     /// <returns>
-    /// False when the property is not writable or the conversion or the setter failed, which is shown as an error.
+    /// False when the viewer may not change the property, see <see cref="MayWrite"/>, it is not writable, or the conversion or the setter failed,
+    /// which is shown as an error.
     /// </returns>
     /// <exception cref="ObjectDisposedException">The writer is disposed.</exception>
     public bool TryWrite(RegisteredSubjectProperty property, object? value)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        if (!MayWrite(_permissions, property))
+        {
+            ShowWriteError(property, AccessDeniedTexts.Write);
+            return false;
+        }
 
         var currentValue = property.GetValue();
         if (!IsWritable(property, currentValue))

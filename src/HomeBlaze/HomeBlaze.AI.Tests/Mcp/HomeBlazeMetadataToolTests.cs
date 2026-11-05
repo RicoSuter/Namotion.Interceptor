@@ -620,7 +620,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         root = new AgentTestRoot(context) { Children = new Dictionary<string, IInterceptorSubject> { ["Storage"] = storage } };
         await storage.ConnectAsync(CancellationToken.None);
         var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            serviceProvider, () => root, isReadOnly: false, accessPolicy ?? (isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything));
+            serviceProvider, () => root, accessPolicy ?? (isAgent ? TestAccessPolicies.Operator : TestAccessPolicies.Everything));
         return (new McpToolFactory(root, configuration).CreateTools().ToDictionary(tool => tool.Name), storage);
     }
 

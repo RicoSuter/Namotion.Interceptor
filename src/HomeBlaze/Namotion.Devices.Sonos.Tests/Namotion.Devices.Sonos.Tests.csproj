@@ -6,8 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="bunit" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Moq" />
     <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
     <PackageReference Include="PublicApiGenerator" />
     <PackageReference Include="Verify.Xunit" />
@@ -20,8 +22,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Devices.Sonos\Namotion.Devices.Sonos.csproj" />
+    <ProjectReference Include="..\Namotion.Devices.Sonos.HomeBlaze\Namotion.Devices.Sonos.HomeBlaze.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\HomeBlaze.Components.Tests\Access\TestUserPermissions.cs" Link="Access\TestUserPermissions.cs" />
   </ItemGroup>
 
   <ItemGroup>

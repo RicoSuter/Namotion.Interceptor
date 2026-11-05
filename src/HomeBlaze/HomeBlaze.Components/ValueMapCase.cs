@@ -2,9 +2,10 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Display;
-using Namotion.Interceptor.Expressions;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Expressions;
 
 namespace HomeBlaze.Components;
 
@@ -101,7 +102,8 @@ public partial class ValueMapCase : IConfigurable
     /// <param name="rawText">The raw text of the value of the binding, or null when it has none.</param>
     /// <param name="binding">The value and its subject.</param>
     /// <param name="resolver">The resolver of the paths of the condition.</param>
-    internal bool Matches(string? rawText, in ValueBinding binding, SubjectPathResolver resolver)
+    /// <param name="permissions">The permissions of the viewer, for whom a property it may not read is missing.</param>
+    internal bool Matches(string? rawText, in ValueBinding binding, SubjectPathResolver resolver, IUserPermissions permissions)
     {
         var value = Value;
         if (!string.IsNullOrEmpty(value) && !string.Equals(value, rawText, StringComparison.OrdinalIgnoreCase))
@@ -120,7 +122,7 @@ public partial class ValueMapCase : IConfigurable
             return false;
         }
 
-        var context = new ValueBindingContext(resolver, this, binding, timeZone: null);
+        var context = new ValueBindingContext(resolver, this, binding, timeZone: null, permissions);
         return condition.EvaluateCondition(ref context) == true;
     }
 
@@ -131,14 +133,15 @@ public partial class ValueMapCase : IConfigurable
     /// <param name="binding">The value and its subject.</param>
     /// <param name="resolver">The resolver of the paths of the text.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    internal string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone)
+    /// <param name="permissions">The permissions of the viewer, for whom a property it may not read is missing.</param>
+    internal string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone, IUserPermissions permissions)
     {
         if (GetTemplate().Template is not { } template)
         {
             return null;
         }
 
-        var context = new ValueBindingContext(resolver, this, binding, timeZone);
+        var context = new ValueBindingContext(resolver, this, binding, timeZone, permissions);
         return template.Render(ref context);
     }
 

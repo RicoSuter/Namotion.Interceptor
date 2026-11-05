@@ -26,11 +26,13 @@ public class BuiltInRolesTests
     }
 
     [Theory]
-    [InlineData("Reader", true)]
+    [InlineData("reader", true)]
     [InlineData("operator", true)]
-    [InlineData("EVERYTHING", true)]
-    [InlineData("MyRole", false)]
-    public void WhenANameIsChecked_ThenBuiltInNamesMatchIgnoringCase(string name, bool expected)
+    [InlineData("everything", true)]
+    [InlineData("EVERYTHING", false)]
+    [InlineData("Reader", false)]
+    [InlineData("myrole", false)]
+    public void WhenANameIsChecked_ThenOnlyTheExactBuiltInNamesMatch(string name, bool expected)
     {
         // Act
         var isBuiltIn = BuiltInRoles.IsBuiltIn(name);
@@ -121,7 +123,7 @@ public class BuiltInRolesTests
     }
 
     [Fact]
-    public void WhenTheRoleIsEverything_ThenItAllowsEveryActionOnAPlainMember()
+    public void WhenTheRoleIsEverything_ThenItAllowsEveryActionButAdministerOnAPlainMember()
     {
         // Arrange
         var policy = Compile(BuiltInRoles.EverythingName);
@@ -130,7 +132,8 @@ public class BuiltInRolesTests
         // Act & Assert
         foreach (var action in AuthorizationActions.All)
         {
-            Assert.True(policy.IsAllowed(member, action), action.Name);
+            // The system rules of agents, which these tests compile with, deny administering.
+            Assert.Equal(action != AuthorizationActions.Administer, policy.IsAllowed(member, action));
         }
     }
 
@@ -168,11 +171,9 @@ public class BuiltInRolesTests
         // Arrange
         var policy = Compile(BuiltInRoles.EverythingName);
         var context = TestContext.Create();
-        var role = new Role(context);
-        var authorization = new Authorization(context)
-        {
-            Roles = new Dictionary<string, Role> { ["MyRole"] = role }
-        };
+        var authorization = new Authorization(context);
+        authorization.ReplaceRoles([new AuthorizationRole { Name = "myrole" }]);
+        var role = authorization.Roles["myrole"];
 
         // Act & Assert
         AssertDeniesEveryAction(policy, authorization.TryGetRegisteredSubject()!);

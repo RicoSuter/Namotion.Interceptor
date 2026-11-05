@@ -22,19 +22,23 @@ public static class MetadataSearch
     /// and values without regard to case. The paths of the matches are relative to <paramref name="root"/>, through the
     /// first parent that reaches it, as the registry builds them (<c>Pump/Channels[0]</c>); a subject that no path from
     /// <paramref name="root"/> reaches is not found. The matches are ordered by path and then property, ordinal. A subject
-    /// for which <paramref name="isExcluded"/> returns true, and every subject below it, is skipped.
+    /// for which <paramref name="isExcluded"/> returns true, and every subject below it, is skipped, and so is metadata whose
+    /// member, the dynamic property of a subject or the attribute of a property, <paramref name="isMetadataIncluded"/>
+    /// returns false for. That filter is required, so that a caller decides who may read the metadata it finds.
     /// </summary>
     public static IReadOnlyList<MetadataSearchMatch> Search(
-        IInterceptorSubject root, string? tag = null, string? key = null, string? value = null, IInterceptorSubject? start = null,
-        Func<IInterceptorSubject, bool>? isExcluded = null)
+        IInterceptorSubject root, Func<RegisteredSubjectProperty, bool> isMetadataIncluded, string? tag = null, string? key = null,
+        string? value = null, IInterceptorSubject? start = null, Func<IInterceptorSubject, bool>? isExcluded = null)
     {
+        ArgumentNullException.ThrowIfNull(isMetadataIncluded);
         var matches = new List<MetadataSearchMatch>();
         foreach (var subject in Walk(start ?? root, isExcluded))
         {
             string? subjectPath = null;
-            foreach (var (propertyName, metadata) in GetEntries(subject))
+            foreach (var (member, propertyName, metadata) in GetMemberEntries(subject))
             {
-                if (IsMatch(metadata, tag, key, value) && (subjectPath ??= TryGetPath(subject, root)) is { } matchPath)
+                if (isMetadataIncluded(member) &&
+                    IsMatch(metadata, tag, key, value) && (subjectPath ??= TryGetPath(subject, root)) is { } matchPath)
                 {
                     matches.Add(new MetadataSearchMatch(matchPath, propertyName));
                 }
@@ -52,31 +56,41 @@ public static class MetadataSearch
     /// <summary>
     /// Gets every tag below <paramref name="root"/>, each once without regard to case, in order. A subject for which
     /// <paramref name="isExcluded"/> returns true, and every subject below it, is skipped, and so are the tags of a
-    /// property for which <paramref name="isPropertyIncluded"/> returns false.
+    /// property for which <paramref name="isPropertyIncluded"/> returns false and those of metadata whose member, the dynamic
+    /// property of a subject or the attribute of a property, <paramref name="isMetadataIncluded"/> returns false for. That
+    /// filter is required, so that a caller decides who may read the tags it finds.
     /// </summary>
     public static IReadOnlyList<string> GetTags(
-        IInterceptorSubject root, Func<IInterceptorSubject, bool>? isExcluded = null,
-        Func<RegisteredSubjectProperty, bool>? isPropertyIncluded = null)
-        => Walk(root, isExcluded)
-            .SelectMany(subject => GetEntries(subject)
-                .Where(entry => entry.PropertyName is null || isPropertyIncluded is null ||
-                                (subject.TryGetProperty(entry.PropertyName) is { } property && isPropertyIncluded(property))))
+        IInterceptorSubject root, Func<RegisteredSubjectProperty, bool> isMetadataIncluded,
+        Func<IInterceptorSubject, bool>? isExcluded = null, Func<RegisteredSubjectProperty, bool>? isPropertyIncluded = null)
+    {
+        ArgumentNullException.ThrowIfNull(isMetadataIncluded);
+        return Walk(root, isExcluded)
+            .SelectMany(subject => GetMemberEntries(subject)
+                .Where(entry => isMetadataIncluded(entry.Member) &&
+                                (entry.PropertyName is null || isPropertyIncluded is null ||
+                                 (subject.TryGetProperty(entry.PropertyName) is { } property && isPropertyIncluded(property)))))
             .SelectMany(static entry => entry.Metadata.GetTags())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
 
     /// <summary>
     /// Gets the metadata of the subject, with a null property name, and that of each of its properties that has any,
     /// with the name of the property.
     /// </summary>
     public static IEnumerable<(string? PropertyName, ImmutableDictionary<string, JsonElement> Metadata)> GetEntries(RegisteredSubject subject)
+        => GetMemberEntries(subject).Select(static entry => (entry.PropertyName, entry.Metadata));
+
+    private static IEnumerable<(RegisteredSubjectProperty Member, string? PropertyName, ImmutableDictionary<string, JsonElement> Metadata)> GetMemberEntries(
+        RegisteredSubject subject)
     {
         foreach (var property in subject.Properties)
         {
             if (property.IsMetadata() && property.GetValue() is ImmutableDictionary<string, JsonElement> metadata)
             {
-                yield return (property.IsAttribute ? property.AttributeMetadata.PropertyName : null, metadata);
+                yield return (property, property.IsAttribute ? property.AttributeMetadata.PropertyName : null, metadata);
             }
         }
     }

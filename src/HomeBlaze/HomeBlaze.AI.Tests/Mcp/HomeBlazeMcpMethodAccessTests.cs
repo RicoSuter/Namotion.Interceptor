@@ -172,7 +172,7 @@ public class HomeBlazeMcpMethodAccessTests
 
     private static Graph CreateGraph(IMcpAccessPolicy accessPolicy)
     {
-        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup();
         var invocations = new Dictionary<string, int> { [OperationName] = 0, [QueryName] = 0, [ConfirmedOperationName] = 0 };
         AddMethod(room.TryGetRegisteredSubject()!, OperationName, MethodKind.Operation, () => invocations[OperationName]++);
         AddMethod(room.TryGetRegisteredSubject()!, QueryName, MethodKind.Query, () => invocations[QueryName]++);
@@ -186,7 +186,7 @@ public class HomeBlazeMcpMethodAccessTests
         AddMethod(room.Child.TryGetRegisteredSubject()!, QueryName, MethodKind.Query, () => graph.ChildInvocations++);
 
         graph.Configuration = HomeBlazeMcpConfigurationFactory.Create(
-            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false, accessPolicy);
+            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, accessPolicy);
         graph.Tools = new McpToolFactory(room, graph.Configuration).CreateTools().ToDictionary(tool => tool.Name);
         return graph;
     }

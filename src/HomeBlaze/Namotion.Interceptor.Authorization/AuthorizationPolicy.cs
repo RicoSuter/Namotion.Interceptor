@@ -13,9 +13,6 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public sealed class AuthorizationPolicy
 {
-    /// <summary>The name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
-    public const string SystemRoleName = "System";
-
     // Along a single-parent chain the walk allocates nothing; a branch or this depth starts the visited set, so a subject is explored once and a cycle ends.
     private const int VisitedTrackingDepth = 32;
 
@@ -66,7 +63,7 @@ public sealed class AuthorizationPolicy
     /// <param name="tagProvider">Supplies the tags of members.</param>
     /// <param name="pathProvider">Defines path syntax and builds the paths that patterns are matched against.</param>
     /// <exception cref="AuthorizationException">
-    /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
+    /// A role is null, has no name or is defined more than once.
     /// A role or include name is unknown or empty, includes form a cycle, or includes are nested more than 64 levels deep.
     /// A rule is null, has no actions, names an unknown action or has an empty selector value.
     /// A path pattern starts with '/' or '\' that is not the provider's separator, is malformed, has an empty segment
@@ -127,7 +124,8 @@ public sealed class AuthorizationPolicy
         context.SetMember(member);
         var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
         var denied = FindMatch(_deny, bit, isDeny: true, ref context);
-        return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
+        return new PermissionDecision(
+            allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule, IsDeniedBySystem: denied is { Role: null });
     }
 
     /// <summary>Answers <see cref="CanRead(RegisteredSubject)"/> and, when the subject is hidden, says why.</summary>

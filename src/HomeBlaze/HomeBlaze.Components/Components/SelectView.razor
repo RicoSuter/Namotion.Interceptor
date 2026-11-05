@@ -1,5 +1,6 @@
 @using HomeBlaze.Components.Controls
 @using HomeBlaze.Services.Display
+@inherits PermissionsComponentBase
 @inject PropertyWriter Writer
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
@@ -21,16 +22,17 @@ else
     var names = _names;
     var isNullable = enumType is not null && Nullable.GetUnderlyingType(property!.Type) is not null;
     var canWrite = enumType is not null && PropertyWriter.IsWritable(property!, value);
+    var isDenied = canWrite && !PropertyWriter.MayWrite(Permissions, property!);
     var map = Map;
 
-    <div class="select-widget" data-testid="select">
+    <div class="select-widget" data-testid="select" title="@(isDenied ? AccessDeniedTexts.Tooltip : null)">
         <MudSelect T="string"
                    @key="_resetKey"
                    Label="@ValueReader.GetLabel(property, Label, Path)"
                    Value="@(value is Enum ? value.ToString() : null)"
                    ValueChanged="_chooseCallback"
                    ToStringFunc="_textFunc"
-                   Disabled="@(IsEditing || !canWrite)"
+                   Disabled="@(IsEditing || !canWrite || isDenied)"
                    Variant="Variant.Outlined"
                    Margin="Margin.Dense"
                    Dense="true">
@@ -41,7 +43,7 @@ else
             @foreach (var name in names)
             {
                 var binding = new ValueBinding(property, name, property?.Subject);
-                var mapCase = map?.FindCase(binding, PathResolver);
+                var mapCase = map?.FindCase(binding, PathResolver, Permissions);
                 var icon = MudBlazorIconResolver.ResolveOrNull(mapCase?.Icon);
                 var iconColor = mapCase?.GetColor() ?? ValueColor.Default;
                 <MudSelectItem T="string" Value="@name">
@@ -50,7 +52,7 @@ else
                         {
                             <MudIcon Icon="@icon" Color="@iconColor.Theme" Style="@iconColor.Style" Size="Size.Small" />
                         }
-                        <span>@(mapCase?.GetText(binding, PathResolver, TimeZone) ?? name)</span>
+                        <span>@(mapCase?.GetText(binding, PathResolver, TimeZone, Permissions) ?? name)</span>
                     </div>
                 </MudSelectItem>
             }
@@ -97,6 +99,7 @@ else
 
     protected override void OnInitialized()
     {
+        base.OnInitialized();
         // Created once: binding method groups or lambdas in the markup would allocate new delegates on every render.
         _chooseCallback = EventCallback.Factory.Create<string?>(this, Choose);
         _textFunc = GetText;
@@ -123,7 +126,7 @@ else
 
         var property = Property;
         var binding = new ValueBinding(property, name, property?.Subject);
-        return Map?.FindCase(binding, PathResolver)?.GetText(binding, PathResolver, TimeZone) ?? name;
+        return Map?.FindCase(binding, PathResolver, Permissions)?.GetText(binding, PathResolver, TimeZone, Permissions) ?? name;
     }
 
     private void Choose(string? name)

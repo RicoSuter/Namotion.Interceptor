@@ -1,9 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.Authorization.Abstractions\HomeBlaze.Authorization.Abstractions.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <PackageReference Include="Microsoft.AspNetCore.Components" />
     </ItemGroup>
 
 </Project>

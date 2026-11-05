@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Select))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 
 @{
@@ -17,7 +18,7 @@
     }
     else
     {
-        <SelectView Property="@ValueReader.ResolveProperty(PathResolver, select, path)"
+        <SelectView Property="@ValueReader.ResolveProperty(PathResolver, select, path, Permissions)"
                     Path="@path"
                     Label="@select.Label"
                     Map="@map" />

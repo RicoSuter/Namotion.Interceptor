@@ -11,7 +11,7 @@ public class SearchAccessTests
         McpToolCaller.CallAsync(root, new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            AccessPolicy = policy
+            AccessPolicy = policy ?? ReadOnlyMcpAccessPolicy.Instance
         }, "search", input);
 
     // A device two levels below the root: Items[hidden] holds a group whose Devices[x] holds the device. The

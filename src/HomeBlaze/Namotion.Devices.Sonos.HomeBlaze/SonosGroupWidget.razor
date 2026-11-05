@@ -1,6 +1,5 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosGroup))]
-@implements ISubjectComponent
-@inject ISnackbar Snackbar
+@inherits SonosWidgetBase
 
 <MudPaper Class="pa-4">
     <MudStack Spacing="2">
@@ -21,24 +20,25 @@
             <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Group?.CurrentTrackArtist, Group?.CurrentTrackTitle, Group?.SourceTitle)</MudText>
         </MudStack>
 
-        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-            <MudIconButton Icon="@(Group?.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
-                           Disabled="@(Group?.TogglePlayback_IsEnabled != true)"
-                           OnClick="@(() => RunAsync(group => group.TogglePlaybackAsync(CancellationToken.None)))" />
-            <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
-                       Disabled="@(Group?.SetVolume_IsEnabled != true)"
-                       Value="@((int)((Group?.Volume ?? 0m) * 100m))"
-                       ValueChanged="@(value => RunAsync(group => group.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
-        </MudStack>
+        @if (Group is { } group)
+        {
+            var canTogglePlayback = CanRun(group, nameof(SonosGroup.TogglePlaybackAsync));
+            var canSetVolume = CanRun(group, nameof(SonosGroup.SetVolumeAsync));
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIconButton Icon="@(group.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                               Disabled="@(!group.TogglePlayback_IsEnabled || !canTogglePlayback)"
+                               title="@(canTogglePlayback ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-toggle-playback"
+                               OnClick="@(() => RunAsync(group, nameof(SonosGroup.TogglePlaybackAsync)))" />
+                <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
+                           Disabled="@(!group.SetVolume_IsEnabled || !canSetVolume)"
+                           title="@(canSetVolume ? null : AccessDeniedTexts.Tooltip)" data-testid="sonos-volume"
+                           Value="@((int)((group.Volume ?? 0m) * 100m))"
+                           ValueChanged="@(value => RunAsync(group, nameof(SonosGroup.SetVolumeAsync), value / 100m))" />
+            </MudStack>
+        }
     </MudStack>
 </MudPaper>
 
 @code {
-    [Parameter]
-    public IInterceptorSubject? Subject { get; set; }
-
     private SonosGroup? Group => Subject as SonosGroup;
-
-    private Task RunAsync(Func<SonosGroup, Task> command) =>
-        Group is { } group ? SonosCommands.RunAsync(Snackbar, () => command(group)) : Task.CompletedTask;
 }

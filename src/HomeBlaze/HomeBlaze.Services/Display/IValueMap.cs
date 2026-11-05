@@ -1,4 +1,5 @@
 using HomeBlaze.Components.Abstractions.TimeZones;
+using HomeBlaze.Authorization.Abstractions;
 
 namespace HomeBlaze.Services.Display;
 
@@ -18,5 +19,6 @@ public interface IValueMap
     /// <param name="binding">The value and its subject.</param>
     /// <param name="resolver">The resolver of the paths of the cases.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-    string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone);
+    /// <param name="permissions">The permissions of the viewer, for whom a property of a case that it may not read is missing.</param>
+    string? GetText(in ValueBinding binding, SubjectPathResolver resolver, ITimeZoneDisplay? timeZone, IUserPermissions permissions);
 }

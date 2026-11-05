@@ -6,6 +6,7 @@
 @inject RootManager RootManager
 @inject SubjectComponentRegistry ComponentRegistry
 @inject ISnackbar Snackbar
+@inject IUserPermissions Permissions
 
 @if (Subject != null)
 {
@@ -31,6 +32,7 @@
             <ConfigurationPropertiesEditor @key="Subject"
                                            @ref="_propertiesEditor"
                                            Subject="@Subject"
+                                           IsCreating="@IsCreating"
                                            IsValidChanged="OnPropertiesEditorIsValidChanged" />
         }
     </div>
@@ -186,12 +188,21 @@
     /// Applies the buffered edits to the subject and persists them.
     /// </summary>
     /// <returns>
-    /// True when the edits were applied and <see cref="PersistAsync"/> ran, which reports a failure of its own to
-    /// the user. False when the edits were not applied, which is reported to the user, and nothing was persisted:
-    /// either <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving.
+    /// True when the edits were applied and <see cref="TryPersistAsync"/> ran, which reports a failure of its own to
+    /// the user, or the hosted edit component saved and persists itself, see <see cref="ISubjectEditComponent.PersistsItself"/>.
+    /// False when the edits were not applied, which is reported to the user, and nothing was persisted:
+    /// either the viewer may not administer every configuration member of the subject, which persisting writes,
+    /// <see cref="ApplyChangesAsync"/> returned false, or the edit component failed while saving. Also false when the
+    /// roles changed between the apply and the persist, so that <see cref="TryPersistAsync"/> refused.
     /// </returns>
     public async Task<bool> SaveAsync(CancellationToken cancellationToken)
     {
+        // Checked before anything is applied, so that no edit is applied that could not be persisted.
+        if (Subject is not { } subject || !Permissions.CanAdministerConfiguration(subject))
+        {
+            return Refuse();
+        }
+
         bool isApplied;
         try
         {
@@ -209,24 +220,42 @@
             return false;
         }
 
-        await PersistAsync(cancellationToken);
-        return true;
+        // Such a save may replace the subject, which then is no longer in the graph for the persist to check.
+        if (_subjectComponent is ISubjectEditComponent { PersistsItself: true })
+        {
+            Snackbar.Add("Configuration saved.", Severity.Info);
+            return true;
+        }
+
+        return await TryPersistAsync(cancellationToken);
     }
 
     /// <summary>
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
     /// <returns>
-    /// False when there is no subject, the editor is not ready yet or not valid, or the generated properties
-    /// editor could not convert or set one of its values. The subject is unchanged then, except for a value that
-    /// could not be set back after a setter rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
+    /// False when there is no subject, the editor is not ready yet or not valid, the viewer may not administer a member
+    /// the edits change, which is reported to the user, or the generated properties editor could not convert or set one
+    /// of its values. The subject is unchanged then, except for a value that could not be set back after a setter
+    /// rejected a later one, see <see cref="EditedPropertyValues.Apply"/>.
     /// </returns>
+    /// <remarks>
+    /// The generated properties editor asks for the members it changes, see <see cref="ConfigurationPropertiesEditor.ApplyChanges"/>.
+    /// A hosted edit component does not say which members it changes, so every configuration member of the subject is
+    /// asked for. While creating, the edits go to a subject that is not part of the graph yet and nothing is asked:
+    /// whoever attaches it checks that the viewer may create it.
+    /// </remarks>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
         if (Subject == null || IsSubjectComponentPending || !IsValid) return false;
 
         if (_subjectComponent is ISubjectEditComponent editComponent)
         {
+            if (ConfigurationPropertiesEditor.IsChecked(Subject, IsCreating) && !Permissions.CanAdministerConfiguration(Subject))
+            {
+                return Refuse();
+            }
+
             await editComponent.SaveAsync(cancellationToken);
         }
         else if (_propertiesEditor is { } propertiesEditor)
@@ -238,16 +267,29 @@
         return true;
     }
 
+    private bool Refuse()
+    {
+        Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+        return false;
+    }
+
     /// <summary>
     /// Writes and applies the configuration that contains the subject, see
     /// <see cref="ConfigurationPersistence.PersistOwnerAsync"/>. Nothing is written for a subject that is part of no
     /// configuration, such as a file, which its edit component has saved. Warns when the writer wrote nothing,
-    /// in which case the edits are applied but not saved.
+    /// in which case the edits are applied but not saved. Refused, which is reported to the user, when the viewer may
+    /// not administer every configuration member of the subject.
     /// </summary>
-    public async Task PersistAsync(CancellationToken cancellationToken)
+    /// <returns>False when there is no subject or the persist was refused, and nothing was written; else true.</returns>
+    public async Task<bool> TryPersistAsync(CancellationToken cancellationToken)
     {
         var subject = Subject;
-        if (subject == null) return;
+        if (subject == null) return false;
+
+        if (!Permissions.CanAdministerConfiguration(subject))
+        {
+            return Refuse();
+        }
 
         try
         {
@@ -266,6 +308,8 @@
         {
             Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
         }
+
+        return true;
     }
 
     public ValueTask DisposeAsync()

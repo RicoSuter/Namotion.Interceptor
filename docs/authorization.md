@@ -19,7 +19,7 @@ A **role** has a name, the names of roles it includes, `Allow` rules and `Deny` 
 
 An **action** is a name. `PermissionAction.Read` and `PermissionAction.Write` are built in; an application defines others, such as `execute` or `history`, and passes every action a rule may name as the known actions of `Compile`. A rule naming an unknown action fails compilation. At most 64 actions are supported, `read` and `write` included.
 
-Action names, role names and tags compare ignoring case. Type names, member globs and path patterns compare exactly.
+Action names and tags compare ignoring case. Role names, type names, member globs and path patterns compare exactly.
 
 ## How allow and deny combine
 
@@ -127,16 +127,16 @@ policy.CanRead(registeredSubject);   // visible at all
 
 `IsAllowed` and `Explain(member, action)` throw `ArgumentException` for an action that was not among the known actions of `Compile`.
 
-`Compile` throws `AuthorizationException` when the roles cannot be compiled; the message names the role wherever there is one:
+`Compile` throws `AuthorizationException` when the roles cannot be compiled; the message names the role wherever there is one, and "the system rules" for a system deny rule:
 
-- Over all roles given: a role that is null, has no name, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
+- Over all roles given: a role that is null, has no name, or has a name defined more than once.
 - For the principal's roles and every role they include: an unknown or empty role name (an unknown include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
 - For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has an empty selector value, or a path pattern that is malformed, starts with `/` or `\` that is not the provider's separator, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
 - For the known actions: one without a name, or more than 64 in total.
 
 Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, which denies every action, known or not; a policy must never partially apply. `policy.Roles` lists the principal's roles and every role they include, included roles first.
 
-`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last, a system rule as the role `System`. `Explain(subject)` returns a `SubjectReadDecision`: whether the subject has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is readable and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths.
+`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last. When a system deny rule denies first, `IsDeniedBySystem` is true, `DeniedBy` is null and `DeniedByRule` is that rule. `Explain(subject)` returns a `SubjectReadDecision`: whether the subject has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is readable and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths.
 
 ## Performance and threading
 

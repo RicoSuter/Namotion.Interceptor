@@ -41,12 +41,10 @@ internal static class HomeBlazeMcpConfigurationFactory
     /// </summary>
     /// <param name="serviceProvider">Services; must contain <see cref="SubjectTypeRegistry"/> and <see cref="ILoggerFactory"/>.</param>
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
-    /// <param name="isReadOnly">Whether set_property and operations are blocked.</param>
     /// <param name="accessPolicy">Decides per member and action what is readable for the tools and what they may change, <see cref="McpServerConfiguration.AccessPolicy"/>.</param>
     public static McpServerConfiguration Create(
         IServiceProvider serviceProvider,
         Func<IInterceptorSubject> rootSubjectProvider,
-        bool isReadOnly,
         IMcpAccessPolicy accessPolicy)
     {
         ArgumentNullException.ThrowIfNull(accessPolicy);
@@ -75,28 +73,26 @@ internal static class HomeBlazeMcpConfigurationFactory
                 ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint + " " + HomeBlazeMcpInstructions.PercentFractionsSearchHint,
                 ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution + " " + HomeBlazeMcpInstructions.ConfigurationWriteHint
             },
-            AccessPolicy = accessPolicy,
-            IsReadOnly = isReadOnly
+            AccessPolicy = accessPolicy
         };
 
         configuration.SubjectEnrichers.Add(new HomeBlazeMcpSubjectEnricher(
-            typeProviders, isReadOnly, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider), accessPolicy));
+            typeProviders, accessPolicy, HomeBlazeMcpSubjectEnricher.CreatePageUrlGetter(serviceProvider, configuration, rootSubjectProvider)));
 
         var invoker = new McpMethodInvoker(
             rootSubjectProvider,
             configuration,
             serviceProvider,
             serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
-            isReadOnly,
             (subject, method, arguments) => AgentMetadataAccess.GetOperationError(subject, method, arguments, configuration, pathProvider, rootSubjectProvider()),
             (subject, method, result) => AgentOrderAccess.FilterGetOrderResult(
                 subject, method, AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, configuration, pathProvider),
                 configuration, pathProvider, rootSubjectProvider()));
-        configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker, isReadOnly));
-        configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker, isReadOnly));
+        configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker));
+        configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, configuration));
 
-        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, isReadOnly, configuration);
+        var context = new McpToolProviderContext(serviceProvider, rootSubjectProvider, pathProvider, configuration);
         foreach (var registration in serviceProvider.GetServices<McpToolProviderRegistration>())
         {
             configuration.ToolProviders.Add(registration.Create(context));

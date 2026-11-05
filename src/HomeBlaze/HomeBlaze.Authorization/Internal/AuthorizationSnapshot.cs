@@ -16,15 +16,30 @@ internal sealed class AuthorizationSnapshot
 {
     private static readonly HomeBlazeMemberTagProvider TagProvider = new();
 
+    /// <summary>The status of every <see cref="Authorization"/> and of their roles while several exist.</summary>
+    internal const string SeveralAuthorizationsStatus =
+        "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.";
+
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
     private readonly Dictionary<string, string> _unavailableRoles;
     private readonly string? _customRolesError;
-    private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
+    private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult>[] _policies = CreatePolicyCaches();
     private readonly PreviewCache _previews = new();
 
     // The error of each role with a path pattern the application refuses, see PathPatternChecks; null when there is none.
     private readonly Dictionary<string, string>? _leadingSeparatorErrors;
+
+    private static ConcurrentDictionary<RoleNameSet, AuthorizationResult>[] CreatePolicyCaches()
+    {
+        var caches = new ConcurrentDictionary<RoleNameSet, AuthorizationResult>[Enum.GetValues<PrincipalKind>().Length];
+        for (var index = 0; index < caches.Length; index++)
+        {
+            caches[index] = new();
+        }
+
+        return caches;
+    }
 
     private AuthorizationSnapshot(
         long version,
@@ -48,7 +63,7 @@ internal sealed class AuthorizationSnapshot
     /// <summary>The names of the built-in roles, then of the usable custom roles ordered by name.</summary>
     public IReadOnlyList<string> RoleNames { get; }
 
-    /// <summary>The custom roles that exist but cannot be used, by name ignoring case, with the reason.</summary>
+    /// <summary>The custom roles that exist but cannot be used, by name, with the reason.</summary>
     public IReadOnlyDictionary<string, string> UnavailableRoles => _unavailableRoles;
 
     /// <summary>The status of each <see cref="Authorization"/> subject.</summary>
@@ -70,13 +85,13 @@ internal sealed class AuthorizationSnapshot
         var authorizations = knownSubjects.Keys.OfType<Authorization>().ToList();
         var authorizationStatuses = ImmutableArray.CreateBuilder<(Authorization, string?)>(authorizations.Count);
         var roleStatuses = ImmutableArray.CreateBuilder<(Role, string, string?, string?)>();
-        var unavailableRoles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var unavailableRoles = new Dictionary<string, string>(StringComparer.Ordinal);
         var customRoles = new List<KeyValuePair<string, Role>>();
         string? customRolesError = null;
 
         if (authorizations.Count > 1)
         {
-            customRolesError = AuthorizationService.SeveralAuthorizationsStatus;
+            customRolesError = SeveralAuthorizationsStatus;
             foreach (var authorization in authorizations)
             {
                 authorizationStatuses.Add((authorization, customRolesError));
@@ -94,7 +109,7 @@ internal sealed class AuthorizationSnapshot
         {
             authorizationStatuses.Add((authorizations[0], null));
             var roles = GetRoles(authorizations[0]);
-            var countsByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var countsByName = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var (name, _) in roles)
             {
                 countsByName[name] = countsByName.GetValueOrDefault(name) + 1;
@@ -117,7 +132,7 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
-        customRoles.Sort(static (left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Key, right.Key));
+        customRoles.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Key, right.Key));
 
         var allRoles = ImmutableArray.CreateBuilder<AuthorizationRole>(BuiltInRoles.All.Length + customRoles.Count);
         allRoles.AddRange(BuiltInRoles.All);
@@ -134,6 +149,41 @@ internal sealed class AuthorizationSnapshot
         return snapshot;
     }
 
+    /// <summary>
+    /// Builds a snapshot of the built-in roles and <paramref name="customRoles"/>, as the complete set of custom roles,
+    /// to compile policies with; a custom role whose name cannot be used is unavailable. Its version is
+    /// <see cref="UnreadableVersion"/>, and it has no statuses.
+    /// </summary>
+    public static AuthorizationSnapshot BuildCandidate(IReadOnlyList<AuthorizationRole> customRoles, PathProviderBase pathProvider)
+    {
+        var countsByName = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var role in customRoles)
+        {
+            countsByName[role.Name] = countsByName.GetValueOrDefault(role.Name) + 1;
+        }
+
+        var unavailableRoles = new Dictionary<string, string>(StringComparer.Ordinal);
+        var usableRoles = new List<AuthorizationRole>(customRoles.Count);
+        foreach (var role in customRoles)
+        {
+            if (GetNameError(role.Name, countsByName[role.Name]) is not { } nameError)
+            {
+                usableRoles.Add(role);
+            }
+            else if (!BuiltInRoles.IsBuiltIn(role.Name))
+            {
+                unavailableRoles.TryAdd(role.Name, nameError);
+            }
+        }
+
+        usableRoles.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+
+        var allRoles = ImmutableArray.CreateBuilder<AuthorizationRole>(BuiltInRoles.All.Length + usableRoles.Count);
+        allRoles.AddRange(BuiltInRoles.All);
+        allRoles.AddRange(usableRoles);
+        return new AuthorizationSnapshot(UnreadableVersion, pathProvider, allRoles.MoveToImmutable(), unavailableRoles, customRolesError: null);
+    }
+
     /// <summary>The version of a snapshot that could not read the roles, which no version of the graph has.</summary>
     public const long UnreadableVersion = -1;
 
@@ -142,11 +192,11 @@ internal sealed class AuthorizationSnapshot
     /// unavailable, and no status is written. Its version is <see cref="UnreadableVersion"/>, so it is always stale.
     /// </summary>
     public static AuthorizationSnapshot CreateUnreadable(PathProviderBase pathProvider) =>
-        new(UnreadableVersion, pathProvider, BuiltInRoles.All, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+        new(UnreadableVersion, pathProvider, BuiltInRoles.All, new Dictionary<string, string>(StringComparer.Ordinal),
             "The roles changed while they were read; try again.");
 
     /// <summary>Gets the cached or newly compiled policy of a principal holding the role names.</summary>
-    public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames)
+    public AuthorizationResult GetPolicy(IReadOnlyCollection<string> roleNames, PrincipalKind kind)
     {
         if (roleNames.Count == 0)
         {
@@ -159,34 +209,35 @@ internal sealed class AuthorizationSnapshot
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, "A role name is empty.");
         }
 
-        if (_policies.TryGetValue(key, out var cached))
+        var policies = _policies[(int)kind];
+        if (policies.TryGetValue(key, out var cached))
         {
             return cached;
         }
 
-        return _policies.GetOrAdd(key, Compile(key.Names));
+        return policies.GetOrAdd(key, Compile(key.Names, kind));
     }
 
     /// <summary>
     /// Compiles the policy of a principal holding only <paramref name="editedRole"/>, which replaces the custom role of
-    /// the same name ignoring case, or is added. Only the result of the last previewed instance is kept; its error is the
+    /// the same name, or is added. Only the result of the last previewed instance is kept; its error is the
     /// status the role would have once saved.
     /// </summary>
-    public AuthorizationResult Preview(AuthorizationRole editedRole)
+    public AuthorizationResult Preview(AuthorizationRole editedRole, PrincipalKind kind)
     {
-        if (!_previews.TryGet(editedRole, out var result))
+        if (!_previews.TryGet(editedRole, kind, out var result))
         {
-            result = CompilePreview(editedRole);
-            _previews.Set(editedRole, result);
+            result = CompilePreview(editedRole, kind);
+            _previews.Set(editedRole, kind, result);
         }
 
         return result;
     }
 
-    private AuthorizationResult CompilePreview(AuthorizationRole editedRole)
+    private AuthorizationResult CompilePreview(AuthorizationRole editedRole, PrincipalKind kind)
     {
         var name = editedRole.Name;
-        var reason = AuthorizationService.GetRoleNameError(name) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
+        var reason = GetNameError(name, count: 1) ?? _unavailableRoles.GetValueOrDefault(name) ?? _customRolesError;
         if (reason is not null)
         {
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, reason);
@@ -194,10 +245,10 @@ internal sealed class AuthorizationSnapshot
 
         var index = IndexOfRole(name);
         var roles = index >= 0 ? _roles.SetItem(index, editedRole) : _roles.Add(editedRole);
-        return Compile(roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator));
+        return Compile(roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator), kind);
     }
 
-    private AuthorizationResult Compile(string[] roleNames)
+    private AuthorizationResult Compile(string[] roleNames, PrincipalKind kind)
     {
         foreach (var name in roleNames)
         {
@@ -209,11 +260,11 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
-        return Compile(_roles, roleNames, _leadingSeparatorErrors);
+        return Compile(_roles, roleNames, _leadingSeparatorErrors, kind);
     }
 
     private AuthorizationResult Compile(
-        ImmutableArray<AuthorizationRole> roles, string[] roleNames, Dictionary<string, string>? leadingSeparatorErrors)
+        ImmutableArray<AuthorizationRole> roles, string[] roleNames, Dictionary<string, string>? leadingSeparatorErrors, PrincipalKind kind)
     {
         if (leadingSeparatorErrors is not null &&
             PathPatternChecks.FindLeadingSeparatorError(roleNames, roles, leadingSeparatorErrors) is { } patternError)
@@ -224,7 +275,7 @@ internal sealed class AuthorizationSnapshot
         try
         {
             var policy = AuthorizationPolicy.Compile(
-                roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
+                roles, roleNames, SystemRules.For(kind), AuthorizationActions.All, TagProvider, _pathProvider);
             return new AuthorizationResult(policy, null);
         }
         catch (AuthorizationException exception)
@@ -233,11 +284,25 @@ internal sealed class AuthorizationSnapshot
         }
     }
 
+    /// <summary>Gets the names the role named <paramref name="name"/>, compared ordinally, includes, or null when there is no such role.</summary>
+    public IReadOnlyList<string>? TryGetIncludes(string name)
+    {
+        var index = IndexOfRole(name);
+        return index >= 0 ? _roles[index].Includes : null;
+    }
+
+    /// <summary>Whether the role named <paramref name="name"/> has a deny rule of its own, or null when there is no such usable role.</summary>
+    public bool? HasDenyRules(string name)
+    {
+        var index = IndexOfRole(name);
+        return index >= 0 ? !_roles[index].Deny.IsDefaultOrEmpty : null;
+    }
+
     private int IndexOfRole(string name)
     {
         for (var index = 0; index < _roles.Length; index++)
         {
-            if (string.Equals(_roles[index].Name, name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_roles[index].Name, name, StringComparison.Ordinal))
             {
                 return index;
             }
@@ -256,7 +321,7 @@ internal sealed class AuthorizationSnapshot
         for (var i = 0; i < customRoles.Count; i++)
         {
             var (name, role) = customRoles[i];
-            var error = GetPolicy([name]).Error;
+            var error = GetPolicy([name], PrincipalKind.NonHuman).Error;
             var warning = error is null
                 ? PathPatternChecks.GetWarning(_roles[BuiltInRoles.All.Length + i], knownSubjects, _pathProvider, ref roots)
                 : null;
@@ -281,10 +346,24 @@ internal sealed class AuthorizationSnapshot
         return roles;
     }
 
-    // Gets why a name held by count roles, ignoring case, cannot name a custom role, or null.
-    private static string? GetNameError(string name, int count) =>
-        AuthorizationService.GetRoleNameError(name) ??
-        (count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null);
+    /// <summary>
+    /// Gets why <paramref name="name"/> cannot name a custom role held by <paramref name="count"/> roles of the
+    /// <see cref="Authorization"/>, or null, see <see cref="AuthorizationService.GetRoleNameError"/>.
+    /// </summary>
+    public static string? GetNameError(string name, int count)
+    {
+        if (NameRules.GetNameError(name, "role name") is { } nameError)
+        {
+            return nameError;
+        }
+
+        if (BuiltInRoles.IsBuiltIn(name))
+        {
+            return $"The name '{name}' is reserved for a built-in role.";
+        }
+
+        return count > 1 ? $"The name '{name}' is used by more than one role." : null;
+    }
 
     private static AuthorizationRole ToAuthorizationRole(string name, Role role) =>
         new()

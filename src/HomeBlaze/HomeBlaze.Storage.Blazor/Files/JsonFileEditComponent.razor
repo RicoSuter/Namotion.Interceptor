@@ -1,4 +1,6 @@
 @using BlazorMonaco.Editor
+@using HomeBlaze.Authorization.Abstractions
+@using HomeBlaze.Components.Abstractions.Access
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage
@@ -7,6 +9,8 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(JsonFile))]
 @implements ISubjectEditComponent
+
+@inject IUserPermissions Permissions
 
 <DisposeAwareCodeEditor @ref="_editor"
     Id="json-editor"
@@ -79,11 +83,22 @@
         });
     }
 
+    /// <summary>Writes the text of the editor into the file.</summary>
+    /// <exception cref="InvalidOperationException">The viewer may not change the file, which the host shows; nothing is written.</exception>
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (File == null || _editor == null) return;
+        if (File == null) return;
+
+        if (!Permissions.CanAdministerFileContent(File))
+            throw new InvalidOperationException(AccessDeniedTexts.Administer);
+
+        if (_editor == null) return;
 
         var content = await _editor.GetValue();
+
+        // The roles may have changed while the text was read.
+        if (!Permissions.CanAdministerFileContent(File))
+            throw new InvalidOperationException(AccessDeniedTexts.Administer);
 
         await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), CancellationToken.None);
         _originalContent = content;

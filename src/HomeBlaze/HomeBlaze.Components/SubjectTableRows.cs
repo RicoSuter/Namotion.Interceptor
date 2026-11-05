@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -40,6 +41,8 @@ internal static class SubjectTableRows
     /// <param name="widget">The subject the source is relative to, usually the table.</param>
     /// <param name="source">The path of the source.</param>
     /// <param name="typeName">The full name of a class, base class or interface that a row must have, or null or empty for every row.</param>
+    /// <param name="permissions">The permissions of the viewer, for whom a property of the source that it may not read leads nowhere
+    /// and who gets no row for a subject it may not see.</param>
     /// <param name="rows">The rows in the order of the source, empty on an error.</param>
     /// <param name="error">The widget argument error, or null.</param>
     /// <returns>Whether the source leads to subjects. A source with no subject of the type gives true and no rows.</returns>
@@ -48,6 +51,7 @@ internal static class SubjectTableRows
         IInterceptorSubject widget,
         string? source,
         string? typeName,
+        IUserPermissions permissions,
         out ImmutableArray<SubjectPropertyChild> rows,
         [NotNullWhen(false)] out string? error)
     {
@@ -58,7 +62,7 @@ internal static class SubjectTableRows
             return false;
         }
 
-        var property = FindRowsProperty(resolver, widget, source);
+        var property = FindRowsProperty(resolver, widget, source, permissions);
         if (property is null)
         {
             error = $"Cannot list subjects of: {source}";
@@ -70,7 +74,7 @@ internal static class SubjectTableRows
         _ = property.GetValue();
 
         error = null;
-        rows = Filter(property.Children, typeName);
+        rows = Filter(property.Children, typeName, permissions);
         return true;
     }
 
@@ -176,37 +180,54 @@ internal static class SubjectTableRows
 
     private sealed record LinkEntry(string CanonicalPath, string? Link);
 
-    private static RegisteredSubjectProperty? FindRowsProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string source)
+    private static RegisteredSubjectProperty? FindRowsProperty(SubjectPathResolver resolver, IInterceptorSubject widget, string source, IUserPermissions permissions)
     {
-        var property = ValueReader.ResolveProperty(resolver, widget, source);
-        if (property is { CanContainSubjects: true })
+        RegisteredSubjectProperty? property;
+        try
         {
-            return property;
+            property = resolver.ResolveScopedDisplayableProperty(source, PathStyle.Canonical, widget);
+        }
+        catch
+        {
+            // The source is written by the author of a page, and a malformed one must not take the page down.
+            return null;
         }
 
-        var subject = ValueReader.ResolveSubject(resolver, widget, source);
+        if (property is not null)
+        {
+            // Not resolved as a subject instead, which would follow a reference the viewer may not read.
+            if (!permissions.CanRead(property))
+            {
+                return null;
+            }
+
+            if (property.CanContainSubjects)
+            {
+                return property;
+            }
+        }
+
+        // The property the source ends at, if any, was checked for the viewer above.
+        var subject = ValueReader.ResolveSubjectUnchecked(resolver, widget, source);
         if (subject is null)
         {
             return null;
         }
 
         var propertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.GetType());
-        return propertyName is null ? null : subject.TryGetRegisteredProperty(propertyName);
+        var inlineProperty = propertyName is null ? null : subject.TryGetRegisteredProperty(propertyName);
+        return inlineProperty is not null && permissions.CanRead(inlineProperty) ? inlineProperty : null;
     }
 
-    private static ImmutableArray<SubjectPropertyChild> Filter(ImmutableArray<SubjectPropertyChild> children, string? typeName)
+    private static ImmutableArray<SubjectPropertyChild> Filter(
+        ImmutableArray<SubjectPropertyChild> children, string? typeName, IUserPermissions permissions)
     {
-        if (string.IsNullOrEmpty(typeName))
-        {
-            return children;
-        }
-
         // The builder is only created at the first row that does not match, so a source whose rows all match costs no copy.
         ImmutableArray<SubjectPropertyChild>.Builder? builder = null;
         for (var index = 0; index < children.Length; index++)
         {
             var child = children[index];
-            if (MatchesType(child.Subject.GetType(), typeName))
+            if ((string.IsNullOrEmpty(typeName) || MatchesType(child.Subject.GetType(), typeName)) && permissions.CanShow(child.Subject))
             {
                 builder?.Add(child);
             }

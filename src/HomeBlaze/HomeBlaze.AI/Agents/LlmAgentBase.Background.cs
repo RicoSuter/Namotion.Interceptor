@@ -13,7 +13,7 @@ public abstract partial class LlmAgentBase
     private const int RecentResultCount = 5;
 
     /// <summary>Starts a background run now, also while automatic runs are paused.</summary>
-    [Operation(Title = "Run Now", Icon = "PlayArrow", Position = 1)]
+    [Operation(Title = "Run Now", Icon = "PlayArrow", Position = 1, RequiresAdministration = true)]
     public void RunNow()
     {
         lock (_stateLock)
@@ -94,12 +94,12 @@ public abstract partial class LlmAgentBase
         }
     }
 
-    // The operator chose the watch paths, so they are read without the agent's roles but with the system rules.
+    // Read with the agent's roles, so a watched value never reaches a conversation beyond the agent's policy.
     private Task<IReadOnlyList<AgentWatchedState>> FetchWatchedStateAsync(CancellationToken cancellationToken) =>
         AgentWatchPaths.FetchStateAsync(
             Volatile.Read(ref _normalizedWatchPaths),
             _services.ToolSource,
-            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, McpAuthorization.EverythingRoleNames),
+            McpAuthorization.GetAccessPolicy(_services.AuthorizationService, Roles ?? []),
             cancellationToken);
 
     // The scheduler callback: an exception escaping it ends the scheduler loop, so only cancellation of the

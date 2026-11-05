@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Devices.FritzBox\Namotion.Devices.FritzBox.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Authorization.Abstractions\HomeBlaze.Authorization.Abstractions.csproj" />
     <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
   </ItemGroup>
 

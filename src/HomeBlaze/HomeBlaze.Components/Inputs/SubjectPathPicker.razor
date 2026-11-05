@@ -6,6 +6,7 @@
 
 @inject RootManager RootManager
 @inject SubjectPathResolver PathResolver
+@inject IUserPermissions Permissions
 
 <div class="subject-path-picker" data-testid="subject-path-picker">
     <MudTextField T="string"
@@ -126,7 +127,7 @@
     {
         _treeItems.Clear();
 
-        // Add local subjects
+        // Add local subjects, which the caller hands over from what it edits rather than the picker finding them in the graph.
         if (LocalSubjects is { Count: > 0 })
         {
             foreach (var kvp in LocalSubjects)
@@ -136,7 +137,7 @@
         }
 
         // Add Root
-        if (RootManager.Root != null)
+        if (RootManager.Root != null && Permissions.CanShow(RootManager.Root))
         {
             var rootItem = CreateSubjectTreeItem(RootManager.Root, "Root", "/");
             rootItem.Value!.Icon = Icons.Material.Filled.Home;
@@ -227,11 +228,11 @@
                 var isInlinePathsProperty = parent.Subject != null &&
                     InlinePathsAttribute.IsInlinePathsProperty(parent.Subject.GetType(), parent.Property.Name);
 
-                // For collection/dictionary, show child subjects by index. A subject excluded from user interfaces is
-                // not offered, nor what it holds.
+                // For collection/dictionary, show child subjects by index. A subject excluded from user interfaces, or
+                // that the viewer may not see, is not offered, nor what it holds.
                 foreach (var child in parent.Property.Children)
                 {
-                    if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
+                    if (!IsOffered(child.Subject))
                         continue;
 
                     var childKey = child.Index is { } index ? PathExtensions.FormatPathIndex(index) : "";
@@ -256,7 +257,7 @@
             {
                 // For a reference, directly show the child subject's properties
                 var child = parent.Property.Children[0];
-                return LoadPropertiesFromSubject(child.Subject, parent.Path);
+                return IsOffered(child.Subject) ? LoadPropertiesFromSubject(child.Subject, parent.Path) : children;
             }
         }
         else if (parent.Subject != null)
@@ -281,8 +282,8 @@
         {
             foreach (var property in registered.Properties.OrderBy(p => p.GetDisplayPosition()))
             {
-                // Skip internal properties
-                if (property.Name.StartsWith("_"))
+                // Skip internal properties and those the viewer may not read
+                if (property.Name.StartsWith("_") || !Permissions.CanRead(property))
                     continue;
 
                 // Apply visibility filter
@@ -294,7 +295,7 @@
                 {
                     foreach (var child in property.Children)
                     {
-                        if (child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
+                        if (!IsOffered(child.Subject))
                             continue;
 
                         var childKey = child.Index is { } index ? PathExtensions.FormatPathIndex(index) : "";
@@ -305,7 +306,7 @@
                 }
 
                 // A reference to a subject that is not offered is left out with what it holds.
-                if (property is { IsSubjectReference: true, Children.Length: > 0 } && property.Children[0].Subject.IsExcludedFrom(ExclusionTarget.UserInterface))
+                if (property is { IsSubjectReference: true, Children.Length: > 0 } && !IsOffered(property.Children[0].Subject))
                     continue;
 
                 // Determine if property has state attribute
@@ -315,7 +316,7 @@
                 var isExpandable = false;
                 if (property.IsSubjectDictionary || property.IsSubjectCollection)
                 {
-                    isExpandable = property.Children.Any(child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface));
+                    isExpandable = property.Children.Any(child => IsOffered(child.Subject));
                 }
                 else if (property is { IsSubjectReference: true, Children.Length: > 0 })
                 {
@@ -376,7 +377,7 @@
     {
         var subjectPath = propertyPath[..(propertyPath.LastIndexOf('/') + 1)];
         var children = new List<TreeItemData<PathTreeItem>>();
-        foreach (var attribute in SubjectPathSelection.GetListedAttributes(property, CanSelectProperty!))
+        foreach (var attribute in SubjectPathSelection.GetListedAttributes(property, IsListedAttribute))
         {
             var isExpandable = HasListedAttributes(attribute);
             children.Add(new TreeItemData<PathTreeItem>
@@ -402,8 +403,14 @@
     // Only a predicate that accepts an attribute lists one, like an operation.
     private bool HasListedAttributes(RegisteredSubjectProperty property)
     {
-        return CanSelectProperty is not null && SubjectPathSelection.GetListedAttributes(property, CanSelectProperty).Any();
+        return CanSelectProperty is not null && SubjectPathSelection.GetListedAttributes(property, IsListedAttribute).Any();
     }
+
+    private bool IsListedAttribute(RegisteredSubjectProperty attribute) =>
+        Permissions.CanRead(attribute) && CanSelectProperty!(attribute);
+
+    private bool IsOffered(IInterceptorSubject subject) =>
+        !subject.IsExcludedFrom(ExclusionTarget.UserInterface) && Permissions.CanShow(subject);
 
     private static bool IsUnderAttributeItem(PathTreeItem item, string targetPath)
     {
@@ -508,7 +515,7 @@
 
         return registered.Properties.Any(p =>
         {
-            if (p.Name.StartsWith("_"))
+            if (p.Name.StartsWith("_") || !Permissions.CanRead(p))
                 return false;
 
             // Has state attribute - will be shown
@@ -522,12 +529,12 @@
                 return true;
 
             // Collection/Dictionary with children that are offered - will be shown
-            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Any(child => !child.Subject.IsExcludedFrom(ExclusionTarget.UserInterface)))
+            if ((p.IsSubjectDictionary || p.IsSubjectCollection) && p.Children.Any(child => IsOffered(child.Subject)))
                 return true;
 
             // Reference with an offered, expandable subject - will be shown
             if (p is { IsSubjectReference: true, Children.Length: > 0 })
-                return !p.Children[0].Subject.IsExcludedFrom(ExclusionTarget.UserInterface) && HasExpandableProperties(p.Children[0].Subject);
+                return IsOffered(p.Children[0].Subject) && HasExpandableProperties(p.Children[0].Subject);
 
             // Property with attributes that can be selected - will be shown
             return !p.IsAttribute && !p.CanContainSubjects && HasListedAttributes(p);
@@ -612,13 +619,16 @@
                     var key = Value[..slashIndex];
                     if (LocalSubjects.TryGetValue(key, out var local))
                     {
-                        value = PathResolver.ResolveValue(Value[(slashIndex + 1)..], PathStyle.Canonical, relativeTo: local);
+                        value = ResolveReadableValue(Value[(slashIndex + 1)..], local);
                     }
                 }
             }
 
             // Then try absolute/root resolution (e.g., "/Demo/Conveyor/Temperature")
-            value ??= PathResolver.ResolveValue(Value, PathStyle.Canonical);
+            if (value is null && RootManager.Root is { } root)
+            {
+                value = ResolveReadableValue(Value, root);
+            }
 
             // A secret property resolves to no value; a value whose text can show a secret, such as a record with a
             // secret property, is not previewed either.
@@ -643,15 +653,16 @@
                             subject = PathResolver.ResolveSubject(Value[(slashIndex + 1)..], PathStyle.Canonical, relativeTo: local);
                         }
                     }
-                    else if (LocalSubjects.TryGetValue(Value, out var directLocal))
+                    else if (LocalSubjects.ContainsKey(Value))
                     {
-                        subject = directLocal;
+                        _isValidPath = true;
+                        return;
                     }
                 }
 
                 subject ??= PathResolver.ResolveSubject(Value, PathStyle.Canonical);
 
-                if (subject != null)
+                if (subject != null && Permissions.CanShow(subject))
                 {
                     _isValidPath = true;
                 }
@@ -662,6 +673,14 @@
             // Invalid path - ignore
         }
     }
+
+    // The value of a displayable property that the viewer may read, of a subject it may see, else null as for a path that
+    // leads nowhere.
+    private object? ResolveReadableValue(string path, IInterceptorSubject from) =>
+        PathResolver.ResolveDisplayablePropertyFrom(path, PathStyle.Canonical, from) is { } property &&
+        Permissions.CanRead(property) && Permissions.CanShow(property.Subject)
+            ? property.GetValue()
+            : null;
 
     private static List<TreeItemData<PathTreeItem>>? GetChildItems(ITreeItemData<PathTreeItem> context)
     {

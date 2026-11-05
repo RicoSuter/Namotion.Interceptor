@@ -1,4 +1,5 @@
 using Bunit;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Components.Editors;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
@@ -15,6 +16,7 @@ public sealed class ConfigurationPropertiesEditorTests : BunitContext, IAsyncLif
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
+        Services.AddSingleton<IUserPermissions>(UnrestrictedPermissions.Instance);
         Render<MudPopoverProvider>();
     }
 

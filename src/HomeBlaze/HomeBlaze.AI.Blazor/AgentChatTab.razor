@@ -1,25 +1,42 @@
+@using HomeBlaze.Authorization.Abstractions
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IJSRuntime JavaScript
+@inject IUserPermissions Permissions
 
 <div class="d-flex flex-column mud-height-full">
     @* The script keeps this scrolled to the newest entry while the reader is at the bottom, and shows it once it is
        scrolled there. *@
     <div class="flex-grow-1 overflow-y-auto" style="@(_isTimelineHidden ? "visibility: hidden;" : null)" data-testid="agent-timeline" @ref="_timeline">
         <div>
-            <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
+            @* The conversation is shared by everyone who chats with the agent, so it stays hidden from a person who may not. *@
+            @if (_refusal is null)
+            {
+                <AgentTimelineList Agent="Agent" TimeZoneVersion="TimeZoneVersion" />
+            }
         </div>
     </div>
 
+    @* The container stays when the chat is refused, so the script's Enter listener keeps its element. *@
     <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2" Class="flex-shrink-0 pt-2">
         <div class="flex-grow-1" data-testid="agent-chat-input" @ref="_inputContainer">
-            <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="1" Sizing="InputSizing.Auto" MaxLines="6"
-                          Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Ask the agent"
-                          HelperText="@(_sendsOnEnter ? "Enter sends, Shift+Enter adds a line" : null)" FullWidth="true"
-                          Error="@(_sendError is not null)" ErrorText="@_sendError" />
+            @if (_refusal is not null)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" data-testid="agent-chat-refusal">@_refusal</MudAlert>
+            }
+            else
+            {
+                <MudTextField T="string" @bind-Value="_message" Immediate="true" Lines="1" Sizing="InputSizing.Auto" MaxLines="6"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Ask the agent"
+                              HelperText="@(_sendsOnEnter ? "Enter sends, Shift+Enter adds a line" : null)" FullWidth="true"
+                              Error="@(_sendError is not null)" ErrorText="@_sendError" />
+            }
         </div>
-        <MudIconButton Icon="@Icons.Material.Filled.Send" Variant="Variant.Filled" Color="Color.Primary" aria-label="Send" Class="mt-1"
-                       OnClick="SendAsync" Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send" />
+        @if (_refusal is null)
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.Send" Variant="Variant.Filled" Color="Color.Primary" aria-label="Send" Class="mt-1"
+                           OnClick="SendAsync" Disabled="@(_isSending || string.IsNullOrWhiteSpace(_message))" data-testid="agent-chat-send" />
+        }
     </MudStack>
 </div>
 
@@ -36,6 +53,8 @@
     private bool _sendsOnEnter;
     private bool _isTimelineHidden = true;
     private bool _isDisposed;
+    private string? _refusal;
+    private bool _isAttachingEnterListener;
 
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
@@ -43,10 +62,34 @@
     [Parameter]
     public int TimeZoneVersion { get; set; }
 
+    protected override void OnInitialized() => Permissions.Changed += OnPermissionsChanged;
+
+    protected override void OnParametersSet() => _refusal = AgentChatAccess.GetRefusal(Permissions, Agent);
+
+    private void OnPermissionsChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_isDisposed)
+        {
+            _refusal = AgentChatAccess.GetRefusal(Permissions, Agent);
+            StateHasChanged();
+        }
+    });
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // The textarea is replaced by the refusal and created again when the roles return, so the Enter listener is
+        // attached after every render that shows it, not only the first.
         if (!firstRender)
         {
+            try
+            {
+                await SyncEnterListenerAsync();
+            }
+            catch (Exception exception) when (IsInteropFailure(exception))
+            {
+                // The circuit is gone or the script failed; the Send button still works.
+            }
+
             return;
         }
 
@@ -71,19 +114,7 @@
 
             _bottomFollower = bottomFollower;
             _dotNetReference = DotNetObjectReference.Create(this);
-            var listener = await module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, _dotNetReference);
-            if (_isDisposed)
-            {
-                await DisposeListenerAsync(listener);
-                return;
-            }
-
-            _enterListener = listener;
-            if (listener is not null && await listener.InvokeAsync<bool>("sendsOnEnter") && !_isDisposed)
-            {
-                _sendsOnEnter = true;
-                StateHasChanged();
-            }
+            await SyncEnterListenerAsync();
         }
         catch (Exception exception) when (IsInteropFailure(exception))
         {
@@ -97,6 +128,51 @@
                 _isTimelineHidden = false;
                 StateHasChanged();
             }
+        }
+    }
+
+    private async Task SyncEnterListenerAsync()
+    {
+        if (_isDisposed || _module is not { } module || _dotNetReference is not { } dotNetReference)
+        {
+            return;
+        }
+
+        if (_refusal is not null)
+        {
+            // The textarea is gone, and the browser dropped its listener with it.
+            var stale = _enterListener;
+            _enterListener = null;
+            _sendsOnEnter = false;
+            await DisposeListenerAsync(stale);
+            return;
+        }
+
+        if (_enterListener is not null || _isAttachingEnterListener)
+        {
+            return;
+        }
+
+        _isAttachingEnterListener = true;
+        try
+        {
+            var listener = await module.InvokeAsync<IJSObjectReference?>("attachEnterToSend", _inputContainer, dotNetReference);
+            if (_isDisposed || _refusal is not null)
+            {
+                await DisposeListenerAsync(listener);
+                return;
+            }
+
+            _enterListener = listener;
+            if (listener is not null && await listener.InvokeAsync<bool>("sendsOnEnter") && !_isDisposed)
+            {
+                _sendsOnEnter = true;
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            _isAttachingEnterListener = false;
         }
     }
 
@@ -130,6 +206,14 @@
         var text = _message.Trim();
         if (_isSending || text.Length == 0)
         {
+            return;
+        }
+
+        // The roles may have changed since the last render, and a send can arrive from the keyboard script.
+        _refusal = AgentChatAccess.GetRefusal(Permissions, Agent);
+        if (_refusal is not null)
+        {
+            StateHasChanged();
             return;
         }
 
@@ -176,6 +260,7 @@
     public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
+        Permissions.Changed -= OnPermissionsChanged;
         var enterListener = _enterListener;
         var bottomFollower = _bottomFollower;
         var module = _module;

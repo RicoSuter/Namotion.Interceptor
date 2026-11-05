@@ -63,14 +63,22 @@ public class McpServerConfiguration
     /// <summary>
     /// Decides per member and action what the tools let a client read and change, see "Access Policy" in the MCP documentation. A
     /// member the policy does not allow to read reads as missing, and set_property refuses a member it does not allow
-    /// to write. Null (the default) allows every action. Applies in addition to <see cref="IsReadOnly"/>.
+    /// to write. Defaults to <see cref="ReadOnlyMcpAccessPolicy.Instance"/>, which allows reading only; set
+    /// <see cref="AllowAllMcpAccessPolicy.Instance"/> to allow every action.
     /// </summary>
-    public IMcpAccessPolicy? AccessPolicy { get; init; }
+    /// <exception cref="ArgumentNullException">The value is null.</exception>
+    public IMcpAccessPolicy AccessPolicy
+    {
+        get;
+        init => field = value ?? throw new ArgumentNullException(nameof(value));
+    } = ReadOnlyMcpAccessPolicy.Instance;
 
     /// <summary>
-    /// When true, set_property is blocked.
+    /// The policy the read checks of the tools ask, or null when <see cref="AccessPolicy"/> allows every read, so that
+    /// they evaluate and allocate nothing.
     /// </summary>
-    public bool IsReadOnly { get; init; } = true;
+    internal IMcpAccessPolicy? ReadPolicy =>
+        AccessPolicy is ReadOnlyMcpAccessPolicy or AllowAllMcpAccessPolicy ? null : AccessPolicy;
 
     private PathProviderBase? _toolPathProvider;
 
@@ -80,7 +88,7 @@ public class McpServerConfiguration
     /// <see cref="PathProvider"/> itself without a policy.
     /// </summary>
     // Racing first calls create equal providers, so whichever one is kept is correct.
-    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= AccessPolicy is { } policy
+    internal PathProviderBase ToolPathProvider => _toolPathProvider ??= ReadPolicy is { } policy
         ? new McpAccessPathProvider(PathProvider, policy)
         : PathProvider;
 }

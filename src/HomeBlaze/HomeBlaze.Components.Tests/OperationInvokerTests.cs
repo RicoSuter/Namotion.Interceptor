@@ -1,9 +1,14 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Components.Operations;
+using HomeBlaze.Components.Tests.Access;
 using Microsoft.AspNetCore.Components;
 using Moq;
 using MudBlazor;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -11,6 +16,16 @@ namespace HomeBlaze.Components.Tests;
 public class OperationInvokerTests
 {
     private static readonly IServiceProvider ServiceProvider = Mock.Of<IServiceProvider>();
+
+    // A viewer that may run the method and a member that holds it, so that these tests cover the prompts and dialogs.
+    private static Task<OperationInvocationResult> InvokeAsync(
+        IDialogService dialogService,
+        MethodMetadata method,
+        CancellationToken lifetime,
+        Action<bool>? isRunningChanged = null,
+        IReadOnlyDictionary<string, object?>? initialValues = null) =>
+        OperationInvoker.InvokeAsync(dialogService, ServiceProvider, new TestUserPermissions(), OperationTestGraph.CreateMember(method),
+            lifetime, isRunningChanged, initialValues);
 
     private static MethodParameter InputParameter(string name, Type type) => new() { Name = name, Type = type };
 
@@ -140,7 +155,7 @@ public class OperationInvokerTests
         };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
@@ -161,7 +176,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => { states.Add($"method:{isRunning}"); return 42; }) { RequiresConfirmation = true };
 
         // Act
-        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None,
+        await InvokeAsync(dialogService.Object, method, CancellationToken.None,
             running => isRunning = running);
 
         // Assert
@@ -179,7 +194,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => throw new InvalidOperationException("Failed"));
 
         // Act
-        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None, reports.Add);
+        await InvokeAsync(dialogService.Object, method, CancellationToken.None, reports.Add);
 
         // Assert
         Assert.Equal([true, false], reports);
@@ -196,7 +211,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => null) { RequiresConfirmation = true };
 
         // Act
-        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None, reports.Add);
+        await InvokeAsync(dialogService.Object, method, CancellationToken.None, reports.Add);
 
         // Assert
         Assert.Empty(reports);
@@ -215,7 +230,7 @@ public class OperationInvokerTests
         };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Canceled, result.Outcome);
@@ -232,7 +247,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => { isInvoked = true; return null; }) { RequiresConfirmation = true };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Canceled, result.Outcome);
@@ -249,7 +264,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => { isInvoked = true; return null; }) { RequiresConfirmation = true };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
@@ -266,7 +281,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => { isInvoked = true; return null; });
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
@@ -282,12 +297,61 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => "42") { Kind = MethodKind.Query, Title = "Get Answer" };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
         Assert.Equal("42", result.Value);
         VerifyShown<MethodResultDialog>(dialogService, Times.Once());
+    }
+
+    [Fact]
+    public async Task WhenAnOperationReturnsAOneTimeSecret_ThenOnlyTheSecretDialogShowsItAndTheResultLeavesItOut()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        var secret = new OneTimeSecret("Setup code for mom", "Give mom this setup code.", "ABCD1234", "account/setup");
+        var method = new MethodMetadata(_ => secret) { Kind = MethodKind.Operation, Title = "Add User" };
+        DialogParameters? shownParameters = null;
+        string? shownTitle = null;
+        dialogService
+            .Setup(service => service.ShowAsync<OneTimeSecretDialog>(It.IsAny<string>(), It.IsAny<DialogParameters>(), It.IsAny<DialogOptions>()))
+            .Callback<string, DialogParameters, DialogOptions>((title, parameters, _) => (shownTitle, shownParameters) = (title, parameters))
+            .ReturnsAsync(Mock.Of<IDialogReference>());
+
+        // Act
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
+        Assert.Null(result.Value);
+        Assert.Equal("Setup code for mom", shownTitle);
+        Assert.Equal("ABCD1234", shownParameters![nameof(OneTimeSecretDialog.Secret)]);
+        Assert.Equal("account/setup", shownParameters[nameof(OneTimeSecretDialog.Link)]);
+        Assert.DoesNotContain("ABCD1234", secret.ToString(), StringComparison.Ordinal);
+        VerifyShown<MethodResultDialog>(dialogService, Times.Never());
+    }
+
+    [Fact]
+    public async Task WhenTheLifetimeEndsWhileAnOperationReturnsAOneTimeSecret_ThenNoDialogShowsItAndTheResultLeavesItOut()
+    {
+        // Arrange
+        var dialogService = new Mock<IDialogService>();
+        using var lifetime = new CancellationTokenSource();
+        var method = new MethodMetadata(_ =>
+        {
+            lifetime.Cancel();
+            return new OneTimeSecret("Setup code for mom", "Give mom this setup code.", "ABCD1234", "account/setup");
+        })
+        { Kind = MethodKind.Operation, Title = "Add User" };
+
+        // Act
+        var result = await InvokeAsync(dialogService.Object, method, lifetime.Token);
+
+        // Assert
+        Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
+        Assert.Null(result.Value);
+        dialogService.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -298,7 +362,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => throw new InvalidOperationException("Device offline")) { Title = "Turn On" };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Failed, result.Outcome);
@@ -313,7 +377,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => throw new TaskCanceledException("The request timed out.")) { Title = "Turn On" };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Failed, result.Outcome);
@@ -333,7 +397,7 @@ public class OperationInvokerTests
         });
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+        var result = await InvokeAsync(dialogService.Object, method, lifetime.Token);
 
         // Assert
         Assert.Equal(OperationOutcome.Failed, result.Outcome);
@@ -353,7 +417,7 @@ public class OperationInvokerTests
         };
 
         // Act
-        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+        await InvokeAsync(dialogService.Object, method, lifetime.Token);
 
         // Assert
         Assert.False(receivedToken.CanBeCanceled);
@@ -370,7 +434,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => { isInvoked = true; return null; }) { RequiresConfirmation = true };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+        var result = await InvokeAsync(dialogService.Object, method, lifetime.Token);
 
         // Assert
         Assert.Equal(OperationOutcome.Canceled, result.Outcome);
@@ -393,7 +457,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => { isInvoked = true; return null; }) { RequiresConfirmation = true };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+        var result = await InvokeAsync(dialogService.Object, method, lifetime.Token);
 
         // Assert
         Assert.Equal(OperationOutcome.Canceled, result.Outcome);
@@ -414,7 +478,7 @@ public class OperationInvokerTests
         { Kind = MethodKind.Query };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+        var result = await InvokeAsync(dialogService.Object, method, lifetime.Token);
 
         // Assert
         Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
@@ -434,7 +498,7 @@ public class OperationInvokerTests
         });
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, lifetime.Token);
+        var result = await InvokeAsync(dialogService.Object, method, lifetime.Token);
 
         // Assert
         Assert.Equal(OperationOutcome.Failed, result.Outcome);
@@ -459,7 +523,7 @@ public class OperationInvokerTests
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None));
+            InvokeAsync(dialogService.Object, method, CancellationToken.None));
         Assert.Equal(1, invocationCount);
         VerifyShown<MethodErrorDialog>(dialogService, Times.Never());
     }
@@ -483,11 +547,104 @@ public class OperationInvokerTests
         var initialValues = new Dictionary<string, object?> { ["speed"] = 5 };
 
         // Act
-        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None, initialValues: initialValues);
+        await InvokeAsync(dialogService.Object, method, CancellationToken.None, initialValues: initialValues);
 
         // Assert
         Assert.NotNull(shownParameters);
         Assert.Same(initialValues, shownParameters.Get<IReadOnlyDictionary<string, object?>>(nameof(MethodParameterDialog.InitialValues)));
+    }
+
+    [Fact]
+    public async Task WhenAParameterNamesAReadablePropertyForItsInitialValue_ThenTheDialogIsPrefilledWithItsValue()
+    {
+        // Arrange
+        var (member, _, _) = CreateMemberWithInitialValueProperties();
+        var (dialogService, getShownInitialValues) = CaptureInitialValues();
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, new TestUserPermissions(), member, CancellationToken.None);
+
+        // Assert
+        var initialValues = getShownInitialValues();
+        Assert.NotNull(initialValues);
+        Assert.Equal(["kitchen", "garden"], Assert.IsType<string[]>(initialValues["names"]));
+        Assert.Equal("Mom", initialValues["title"]);
+        Assert.False(initialValues.ContainsKey("speed"));
+    }
+
+    [Fact]
+    public async Task WhenThePropertyOfAnInitialValueIsNotReadable_ThenTheParameterIsNotPrefilled()
+    {
+        // Arrange
+        var (member, names, _) = CreateMemberWithInitialValueProperties();
+        var (dialogService, getShownInitialValues) = CaptureInitialValues();
+        var permissions = new TestUserPermissions { CannotRead = [names] };
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, permissions, member, CancellationToken.None);
+
+        // Assert
+        var initialValues = getShownInitialValues();
+        Assert.NotNull(initialValues);
+        Assert.False(initialValues.ContainsKey("names"));
+        Assert.Equal("Mom", initialValues["title"]);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerGivesAnInitialValue_ThenItWinsOverTheProperty()
+    {
+        // Arrange
+        var (member, _, _) = CreateMemberWithInitialValueProperties();
+        var (dialogService, getShownInitialValues) = CaptureInitialValues();
+
+        // Act
+        await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, new TestUserPermissions(), member, CancellationToken.None,
+            initialValues: new Dictionary<string, object?> { ["title"] = "Dad", ["speed"] = 3 });
+
+        // Assert
+        var initialValues = getShownInitialValues();
+        Assert.NotNull(initialValues);
+        Assert.Equal("Dad", initialValues["title"]);
+        Assert.Equal(3, initialValues["speed"]);
+        Assert.Equal(["kitchen", "garden"], Assert.IsType<string[]>(initialValues["names"]));
+    }
+
+    // A subject with the readable properties Names and Title, and an operation whose parameters take their initial values
+    // from them; the parameter speed names a property that does not exist.
+    private static (RegisteredSubjectProperty Member, RegisteredSubjectProperty Names, RegisteredSubjectProperty Title) CreateMemberWithInitialValueProperties()
+    {
+        var subject = new Models.PersistedDevice(InterceptorSubjectContext.Create().WithRegistry()).TryGetRegisteredSubject()!;
+        IReadOnlyList<string> names = ["kitchen", "garden"];
+        var namesProperty = subject.AddProperty("Names", typeof(IReadOnlyList<string>), _ => names, null);
+        var titleProperty = subject.AddProperty("Title", typeof(string), _ => "Mom", null);
+        var method = new MethodMetadata(_ => null)
+        {
+            Title = "Edit",
+            Parameters =
+            [
+                new MethodParameter { Name = "names", Type = typeof(string[]), InitialValueProperty = "Names" },
+                new MethodParameter { Name = "title", Type = typeof(string), IsNullable = true, InitialValueProperty = "Title" },
+                new MethodParameter { Name = "speed", Type = typeof(int), InitialValueProperty = "Missing" }
+            ]
+        };
+        var member = subject.AddProperty("Edit", typeof(MethodMetadata), _ => method, null);
+        return (member, namesProperty, titleProperty);
+    }
+
+    private static (Mock<IDialogService> DialogService, Func<IReadOnlyDictionary<string, object?>?> GetShownInitialValues) CaptureInitialValues()
+    {
+        var dialogService = new Mock<IDialogService>();
+        DialogParameters? shownParameters = null;
+        dialogService
+            .Setup(service => service.ShowAsync<MethodParameterDialog>(It.IsAny<string>(), It.IsAny<DialogParameters>(), It.IsAny<DialogOptions>()))
+            .Callback<string, DialogParameters, DialogOptions>((_, parameters, _) => shownParameters = parameters)
+            .ReturnsAsync(() =>
+            {
+                var reference = new Mock<IDialogReference>();
+                reference.Setup(dialogReference => dialogReference.Result).Returns(Task.FromResult<DialogResult?>(DialogResult.Cancel()));
+                return reference.Object;
+            });
+        return (dialogService, () => shownParameters?.Get<IReadOnlyDictionary<string, object?>>(nameof(MethodParameterDialog.InitialValues)));
     }
 
     [Fact]
@@ -508,7 +665,7 @@ public class OperationInvokerTests
         };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Succeeded, result.Outcome);
@@ -531,7 +688,7 @@ public class OperationInvokerTests
         };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Failed, result.Outcome);
@@ -549,7 +706,7 @@ public class OperationInvokerTests
         var method = new MethodMetadata(_ => null) { Title = "Set Speed", Parameters = [InputParameter("speed", typeof(int))] };
 
         // Act
-        var result = await OperationInvoker.InvokeAsync(dialogService.Object, ServiceProvider, method, CancellationToken.None);
+        var result = await InvokeAsync(dialogService.Object, method, CancellationToken.None);
 
         // Assert
         Assert.Equal(OperationOutcome.Canceled, result.Outcome);

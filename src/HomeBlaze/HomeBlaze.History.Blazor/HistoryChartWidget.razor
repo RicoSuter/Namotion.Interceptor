@@ -7,6 +7,7 @@
 @using HomeBlaze.Components.Abstractions.TimeZones
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.Services
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.Services.Display
 @using Namotion.Interceptor
 @using Namotion.Interceptor.Registry.Abstractions
@@ -16,6 +17,7 @@
 @inject TimeProvider TimeProvider
 @inject IInterceptorSubjectContext RootContext
 @inject IDialogService DialogService
+@inject IUserPermissions Permissions
 
 @if (Subject is HistoryChart chart)
 {
@@ -268,14 +270,27 @@
         }
 
         var settings = HistoryChartSeriesResolver.GetDialogSettings(entry, _resolvedRange, _resolvedBucket);
-        await PropertyHistoryDialog.ShowAsync(DialogService, registry, PathResolver, property, entry.Label, settings);
+        await PropertyHistoryDialog.ShowAsync(DialogService, registry, PathResolver, Permissions, property, entry.Label, settings);
     }
 
     protected override void OnInitialized()
     {
         _refresh = new HistoryChartRefresh(TimeProvider, OnRefreshDue);
         TimeZone.Changed += OnTimeZoneChanged;
+        Permissions.Changed += OnPermissionsChanged;
     }
+
+    // The shown data can hold series the viewer may no longer read, so it is dropped at once for the placeholder, and the
+    // series are resolved and queried again for the new access, also when the chart is unchanged.
+    private void OnPermissionsChanged() => _ = InvokeAsync(() =>
+    {
+        _queryCancellation?.Cancel();
+        _data = null;
+        _reuseState = null;
+        _resolvedEntries = null;
+        _isQueryOutdated = true;
+        StateHasChanged();
+    });
 
     // A calendar bucket starts at local midnight, so another time zone has other buckets. Until the zone of the viewer is
     // known the buckets are aligned in UTC, which the view shows its times in as well.
@@ -356,7 +371,7 @@
             return;
         }
 
-        var series = HistoryChartSeriesResolver.Resolve(PathResolver, entries, configurations, aggregation);
+        var series = HistoryChartSeriesResolver.Resolve(PathResolver, entries, configurations, aggregation, Permissions);
         var error = HistoryChartSeriesResolver.FindArgumentError(range, bucket, aggregation, height, refreshInterval, series);
 
         // A change of the graph that leaves the series as they were, which is the common case, does not query again.
@@ -627,6 +642,7 @@
     {
         _isDisposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
+        Permissions.Changed -= OnPermissionsChanged;
         _refresh?.Dispose();
 
         // Cancel before disposing: disposing does not cancel the token of a running query.

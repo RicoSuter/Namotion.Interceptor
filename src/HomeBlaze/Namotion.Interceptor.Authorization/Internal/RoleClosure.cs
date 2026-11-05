@@ -7,7 +7,7 @@ internal static class RoleClosure
 
     public static List<AuthorizationRole> Resolve(IReadOnlyCollection<AuthorizationRole> roles, IReadOnlyCollection<string> roleNames)
     {
-        var rolesByName = new Dictionary<string, AuthorizationRole>(StringComparer.OrdinalIgnoreCase);
+        var rolesByName = new Dictionary<string, AuthorizationRole>(StringComparer.Ordinal);
         foreach (var role in roles)
         {
             if (role is null)
@@ -20,11 +20,6 @@ internal static class RoleClosure
                 throw new AuthorizationException("A role has no name.");
             }
 
-            if (string.Equals(role.Name, AuthorizationPolicy.SystemRoleName, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new AuthorizationException($"Role name '{AuthorizationPolicy.SystemRoleName}' is reserved.");
-            }
-
             if (!rolesByName.TryAdd(role.Name, role))
             {
                 throw new AuthorizationException($"Role '{role.Name}' is defined more than once.");
@@ -32,7 +27,7 @@ internal static class RoleClosure
         }
 
         var result = new List<AuthorizationRole>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         var path = new List<string>();
         foreach (var name in roleNames)
         {
@@ -63,7 +58,7 @@ internal static class RoleClosure
                 : $"Role '{path[^1]}' includes '{name}', which is not defined.");
         }
 
-        var cycleStart = path.FindIndex(entry => string.Equals(entry, role.Name, StringComparison.OrdinalIgnoreCase));
+        var cycleStart = path.FindIndex(entry => string.Equals(entry, role.Name, StringComparison.Ordinal));
         if (cycleStart >= 0)
         {
             var cycle = string.Join(" > ", path.Skip(cycleStart).Append(role.Name));

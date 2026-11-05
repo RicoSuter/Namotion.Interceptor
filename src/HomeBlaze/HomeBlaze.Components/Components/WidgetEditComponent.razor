@@ -3,6 +3,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Widget))]
 @implements ISubjectEditComponent
 @implements IDisposable
+@inject IUserPermissions Permissions
 
 <MudForm>
     <MudText Typo="Typo.body2" Class="mb-4">
@@ -18,7 +19,7 @@
 
     @{
         // The path in the field and not Widget.ResolvedSubject, which stays at the saved path until the form is saved.
-        var resolvedSubject = CanResolvePath ? WidgetSubject?.ResolveSubject(_path) : null;
+        var resolvedSubject = CanResolvePath ? WidgetSubject?.ResolveSubject(_path, Permissions) : null;
     }
 
     @if (resolvedSubject != null)

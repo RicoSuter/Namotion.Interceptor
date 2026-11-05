@@ -1,0 +1,39 @@
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Authorization.Abstractions
+
+@inherits PermissionsComponentBase
+
+@inject UserStore UserStore
+
+@if (UserStore.IsSeededAdministratorUnclaimed)
+{
+    <AuthorizeView Policy="@HomeBlazePolicies.FullAdministrator">
+        <Authorized>
+            <MudAlert Severity="Severity.Error" Class="mb-4" data-testid="banner-unclaimed-administrator">
+                The administrator has no password yet: anyone who reaches this server can sign in as
+                @AdminSeeding.AdminUserName with an empty password until a password is set.
+            </MudAlert>
+        </Authorized>
+    </AuthorizeView>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        // The policy of the person and the seeded administrator change without a change of the authentication state.
+        UserStore.UserChanged += OnUserChanged;
+    }
+
+    private void OnUserChanged(string userId) => _ = InvokeAsync(StateHasChanged);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            UserStore.UserChanged -= OnUserChanged;
+        }
+
+        base.Dispose(disposing);
+    }
+}

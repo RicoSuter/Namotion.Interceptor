@@ -59,6 +59,15 @@ public static class RegisteredSubjectMethodExtensions
     }
 
     /// <summary>
+    /// Gets why the operation or query that the method property holds is not enabled: the value of its
+    /// <see cref="KnownAttributes.DisabledReason"/> attribute, null without one.
+    /// </summary>
+    public static string? GetMethodDisabledReason(this RegisteredSubjectProperty methodProperty)
+    {
+        return methodProperty.TryGetAttribute(KnownAttributes.DisabledReason)?.GetValue() as string;
+    }
+
+    /// <summary>
     /// Gets the operation or query that the property holds, or null when it holds none. The value of a property whose
     /// type cannot hold a <see cref="MethodMetadata"/> is not read.
     /// </summary>

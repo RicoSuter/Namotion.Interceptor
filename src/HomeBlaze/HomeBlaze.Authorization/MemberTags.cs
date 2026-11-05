@@ -34,7 +34,10 @@ public static class MemberTags
     /// <summary>The metadata of a subject or, as an attribute, of a property.</summary>
     public const string Metadata = "metadata";
 
+    /// <summary>An operation marked <c>RequiresAdministration</c>.</summary>
+    public const string Administration = "administration";
+
     /// <summary>Every tag, in the order above.</summary>
     public static readonly ImmutableArray<string> All =
-        [State, Configuration, Secret, Query, Operation, RequiresConfirmation, Subjects, Attribute, Metadata];
+        [State, Configuration, Secret, Query, Operation, RequiresConfirmation, Subjects, Attribute, Metadata, Administration];
 }

@@ -8,39 +8,56 @@ status: In Progress
 
 ## Overview
 
-Security in HomeBlaze covers graph-level authorization (who can read and write which properties, invoke which methods and read which history), inter-node authentication, and MCP access control. Graph authorization is implemented for the built-in AI agents and the external `/mcp` endpoint; roles for people in the browser, inter-node authentication and per-client MCP identity are planned. The operator guide is [Authorization](../../administration/authorization.md).
+Security in HomeBlaze covers sign-in, graph-level authorization (who can read and write which properties, invoke which methods, read which history and administer), inter-node authentication, and MCP access control. Sign-in and authorization are implemented for people in the browser, signed-out visitors, the built-in AI agents and the external `/mcp` endpoint; inter-node authentication, per-user tokens for MCP clients and scripts, and an audit trail of graph writes are planned. The operator guide is [Authorization](../../administration/authorization.md).
 
-## Graph Authorization [In Progress]
+## Graph Authorization [Implemented]
 
 Authorization is role-based, with roles as data. The generic engine is the library `Namotion.Interceptor.Authorization`, see its [documentation](../../../../../../../../docs/authorization.md) and [design](../../../../../../../../docs/design/authorization.md): rules select members of the graph by path, type, member name and tag, roles hold allow and deny rules and include other roles, and `AuthorizationPolicy.Compile` turns the roles of one principal into an immutable policy. `HomeBlaze.Authorization` supplies what the library leaves to the application: the roles, the tags, the actions and the system rules.
 
 | Part | Implementation |
 |------|----------------|
-| Actions | `read`, `write` (built into the library), `execute` and `history` (`AuthorizationActions`) |
-| Tags | `HomeBlazeMemberTagProvider` tags members from the existing markers: `state`, `configuration`, `secret`, `query`, `operation`, `requires-confirmation`, `subjects`, `attribute`, `metadata`. No subject type needs an attribute of its own. The tags of a member are cached until an attribute is added to it, and only a property of type `MethodMetadata` is read |
-| Built-in roles | `Reader` (read and history on every member, execute on queries), `Operator` (`Reader`, write on every member, execute on operations) and `Everything` in code (`BuiltInRoles`), always present, not editable, names reserved. They are broad, so that `Operator` with the system rules is exactly what agents could do before; restriction is the job of custom roles |
-| Custom roles | The `Roles` dictionary of the single `Authorization` subject, a `[Configuration, InlinePaths]` dictionary of `Role` subjects with `Includes`, `Allow` and `Deny`, stored in a JSON file such as `Files/Authorization.json` |
+| Actions | `read`, `write` (built into the library), `execute`, `history` and `administer` (`AuthorizationActions`) |
+| Tags | `HomeBlazeMemberTagProvider` tags members from the existing markers: `state`, `configuration`, `secret`, `query`, `operation`, `requires-confirmation`, `administration`, `subjects`, `attribute`, `metadata`. No subject type needs an attribute of its own. The tags of a member are cached until an attribute is added to it, and only a property of type `MethodMetadata` is read |
+| Built-in roles | `reader` (read and history on every member, execute on queries), `operator` (`reader`, write on every member, execute on operations) and `everything` (every action, including `administer`) in code (`BuiltInRoles`), always present, not editable, names reserved. They are broad, so that `operator` with the system rules is exactly what agents could do before and what a household member needs; restriction is the job of custom roles. A person whose roles include `everything` is a full administrator |
+| Custom roles | Rows of the authentication database, projected into the `Roles` dictionary of the single `Authorization` subject as `Role` subjects with `Includes`, `Allow` and `Deny`. The projection is read-only and never saved to JSON; roles change only through the role store |
 | System rules | `SystemRules`, compiled into every policy as the library's system deny rules |
-| Policies | `AuthorizationService.GetPolicy(roleNames)` |
-| Enforcement | `AuthorizationMcpAccessPolicy`, the `IMcpAccessPolicy` of the MCP tools, and `PropertyReadAccess` for page expressions |
+| Policies | `AuthorizationService.GetPolicy(roleNames, kind)` |
+| Enforcement | `AuthorizationMcpAccessPolicy`, the `IMcpAccessPolicy` of the MCP tools, and the `IUserPermissions` of the person of a circuit, which is also what a method takes for page expressions |
 
 ### System Rules
 
+`SystemRules.For(PrincipalKind)` gives the deny rules compiled into every policy of a kind of principal. No role lifts them, because a deny always wins.
+
 ```text
-deny  [secret]                         read, write, history
+Every kind:
+deny  [secret]                         read, history
 deny  [configuration]                  write
+deny  [administration]                 execute
+
+Non-human (agents and /mcp) additionally:
+deny  [secret]                         write
 deny  [requires-confirmation]          execute
-deny  types: LlmAgentBase              read, write, execute, history
-deny  types: Authorization, Role       read, write, execute, history
+deny  (every member)                   administer
+deny  types: LlmAgentBase              read, write, execute, history, administer
+deny  types: Authorization, Role, User read, write, execute, history, administer
+
+People additionally:
+deny  types: Authorization, Role       write, execute
+deny  types: User                      read, write, execute, history
+
+Visitors who are not signed in: the people rules, and
+deny  (every member)                   administer
 ```
 
-They apply to every non-human client, agents and `/mcp` alike, and no role lifts them, because a deny always wins. They replace the hand-written checks of the tools: "agents cannot run operations of agents", "agents cannot change the metadata of agents" and the configuration write policy. `LlmAgentBase` is named by its full type name, since `HomeBlaze.Authorization` does not reference `HomeBlaze.AI`. `McpMethodInvoker` keeps its own refusal of an operation that requires confirmation, checked before the policy, so the client is told the actual reason. `[ExcludeFrom]` stays separate: it decides what is offered, not who may reach it.
+They replace the hand-written checks of the tools: "agents cannot run operations of agents", "agents cannot change the metadata of agents" and the configuration write policy. `LlmAgentBase` is named by its full type name, since `HomeBlaze.Authorization` does not reference `HomeBlaze.AI`. `McpMethodInvoker` keeps its own refusal of an operation that requires confirmation, checked before the policy, so the client is told the actual reason. `[ExcludeFrom]` stays separate: it decides what is offered, not who may reach it.
+
+Configuration is administration, not writing: changing it can run code or point the application at its own data. `[Operation(RequiresAdministration = true)]` marks the operations that grant power or change what the application is, and the tag `administration` carries it. The system rules keep `write` from reaching configuration and `execute` from reaching these operations, so the generic property panel, `PropertyWriter` and `OperationInvoker` never change configuration through them. Administration is decided where something changes: `IUserPermissions.CanAdminister(member)` allows `administer` on a user-management member when the policy allows it, and on any other member only for a full administrator. Scoped administration of configuration and pages needs a per-type safety classification and is a later step.
 
 ### Policies
 
 `AuthorizationService` finds the `Authorization` subjects in the registry and compiles the built-in roles, the custom roles of the single `Authorization` subject, the system rules, the four actions, the tag provider and the path provider of the MCP tools (`StateAttributePathProvider`), so that a path pattern matches the paths the tools build.
 
-- **Cache**: one policy per distinct set of role names, ignoring case and order. A change of an `Authorization` or a `Role`, observed through property changes and the lifecycle, builds a new snapshot; a policy once handed out never changes. After a rebuild, `PoliciesChanged` is raised on the thread pool, on which started agents check their roles again. The service is thread-safe.
+- **Cache**: one policy per distinct set of role names, ignoring order. A change of an `Authorization` or a `Role`, observed through property changes and the lifecycle, builds a new snapshot; a policy once handed out never changes. After a rebuild, `PoliciesChanged` is raised on the thread pool, on which started agents check their roles again. The service is thread-safe.
 - **Concurrent edits**: when the graph or a role list changes while a snapshot is built, its enumeration throws; the snapshot is built once more, and when that fails as well, a stale snapshot of the built-in roles makes custom roles unavailable for that call, so the error never reaches an agent turn or `ApplyConfigurationAsync`.
 - **Errors**: no name at all, an empty or unknown name, a role that does not compile, a custom role with a reserved or duplicate name, or a custom role while several `Authorization` subjects exist gives `AuthorizationPolicy.DenyAll` with the reason. A policy never partially applies.
 - **Statuses**: each `Role` shows why it cannot be used, from compiling it on its own, a `Warning`, for a role that compiles, when a path pattern without a wildcard resolves in the graph to an entry of a folder or collection and so matches no member (the role stays usable, because the result depends on the graph at the time of the check), and how many started agents name it (`UsedByAgents`); each `Authorization` shows when it is one of several. Statuses are written in the background after a change. `GetUnavailableRoles` lists the custom roles that exist but cannot be used with the reason, which the role picker shows.
@@ -50,10 +67,11 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 
 | Principal | Policy |
 |-----------|--------|
-| Built-in agent | Its `Roles`, default `["Operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
-| Watch paths of an agent | `Everything` with the system rules: the operator chose the paths, so the agent's roles do not filter them |
-| External `/mcp` | `Everything` with the system rules, and `McpServer:ReadOnly` |
-| People in the browser | No policy yet |
+| Built-in agent | Its `Roles`, default `["operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
+| Watch paths of an agent | The agent's `Roles` with the system rules: a watched value the roles may not read is left out of the state a run receives |
+| External `/mcp` | The roles of the built-in user `mcp`, default `reader`, with the non-human system rules. An optional key, created and revoked with operations on `mcp` and stored hashed, makes `/mcp` require it as a bearer token; without a key it is unauthenticated. There is no read-only setting: the policy refuses writes |
+| People in the browser | The roles of the signed-in user, with the people system rules, kind `Person` |
+| Visitors who are not signed in | The roles of the built-in user `anonymous`, default none, with the system rules of kind `Anonymous` |
 
 ### Enforcement
 
@@ -72,18 +90,41 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 
 Denied `execute` and `history` are logged at debug level with the agent and the member; reads and writes are asked for every listed member and are not logged.
 
-**Page expressions.** `ReadEvaluatedContent` is a query of the shared page subject, called with the MCP arguments, so the caller cannot be passed in, and agents and people read the same page concurrently. `McpMethodInvoker`, which every method and Markdown tool calls through, therefore sets an ambient read check (`PropertyReadAccess`, an `AsyncLocal`) from the configuration's access policy for the duration of each query, as `MarkdownPageLayoutPermission` does for page layout, and `MarkdownExpressionContext` resolves a property the check refuses as missing, which renders empty like a secret. Agents and `/mcp` clients get the same rule in one place, and a scope is entered for every method, without a check for an operation and without a policy, so a check of the calling flow never carries over.
+**Page expressions.** `ReadEvaluatedContent` is a query of the shared page subject, and agents and people read the same page concurrently, so the reader is passed in: the method takes `IUserPermissions` as a `[FromServices]` parameter, and `MarkdownExpressionContext` resolves a property the permissions do not allow to read as missing, which renders empty like a secret. `McpMethodInvoker`, which every method and Markdown tool calls through, invokes each method with a service provider that resolves `IUserPermissions` to the permissions of the configuration's access policy, so agents and `/mcp` clients get the same rule in one place. In the browser the scope of the circuit resolves the permissions of the person.
 
-- **The check** (`McpPageReadAccess`) builds the property's path from the root and requires `TryGetReadableProperty` to resolve that path back to the same property, so a property below a hidden branch renders empty although the policy allows to read it. The path names every member, the tools' segments and otherwise the member's name, so an expression may read a member the tools do not list, such as a derived title. A property without a path fails closed. The answers are cached per property for one query.
-- **Queries only**: an operation changes state, and the change handlers, renders and background work it starts would otherwise inherit the caller's check.
-- Without a scope, as in the browser, nothing changes. The derived `Value` of a page expression is computed without the check, as it is shared by every caller.
+- **The permissions** (`McpPageReadAccess`) build the property's path from the root and require `TryGetReadableProperty` to resolve that path back to the same property, so a property below a hidden branch renders empty although the policy allows to read it. The path names every member, the tools' segments and otherwise the member's name, so an expression may read a member the tools do not list, such as a derived title. A property without a path fails closed. A subject is shown when the tools build a path for it. They never administer and hold no role. The answers are cached per member and subject for one query.
+- **Queries only**: an operation gets `DenyAllPermissions`, as what it reads is not shown to the caller.
+- Without a registered `IUserPermissions`, or without a service provider, a page read denies every property. The derived `Value` of a page expression is computed without a check, as it is shared by every viewer.
 
 **Known limits.**
 
 - A rule on a derived property applies to that property, even when it is computed from properties the policy does not allow to read.
 - The raw source of a page (`ReadRawContent`, and `ReadEvaluatedContent` outside its expressions) includes the non-secret configuration values of its blocks, whatever the roles allow on their subjects.
-- With a policy, the history of a path that does not resolve is not available.
+- The history of a path that does not resolve is not available, except with `AllowAllMcpAccessPolicy`, which queries every path as requested.
 - A subject whose only members other than attributes are secrets is empty for every policy and hidden from every agent and `/mcp` client.
+
+## Authentication [Implemented]
+
+People sign in with ASP.NET Core Identity on SQLite. The operator guide is [Signing In](../../administration/authorization.md#signing-in).
+
+- **Database**: `authentication.db` in the data folder, or `Authentication:Database`, outside the browsable `Files` storage. It stays in `appsettings` because it must be known before anyone can sign in. `AuthenticationDbContext` uses Identity's tables; `ApplicationUser` adds `MustChangePassword`, `LastLogin`, `IsBuiltIn` and `AllowsEmptyPassword`, and `ApplicationRole` adds a JSON `Definition` and `IsBuiltIn`. Role assignments reference roles by id, so a rename keeps them. Setup codes are Identity user tokens, stored hashed with an expiry.
+- **Graph as the API**: `Authorization.Roles` and `Authorization.Users` are runtime projections of the database. They change only through the operations and dialogs, which commit in a transaction and then refresh the projection, under one gate shared by the role and user stores. A refused or failed change leaves both unchanged.
+- **Names**: user and role names are lowercase ASCII (`a-z`, `0-9`, `.`, `-`, `_`, at most 64 characters) and compare ordinally, so no name can look like another through case, Unicode normalization or invisible characters, and nothing depends on case folding. Only signing in lowercases the typed name; see [Names](../../administration/authorization.md#names). Display names, which nothing compares, refuse control, format (zero-width and bidirectional), separator and private use characters, so they cannot hide or reorder text in the user interface or the log.
+- **Role saves never break a principal**: a save, rename or removal is validated against the role sets of every user, the built-in users and the agents, and is refused with the principals it would break, or when it would leave no unlocked user with `everything`. Removing a role is refused while a user or an agent uses it.
+- **Sessions**: the Identity cookie, `HttpOnly`, `SameAsRequest`, `Lax`, with a 14 day sliding lifetime for "keep me signed in". The authentication state is revalidated against the security stamp, so a lock, a password change, a reset or a removal ends open circuits at once when made through the store, and at the latest at the next check, which runs every 5 minutes; a change of roles keeps the stamp and switches the circuit to the new roles at once. The hub validates the `Origin` header.
+- **One gate in the app**: `AccountGate` in `Routes.razor` wraps the router. It renders the router only when `HomeBlazeAccessRequirement` passes (a signed-in person, or `anonymous` holding roles that compile) and the person need not change their password; otherwise the frame of the main layout (`LayoutFrame`) with the sign-in, setup or set-password dialog, and nothing while the authentication state is unknown. It decides again when the authentication state, the roles of the person or `anonymous`, or the policies change, and prerendering goes through it, so nothing of the app reaches a visitor it stops. The pages of the app and the hub therefore allow anonymous requests (`WithHomeBlazeAccountGate`); every other endpoint keeps the fallback policy, whose challenge redirects to the root with `ReturnUrl`, or answers 401 or 403 to a request that accepts JSON. A static page that is excluded from interactive routing and carries `[AllowAnonymous]` itself passes the gate, as it opens no circuit; today that is only the error page. It renders with the full layout and the deny-all permissions of the visitor, so a plugin page that opts in this way is trusted code.
+- **Account endpoints**: `POST /account/sign-in`, `/account/password`, `/account/setup` and `/account/logout`, with antiforgery tokens, the sign-in rate limit except for sign-out, and JSON answers (`redirect`, `error` or `errors`) that never echo a password. A circuit cannot set cookies, so the dialogs post plain HTML forms, whose inputs are not bound to the circuit, with `fetch` from a small script, and load the redirect anew; passwords never travel through the circuit. The endpoints share their logic (`PasswordSignIn`, `PasswordChange`, `SetupCodeSignIn`): one refusal message with one password hash verified per refusal, lockout, a security stamp check before a password change, the refusal of an administrator lock and failed accesses counted for a wrong current password.
+- **Must change the password**: besides the gate, a person with the claim gets deny-all permissions and a user administration that refuses every change in the circuit, and every endpoint other than the app, the hub, framework files, static assets and the password and sign-out endpoints answers 403.
+- **Rate limits**: per client address (IPv6 per /64) on posts to the sign-in, password and setup endpoints (`LoginRateLimit`), and on requests that are not signed in to the pages of the app and the hub (`UiStartRateLimit`), which bounds the circuits such visitors can open; signed-in requests to the app are not limited. The numbers are in [Signing In](../../administration/authorization.md#signing-in).
+- **First start and recovery**: a seeded `admin` with `everything`, an empty password and a marker file next to the database, so that a lost or emptied database never reopens the empty password while the marker survives next to it, see [First Start](../../administration/authorization.md#first-start). `--reset-admin` resets and exits, see [Recovery](../../administration/authorization.md#recovery).
+- **Reverse proxy**: forwarded headers apply only for the proxies listed in `Authentication:ForwardedHeadersKnownNetworks` and `Authentication:ForwardedHeadersKnownProxies`; `Authentication:PathBase` sets an optional base path.
+- **Agents and chat**: the chat, timeline, activity and memory of an agent require every role of the agent or `everything`, because they are shared by everyone who chats.
+- **Enforcement in the UI**: `IUserPermissions` (in `HomeBlaze.Authorization.Abstractions`, so plugin widgets use it too) answers `CanRead`, `CanWrite`, `CanInvoke`, `CanAdminister` and `CanReadHistory` for a member, `CanShow` for a subject and `HoldsAllRoles`, for the person of the circuit. The default registration denies everything. Components that need it derive from `PermissionsComponentBase`. `PropertyWriter`, `OperationInvoker` and the value readers of widgets take the permissions, and paths configured on widgets resolve under the viewer's policy, so a path the viewer may not read looks like a missing one. Read denies apply to member paths, not to where data flows.
+
+### Developer Notes
+
+- Entity Framework migrations of the authentication database live in `HomeBlaze.Authentication/Data/Migrations`. Add one with `dotnet ef migrations add <Name>` for that project, and keep the `// <auto-generated />` header on the first line of each generated file, including the designer file and the model snapshot: the analyzers skip generated files, and without the header the Sonar rule S138 fails the build on them.
+- Downgrading to a version from before sign-in removes sign-in, and a downgrade between versions with sign-in after a database migration is not supported and may fail. See [Upgrading to sign-in](../../administration/installation.md#upgrading-to-sign-in).
 
 ## Inter-Node Authentication [Planned]
 
@@ -91,26 +132,30 @@ Planned. WebSocket connections between instances (satellite-to-central, primary-
 
 Likely approach: mutual TLS or token-based authentication on WebSocket connections.
 
-## MCP Access Control [Planned]
+## Per-Client MCP Access [Planned]
 
-Planned. Today every `/mcp` client shares the `Everything` policy. With a client identity, the MCP session would carry roles and get its own policy from `AuthorizationService`, as an agent does.
+Planned. Today every `/mcp` client shares the roles of the built-in user `mcp`, and an optional shared key authenticates them. With a client identity, such as per-user tokens for MCP clients and scripts, the MCP session would carry the roles of that user and get its own policy from `AuthorizationService`, as an agent does.
 
 ## Key Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Authorization model | Roles as data, rules selecting by path, type, member and tag, compiled per principal | Operators define roles without code; subject types need no attributes, as tags come from existing markers |
-| Built-in roles | `Reader`, `Operator`, `Everything` in code | Always available, so an installation without `Authorization.json` works, and `Operator` keeps the agents' behavior on upgrade |
-| System rules | Fixed deny rules for every non-human client | Secrets, configuration, confirmation, agents and the roles themselves must never depend on a role being written correctly |
+| Built-in roles | `reader`, `operator`, `everything` in code | Always available, so an installation without custom roles works, and `operator` keeps the agents' behavior on upgrade |
+| System rules | Fixed deny rules per kind of principal | Secrets, configuration, confirmation, agents, administration and the roles themselves must never depend on a role being written correctly |
 | Two gates for agents | `AllowedTools` decides the tools, roles what they reach | Tools stay a coarse, visible switch; roles add the fine-grained scope |
 | Several `Authorization` subjects | None is used | Merging two role sets silently could grant more than either intends |
-| Page expressions | Ambient `AsyncLocal` read check | The shared page subject cannot receive the caller, and a per-caller service does not reach it |
+| Page expressions | The reader's `IUserPermissions` as a service parameter of the method | The shared page subject receives the reader with each call, and a missing reader fails closed |
+| Configuration | Administration, not writing; full administrators only | Changing configuration can run code or point the application at its own data; scoped administration needs a per-type classification |
+| Agents | Never administer; a person chats only if they hold every role of the agent and the agent holds each of their roles with deny rules | Agents are steered by text they read; one shared conversation and memory must not leak or escalate between people |
+| Deny rules when acting through another principal | The roles assigned, the user acted on and the agent chatted with hold each of the person's roles with deny rules, full administrators included; locking, removing, taking all roles away, and taking roles away while the user keeps the person's roles with deny rules that they hold are exempt | Deny rules apply across all roles of one principal, so a principal without the role is not bound by them; taking away a role with deny rules lifts its deny rules and grants access |
 | Inter-node auth | Deferred | Focus on graph authorization first |
 
 ## Open Questions
 
-- Roles of people in the browser, the role editor and a "preview as" tester
+- A "preview as a user" tester, two-factor sign-in or passkeys, a kiosk device sign-in with a long session, and sign-in through an external identity provider
+- Scoped administration of configuration and pages, which needs a per-type safety classification
 - Inter-node authentication mechanism (TLS, tokens, certificates)
-- MCP session identity model
+- Per-user tokens for MCP clients and scripts, and the MCP session identity model
 - Authorization for cross-instance operation proxying
 - Audit integration: logging authorization decisions (see [Audit](audit.md))

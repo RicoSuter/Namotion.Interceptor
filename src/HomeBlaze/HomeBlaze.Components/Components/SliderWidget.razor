@@ -1,5 +1,6 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Slider))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 
 @{
@@ -10,7 +11,7 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = slider.Path;
-    <SliderView Property="@ValueReader.ResolveProperty(PathResolver, slider, path)"
+    <SliderView Property="@ValueReader.ResolveProperty(PathResolver, slider, path, Permissions)"
                 Path="@path"
                 Label="@slider.Label"
                 Minimum="@slider.Minimum"

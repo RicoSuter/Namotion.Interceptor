@@ -15,22 +15,19 @@ namespace HomeBlaze.AI.Mcp;
 internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
     private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
-    private readonly bool _isReadOnly;
-    private readonly IMcpAccessPolicy? _accessPolicy;
+    private readonly IMcpAccessPolicy _accessPolicy;
     private readonly Func<IInterceptorSubject, string?>? _getPageUrl;
 
     /// <param name="typeProviders">The providers of the types named in <c>$type</c> and <c>$interfaces</c>.</param>
-    /// <param name="isReadOnly">Whether <c>$methods</c> leaves out operations.</param>
+    /// <param name="accessPolicy">Decides which methods <c>$methods</c> lists: only those it allows to read.</param>
     /// <param name="getPageUrl">Gets the address of the page of a subject, such as <c>/pages/House/Haus.md</c>, or null
     /// for a subject without a page of its own; null for no addresses.</param>
-    /// <param name="accessPolicy">Decides which methods <c>$methods</c> lists: only those it allows to read; all without one.</param>
     public HomeBlazeMcpSubjectEnricher(
         IEnumerable<IMcpTypeProvider> typeProviders,
-        bool isReadOnly,
-        Func<IInterceptorSubject, string?>? getPageUrl = null,
-        IMcpAccessPolicy? accessPolicy = null)
+        IMcpAccessPolicy accessPolicy,
+        Func<IInterceptorSubject, string?>? getPageUrl = null)
     {
-        _isReadOnly = isReadOnly;
+        ArgumentNullException.ThrowIfNull(accessPolicy);
         _getPageUrl = getPageUrl;
         _accessPolicy = accessPolicy;
         _typeCache = new Lazy<(HashSet<Type>, HashSet<Type>)>(() =>
@@ -60,9 +57,8 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     }
 
     // The address names every property on the canonical path, which may differ from the path the tools build for the
-    // subject, such as for a subject with several parents. With an access policy, a subject therefore gets an address
-    // only when the canonical path resolves back to it as the tools resolve a path, so the address names nothing hidden
-    // from the tools.
+    // subject, such as for a subject with several parents. A subject therefore gets an address only when the canonical
+    // path resolves back to it as the tools resolve a path, so the address names nothing hidden from the tools.
     internal static Func<IInterceptorSubject, string?> CreatePageUrlGetter(
         Func<IInterceptorSubject, bool> hasPage,
         ISubjectPathResolver pathResolver,
@@ -79,11 +75,6 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
     private static bool IsReadableAtPath(
         McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider, IInterceptorSubject subject, string path)
     {
-        if (configuration.AccessPolicy is null)
-        {
-            return true;
-        }
-
         var root = rootSubjectProvider();
         if (ReferenceEquals(root, subject))
         {
@@ -132,7 +123,6 @@ internal class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
         }
 
         var methods = McpMethodInvoker.GetReadableMethods(subject, _accessPolicy)
-            .Where(method => !_isReadOnly || method.Kind == MethodKind.Query)
             .Select(method => method.PropertyName)
             .ToArray();
 

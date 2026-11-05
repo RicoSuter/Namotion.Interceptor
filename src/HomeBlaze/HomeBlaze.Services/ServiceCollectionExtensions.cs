@@ -1,5 +1,7 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Clients;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
@@ -37,6 +39,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
+        services.TryAddScoped<IUserPermissions>(_ => DenyAllPermissions.Instance);
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
         return services;

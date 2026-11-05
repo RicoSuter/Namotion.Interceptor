@@ -103,9 +103,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
 
         discoveredMethods.Add(method.Name);
 
-        var propertyName = method.Name.EndsWith("Async", StringComparison.Ordinal)
-            ? method.Name[..^5]
-            : method.Name;
+        var propertyName = MethodMetadata.GetPropertyName(method.Name);
 
         if (registeredSubject.TryGetProperty(propertyName)?.GetValue() is MethodMetadata)
         {
@@ -119,7 +117,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
         {
             // A query that implements or overrides an operation requiring confirmation runs as that operation, so it
             // cannot be invoked as a query either.
-            Kind = traits.RequiresConfirmation ? MethodKind.Operation : kind,
+            Kind = traits.RequiresConfirmation || traits.RequiresAdministration ? MethodKind.Operation : kind,
             PropertyName = propertyName,
             Title = attribute.Title ?? propertyName,
             Description = attribute.Description,
@@ -127,6 +125,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             Position = attribute.Position,
             Category = traits.Category,
             RequiresConfirmation = traits.RequiresConfirmation,
+            RequiresAdministration = traits.RequiresAdministration,
             Purpose = GetPurpose(operationAttribute, traits.Parameters),
             ExcludedFrom = traits.ExcludedFrom,
             Parameters = traits.Parameters,
@@ -174,7 +173,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
     }
 
     /// <summary>The category, the confirmation, the parameters and the exclusion of a discovered method of one subject type.</summary>
-    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, MethodParameter[] Parameters, ExclusionTarget ExcludedFrom);
+    private readonly record struct MethodTraits(string? Category, bool RequiresConfirmation, bool RequiresAdministration, MethodParameter[] Parameters, ExclusionTarget ExcludedFrom);
 
     /// <summary>The interface maps of a subject type and the traits of its methods, computed once per method.</summary>
     private sealed class SubjectTypeMethods
@@ -211,8 +210,11 @@ public class MethodPropertyInitializer : ILifecycleHandler
             return new MethodTraits(
                 FindCategory(method, isInterfaceMethod, classMethod, implementedMethods),
                 RequiresConfirmation(method) ||
-                (classMethod is not null && AnyOverriddenMethodRequiresConfirmation(classMethod)) ||
+                (classMethod is not null && AnyOverriddenMethod(classMethod, RequiresConfirmation)) ||
                 implementedMethods.Exists(RequiresConfirmation),
+                RequiresAdministration(method) ||
+                (classMethod is not null && AnyOverriddenMethod(classMethod, RequiresAdministration)) ||
+                implementedMethods.Exists(RequiresAdministration),
                 CreateParameters(method),
                 excludedFrom);
         }
@@ -242,7 +244,9 @@ public class MethodPropertyInitializer : ILifecycleHandler
                 {
                     Name = parameter.Name ?? $"arg{parameter.Position}",
                     Type = parameter.ParameterType,
-                    Unit = operationParameterAttribute?.Unit,
+                    Unit = operationParameterAttribute is { Unit: not StateUnit.Default } ? operationParameterAttribute.Unit : null,
+                    Editor = operationParameterAttribute?.Editor,
+                    InitialValueProperty = operationParameterAttribute?.InitialValueProperty,
                     IsFromServices = parameter.GetCustomAttribute<FromServicesAttribute>() != null,
                     IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken),
                     IsNullable = isNullable,
@@ -278,9 +282,12 @@ public class MethodPropertyInitializer : ILifecycleHandler
         private static bool RequiresConfirmation(MethodInfo method) =>
             method.GetCustomAttribute<OperationAttribute>() is { RequiresConfirmation: true };
 
+        private static bool RequiresAdministration(MethodInfo method) =>
+            method.GetCustomAttribute<OperationAttribute>() is { RequiresAdministration: true };
+
         // Every level, not only the base definition: an intermediate override may add the requirement, and an own
         // attribute on a further override hides the inherited one.
-        private static bool AnyOverriddenMethodRequiresConfirmation(MethodInfo method)
+        private static bool AnyOverriddenMethod(MethodInfo method, Func<MethodInfo, bool> predicate)
         {
             var baseDefinition = method.GetBaseDefinition();
             var current = method;
@@ -289,10 +296,10 @@ public class MethodPropertyInitializer : ILifecycleHandler
                 var overridden = FindOverriddenMethod(baseType, current, baseDefinition);
                 if (overridden is null)
                 {
-                    return RequiresConfirmation(baseDefinition);
+                    return predicate(baseDefinition);
                 }
 
-                if (RequiresConfirmation(overridden))
+                if (predicate(overridden))
                 {
                     return true;
                 }

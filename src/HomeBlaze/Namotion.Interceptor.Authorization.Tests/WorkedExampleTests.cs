@@ -102,7 +102,8 @@ public class WorkedExampleTests
 
         // Assert
         Assert.False(decision.IsAllowed);
-        Assert.Equal(AuthorizationPolicy.SystemRoleName, decision.DeniedBy!.Name);
+        Assert.True(decision.IsDeniedBySystem);
+        Assert.Null(decision.DeniedBy);
         Assert.Equal(["secret"], decision.DeniedByRule!.Tags.AsEnumerable());
     }
 

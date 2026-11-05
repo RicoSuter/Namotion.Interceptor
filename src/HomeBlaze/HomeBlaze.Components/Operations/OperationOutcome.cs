@@ -13,4 +13,7 @@ public enum OperationOutcome
 
     /// <summary>The method threw, also an <see cref="OperationCanceledException"/> such as the timeout of a request.</summary>
     Failed,
+
+    /// <summary>The roles of the viewer do not allow running the method, checked before the prompt and before it starts.</summary>
+    Denied,
 }

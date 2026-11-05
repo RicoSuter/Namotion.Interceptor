@@ -67,7 +67,7 @@ internal static class AgentToolOptions
         IReadOnlyList<McpToolInfo>? offeredTools;
         try
         {
-            offeredTools = toolSource.CreateTools(isReadOnly: false, AllowAllMcpAccessPolicy.Instance);
+            offeredTools = toolSource.CreateTools(AllowAllMcpAccessPolicy.Instance);
         }
         catch (Exception)
         {
@@ -143,5 +143,5 @@ internal static class AgentToolOptions
             ChangesPages: PageTools.Contains(name), ChangesPageLayout: isPageLayout);
     }
 
-    private static bool CanChangeState(string name) => !AgentToolSet.IsReadOnly([name]);
+    private static bool CanChangeState(string name) => AgentToolSet.StateChangingTools.Contains(name);
 }

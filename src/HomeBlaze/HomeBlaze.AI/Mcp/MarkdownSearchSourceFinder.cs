@@ -33,8 +33,8 @@ internal sealed class MarkdownSearchSourceFinder
     /// <summary>
     /// Gets the Markdown files and the notes of metadata in or under <paramref name="pathPrefix"/>, all when it is null,
     /// in order of path, then property and then a page before notes, so that results and truncation are stable; without those of a subject of an
-    /// excluded type or below one, which browse and search do not list. With an access policy, a page is found only when
-    /// it is readable for the tools at its path and the policy allows to read and execute its ReadRawContent, and notes only when
+    /// excluded type or below one, which browse and search do not list. A page is found only when it is readable for the
+    /// tools at its path and the policy allows to read and execute its ReadRawContent, and notes only when
     /// get_property can read them at the path of their metadata.
     /// </summary>
     public List<MarkdownSearchSource> Find(ISubjectRegistry registry, IInterceptorSubject rootSubject, string? pathPrefix)
@@ -44,8 +44,6 @@ internal sealed class MarkdownSearchSourceFinder
         {
             return sources;
         }
-
-        var accessRoot = _configuration.AccessPolicy is null ? null : root;
 
         foreach (var (_, registered) in registry.KnownSubjects)
         {
@@ -60,19 +58,18 @@ internal sealed class MarkdownSearchSourceFinder
                 continue;
             }
 
-            AddReadableSources(sources, accessRoot, registered, path, file, notes);
+            AddReadableSources(sources, root, registered, path, file, notes);
         }
 
         sources.Sort(CompareSources);
         return sources;
     }
 
-    // The access root is null without an access policy, which lets every page and note through.
     private void AddReadableSources(
-        List<MarkdownSearchSource> sources, RegisteredSubject? accessRoot, RegisteredSubject subject, string path,
+        List<MarkdownSearchSource> sources, RegisteredSubject root, RegisteredSubject subject, string path,
         MarkdownFile? file, List<(string? PropertyName, string? Title, string Notes)>? notes)
     {
-        if (file is not null && (accessRoot is null || IsPageReadable(accessRoot, subject, path)))
+        if (file is not null && IsPageReadable(root, subject, path))
         {
             sources.Add(new MarkdownSearchSource(path, null, file.Title, file, null));
         }
@@ -84,7 +81,7 @@ internal sealed class MarkdownSearchSourceFinder
 
         foreach (var (propertyName, title, text) in notes)
         {
-            if (accessRoot is null || AgentMetadataAccess.IsMetadataReadable(_configuration, accessRoot, subject, path, propertyName))
+            if (AgentMetadataAccess.IsMetadataReadable(_configuration, root, subject, path, propertyName))
             {
                 sources.Add(new MarkdownSearchSource(path, propertyName, title, null, text));
             }

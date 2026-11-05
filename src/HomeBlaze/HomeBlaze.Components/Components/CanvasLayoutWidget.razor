@@ -4,6 +4,7 @@
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 
 @inject IDialogService DialogService
 @inject SubjectFactory SubjectFactory
@@ -53,7 +54,7 @@
                       Id="@GetNodeId(node)"
                       X="@((double)node.X)"
                       Y="@((double)node.Y)"
-                      Movable="@IsEditing"
+                      Movable="@(IsEditing && CanMoveNode(node))"
                       XChanged="@(x => OnNodePositionChanged(node, x, node.Y))"
                       YChanged="@(y => OnNodePositionChanged(node, node.X, y))"
                       ContentStyle="@($"width: {node.Width}px; height: {node.Height}px;")">
@@ -76,6 +77,7 @@
                         {
                             <LayoutItemActions EditTitle="Edit Node"
                                                OnEdit="() => EditNode(node)"
+                                               CanDelete="@CanChangeNodes"
                                                OnDelete="() => DeleteNode(node)" />
                         }
                     </div>
@@ -224,6 +226,12 @@ else
 
     private string GetNodeId(CanvasNode node) => node.GetOrAddSubjectId();
 
+    // Adding and deleting a node replace the nodes of the canvas.
+    private bool CanChangeNodes => Canvas is { } canvas && Permissions.CanAdminister(canvas, nameof(CanvasLayout.Nodes));
+
+    // Moving a node changes its position, and saving the move writes its configuration.
+    private bool CanMoveNode(CanvasNode node) => Permissions.CanAdministerConfiguration(node);
+
     private int SnapToGrid(double value)
     {
         if (Canvas?.IsSnapToGridEnabled == true)
@@ -237,6 +245,11 @@ else
 
     private void OnNodePositionChanged(CanvasNode node, double x, double y)
     {
+        if (!CanMoveNode(node))
+        {
+            return;
+        }
+
         var intX = SnapToGrid(x);
         var intY = SnapToGrid(y);
 
@@ -254,6 +267,10 @@ else
         // The moved node is saved and not the canvas: on a page a node is a block of its own, and only its
         // line changes.
         IInterceptorSubject moved = Nodes.FirstOrDefault(node => GetNodeId(node) == modifiedNode.Id) ?? (IInterceptorSubject)canvas;
+        if (!Permissions.CanAdministerConfiguration(moved))
+        {
+            return;
+        }
 
         _ = InvokeAsync(async () =>
         {
@@ -330,7 +347,10 @@ else
         }
 
         // Add node at click position
-        await AddNodeAtPosition((int)e.OffsetX, (int)e.OffsetY);
+        if (CanChangeNodes)
+        {
+            await AddNodeAtPosition((int)e.OffsetX, (int)e.OffsetY);
+        }
     }
 
     private async Task AddNodeAtPosition(int x, int y)
@@ -338,18 +358,31 @@ else
         x = SnapToGrid(x);
         y = SnapToGrid(y);
 
+        // The subject goes into the layout that the gate checked, also when the parameter changes while the dialog is open.
+        if (Canvas is not { } canvas)
+        {
+            return;
+        }
+
         await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
+            AdministerMember = canvas.TryGetRegisteredSubject()?.TryGetProperty(nameof(CanvasLayout.Nodes)),
+            RevertBeforeSave = subject =>
+            {
+                if (canvas.Nodes.FirstOrDefault(item => ReferenceEquals(item.Child, subject)) is { } item)
+                {
+                    canvas.Nodes = canvas.Nodes.Where(existing => existing != item).ToArray();
+                    item.Child = null;
+                }
+            },
             BeforeSave = subject =>
             {
-                if (Canvas == null) return;
-
                 var node = SubjectFactory.CreateSubject<CanvasNode>();
                 node.X = x;
                 node.Y = y;
                 node.Child = subject;
 
-                Canvas.Nodes = [.. Nodes, node];
+                canvas.Nodes = [.. canvas.Nodes, node];
             }
         });
     }
@@ -364,13 +397,24 @@ else
     {
         if (Canvas == null) return;
 
+        if (!CanChangeNodes)
+        {
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+            return;
+        }
+
         var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Node",
             "Are you sure you want to delete this node?",
             yesText: "Delete",
             cancelText: "Cancel");
 
-        if (confirmed == true)
+        // The roles may have changed while the confirmation was open.
+        if (confirmed == true && !CanChangeNodes)
+        {
+            Snackbar.Add(AccessDeniedTexts.Administer, Severity.Error);
+        }
+        else if (confirmed == true)
         {
             Canvas.Nodes = Nodes.Where(existing => existing != node).ToArray();
 

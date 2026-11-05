@@ -20,16 +20,16 @@ public class RoleClosureTests
     }
 
     [Fact]
-    public void WhenRoleNamesDifferInCase_ThenTheyResolveToTheSameRole()
+    public void WhenRoleNamesDifferInCase_ThenTheyNameDifferentRoles()
     {
         // Arrange
         AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "READER")];
 
         // Act
-        var closure = RoleClosure.Resolve(roles, ["agent"]);
+        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(roles, ["Agent"]));
 
         // Assert
-        Assert.Equal(["Reader", "Agent"], closure.Select(role => role.Name));
+        Assert.Equal("Role 'Agent' includes 'READER', which is not defined.", exception.Message);
     }
 
     [Fact]
@@ -62,13 +62,13 @@ public class RoleClosureTests
     public void WhenTwoRolesShareAName_ThenResolveThrows()
     {
         // Arrange
-        AuthorizationRole[] roles = [Role("Reader"), Role("reader")];
+        AuthorizationRole[] roles = [Role("Reader"), Role("Reader")];
 
         // Act
         var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(roles, ["Reader"]));
 
         // Assert
-        Assert.Equal("Role 'reader' is defined more than once.", exception.Message);
+        Assert.Equal("Role 'Reader' is defined more than once.", exception.Message);
     }
 
     [Fact]
@@ -110,10 +110,10 @@ public class RoleClosureTests
     public void WhenARoleIsNamedTwiceAndAlsoIncluded_ThenItIsResolvedOnce()
     {
         // Arrange
-        AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "reader")];
+        AuthorizationRole[] roles = [Role("Reader"), Role("Agent", "Reader")];
 
         // Act
-        var closure = RoleClosure.Resolve(roles, ["READER", "agent", "Reader"]);
+        var closure = RoleClosure.Resolve(roles, ["Reader", "Agent", "Reader"]);
 
         // Assert
         Assert.Equal(["Reader", "Agent"], closure.Select(role => role.Name));

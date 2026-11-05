@@ -85,7 +85,7 @@ The CLI always runs on the subscription login:
 
 ## Creating an agent
 
-Create a `ClaudeCliAgent` or `AnthropicAgent` (category AI) in the subject browser, see [Subjects](subjects.md). Configuration changes apply to the next turn; a running turn keeps the settings it started with. As JSON files:
+Create a `ClaudeCliAgent` or `AnthropicAgent` (category AI) in the subject browser, see [Subjects](subjects.md). Creating an agent and changing its settings, including its `Roles`, require a full administrator, see [Administration](authorization.md#administration). Configuration changes apply to the next turn; a running turn keeps the settings it started with. As JSON files:
 
 ```json
 {
@@ -131,7 +131,7 @@ All settings are `[Configuration]` properties in the agent's JSON file. Time spa
 | `PollInterval` | none | Starts a background run at this interval; at most 365 days |
 | `MinRunInterval` | `00:01:00` | Minimum time between the starts of two automatic runs; at most 365 days |
 | `AllowedTools` | read-only tools | See [Tools and permissions](#tools-and-permissions). An empty list leaves only `update_memory` |
-| `Roles` | `["Operator"]` | The roles that decide what the tools may read, change, run and read the history of, see [Authorization](authorization.md#agents). Also the default when the file has no `Roles` |
+| `Roles` | `["operator"]` | The roles that decide what the tools may read, change, run and read the history of, see [Authorization](authorization.md#agents). Also the default when the file has no `Roles`. A person chats with the agent only if they hold all of these roles, see [Who May Chat With an Agent](authorization.md#who-may-chat-with-an-agent) |
 | `TurnTimeout` | `00:05:00` | Time one turn may take; `00:00:00` for no limit, at most about 24 days |
 | `MaxToolCallsPerTurn` | `25` | Tool calls of one turn, see below |
 | `CliPath` | `claude` | CLI only. The executable; a bare name is resolved through `PATH` |
@@ -144,7 +144,7 @@ All settings are `[Configuration]` properties in the agent's JSON file. Time spa
 - **Tool calls** beyond `MaxToolCallsPerTurn` return an error and the model answers with what it has. `update_memory` does not count.
 - **Model rounds** are capped at `MaxToolCallsPerTurn` plus 10. The last round of an `AnthropicAgent` offers no tools, so the model answers; a `ClaudeCliAgent` turn that runs out of rounds fails.
 
-State properties, in the property panel: `Status`, `StatusMessage`, `IsBusy`, `Last Analysis` (newest background result that was not quiet), `Last Activity` (start of the newest turn), `Last Background Run`, `Background Runs` and, for CLI agents, the subscription usage of the last five hours and seven days. Agents and `/mcp` clients cannot read them, see [System Rules](authorization.md#system-rules).
+State properties, in the property panel: `Status`, `StatusMessage`, `IsBusy`, `Last Analysis` (newest background result that was not quiet), `Last Activity` (start of the newest turn), `Last Background Run`, `Background Runs` and, for CLI agents, the subscription usage of the last five hours and seven days. Agents and `/mcp` clients cannot read them, see [System Rules](authorization.md#system-rules). `Last Analysis` holds a finding, so like the conversation it is shown, in the property panel, widgets, page expressions and history alike, only to people who may chat with the agent, and so are the operations `New Conversation` and `Run Now`, which feed the shared conversation, see [Who May Chat With an Agent](authorization.md#who-may-chat-with-an-agent).
 
 ---
 
@@ -173,7 +173,7 @@ A background run starts when the **poll interval** elapses, when a **watched val
 
 Both share the instructions, memory and timeline, but not the conversation.
 
-- **Background runs** start without chat history. They get the trigger with the server time zone, the five newest results that were not quiet, the time of the last quiet run, and the current state of each watch path.
+- **Background runs** start without chat history. They get the trigger with the server time zone, the five newest results that were not quiet, the time of the last quiet run, and the current state of each watch path. Watch paths are read with the agent's `Roles`, so a watched value the roles may not read is left out.
 - **Quiet runs**: when nothing is noteworthy, the agent answers with one line starting with `[quiet]`, which is recorded but not reported. Only the text after the last tool call counts.
 - **Chat** is one ongoing conversation per agent. Each message carries the findings that are not quiet since the agent's last reply.
 - **New conversation** asks for confirmation, then discards the conversation and adds a divider. Memory and timeline stay.
@@ -217,12 +217,13 @@ The header has a status chip, **Run now** and **New conversation** (disabled whi
 - Enter sends and Shift+Enter adds a line; on touch devices Enter adds a line and the button sends.
 - While a background run or an `AnthropicAgent` summary holds the agent, the status shows Waiting and your message is answered after it.
 - A message to an agent that is stopped or still starting is rejected and stays in the input.
+- **Who may open it**: the chat, the timeline, the activity and the memory are shown only to people who hold every role of the agent, or are full administrators, and whose roles with deny rules the agent holds as well, because everyone who chats shares one conversation and one memory. Others see "You can chat with this agent only if you hold its roles. Missing: ..." and the roles they lack, or "You can chat with this agent only if it holds your roles with deny rules, ..." and the roles the agent lacks. Give the person those roles, or the agent, see [Who May Chat With an Agent](authorization.md#who-may-chat-with-an-agent).
 
 ---
 
 ## Tools and permissions
 
-Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. What these tools may reach, which subjects and properties are readable for them, which properties they write, which methods they run and which history they read, is decided by the agent's `Roles`, see [Authorization](authorization.md). A call needs both: `invoke_operation` with the role `Reader` runs no operation. Both are enforced where the tools are served, not by what the model is told.
+Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. What these tools may reach, which subjects and properties are readable for them, which properties they write, which methods they run and which history they read, is decided by the agent's `Roles`, see [Authorization](authorization.md). A call needs both: `invoke_operation` with the role `reader` runs no operation. Both are enforced where the tools are served, not by what the model is told.
 
 | Tool | Default | What it does |
 |---|---|---|
@@ -238,7 +239,7 @@ Each turn offers exactly the tools in `AllowedTools`, plus `update_memory`. What
 | `set_property` | off | Writes a property value |
 | `edit_markdown` | off | Replaces one passage of a page, see [Changing pages](#changing-pages) |
 | `write_markdown` | off | Replaces the whole text of a page |
-| `create_markdown` | off | Creates a page in a folder |
+| `create_markdown` | off | Creates a page in a folder. Refused: agents never create files, see [Changing pages](#changing-pages) |
 | `edit_page_layout` | off | No tool: lets the page tools change layout blocks, see [Editing page layout](#editing-page-layout) |
 | `update_memory` | always | Changes the agent's memory |
 | `web_search`, `web_fetch` | off | Search the web and load pages, see [Web tools](#web-tools) |
@@ -275,9 +276,9 @@ An agent with `invoke_operation` finds `INotificationPublisher` with `list_types
 |---|---|---|
 | `edit_markdown` | `ReplaceText` | Replaces one exact passage that occurs once in the source |
 | `write_markdown` | `ReplaceContent` | Replaces the whole source |
-| `create_markdown` | `CreateMarkdownFile` of a storage or folder | Creates a file with a plain name ending in `.md` |
+| `create_markdown` | `CreateMarkdownFile` of a storage or folder | Refused as not permitted by the access policy: creating a file is administration, which no agent may do |
 
-Each tool can be allowed on its own; the edit form marks them "Changes pages and documents". `invoke_operation` reaches the operations too, so it can change pages with the three tools off. They write like the page editor, and an open page updates as after a save. JSON and other files cannot be changed.
+Each tool can be allowed on its own; the edit form marks them "Changes pages and documents". Agents edit existing pages only: `create_markdown` stays listed but is refused, because creating a subject or a file is administration, which agents never do, see [System Rules](authorization.md#system-rules). A person creates the page and the agent edits it. `invoke_operation` reaches the operations too, so it can change pages with the three tools off. They write like the page editor, and an open page updates as after a save. JSON and other files cannot be changed.
 
 The operations change text only and refuse:
 
@@ -385,5 +386,7 @@ Each agent keeps its data in the `Agents` folder of the [data folder](configurat
 | The request is too long for the model | Start a new conversation, or lower `HistoryTokenBudget` |
 | The agent is not running. | The agent is stopped or still starting. Check the status and the log |
 | Invalid configuration: ... | An interval is out of range, such as a poll interval above 365 days. Correct it in the edit form |
-| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a removed or renamed custom role. Every tool call is denied until the roles are fixed in the edit form, with the operations of the `Authorization` subject and its roles or in `Authorization.json`; the status clears as soon as they are, see [Invalid Roles](authorization.md#invalid-roles) |
-| ... is not permitted. The access policy does not allow it. | The agent's roles do not allow the call. Give it a role that does, see [Authorization](authorization.md) |
+| Invalid roles: ... | A role of the agent cannot be used, such as "Role 'X' is not defined." for a name in the agent's file that is no role. Every tool call is denied until the roles are fixed in the edit form or with the operations of the `Authorization` subject and its roles; the status clears as soon as they are, see [Invalid Roles](authorization.md#invalid-roles) |
+| ... is not permitted. The access policy does not allow it. | The agent's roles do not allow the call. Give it a role that does, see [Authorization](authorization.md). `CreateMarkdownFile` is never allowed to an agent |
+| You can chat with this agent only if you hold its roles. | The person lacks a role of the agent. Give them the roles named in the message, or ask a full administrator, see [Authorization](authorization.md#who-may-chat-with-an-agent) |
+| You can chat with this agent only if it holds your roles with deny rules, ... | The person holds a role with deny rules that the agent lacks, so the agent could do what the role denies them. Give the agent the role named in the message, see [Roles With Deny Rules](authorization.md#roles-with-deny-rules) |

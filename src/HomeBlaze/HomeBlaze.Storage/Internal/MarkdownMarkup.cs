@@ -1,6 +1,7 @@
 using System.Text;
 using System.Web;
 using HomeBlaze.Components.Abstractions.TimeZones;
+using HomeBlaze.Authorization.Abstractions;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -23,13 +24,14 @@ public static class MarkdownMarkup
     /// </summary>
     /// <param name="children">The children of the page or of the fragment.</param>
     /// <param name="timeZone">The time zone of the viewer for dates, or null for the time zone of the server.</param>
+    /// <param name="permissions">The permissions of the viewer the values of the expressions are shown to, see <see cref="RenderExpression.GetText"/>.</param>
     /// <param name="groupsText">
     /// Whether each segment that starts a text block or other content (see <see cref="HtmlSegment.Start"/>) starts markup of
     /// its own, which carries that segment and holds the HTML and the values up to the next one or the next widget. The
     /// markup of a segment that starts a block is there even when it is empty.
     /// </param>
     public static List<MarkdownRenderSegment> GetRenderSegments(
-        IEnumerable<IInterceptorSubject> children, ITimeZoneDisplay? timeZone, bool groupsText = false)
+        IEnumerable<IInterceptorSubject> children, ITimeZoneDisplay? timeZone, IUserPermissions permissions, bool groupsText = false)
     {
         var result = new List<MarkdownRenderSegment>();
         StringBuilder? builder = null;
@@ -64,7 +66,7 @@ public static class MarkdownMarkup
                 }
                 else
                 {
-                    builder.Append(HttpUtility.HtmlEncode(expression.GetText(timeZone)));
+                    builder.Append(HttpUtility.HtmlEncode(expression.GetText(timeZone, permissions)));
                 }
             }
             else

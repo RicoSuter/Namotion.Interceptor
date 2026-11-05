@@ -1,9 +1,14 @@
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Controls
 @using Namotion.Interceptor
+@using Namotion.Interceptor.Registry
+@using Namotion.Interceptor.Registry.Abstractions
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Motor))]
+@inherits PermissionsComponentBase
 @implements ISubjectComponent
+@inject PropertyWriter Writer
 
 <MudPaper Class="pa-4" Elevation="2" Style="min-width: 280px;">
     <div class="d-flex align-center mb-3">
@@ -29,6 +34,7 @@
             <MudSlider T="int"
                        Value="@MotorSubject.TargetSpeed"
                        ValueChanged="@OnTargetSpeedChanged"
+                       Disabled="@(!CanChangeTargetSpeed)"
                        Min="0"
                        Max="3000"
                        Step="100"
@@ -82,11 +88,17 @@
 
     private Motor? MotorSubject => Subject as Motor;
 
+    private RegisteredSubjectProperty? TargetSpeedProperty => MotorSubject?.TryGetRegisteredProperty(nameof(Motor.TargetSpeed));
+
+    // A configuration property, which only a viewer who may administer it changes.
+    private bool CanChangeTargetSpeed => TargetSpeedProperty is { } property && PropertyWriter.MayWrite(Permissions, property);
+
+    // The writer checks the viewer again, shows a refusal and persists the configuration of the motor.
     private void OnTargetSpeedChanged(int newSpeed)
     {
-        if (MotorSubject != null)
+        if (TargetSpeedProperty is { } property)
         {
-            MotorSubject.TargetSpeed = newSpeed;
+            Writer.TryWrite(property, newSpeed);
         }
     }
 

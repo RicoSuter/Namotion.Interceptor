@@ -1,6 +1,7 @@
 @using System.Globalization
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Progress))]
 @implements ISubjectComponent
+@inherits PermissionsComponentBase
 @inject SubjectPathResolver PathResolver
 
 @{
@@ -11,7 +12,7 @@
 {
     // Read once per render and never kept: its render records the reads, so that it renders again when one changes.
     var path = progress.Path;
-    var property = ValueReader.ResolveProperty(PathResolver, progress, path);
+    var property = ValueReader.ResolveProperty(PathResolver, progress, path, Permissions);
     var state = ValueRangeResolver.GetState(property, property?.GetValue(), progress.Minimum, progress.Maximum);
 
     if (state.Error is not null)

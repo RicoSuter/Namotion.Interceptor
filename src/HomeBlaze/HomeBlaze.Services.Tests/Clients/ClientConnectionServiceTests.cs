@@ -1,6 +1,9 @@
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Services.Clients;
+using HomeBlaze.Services.Tests.Attributes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Tests.Clients;
 
@@ -108,36 +111,43 @@ public class ClientConnectionServiceTests
     }
 
     [Fact]
-    public async Task WhenNoRenameHandlerIsSet_ThenRenamingThrows()
+    public void WhenNoRenameMemberResolverIsSet_ThenThereIsNoRenameMember()
     {
         // Arrange
         var service = CreateService();
         var connection = service.Connect(null, new NoCallbacks());
 
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RenameAsync(connection, "Kitchen", CancellationToken.None));
+        // Act
+        var member = service.TryGetRenameMember(connection);
+
+        // Assert
+        Assert.Null(member);
     }
 
     [Fact]
-    public async Task WhenARenameHandlerIsSetAndDisposed_ThenRenamingCallsItOnlyWhileSet()
+    public void WhenARenameMemberResolverIsSetAndDisposed_ThenItResolvesOnlyWhileSet()
     {
         // Arrange
         var service = CreateService();
         var connection = service.Connect(null, new NoCallbacks());
-        string? renamed = null;
-        var registration = service.SetRenameHandler((_, name, _) =>
+        var subject = new SecretConfigTestSubject(InterceptorSubjectContext.Create().WithRegistry());
+        var renameMember = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(SecretConfigTestSubject.PublicConfig))!;
+        ClientConnection? resolved = null;
+        var registration = service.SetRenameMemberResolver(resolvedConnection =>
         {
-            renamed = name;
-            return Task.CompletedTask;
+            resolved = resolvedConnection;
+            return renameMember;
         });
 
         // Act
-        await service.RenameAsync(connection, "Kitchen", CancellationToken.None);
+        var memberWhileSet = service.TryGetRenameMember(connection);
         registration.Dispose();
+        var memberAfterDispose = service.TryGetRenameMember(connection);
 
         // Assert
-        Assert.Equal("Kitchen", renamed);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RenameAsync(connection, "Hall", CancellationToken.None));
+        Assert.Same(renameMember, memberWhileSet);
+        Assert.Same(connection, resolved);
+        Assert.Null(memberAfterDispose);
     }
 
     [Fact]

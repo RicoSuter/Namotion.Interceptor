@@ -10,11 +10,10 @@ namespace Namotion.Interceptor.Mcp;
 public static class McpServerConfigurationExtensions
 {
     /// <summary>
-    /// Whether <see cref="McpServerConfiguration.AccessPolicy"/> allows the action on the member; true when there is
-    /// no policy.
+    /// Whether <see cref="McpServerConfiguration.AccessPolicy"/> allows the action on the member.
     /// </summary>
     public static bool IsAllowed(this McpServerConfiguration configuration, RegisteredSubjectProperty member, string action)
-        => configuration.AccessPolicy?.IsAllowed(member, action) ?? true;
+        => configuration.AccessPolicy.IsAllowed(member, action);
 
     /// <summary>
     /// Resolves a property path from <paramref name="root"/> as get_property does: null when the path does not resolve
@@ -64,7 +63,7 @@ public static class McpServerConfigurationExtensions
 
         // The built path passes only readable properties, so only emptiness is left to check, as search does.
         return path is not null &&
-            configuration.AccessPolicy is { } policy &&
+            configuration.ReadPolicy is { } policy &&
             subject.Subject != root.Subject &&
             McpSubjectReadability.IsEmptyForPolicy(policy, configuration.PathProvider, subject)
                 ? null

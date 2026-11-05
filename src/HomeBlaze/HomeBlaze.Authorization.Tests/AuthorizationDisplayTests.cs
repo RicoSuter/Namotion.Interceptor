@@ -14,14 +14,14 @@ public class AuthorizationDisplayTests
         var role = new Role();
         var authorization = new Authorization(TestContext.Create())
         {
-            Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Kitchen"] = role }
+            Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["kitchen"] = role }
         };
 
         // Act
         var title = ((ITitleProvider)role).Title;
 
         // Assert
-        Assert.Equal("Kitchen", title);
+        Assert.Equal("kitchen", title);
         Assert.Same(authorization, role.FindParent().Authorization);
     }
 

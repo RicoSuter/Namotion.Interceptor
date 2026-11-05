@@ -1,13 +1,17 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Authorization.Abstractions
 @using HomeBlaze.History
 @using HomeBlaze.History.Abstractions
 @using HomeBlaze.Services
 @using HomeBlaze.Services.Display
+@using Namotion.Interceptor.Registry
 @using Namotion.Interceptor.Registry.Abstractions
 @using HomeBlaze.Components.Abstractions.TimeZones
 @inject ITimeZoneDisplay TimeZone
 @inject TimeProvider TimeProvider
+@inject SubjectPathResolver PathResolver
+@inject IUserPermissions Permissions
 @implements IDisposable
 
 <MudDialog Style="height:100%;" ContentClass="overflow-hidden">
@@ -148,6 +152,7 @@
     protected override async Task OnInitializedAsync()
     {
         TimeZone.Changed += OnTimeZoneChanged;
+        Permissions.Changed += OnPermissionsChanged;
         var column = HistoryColumns.GetValueColumnFor(PropertyType);
         var supportedAggregations = HistoryChartQuery.GetSupportedAggregations(HistoryChartQuery.GetStores(Registry));
         var isDiscrete = PropertyHistoryChartModel.IsDiscrete(PropertyType, IsDiscreteState);
@@ -186,6 +191,18 @@
         _loadCancellation?.Dispose();
         _loadCancellation = new CancellationTokenSource();
         var cancellationToken = _loadCancellation.Token;
+
+        // Checked on every load, also when the dialog was shown without ShowAsync: a history the viewer may not read is
+        // never queried and shows as a range without data.
+        if (!CanReadHistory(PathResolver, Permissions, PropertyPath))
+        {
+            _loading = false;
+            _error = null;
+            _truncated = false;
+            ClearView();
+            StateHasChanged();
+            return;
+        }
 
         _loading = true;
         _error = null;
@@ -323,10 +340,14 @@
         InvokeAsync(() => _isDisposed ? Task.CompletedTask : LoadAsync());
     }
 
+    // A viewer who may no longer read the history loses the shown data with the next load.
+    private void OnPermissionsChanged() => OnTimeZoneChanged();
+
     public void Dispose()
     {
         _isDisposed = true;
         TimeZone.Changed -= OnTimeZoneChanged;
+        Permissions.Changed -= OnPermissionsChanged;
         // Cancel before disposing: disposing a CTS does not cancel its token, so an in-flight LoadAsync would
         // otherwise keep running and call StateHasChanged on this disposed component.
         _loadCancellation?.Cancel();
@@ -335,11 +356,13 @@
 
     /// <summary>
     /// Shows the history of a recorded property, with the unit and the kind of value the property declares.
-    /// Returns null without showing anything when the subject of the property is not in the graph.
+    /// Returns null without showing anything when the subject of the property is not in the graph, or when the viewer may
+    /// not read the property or its history.
     /// </summary>
     /// <param name="dialogService">The dialog service.</param>
     /// <param name="registry">The registry that knows the history stores.</param>
     /// <param name="pathResolver">The resolver of the history path of the property.</param>
+    /// <param name="permissions">The permissions of the viewer, who sees only a history it may read.</param>
     /// <param name="property">The property.</param>
     /// <param name="displayName">The name of the property in the title.</param>
     /// <param name="settings">The selections the dialog opens with, or null for its defaults.</param>
@@ -347,40 +370,32 @@
         IDialogService dialogService,
         ISubjectRegistry registry,
         ISubjectPathResolver pathResolver,
+        IUserPermissions permissions,
         RegisteredSubjectProperty property,
         string displayName,
         PropertyHistoryDialogSettings? settings = null)
     {
-        if (property.GetHistoryPath(pathResolver) is not { } path)
+        if (!CanReadHistory(permissions, property) || property.GetHistoryPath(pathResolver) is not { } path)
+        {
+            return null;
+        }
+
+        // The dialog shows the history of the path, so the path must lead to a property the viewer may read as well.
+        if (!CanReadHistory(pathResolver, permissions, path))
         {
             return null;
         }
 
         var metadata = property.GetStateMetadata();
-        return await ShowAsync(
-            dialogService, registry, path, displayName, property.Type, metadata?.IsCumulative ?? false,
-            metadata?.Unit ?? StateUnit.Default, metadata?.IsDiscrete ?? false, settings);
-    }
-
-    public static Task<IDialogReference> ShowAsync(
-        IDialogService dialogService,
-        ISubjectRegistry registry,
-        string propertyPath,
-        string displayName,
-        Type propertyType,
-        bool isCumulative,
-        StateUnit unit = StateUnit.Default,
-        bool isDiscreteState = false,
-        PropertyHistoryDialogSettings? settings = null)
-    {
+        var unit = metadata?.Unit ?? StateUnit.Default;
         var parameters = new DialogParameters<PropertyHistoryDialog>
         {
             { dialog => dialog.Registry, registry },
-            { dialog => dialog.PropertyPath, propertyPath },
+            { dialog => dialog.PropertyPath, path },
             { dialog => dialog.DisplayName, displayName },
-            { dialog => dialog.PropertyType, propertyType },
-            { dialog => dialog.IsCumulative, isCumulative },
-            { dialog => dialog.IsDiscreteState, isDiscreteState },
+            { dialog => dialog.PropertyType, property.Type },
+            { dialog => dialog.IsCumulative, metadata?.IsCumulative ?? false },
+            { dialog => dialog.IsDiscreteState, metadata?.IsDiscrete ?? false },
             { dialog => dialog.Unit, unit },
             { dialog => dialog.Settings, settings }
         };
@@ -388,6 +403,31 @@
         var options = new DialogOptions { FullScreen = true, CloseButton = true };
         var suffix = StateUnitExtensions.GetUnitSuffix(unit);
         var title = string.IsNullOrEmpty(suffix) ? $"History: {displayName}" : $"History: {displayName} ({suffix})";
-        return dialogService.ShowAsync<PropertyHistoryDialog>(title, parameters, options);
+        return await dialogService.ShowAsync<PropertyHistoryDialog>(title, parameters, options);
     }
+
+    // The path of a history is the canonical path of the subject joined with the name of the property.
+    private static bool CanReadHistory(ISubjectPathResolver pathResolver, IUserPermissions permissions, string propertyPath)
+    {
+        var separator = propertyPath.LastIndexOf('/');
+        if (separator < 0 || separator == propertyPath.Length - 1)
+        {
+            return false;
+        }
+
+        try
+        {
+            var subject = pathResolver.ResolveSubject(separator == 0 ? "/" : propertyPath[..separator], PathStyle.Canonical);
+            return subject?.TryGetRegisteredSubject()?.TryGetProperty(propertyPath[(separator + 1)..]) is { } property &&
+                   CanReadHistory(permissions, property);
+        }
+        catch
+        {
+            // A malformed path leads nowhere.
+            return false;
+        }
+    }
+
+    private static bool CanReadHistory(IUserPermissions permissions, RegisteredSubjectProperty property) =>
+        permissions.CanRead(property) && permissions.CanReadHistory(property);
 }

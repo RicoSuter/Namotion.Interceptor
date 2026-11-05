@@ -27,57 +27,24 @@ public class AuthorizationPersistenceTests
     }
 
     [Fact]
-    public void WhenAnAuthorizationWithRolesIsSerializedAndLoaded_ThenTheRulesRoundTrip()
+    public void WhenAnAuthorizationWithRolesIsSerializedAndLoaded_ThenNeitherTheJsonNorTheLoadedSubjectHoldsRoles()
     {
         // Arrange
         var context = CreateContext();
-        var role = CreateRole(context);
-        var authorization = new Authorization(context)
-        {
-            Roles = new Dictionary<string, Role> { ["MyRole"] = role }
-        };
+        var authorization = new Authorization(context);
+        authorization.ReplaceRoles([CreateRole()]);
 
         // Act
         var json = _serializer.Serialize(authorization);
         var loaded = Assert.IsType<Authorization>(_serializer.Deserialize(json));
 
         // Assert
-        var loadedRole = Assert.Single(loaded.Roles);
-        Assert.Equal("MyRole", loadedRole.Key);
-        Assert.Equal(role.Includes, loadedRole.Value.Includes);
-        Assert.Equal(role.Allow, loadedRole.Value.Allow);
-        Assert.Equal(role.Deny, loadedRole.Value.Deny);
-    }
-
-    [Fact]
-    public void WhenAnAuthorizationIsSerialized_ThenRolesAreKeyedByNameWithRulesAsObjectsAndActionsAsNames()
-    {
-        // Arrange
-        var context = CreateContext();
-        var authorization = new Authorization(context)
-        {
-            Roles = new Dictionary<string, Role> { ["MyRole"] = CreateRole(context) }
-        };
-
-        // Act
-        var json = _serializer.Serialize(authorization);
-
-        // Assert
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         Assert.Equal(typeof(Authorization).FullName, root.GetProperty("$type").GetString());
+        Assert.False(root.TryGetProperty("roles", out _));
         Assert.False(root.TryGetProperty("status", out _));
-
-        var role = root.GetProperty("roles").GetProperty("MyRole");
-        Assert.Equal(["Reader"], role.GetProperty("includes").EnumerateArray().Select(element => element.GetString()));
-        Assert.False(role.TryGetProperty("usedByAgents", out _));
-
-        var allow = Assert.Single(role.GetProperty("allow").EnumerateArray().ToArray());
-        Assert.Equal(["/Home"], allow.GetProperty("paths").EnumerateArray().Select(element => element.GetString()));
-        Assert.Equal(["read", "execute"], allow.GetProperty("actions").EnumerateArray().Select(element => element.GetString()));
-
-        var deny = Assert.Single(role.GetProperty("deny").EnumerateArray().ToArray());
-        Assert.Equal("""{"paths":["/Home/Bedroom"],"actions":["write"]}""", JsonSerializer.Serialize(deny));
+        Assert.Empty(loaded.Roles);
     }
 
     [Fact]
@@ -85,28 +52,24 @@ public class AuthorizationPersistenceTests
     {
         // Arrange
         var context = CreateContext();
-        var role = CreateRole(context);
+        var authorization = new Authorization(context);
+        authorization.ReplaceRoles([CreateRole()]);
+        var role = authorization.Roles["myrole"];
         var root = new TestRoot(context)
         {
-            Children = new Dictionary<string, IInterceptorSubject>
-            {
-                ["Authorization"] = new Authorization(context)
-                {
-                    Roles = new Dictionary<string, Role> { ["MyRole"] = role }
-                }
-            }
+            Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = authorization }
         };
         var resolver = new SubjectPathResolver(() => root);
 
         // Act
-        var resolved = resolver.ResolveSubject("/Authorization/MyRole", PathStyle.Canonical);
-        var resolvedByRegistry = new DefaultPathProvider('/').TryGetSubjectFromPath(root.TryGetRegisteredSubject()!, "/Authorization/MyRole");
+        var resolved = resolver.ResolveSubject("/Authorization/myrole", PathStyle.Canonical);
+        var resolvedByRegistry = new DefaultPathProvider('/').TryGetSubjectFromPath(root.TryGetRegisteredSubject()!, "/Authorization/myrole");
         var path = resolver.GetPath(role, PathStyle.Canonical);
 
         // Assert
         Assert.Same(role, resolved);
         Assert.Same(role, resolvedByRegistry?.Subject);
-        Assert.Equal("/Authorization/MyRole", path);
+        Assert.Equal("/Authorization/myrole", path);
     }
 
     private static IInterceptorSubjectContext CreateContext() =>
@@ -118,10 +81,11 @@ public class AuthorizationPersistenceTests
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
 
-    private static Role CreateRole(IInterceptorSubjectContext context) =>
-        new(context)
+    private static AuthorizationRole CreateRole() =>
+        new()
         {
-            Includes = ["Reader"],
+            Name = "myrole",
+            Includes = ["reader"],
             Allow =
             [
                 new PermissionRule

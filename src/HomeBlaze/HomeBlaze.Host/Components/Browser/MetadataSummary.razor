@@ -3,9 +3,12 @@
 @using HomeBlaze.Services.Metadata
 @using HomeBlaze.Storage.Abstractions.Metadata
 @using HomeBlaze.Storage.Metadata
+@using HomeBlaze.Authorization.Abstractions
 
 @inject MetadataLinkResolver LinkResolver
 @inject SubjectPathResolver PathResolver
+
+@inherits PermissionsComponentBase
 
 @if (_notes is not null || _links.Length > 0 || _tags.Length > 0)
 {
@@ -35,7 +38,7 @@
                     _ = PathResolver.PathsVersion;
                     @foreach (var metadataLink in _links)
                     {
-                        var link = LinkResolver.Resolve(metadataLink);
+                        var link = LinkResolver.Resolve(metadataLink, Permissions);
                         @* A link that opens in a new tab shows so by its icon. *@
                         <MudChip T="string" Size="Size.Small" Color="@(link.IsBroken ? Color.Error : Color.Default)" Variant="Variant.Outlined"
                                  Icon="@(link.IsBroken ? Icons.Material.Filled.LinkOff : link.IsExternal ? Icons.Material.Filled.OpenInNew : Icons.Material.Filled.Link)"

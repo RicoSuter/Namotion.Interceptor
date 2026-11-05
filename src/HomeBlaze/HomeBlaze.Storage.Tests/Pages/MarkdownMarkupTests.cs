@@ -1,4 +1,5 @@
 using System.Net;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
@@ -10,7 +11,7 @@ public class MarkdownMarkupTests
     private static readonly string Namespace = typeof(TestMeter).Namespace!;
 
     private static string?[] GetMarkup(params IInterceptorSubject[] children) =>
-        MarkdownMarkup.GetRenderSegments(children, timeZone: null).Select(segment => segment.Html).ToArray();
+        MarkdownMarkup.GetRenderSegments(children, timeZone: null, UnrestrictedPermissions.Instance).Select(segment => segment.Html).ToArray();
 
     private static async Task<MarkdownFile> AddPageAsync(string text)
     {
@@ -24,7 +25,7 @@ public class MarkdownMarkupTests
     }
 
     private static string GetPowerText(MarkdownFile page) =>
-        WebUtility.HtmlEncode(page.Children.Values.OfType<RenderExpression>().Single().GetText(null));
+        WebUtility.HtmlEncode(page.Children.Values.OfType<RenderExpression>().Single().GetText(null, UnrestrictedPermissions.Instance));
 
     [Fact]
     public void WhenABlockStartsAtTheStartOfASegment_ThenTheHtmlBeforeIsMarkupOfItsOwn()
@@ -78,8 +79,8 @@ public class MarkdownMarkupTests
         var page = await AddPageAsync("First.\n\nSecond {{ meter/Power }} end.\n\nThird.");
 
         // Act
-        var first = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
-        var second = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
+        var first = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null, UnrestrictedPermissions.Instance);
+        var second = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(
@@ -97,8 +98,8 @@ public class MarkdownMarkupTests
         var page = await AddPageAsync("First.\n\n<!-- note -->\n\nSecond {{ meter/Power }}.");
 
         // Act
-        var first = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
-        var second = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
+        var first = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null, UnrestrictedPermissions.Instance);
+        var second = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(
@@ -120,7 +121,7 @@ public class MarkdownMarkupTests
         // Assert
         Assert.Equal(
             new[] { "<p>Changed.</p>\n<!-- note -->\n", "<p>Second.</p>\n" },
-            MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null).Select(segment => segment.Html));
+            MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null, UnrestrictedPermissions.Instance).Select(segment => segment.Html));
     }
 
     [Fact]
@@ -130,7 +131,7 @@ public class MarkdownMarkupTests
         var page = await AddPageAsync("An <img alt=\"{{ meter/Power }}\"> image.\n\nAfter.");
 
         // Act
-        var markup = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null);
+        var markup = MarkdownMarkup.GetRenderSegments(page.Children.Values, timeZone: null, UnrestrictedPermissions.Instance);
 
         // Assert
         Assert.Equal(

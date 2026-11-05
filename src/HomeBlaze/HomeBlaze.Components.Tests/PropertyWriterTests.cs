@@ -1,4 +1,5 @@
 using HomeBlaze.Components.Controls;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Components.Tests.Models;
 using Microsoft.Extensions.Time.Testing;
 using MudBlazor;
@@ -19,7 +20,7 @@ public sealed class PropertyWriterTests : IDisposable
 
     public PropertyWriterTests()
     {
-        _writer = new PropertyWriter(_graph.RootManager, _snackbar.Snackbar, _timeProvider);
+        _writer = new PropertyWriter(_graph.RootManager, _snackbar.Snackbar, _timeProvider, new TestUserPermissions());
     }
 
     private static RegisteredSubjectProperty GetProperty(IInterceptorSubject subject, string propertyName) =>

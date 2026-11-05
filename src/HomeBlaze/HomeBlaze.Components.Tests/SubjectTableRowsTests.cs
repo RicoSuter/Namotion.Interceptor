@@ -1,7 +1,10 @@
 using System.Reflection;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -60,7 +63,7 @@ public class SubjectTableRowsTests
         var graph = CreateGraph();
 
         // Act
-        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", null, out var rows, out var error);
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", null, UnrestrictedPermissions.Instance, out var rows, out var error);
 
         // Assert
         Assert.True(found);
@@ -78,7 +81,7 @@ public class SubjectTableRowsTests
         var graph = CreateGraph();
 
         // Act
-        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, out var rows, out var error);
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, UnrestrictedPermissions.Instance, out var rows, out var error);
 
         // Assert
         Assert.True(found);
@@ -97,7 +100,27 @@ public class SubjectTableRowsTests
         var graph = CreateGraph();
 
         // Act
-        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, out var rows, out var error);
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, UnrestrictedPermissions.Instance, out var rows, out var error);
+
+        // Assert
+        Assert.False(found);
+        Assert.Empty(rows);
+        Assert.Equal($"Cannot list subjects of: {source}", error);
+    }
+
+    [Theory]
+    [InlineData("../devices/Devices", "Devices")]
+    [InlineData("../devices/Main", "Main")]
+    [InlineData("../devices", "Children")]
+    public void WhenTheSourceOrItsInlinePathsPropertyIsHidden_ThenItLeadsNowhere(string source, string hiddenPropertyName)
+    {
+        // Arrange
+        var graph = CreateGraph();
+        var devices = graph.Resolver.ResolveSubject("/devices", PathStyle.Canonical)!;
+        var permissions = new TestUserPermissions { CannotRead = [devices.TryGetRegisteredSubject()!.TryGetProperty(hiddenPropertyName)!] };
+
+        // Act
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, permissions, out var rows, out var error);
 
         // Assert
         Assert.False(found);
@@ -114,7 +137,7 @@ public class SubjectTableRowsTests
         var graph = CreateGraph();
 
         // Act
-        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, out _, out var error);
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, source, null, UnrestrictedPermissions.Instance, out _, out var error);
 
         // Assert
         Assert.False(found);
@@ -133,7 +156,7 @@ public class SubjectTableRowsTests
         var graph = CreateGraph();
 
         // Act
-        SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", type.FullName, out var rows, out _);
+        SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", type.FullName, UnrestrictedPermissions.Instance, out var rows, out _);
 
         // Assert
         Assert.Equal(["Fan", "Pump"], GetNames(rows));
@@ -149,7 +172,7 @@ public class SubjectTableRowsTests
         var graph = CreateGraph();
 
         // Act
-        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", typeName, out var rows, out var error);
+        var found = SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", typeName, UnrestrictedPermissions.Instance, out var rows, out var error);
 
         // Assert
         Assert.True(found);
@@ -180,7 +203,7 @@ public class SubjectTableRowsTests
     {
         // Arrange
         var graph = CreateGraph();
-        SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", typeof(TestDevice).FullName, out var rows, out _);
+        SubjectTableRows.TryGetRows(graph.Resolver, graph.Table, "../devices", typeof(TestDevice).FullName, UnrestrictedPermissions.Instance, out var rows, out _);
         var labeled = new SubjectTableColumn(_context) { Property = nameof(TestDevice.Speed), Label = "Speed" };
         var titled = new SubjectTableColumn(_context) { Property = nameof(TestDevice.Speed) };
         var unknown = new SubjectTableColumn(_context) { Property = "Missing" };

@@ -40,13 +40,13 @@ namespace HomeBlaze.Installation
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Removes the name of this client; its open tabs become anonymous clients again.", Icon="Delete", Position=2, RequiresConfirmation=true, Title="Forget")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Removes the name of this client; its open tabs become anonymous clients again.", Icon="Delete", Position=2, RequiresAdministration=true, RequiresConfirmation=true, Title="Forget")]
         public System.Threading.Tasks.Task ForgetAsync(System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Names this client, which keeps it when its browser closes.", Icon="Edit", Position=1, Title="Rename")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Names this client, which keeps it when its browser closes.", Icon="Edit", Position=1, RequiresAdministration=true, Title="Rename")]
         public System.Threading.Tasks.Task RenameAsync(string name, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Abstractions.Messaging.NotificationResult> SendNotificationAsync(HomeBlaze.Abstractions.Messaging.Notification notification, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }

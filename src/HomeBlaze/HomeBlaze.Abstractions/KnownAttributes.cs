@@ -15,6 +15,12 @@ public static class KnownAttributes
     public const string IsEnabled = "IsEnabled";
 
     /// <summary>
+    /// Attribute name for why a member is not enabled, a string the user interface shows while <see cref="IsEnabled"/>
+    /// is false, or null for no reason.
+    /// </summary>
+    public const string DisabledReason = "DisabledReason";
+
+    /// <summary>
     /// Registry attribute name for [State] property metadata.
     /// </summary>
     public const string State = "HomeBlaze:State";

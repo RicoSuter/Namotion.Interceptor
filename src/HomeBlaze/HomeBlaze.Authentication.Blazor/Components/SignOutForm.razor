@@ -1,0 +1,23 @@
+@* A plain form, posted by the browser and not by the circuit, as only a request can remove the session cookie. *@
+
+<form method="post" action="@AccountEndpoints.LogoutPath.TrimStart('/')" data-testid="@TestId">
+    <AntiforgeryToken />
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text" FullWidth="@FullWidth" Class="@Class"
+               StartIcon="@Icons.Material.Filled.Logout">
+        Sign out
+    </MudButton>
+</form>
+
+@code {
+    /// <summary>The <c>data-testid</c> of the form.</summary>
+    [Parameter]
+    public string? TestId { get; set; }
+
+    /// <summary>Whether the button takes the whole width.</summary>
+    [Parameter]
+    public bool FullWidth { get; set; }
+
+    /// <summary>The classes of the button.</summary>
+    [Parameter]
+    public string? Class { get; set; }
+}

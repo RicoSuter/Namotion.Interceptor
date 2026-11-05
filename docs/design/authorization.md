@@ -22,7 +22,7 @@ A subject graph exposed to principals other than its owner (AI agents, remote cl
 | Member | A `RegisteredSubjectProperty`: a property, a method an application registers as a property, or an attribute. An attribute is evaluated on its own, with its own tags, and is named `Property@Attribute` for member globs. |
 | Rule | Four selectors (`Paths`, `Types`, `Members`, `Tags`) and a list of actions. It applies when the action is listed and every non-empty selector matches. |
 | Role | A name, the names of included roles, allow rules and deny rules. Includes are transitive and may form a diamond. |
-| System deny rules | Deny rules an application passes with every compilation, reported as the reserved role `System`. No role can override them. |
+| System deny rules | Deny rules an application passes with every compilation, belonging to no role and reported by `Explain` with `IsDeniedBySystem`. No role can override them. |
 | Principal | Whoever holds a set of role names. The library has no principal type; the role names are the principal. |
 | Policy | `AuthorizationPolicy`, the compiled rules of one principal's roles and their includes, plus the system deny rules. Immutable and shared across threads. |
 
@@ -58,7 +58,7 @@ One question can test many rules, and several of them may need the same derived 
 
 ### Explain
 
-`Explain(member, action)` runs the same passes and returns the first matching allow rule and the first matching deny rule with their roles. Rules are kept in closure order, included roles first, each role's rules in their written order, and the system deny rules last, so the report names the first deciding rule in that order and names `System` only when no role's deny matched. It is meant for a permission tester and for tests, not for hot paths. `Explain(subject)` is described under [Subject visibility](#subject-visibility).
+`Explain(member, action)` runs the same passes and returns the first matching allow rule and the first matching deny rule with their roles. Rules are kept in closure order, included roles first, each role's rules in their written order, and the system deny rules last, so the report names the first deciding rule in that order and reports a system deny rule, with `IsDeniedBySystem`, only when no role's deny matched. It is meant for a permission tester and for tests, not for hot paths. `Explain(subject)` is described under [Subject visibility](#subject-visibility).
 
 ## Paths
 
@@ -139,7 +139,7 @@ Visibility uses reachability through any parent rather than the first parent, fo
 
 | Validated over | Why there |
 |---|---|
-| All roles given | Names must resolve unambiguously before any closure can be computed, and a role named `System` would be indistinguishable from the system rules in `Explain`. |
+| All roles given | Names must resolve unambiguously before any closure can be computed. |
 | The principal's closure | Only these roles take part; a broken role outside the closure must not lock this principal out. |
 | Rules of the closure and the system rules | Same scoping: only rules the policy evaluates are parsed. |
 | Known actions | The bit assignment depends on them. |
@@ -148,7 +148,7 @@ A principal whose roles fail to compile gets `AuthorizationPolicy.DenyAll`, neve
 
 The include closure is resolved recursively; the depth cap of 64 turns a pathological include chain into a compile error with the role's name instead of a stack overflow. Roles reached through several includes, as in a diamond, are resolved once. `Roles` on the policy lists the closure in resolution order, included roles first, which is also the order of the rules and of `Explain`.
 
-`PermissionRule` and `AuthorizationRole` are records with value equality over their arrays: element by element and in order, role names, includes, actions and tags ignoring case like resolution and matching, the other selector values exactly. An application can therefore tell whether a role really changed before recompiling, and tests can compare rules. Order counts because it decides which rule `Explain` reports.
+`PermissionRule` and `AuthorizationRole` are records with value equality over their arrays: element by element and in order, actions and tags ignoring case like matching, role names and includes ordinally like resolution, the other selector values exactly. An application can therefore tell whether a role really changed before recompiling, and tests can compare rules. Order counts because it decides which rule `Explain` reports.
 
 ## Performance
 

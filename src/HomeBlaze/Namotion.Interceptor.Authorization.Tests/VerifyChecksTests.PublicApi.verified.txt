@@ -11,7 +11,6 @@ namespace Namotion.Interceptor.Authorization
     }
     public sealed class AuthorizationPolicy
     {
-        public const string SystemRoleName = "System";
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.AuthorizationRole> Roles { get; }
         public static Namotion.Interceptor.Authorization.AuthorizationPolicy DenyAll { get; }
         public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
@@ -55,12 +54,13 @@ namespace Namotion.Interceptor.Authorization
     }
     public readonly struct PermissionDecision : System.IEquatable<Namotion.Interceptor.Authorization.PermissionDecision>
     {
-        public PermissionDecision(bool IsAllowed, Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy, Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule, Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy, Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule) { }
+        public PermissionDecision(bool IsAllowed, Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy, Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule, Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy, Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule, bool IsDeniedBySystem) { }
         public Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy { get; init; }
         public Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule { get; init; }
         public Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy { get; init; }
         public Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule { get; init; }
         public bool IsAllowed { get; init; }
+        public bool IsDeniedBySystem { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(Namotion.Interceptor.Authorization.PermissionRuleJsonConverter))]
     public sealed class PermissionRule : System.IEquatable<Namotion.Interceptor.Authorization.PermissionRule>

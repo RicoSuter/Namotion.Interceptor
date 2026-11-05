@@ -1,4 +1,7 @@
 using Bunit;
+using HomeBlaze.Authorization.Abstractions;
+using Namotion.Interceptor.Registry;
+using HomeBlaze.Components.Abstractions;
 using HomeBlaze.Authorization.Tests;
 using Microsoft.AspNetCore.Components.Web;
 using MudBlazor;
@@ -16,10 +19,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenTheRoleIsLoaded_ThenItsIncludesAndRulesAreShownWithoutANameLine()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["reader"];
-        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read, AuthorizationActions.Execute] }];
-        role.Deny = [new PermissionRule { Tags = [MemberTags.Secret], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", includes: ["reader"], allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read, AuthorizationActions.Execute] }], deny: [new PermissionRule { Tags = [MemberTags.Secret], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -28,12 +28,12 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         var usedBy = component.Find(".role-edit").FirstElementChild;
         Assert.Equal("role-edit-used-by", usedBy?.GetAttribute("data-testid"));
         Assert.Contains("role-edit-tabs", usedBy?.NextElementSibling?.ClassName);
-        Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='role-edit-include-Reader']").TextContent.Trim());
+        Assert.Equal(BuiltInRoles.ReaderName, component.Find("[data-testid='role-edit-include-reader']").TextContent.Trim());
 
         var allowCard = Assert.Single(GetCards(component, "allow"));
         Assert.Equal(["/Devices/**"], GetChips(allowCard, "rule-paths"));
         Assert.Equal("any", allowCard.QuerySelector("[data-testid='rule-types-any']")?.TextContent.Trim());
-        Assert.Equal([true, false, true, false], GetActionStates(component, 0));
+        Assert.Equal([true, false, true, false, false], GetActionStates(component, 0));
 
         var denyCard = Assert.Single(GetCards(component, "deny"));
         Assert.Equal([MemberTags.Secret], GetChips(denyCard, "rule-tags"));
@@ -45,29 +45,27 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenTheRoleIsLoaded_ThenTheBuiltInRolesAndTheSystemRulesAreDescribedWithTheIncludes()
     {
         // Act
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
 
         // Assert
         Assert.Contains("The system rules apply to every role.", component.Find("[data-testid='role-edit-builtin-roles']").TextContent);
-        Assert.Equal("Reader: Reads every member and its history and executes queries.",
-            component.Find("[data-testid='role-edit-builtin-role-Reader']").TextContent.Trim());
-        Assert.Equal("Operator: Includes Reader, writes every member and executes operations.",
-            component.Find("[data-testid='role-edit-builtin-role-Operator']").TextContent.Trim());
-        Assert.Equal("Everything: Allows every action on every member.",
-            component.Find("[data-testid='role-edit-builtin-role-Everything']").TextContent.Trim());
+        Assert.Equal("reader: Reads every member and its history and executes queries.",
+            component.Find("[data-testid='role-edit-builtin-role-reader']").TextContent.Trim());
+        Assert.Equal("operator: Includes reader, writes every member and executes operations.",
+            component.Find("[data-testid='role-edit-builtin-role-operator']").TextContent.Trim());
+        Assert.Equal("everything: Allows every action on every member.",
+            component.Find("[data-testid='role-edit-builtin-role-everything']").TextContent.Trim());
     }
 
     [Fact]
     public void WhenTheRoleIsLoaded_ThenTheTabsAreRolesAllowAndDenyWithTheirCountsAndPreview()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
+        var role = Graph.SetRole("kitchen", allow: 
         [
             new PermissionRule { Actions = [PermissionAction.Read] },
             new PermissionRule { Actions = [PermissionAction.Write] }
-        ];
-        role.Deny = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        ], deny: [new PermissionRule { Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -85,8 +83,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenAnIncludedRoleCannotBeUsed_ThenOnlyTheRolesTabShowsTheErrorMarker()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName, "Ghost"];
+        var role = Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName, "ghost"]);
 
         // Act
         var component = RenderEditor(role);
@@ -102,26 +99,24 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenAMissingIncludedRoleIsAddedWhileTheDialogIsOpen_ThenTheRolesTabMarkerAndTheErrorChipGo()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["Pantry"];
+        var role = Graph.SetRole("kitchen", includes: ["pantry"]);
         var component = RenderEditor(role);
 
         // Act
-        Graph.Authorization.Roles = new Dictionary<string, Role>(Graph.Authorization.Roles) { ["Pantry"] = new Role() };
+        Graph.RoleStore.Apply(null, new AuthorizationRole { Name = "pantry" });
 
         // Assert
         await component.WaitForAssertionAsync(
             () => Assert.Empty(component.FindAll("[data-testid='role-edit-tab-roles-error']")),
             TimeSpan.FromSeconds(10));
-        Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-edit-include-Pantry']").ClassName);
+        Assert.DoesNotContain("mud-chip-color-error", component.Find("[data-testid='role-edit-include-pantry']").ClassName);
     }
 
     [Fact]
     public async Task WhenARuleBecomesInvalid_ThenOnlyTheTabOfItsListShowsTheErrorMarker()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -136,7 +131,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenAListHasNoRules_ThenItsTabSaysSo()
     {
         // Act
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
 
         // Assert
         Assert.Equal("No allow rules yet", component.Find("[data-testid='role-edit-allow-empty']").TextContent.Trim());
@@ -147,7 +142,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenARuleIsAddedToAnEmptyList_ThenOnlyItsTabNoLongerSaysItHasNoRules()
     {
         // Arrange
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
 
         // Act
         await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
@@ -164,12 +159,11 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleHintIsAboveTheTabs()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
+        var role = Graph.SetRole("kitchen", allow: 
         [
             new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] },
             new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }
-        ];
+        ]);
 
         // Act
         var component = RenderEditor(role);
@@ -183,7 +177,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenARuleIsAdded_ThenItHasNoActionAndTheRoleIsInvalidUntilOneIsChecked()
     {
         // Arrange
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
         var validity = new List<bool>();
         component.Instance.IsValidChanged += validity.Add;
 
@@ -209,8 +203,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenTheOnlyActionOfARuleIsUnchecked_ThenTheRoleIsInvalid()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -225,12 +218,11 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenARuleIsRemoved_ThenItsCardIsGoneAndTheOthersKeepTheirRules()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
+        var role = Graph.SetRole("kitchen", allow: 
         [
             new PermissionRule { Paths = ["/First"], Actions = [PermissionAction.Read] },
             new PermissionRule { Paths = ["/Second"], Actions = [PermissionAction.Read] }
-        ];
+        ]);
         var component = RenderEditor(role);
 
         // Act
@@ -243,38 +235,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public async Task WhenSaved_ThenTheRoleGetsNewListsWithTheEditedRules()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
-        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }];
-        var oldIncludes = role.Includes;
-        var oldAllow = role.Allow;
-        var oldDeny = role.Deny;
-        var component = RenderEditor(role);
-        await component.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(component, 1, "write", true);
-        await EnterTextAsync(component, "role-edit-deny-rule-0", "rule-members", "Secret*");
-
-        // Act
-        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
-
-        // Assert
-        Assert.NotSame(oldIncludes, role.Includes);
-        Assert.NotSame(oldAllow, role.Allow);
-        Assert.NotSame(oldDeny, role.Deny);
-        Assert.Equal([BuiltInRoles.ReaderName], role.Includes);
-        Assert.Equal([new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }], role.Allow);
-        Assert.Equal([new PermissionRule { Members = ["Secret*"], Actions = [PermissionAction.Write] }], role.Deny);
-        Assert.False(component.Instance.IsDirty);
-    }
-
-    [Fact]
     public async Task WhenTheRoleIsInvalid_ThenSavingThrowsAndChangesNothing()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
+        var role = Graph.GetRole("kitchen");
         var oldAllow = role.Allow;
         var component = RenderEditor(role);
         await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
@@ -289,12 +253,11 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleAndTheRuleSayTheMethodsCannotBeUsed()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
+        var role = Graph.SetRole("kitchen", allow: 
         [
             new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] },
             new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }
-        ];
+        ]);
 
         // Act
         var component = RenderEditor(role);
@@ -314,10 +277,8 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenAnIncludedRoleAllowsExecuteWithoutRead_ThenOnlyTheRoleSaysTheMethodsCannotBeUsed()
     {
         // Arrange
-        Graph.GetRole("Garden").Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }];
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["Garden"];
-        role.Allow = [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }];
+        Graph.SetRole("garden", allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }]);
+        var role = Graph.SetRole("kitchen", includes: ["garden"], allow: [new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -332,9 +293,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenTheRoleDeniesReadOnAMethodAnIncludedBuiltInRoleAllowsToExecute_ThenTheRoleSaysItCannotBeUsed()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.OperatorName];
-        role.Deny = [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", includes: [BuiltInRoles.OperatorName], deny: [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -348,9 +307,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenAnotherRoleAllowsReadingTheMethods_ThenExecuteWithoutReadIsNoHint()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = [BuiltInRoles.ReaderName];
-        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }];
+        var role = Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName], allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -364,9 +321,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenADenyTakesReadAwayFromAnExecutableMethod_ThenOnlyTheRoleSaysItCannotBeUsed()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read, AuthorizationActions.Execute] }];
-        role.Deny = [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read, AuthorizationActions.Execute] }], deny: [new PermissionRule { Paths = ["/Devices/Child/**"], Actions = [PermissionAction.Read] }]);
 
         // Act
         var component = RenderEditor(role);
@@ -382,15 +337,12 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenAnIncludedRoleStopsAllowingRead_ThenTheExecuteWithoutReadHintAppears()
     {
         // Arrange
-        var garden = Graph.GetRole("Garden");
-        garden.Allow = [new PermissionRule { Members = ["Start"], Actions = [PermissionAction.Read] }];
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["Garden"];
-        role.Allow = [new PermissionRule { Members = ["Start"], Actions = [AuthorizationActions.Execute] }];
+        Graph.SetRole("garden", allow: [new PermissionRule { Members = ["Start"], Actions = [PermissionAction.Read] }]);
+        var role = Graph.SetRole("kitchen", includes: ["garden"], allow: [new PermissionRule { Members = ["Start"], Actions = [AuthorizationActions.Execute] }]);
         var component = RenderEditor(role);
 
         // Act
-        garden.Allow = [];
+        Graph.SetRole("garden", allow: []);
 
         // Assert
         await component.WaitForAssertionAsync(
@@ -402,8 +354,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenReadIsAddedToTheRule_ThenTheExecuteWithoutReadHintsGo()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] }]);
         var component = RenderEditor(role);
         Assert.NotEmpty(component.FindAll("[data-testid='role-edit-execute-without-read']"));
 
@@ -419,7 +370,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenIncludesAreOffered_ThenTheRoleItselfIsNot()
     {
         // Arrange
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
         var select = component.FindComponent<RoleSelector>().FindComponent<MudSelect<string>>();
 
         // Act
@@ -427,21 +378,21 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         var options = PopoverProvider.FindComponents<MudSelectItem<string>>().Select(item => item.Instance.Value).ToList();
-        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "Garden"], options);
+        Assert.Equal([BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "garden"], options);
     }
 
     [Fact]
     public async Task WhenAnIncludeIsSelected_ThenTheEditedRoleHasItAndIsDirty()
     {
         // Arrange
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
         var select = component.FindComponent<RoleSelector>().FindComponent<MudSelect<string>>();
 
         // Act
-        await component.InvokeAsync(() => select.Instance.SelectedValuesChanged.InvokeAsync(["Garden"]));
+        await component.InvokeAsync(() => select.Instance.SelectedValuesChanged.InvokeAsync(["garden"]));
 
         // Assert
-        Assert.Equal(["Garden"], component.Instance.GetEditedRole().Includes.ToArray());
+        Assert.Equal(["garden"], component.Instance.GetEditedRole().Includes.ToArray());
         Assert.True(component.Instance.IsDirty);
     }
 
@@ -449,8 +400,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenTheRoleHasAStatus_ThenItIsShownAsAnError()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["Ghost"];
+        var role = Graph.SetRole("kitchen", includes: ["ghost"]);
         await StatusAssert.NotNullAsync(() => role.Status);
 
         // Act
@@ -458,7 +408,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         var alert = component.Find("[data-testid='role-edit-status']");
-        Assert.Contains("Ghost", alert.TextContent);
+        Assert.Contains("ghost", alert.TextContent);
         Assert.Contains("mud-alert-text-error", alert.ClassName);
     }
 
@@ -466,8 +416,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenAnEditRemovesTheCauseOfTheStatus_ThenTheErrorIsGoneBeforeSaving()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["Ghost"];
+        var role = Graph.SetRole("kitchen", includes: ["ghost"]);
         await StatusAssert.NotNullAsync(() => role.Status);
         var component = RenderEditor(role);
         var select = component.FindComponent<RoleSelector>().FindComponent<MudSelect<string>>();
@@ -484,16 +433,15 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenAnIncludedRoleStopsCompilingWhileTheDialogIsOpen_ThenTheErrorIsShown()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Includes = ["Garden"];
+        var role = Graph.SetRole("kitchen", includes: ["garden"]);
         var component = RenderEditor(role);
 
         // Act
-        Graph.GetRole("Garden").Includes = ["Ghost"];
+        Graph.SetRole("garden", includes: ["ghost"]);
 
         // Assert
         await component.WaitForAssertionAsync(
-            () => Assert.Contains("Ghost", component.Find("[data-testid='role-edit-status']").TextContent),
+            () => Assert.Contains("ghost", component.Find("[data-testid='role-edit-status']").TextContent),
             TimeSpan.FromSeconds(10));
     }
 
@@ -501,7 +449,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public void WhenTheRoleHasNoStatus_ThenNoAlertIsShown()
     {
         // Act
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
 
         // Assert
         Assert.Empty(component.FindAll("[data-testid='role-edit-status']"));
@@ -511,8 +459,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenTheRoleHasAWarning_ThenItIsShownAsAWarning()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Deny = [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", deny: [new PermissionRule { Paths = ["/Devices"], Actions = [PermissionAction.Read] }]);
         await StatusAssert.NotNullAsync(() => role.Warning);
 
         // Act
@@ -529,8 +476,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenAPathNamingAnEntryIsAdded_ThenTheWarningIsShownBeforeSaving()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Deny = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", deny: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -547,10 +493,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     {
         // Arrange
         Graph.Service.SetPrincipalRoles(new object(), ["kitchen"]);
-        Graph.Service.SetPrincipalRoles(new object(), ["Kitchen", BuiltInRoles.ReaderName]);
+        Graph.Service.SetPrincipalRoles(new object(), ["kitchen", BuiltInRoles.ReaderName]);
 
         // Act
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
 
         // Assert
         Assert.Equal("Used by 2 agents", component.Find("[data-testid='role-edit-used-by']").TextContent.Trim());
@@ -561,10 +507,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenAnAgentStartsUsingTheRoleWhileTheDialogIsOpen_ThenTheCountFollows()
     {
         // Arrange
-        var component = RenderEditor(Graph.GetRole("Kitchen"));
+        var component = RenderEditor(Graph.GetRole("kitchen"));
 
         // Act
-        Graph.Service.SetPrincipalRoles(new object(), ["Kitchen"]);
+        Graph.Service.SetPrincipalRoles(new object(), ["kitchen"]);
 
         // Assert
         await component.WaitForAssertionAsync(
@@ -576,8 +522,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     public async Task WhenTheRoleIsEdited_ThenTheEditedRoleHasTheUnsavedState()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow = [new PermissionRule { Actions = [PermissionAction.Read] }];
+        var role = Graph.SetRole("kitchen", allow: [new PermissionRule { Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
 
         // Act
@@ -585,117 +530,126 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
 
         // Assert
         var editedRole = component.Instance.GetEditedRole();
-        Assert.Equal("Kitchen", editedRole.Name);
+        Assert.Equal("kitchen", editedRole.Name);
         Assert.Equal([PermissionAction.Read, AuthorizationActions.History], editedRole.Allow[0].Actions.ToArray());
         Assert.Equal([PermissionAction.Read], role.Allow[0].Actions.ToArray());
     }
 
     [Fact]
-    public async Task WhenTheRolesAreReloadedWhileTheDialogIsOpen_ThenSavingThrowsAndChangesNothing()
+    public async Task WhenSaved_ThenTheStoreReceivesTheEditedRules()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
+        var role = Graph.SetRole("kitchen", includes: [BuiltInRoles.ReaderName], allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }]);
         var component = RenderEditor(role);
+        await component.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
+        await SetActionAsync(component, 1, "write", true);
+        await EnterTextAsync(component, "role-edit-deny-rule-0", "rule-members", "Secret*");
+
+        // Act
+        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.True(saved);
+        var savedRole = Assert.Single(Graph.RoleStore.Saves).Role;
+        Assert.Equal([BuiltInRoles.ReaderName], savedRole.Includes.ToArray());
+        Assert.Equal([new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }], savedRole.Allow.ToArray());
+        Assert.Equal([new PermissionRule { Members = ["Secret*"], Actions = [PermissionAction.Write] }], savedRole.Deny.ToArray());
+        Assert.False(component.Instance.IsDirty);
+    }
+
+    [Fact]
+    public async Task WhenTheRoleIsSaved_ThenTheStoreReceivesItWithTheLoadedStamp()
+    {
+        // Arrange
+        Graph.RoleStore.Stamp = "stamp-1";
+        var component = RenderEditor(Graph.GetRole("kitchen"));
+
+        // Act
+        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        var call = Assert.Single(Graph.RoleStore.Saves);
+        Assert.Equal("kitchen", call.OriginalName);
+        Assert.Equal("kitchen", call.Role.Name);
+        Assert.Equal("stamp-1", call.Stamp);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreRefusesTheSave_ThenTheErrorIsShownAndSaveReturnsFalse()
+    {
+        // Arrange
+        Graph.RoleStore.Result = new RoleChangeResult(false, "changed since you opened it");
+        var component = RenderEditor(Graph.GetRole("kitchen"));
         await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
         await SetActionAsync(component, 0, "read", true);
-        var reloadedRole = new Role();
-        Graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Kitchen"] = reloadedRole,
-            ["Garden"] = new Role()
-        };
+
+        // Act
+        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.False(saved);
+        Assert.Contains("changed since you opened it", component.Find("[data-testid='role-edit-save-error']").TextContent);
+        Assert.True(component.Instance.IsDirty);
+        Assert.Empty(Graph.GetRole("kitchen").Allow);
+    }
+
+    [Fact]
+    public async Task WhenTheHostSavesAndTheStoreRefuses_ThenTheSaveFailsWithTheError()
+    {
+        // Arrange
+        Graph.RoleStore.Result = new RoleChangeResult(false, "changed since you opened it");
+        var component = RenderEditor(Graph.GetRole("kitchen"));
+        ISubjectEditComponent editComponent = component.Instance;
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
-        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
-        Assert.Empty(role.Allow);
-        Assert.Empty(reloadedRole.Allow);
+            () => component.InvokeAsync(() => editComponent.SaveAsync(CancellationToken.None)));
+        Assert.Equal("changed since you opened it", exception.Message);
     }
 
     [Fact]
-    public async Task WhenAnotherDialogSavedTheRoleWhileThisOneWasOpen_ThenSavingThrowsAndKeepsTheOtherSave()
+    public void WhenTheUserMayNotAdministerTheRolesOfTheAuthorization_ThenTheEditorIsReadOnly()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        var first = RenderEditor(role);
-        var second = RenderEditor(role);
-        await first.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(first, 0, "read", true);
-        await first.InvokeAsync(() => first.Instance.SaveAsync(CancellationToken.None));
-        await second.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(second, 0, "read", true);
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => second.InvokeAsync(() => second.Instance.SaveAsync(CancellationToken.None)));
-        Assert.Equal("The roles changed while this dialog was open. Close it and open it again.", exception.Message);
-        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], role.Deny);
-        Assert.Empty(role.Allow);
-    }
-
-    [Fact]
-    public async Task WhenAnotherSaveLandsRightAfterThisOne_ThenItIsNotTakenAsTheListsThisDialogLoaded()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        var otherDeny = new List<PermissionRule> { new() { Actions = [PermissionAction.Write] } };
-        var component = RenderEditor(role);
-        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(component, 0, "read", true);
-
-        // The other save is made as soon as this one assigned its deny rules, the last of its lists.
-        using var otherSave = ((IInterceptorSubject)role).Context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change =>
-            {
-                if (change.Property.Name == nameof(Role.Deny) && !ReferenceEquals(role.Deny, otherDeny))
-                {
-                    role.Deny = otherDeny;
-                }
-            });
-        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
-        otherSave.Dispose();
-
-        // Act & Assert
-        await SetActionAsync(component, 0, "write", true);
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
-        Assert.Same(otherDeny, role.Deny);
-    }
-
-    [Fact]
-    public async Task WhenTheRoleIsSaved_ThenItsListsAreAssignedUnderTheEditLock()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        var component = RenderEditor(role);
-        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(component, 0, "read", true);
-        var isLockHeldPerAssignment = new List<bool>();
-        using var subscription = ((IInterceptorSubject)role).Context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change =>
-            {
-                if (change.Property.Name is nameof(Role.Includes) or nameof(Role.Allow) or nameof(Role.Deny))
-                {
-                    isLockHeldPerAssignment.Add(AuthorizationEditLock.Instance.IsHeldByCurrentThread);
-                }
-            });
+        var role = Graph.SetRole(
+            "kitchen",
+            includes: [BuiltInRoles.ReaderName],
+            allow: [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Read] }],
+            deny: [new PermissionRule { Members = ["Secret*"], Actions = [PermissionAction.Write] }]);
+        Permissions.CannotAdminister.Add(Graph.Authorization.TryGetRegisteredSubject()!.TryGetProperty(nameof(Authorization.Roles))!);
 
         // Act
-        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+        var component = RenderEditor(role);
 
         // Assert
-        Assert.Equal([true, true, true], isLockHeldPerAssignment);
+        Assert.NotEmpty(component.FindAll("input"));
+        Assert.All(component.FindAll("input"), input => Assert.True(input.HasAttribute("disabled") || input.HasAttribute("readonly")));
+        Assert.All(component.FindAll("[data-testid='role-edit-tabs'] button[data-testid]"), button => Assert.True(button.HasAttribute("disabled")));
     }
 
     [Fact]
-    public async Task WhenTheDialogSavesTwice_ThenTheSecondSaveIsNoConcurrentChange()
+    public async Task WhenTheUserMayNotAdministerTheRolesOfTheAuthorization_ThenSavingIsRefusedWithoutTheStore()
     {
         // Arrange
-        var role = Graph.GetRole("Kitchen");
-        var component = RenderEditor(role);
+        Permissions.CannotAdminister.Add(Graph.Authorization.TryGetRegisteredSubject()!.TryGetProperty(nameof(Authorization.Roles))!);
+        var component = RenderEditor(Graph.GetRole("kitchen"));
+
+        // Act
+        var saved = await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
+
+        // Assert
+        Assert.False(saved);
+        Assert.Empty(Graph.RoleStore.Saves);
+        Assert.Contains("full administrator", component.Find("[data-testid='role-edit-save-error']").TextContent);
+    }
+
+    [Fact]
+    public async Task WhenTheDialogSavesTwice_ThenTheSecondSaveUsesTheStampOfTheFirst()
+    {
+        // Arrange
+        Graph.RoleStore.Stamp = "stamp-1";
+        Graph.RoleStore.StampAfterChange = "stamp-2";
+        var component = RenderEditor(Graph.GetRole("kitchen"));
         await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
         await SetActionAsync(component, 0, "read", true);
         await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
@@ -705,54 +659,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
 
         // Assert
-        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }], role.Allow);
-    }
-
-    [Fact]
-    public async Task WhenTheRoleMovesToAnotherAuthorizationWhileTheDialogIsOpen_ThenSavingThrows()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        var component = RenderEditor(role);
-        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(component, 0, "read", true);
-        Graph.Root.Children = new Dictionary<string, IInterceptorSubject>(Graph.Root.Children)
-        {
-            ["Authorization"] = new Authorization
-            {
-                Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Kitchen"] = role }
-            }
-        };
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None)));
-        Assert.Empty(role.Allow);
-    }
-
-    [Fact]
-    public async Task WhenTheRoleIsRenamedWhileTheDialogIsOpen_ThenTheDialogUsesTheNewName()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        var garden = Graph.GetRole("Garden");
-        var component = RenderEditor(role);
-
-        // Act: renamed as the Rename operation does, left out once so that it is attached again under its new key.
-        Graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Garden"] = garden };
-        Graph.Authorization.Roles = new Dictionary<string, Role>(StringComparer.OrdinalIgnoreCase) { ["Pantry"] = role, ["Garden"] = garden };
-        component.Render();
-
-        // Assert
-        Assert.Equal("Pantry", component.Instance.GetEditedRole().Name);
-        Assert.Equal(["Pantry"], component.FindComponent<RoleSelector>().Instance.Excluded!);
-
-        // Act
-        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
-        await SetActionAsync(component, 0, "read", true);
-        await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
-
-        // Assert
-        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read] }], role.Allow);
+        Assert.Equal(["stamp-1", "stamp-2"], Graph.RoleStore.Saves.Select(call => call.Stamp));
+        Assert.Equal([new PermissionRule { Actions = [PermissionAction.Read, PermissionAction.Write] }], Graph.GetRole("kitchen").Allow);
     }
 }

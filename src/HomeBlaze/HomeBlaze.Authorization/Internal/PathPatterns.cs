@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -26,6 +27,12 @@ internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandle
 
     // Each warning with the graph version it was computed at, served only while that version is current; cleared when full.
     private readonly ConcurrentDictionary<string, (long GraphVersion, string? Warning)> _warnings = new(StringComparer.Ordinal);
+
+    // As _warnings, for the warnings of deny patterns.
+    private readonly ConcurrentDictionary<string, (long GraphVersion, string? Warning)> _denyWarnings = new(StringComparer.Ordinal);
+
+    // As _warnings, for whether a deny rule, compared by value, matches a member; null when it does not compile.
+    private readonly ConcurrentDictionary<PermissionRule, (long GraphVersion, bool? Matches)> _denyRuleMatches = new();
 
     // Incremented on every change that can change what a path resolves to.
     private long _graphVersion;
@@ -58,22 +65,52 @@ internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandle
     /// <summary>
     /// Gets the warning of a valid path pattern, see <see cref="PathPatternChecks.GetWarning(string, List{RegisteredSubject}, PathProviderBase)"/>.
     /// </summary>
-    public string? GetWarning(string pattern)
+    public string? GetWarning(string pattern) => GetCachedWarning(_warnings, pattern, PathPatternChecks.GetWarning);
+
+    /// <summary>
+    /// Gets the warning of a valid deny path pattern, see <see cref="PathPatternChecks.GetDenyWarning"/>.
+    /// </summary>
+    public string? GetDenyWarning(string pattern) => GetCachedWarning(_denyWarnings, pattern, PathPatternChecks.GetDenyWarning);
+
+    /// <summary>
+    /// Gets whether a deny rule matches a member of a known subject, see <see cref="DenyRuleMatcher.Matches"/>, or null
+    /// when it does not compile. Computed again only once the graph changed.
+    /// </summary>
+    public bool? DenyRuleMatchesAnyMember(PermissionRule rule)
     {
         var graphVersion = Volatile.Read(ref _graphVersion);
-        if (_warnings.TryGetValue(pattern, out var cached) && cached.GraphVersion == graphVersion)
+        if (_denyRuleMatches.TryGetValue(rule, out var cached) && cached.GraphVersion == graphVersion)
         {
-            return cached.Warning;
+            return cached.Matches;
         }
 
-        var warning = PathPatternChecks.GetWarning(pattern, GetRoots(graphVersion), _pathProvider);
-        if (_warnings.Count >= MaxCachedPathPatterns)
+        var matches = ScanForMatch(rule);
+        if (_denyRuleMatches.Count >= MaxCachedPathPatterns)
         {
-            _warnings.Clear();
+            _denyRuleMatches.Clear();
         }
 
-        _warnings[pattern] = (graphVersion, warning);
-        return warning;
+        _denyRuleMatches[rule] = (graphVersion, matches);
+        return matches;
+    }
+
+    // The graph can change while it is read and the getters on the paths of the rule can throw; the answer is advisory,
+    // so it is then taken as a match, which warns of nothing.
+    private bool? ScanForMatch(PermissionRule rule)
+    {
+        if (DenyRuleMatcher.Create(rule, _pathProvider) is not { } matcher)
+        {
+            return null;
+        }
+
+        try
+        {
+            return matcher.MatchesAny(_registry.KnownSubjects.Values);
+        }
+        catch (Exception)
+        {
+            return true;
+        }
     }
 
     public void HandleLifecycleChange(SubjectLifecycleChange change) => Interlocked.Increment(ref _graphVersion);
@@ -95,6 +132,27 @@ internal sealed class PathPatterns : ILifecycleHandler, IPropertyLifecycleHandle
     // A move to another key or position attaches and detaches nothing, but changes the paths of the moved entries.
     public void HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
         => Interlocked.Increment(ref _graphVersion);
+
+    private string? GetCachedWarning(
+        ConcurrentDictionary<string, (long GraphVersion, string? Warning)> warnings,
+        string pattern,
+        Func<string, List<RegisteredSubject>, PathProviderBase, string?> getWarning)
+    {
+        var graphVersion = Volatile.Read(ref _graphVersion);
+        if (warnings.TryGetValue(pattern, out var cached) && cached.GraphVersion == graphVersion)
+        {
+            return cached.Warning;
+        }
+
+        var warning = getWarning(pattern, GetRoots(graphVersion), _pathProvider);
+        if (warnings.Count >= MaxCachedPathPatterns)
+        {
+            warnings.Clear();
+        }
+
+        warnings[pattern] = (graphVersion, warning);
+        return warning;
+    }
 
     private List<RegisteredSubject> GetRoots(long graphVersion)
     {
