@@ -24,8 +24,6 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsBefore(typeof(PropertyChangeInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
-    private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
-
     // Safety limit for stabilization loops. Prevents infinite loops from getters
     // with side effects that mutate the tracked state (a user error but shouldn't hang).
     // In correct code, the loop runs 1-2 iterations max.
@@ -425,7 +423,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // newValue is the value the stabilization loop settled on and the value paired with
         // oldValue by the guards above, so finalValueIsNewValue publishes it rather than
         // re-invoking the getter (see PropertyWriteContext.FinalValueIsNewValue).
-        derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp, finalValueIsNewValue: true);
+        derivedProperty.PublishDerivedPropertyValue(newValue, oldValue, rawTimestamp, finalValueIsNewValue: true);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {

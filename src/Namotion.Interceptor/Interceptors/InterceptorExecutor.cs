@@ -80,7 +80,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Publishes a derived property's calculated value through the write chain, with
+    /// Publishes a derived property's calculated value through the write chain without storing anything, with
     /// <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set. A nonzero
     /// <paramref name="rawTimestamp"/> pre-populates the new write context's timestamp cache, which lets a
     /// recalculation cascade share the trigger's captured time without pushing a
@@ -89,7 +89,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// getter again (see <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp, bool finalValueIsNewValue)
+    internal void PublishDerivedPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var context = new PropertyWriteContext<TProperty>(
             this,
@@ -99,8 +99,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             rawTimestamp,
             finalValueIsNewValue);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
-        return context.IsWritten;
+        ExecuteInterceptedWrite(ref context, static (_, _) => { });
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

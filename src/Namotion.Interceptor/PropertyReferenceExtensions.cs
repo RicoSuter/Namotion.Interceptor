@@ -17,7 +17,7 @@ public static class PropertyReferenceExtensions
     }
 
     /// <summary>
-    /// Publishes a derived property's calculated value through the write chain, with
+    /// Publishes a derived property's calculated value through the write chain without storing anything, with
     /// <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set. A nonzero
     /// <paramref name="rawTimestamp"/> seeds the new <see cref="PropertyWriteContext{TProperty}"/>'s timestamp
     /// cache directly, which spares a recalculation cascade the
@@ -26,11 +26,11 @@ public static class PropertyReferenceExtensions
     /// <paramref name="finalValueIsNewValue"/> set, publishing reuses <paramref name="newValue"/> instead of invoking
     /// the getter again (see <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
-    internal static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
-        object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp, bool finalValueIsNewValue)
+    internal static void PublishDerivedPropertyValue(this PropertyReference property, object? newValue,
+        object? currentValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var executor = property.Subject.Context as InterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp, finalValueIsNewValue);
+        executor?.PublishDerivedPropertyValue(property.Name, newValue, currentValue, rawTimestamp, finalValueIsNewValue);
     }
 
     /// <summary>
@@ -52,6 +52,6 @@ public static class PropertyReferenceExtensions
         }
 
         var value = metadata.GetValue?.Invoke(property.Subject);
-        property.SetPropertyValueWithInterception(value, null, static (_, _) => { }, rawTimestamp: 0, finalValueIsNewValue: false);
+        property.PublishDerivedPropertyValue(value, null, rawTimestamp: 0, finalValueIsNewValue: false);
     }
 }
