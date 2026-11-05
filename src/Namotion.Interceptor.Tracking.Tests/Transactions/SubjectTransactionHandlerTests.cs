@@ -314,6 +314,70 @@ public class SubjectTransactionHandlerTests
     }
 
     [Fact]
+    public async Task WhenHandlerRecalculatesChangedDerivedPropertyDuringOnCommitting_ThenRecalculationIsPublished()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var sensor = new ExternalSensor(context);
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+        Exception? recalculationError = null;
+        handler.OnCommittingAction = (_, _) => recalculationError = Record.Exception(() =>
+        {
+            // The getter reads a value the interceptors do not track, so only the recalculation publishes it.
+            sensor.ExternalValueProvider = () => 5.0;
+            new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature)).RecalculateDerivedProperty();
+        });
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        sensor.Label = "outdoor";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(recalculationError);
+        Assert.Equal(5.0, sensor.CalibratedTemperature);
+        var change = Assert.Single(notifications, change => change.Property.Name == nameof(ExternalSensor.CalibratedTemperature));
+        Assert.Equal(0.0, change.GetOldValue<double>());
+        Assert.Equal(5.0, change.GetNewValue<double>());
+    }
+
+    [Fact]
+    public async Task WhenHandlerWritesOtherContextDependencyDuringOnCommitting_ThenDerivedRecalculationIsPublished()
+    {
+        // Arrange
+        var context = CreateContext(out var handler);
+        var other = new TransactionCascadeSubject(InterceptorSubjectContext.Create().WithFullPropertyTracking())
+        {
+            Plain = "before"
+        };
+        var subject = new TransactionCascadeSubject(context)
+        {
+            ProbeEvaluator = _ => other.Plain
+        };
+
+        // Recalculates the derived property with the evaluator, so it depends on the other subject.
+        subject.Plain = "initial";
+        var notifications = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(notifications.Add);
+
+        // The other subject's context does not route through the transaction interceptor, so the write lands.
+        handler.OnCommittingAction = (_, _) => other.Plain = "during";
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.SideEffect = "committed";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("committed", subject.SideEffect);
+        Assert.Equal("during", subject.Probe);
+        var probeChange = Assert.Single(notifications, change => change.Property.Name == nameof(TransactionCascadeSubject.Probe));
+        Assert.Equal("before", probeChange.GetOldValue<string>());
+        Assert.Equal("during", probeChange.GetNewValue<string>());
+    }
+
+    [Fact]
     public async Task WhenHandlerWriteOutsideTheTransactionRecalculatesDerivedPropertyAndCommitIsRejected_ThenOnlyLandedValuesArePublished()
     {
         // Arrange
