@@ -82,7 +82,9 @@ The policy enumerates every path of a member's subject, at most 64, and an allow
 - the subject has parents but no chain to a root;
 - the subject or one on a chain is no longer attached because it is being detached or was detached;
 - more than 64 paths exist; or
-- the parents are too densely connected for the search budget.
+- the parents are too densely connected for the search budget of 64 parent links per allowed path.
+
+A path deny that fails closed this way still needs its other selectors to match, so giving it one, such as a type or a tag, keeps it from denying members it was not written for.
 
 A root is a subject without parents that the registry still counts as attached (`RegisteredSubject.IsAttached`); the paths of its members have one segment. The registry clears that flag on a subject before it removes the subject's last parent, which it does only when the subject detaches, and a detach takes the subjects below the detached one with it. A subject being detached, a subject below it, and a detached subject whose member a caller still holds are therefore never taken for a root: a question asked during or after the detach sees such a subject either on its old path or with paths that cannot be listed, and a path deny applies either way.
 
