@@ -623,7 +623,10 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         await first.Find("[data-testid='role-edit-add-deny']").ClickAsync(new MouseEventArgs());
         await SetActionAsync(first, 0, "read", true);
         await first.InvokeAsync(() => first.Instance.SaveAsync(CancellationToken.None));
-        await second.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+
+        // The save makes the second dialog render again from a background thread, so the button is found and clicked
+        // in one dispatch that no render can come between.
+        await second.InvokeAsync(() => second.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs()));
         await SetActionAsync(second, 0, "read", true);
 
         // Act & Assert
@@ -747,8 +750,8 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         Assert.Equal("Pantry", component.Instance.GetEditedRole().Name);
         Assert.Equal(["Pantry"], component.FindComponent<RoleSelector>().Instance.Excluded!);
 
-        // Act
-        await component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs());
+        // Act: the renames make the dialog render again from a background thread, see the test of another dialog's save.
+        await component.InvokeAsync(() => component.Find("[data-testid='role-edit-add-allow']").ClickAsync(new MouseEventArgs()));
         await SetActionAsync(component, 0, "read", true);
         await component.InvokeAsync(() => component.Instance.SaveAsync(CancellationToken.None));
 
