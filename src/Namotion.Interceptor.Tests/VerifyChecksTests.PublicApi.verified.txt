@@ -143,6 +143,7 @@ namespace Namotion.Interceptor
     public static class PropertyReferenceExtensions
     {
         public static Namotion.Interceptor.PropertyReference GetPropertyReference(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
+        public static void PublishInitialDerivedPropertyValue(this Namotion.Interceptor.PropertyReference property) { }
         public static void SetPropertyValueWithInterception(this Namotion.Interceptor.PropertyReference property, object? newValue, object? currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?> writeValue) { }
     }
     public readonly struct SubjectChangeContext
@@ -222,6 +223,7 @@ namespace Namotion.Interceptor.Interceptors
     public struct PropertyWriteContext<TProperty>
     {
         public TProperty CurrentValue { get; }
+        public bool IsDerivedRecalculation { get; }
         public bool IsWritten { get; set; }
         public TProperty NewValue { get; set; }
         public Namotion.Interceptor.ChangeOrigin Origin { get; }

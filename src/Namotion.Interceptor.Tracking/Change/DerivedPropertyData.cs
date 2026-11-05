@@ -38,7 +38,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Reentrancy guard for RecalculateDerivedProperty.
     /// Prevents infinite recursion when a derived-with-setter property's
-    /// SetPropertyValueWithInterception re-enters WriteProperty.
+    /// PublishDerivedPropertyValue re-enters WriteProperty.
     /// Only read/written inside lock(this), so no volatile needed.
     /// </summary>
     internal bool IsRecalculating;

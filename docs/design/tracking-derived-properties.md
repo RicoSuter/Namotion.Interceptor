@@ -332,7 +332,7 @@ NotifyDerivedPropertyChanged(derivedProperty, data, sequence, newValue, oldValue
   if sequence != Volatile.Read(data.RecalculationSequence) → return  // superseded
   if !ReferenceEquals(newValue, Volatile.Read(data.LastKnownValue)) → return  // overwritten
   // Recalculation writes publish with a Local origin by default (no scope needed).
-  SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate)
+  PublishDerivedPropertyValue(newValue, oldValue)
   RaisePropertyChanged("FullName")               // INotifyPropertyChanged integration
 ```
 
@@ -348,10 +348,10 @@ Phase 3 checks the flag before committing. If set, the stale result is discarded
 The generation check inside `EvaluateAndStabilize` avoids re-evaluation when dependencies change but no concurrent write occurred. The stabilization loop only runs when a concurrent write is actually detected.
 
 Key details of the change notification:
-- **Notifications outside lock but inside `IsRecalculating`**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` and `RaisePropertyChanged` without holding `lock(data)` (preventing deadlock with `lock(_attachedSubjects)`), but while `IsRecalculating` is still true. This serializes notification delivery with recalculation, so no concurrent recalculation (and thus no competing notification) can start during delivery. Two additional guards provide defense-in-depth: a `RecalculationSequence` check and a `ReferenceEquals` check on `LastKnownValue`. See the "Deadlock prevention" section for details.
+- **Notifications outside lock but inside `IsRecalculating`**: `NotifyDerivedPropertyChanged` fires `PublishDerivedPropertyValue` and `RaisePropertyChanged` without holding `lock(data)` (preventing deadlock with `lock(_attachedSubjects)`), but while `IsRecalculating` is still true. This serializes notification delivery with recalculation, so no concurrent recalculation (and thus no competing notification) can start during delivery. Two additional guards provide defense-in-depth: a `RecalculationSequence` check and a `ReferenceEquals` check on `LastKnownValue`. See the "Deadlock prevention" section for details.
 - **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation, ensuring consistent timestamps within a mutation context. This also holds under an explicit-null scope (`WithChangedTimestamp(null)`): storage remains the never-written sentinel, but trigger and cascade dependents share a single captured publishing time so change events stay consistent.
 - **Local origin by default**: Origin is stamped per write and nothing inherits it, so the recalculation notification publishes with a `Local` origin without any scope. The local model computed the value and no source confirmed it, so the change flows to bound sources like any local write.
-- **`NoOpWriteDelegate`**: Since derived properties have no backing field, the write delegate is a no-op (`static (_, _) => { }`). The call to `SetPropertyValueWithInterception` exists solely to fire the change notification through the interceptor chain (observable, queue, etc.) with the correct old and new values.
+- **No-op write**: Since derived properties have no backing field, the internal `PublishDerivedPropertyValue` passes a no-op write delegate. It stores nothing but runs the rest of the interceptor chain with the correct old and new values and `IsDerivedRecalculation` set: the change notification (observable, queue, etc.), the lifecycle reconciliation of subject values and the recalculation of dependents.
 - **`IRaisePropertyChanged`**: If the subject implements `IRaisePropertyChanged`, `RaisePropertyChanged` is called to support standard `INotifyPropertyChanged` data binding.
 
 ### 5. Detach (cleanup)
@@ -460,11 +460,11 @@ This is necessary because multiple derived properties on different threads may c
 
 ### Re-entrancy during derived-with-setter recalculation
 
-Derived properties with setters (added via `AddDerivedProperty<T>(name, getValue, setValue)`) create a re-entrancy path: `RecalculateDerivedProperty` calls `NotifyDerivedPropertyChanged` → `SetPropertyValueWithInterception` (while `IsRecalculating` is still true), which re-enters `WriteProperty`, which calls `RecalculateDerivedProperty` again. The re-entrant call acquires `lock(data)`, sees `IsRecalculating = true`, sets `RecalculationNeeded = true`, and bails. The outer loop picks up the flag, re-evaluates (computing the same value), and the equality check interceptor suppresses the duplicate notification.
+Derived properties with setters (added via `AddDerivedProperty<T>(name, getValue, setValue)`) create a re-entrancy path: `RecalculateDerivedProperty` calls `NotifyDerivedPropertyChanged` → `PublishDerivedPropertyValue` (while `IsRecalculating` is still true), which re-enters `WriteProperty`, which calls `RecalculateDerivedProperty` again. The re-entrant call acquires `lock(data)`, sees `IsRecalculating = true`, sets `RecalculationNeeded = true`, and bails. The outer loop picks up the flag, re-evaluates (computing the same value), and the equality check interceptor suppresses the duplicate notification.
 
 ### Deadlock prevention: unlocked getter evaluation
 
-The following diagrams illustrate the ABBA deadlock that would occur if `RecalculateDerivedProperty` held `lock(data)` during getter evaluation, and how the actual design prevents it. Inversion 2 (notifications) follows the same pattern: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` which can acquire `lock(_attachedSubjects)` through the interceptor chain.
+The following diagrams illustrate the ABBA deadlock that would occur if `RecalculateDerivedProperty` held `lock(data)` during getter evaluation, and how the actual design prevents it. Inversion 2 (notifications) follows the same pattern: `NotifyDerivedPropertyChanged` fires `PublishDerivedPropertyValue` which can acquire `lock(_attachedSubjects)` through the interceptor chain.
 
 **Hypothetical deadlock** (if getter ran inside `lock(data)`):
 
@@ -507,7 +507,7 @@ sequenceDiagram
 
 **Inversion 1: Getter side effects**: A derived property getter may write to a subject-typed property as a side effect (e.g., lazy initialization, derived-with-setter patterns). This triggers `LifecycleInterceptor.WriteProperty` → `lock(_attachedSubjects)`. If the getter ran inside `lock(data)`, the ordering would be `lock(data)` → `lock(_attachedSubjects)`. Meanwhile, a concurrent `LifecycleInterceptor` operation holds `lock(_attachedSubjects)` → `AttachProperty`/`DetachProperty` → `lock(data)`. Deadlock.
 
-**Inversion 2: Notifications**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` which enters the interceptor chain, potentially acquiring `lock(_attachedSubjects)` via `LifecycleInterceptor.WriteProperty`. Same ordering inversion as above.
+**Inversion 2: Notifications**: `NotifyDerivedPropertyChanged` fires `PublishDerivedPropertyValue` which enters the interceptor chain, potentially acquiring `lock(_attachedSubjects)` via `LifecycleInterceptor.WriteProperty`. Same ordering inversion as above.
 
 Both are prevented because `lock(data)` is never held during getter evaluation or notification in `RecalculateDerivedProperty`. The `IsRecalculating` flag (set/cleared under brief `lock(data)` acquisitions) serializes concurrent recalculations and, crucially, notification delivery without holding the lock for the entire evaluation. The `RecalculationNeeded` flag catches state changes (writes, attach, detach) that arrive during the unlocked window.
 
@@ -701,7 +701,7 @@ In all cases for tracked properties, both dependencies and used-by properties ar
 
 When `PropertyValueEqualityCheckHandler` is registered (included in `WithFullPropertyTracking`), it compares old and new values before the write proceeds. If they are equal, the entire interceptor chain is skipped: no `WriteProperty` call and no dependent recalculation. This prevents redundant cascading recalculations when a source property is set to its current value.
 
-The equality check also applies to the `SetPropertyValueWithInterception` call during recalculation. If the derived property's new computed value equals the old value, the change notification is suppressed.
+The equality check also applies to the `PublishDerivedPropertyValue` call during recalculation. If the derived property's new computed value equals the old value, the change notification is suppressed.
 
 ### Transactions
 
