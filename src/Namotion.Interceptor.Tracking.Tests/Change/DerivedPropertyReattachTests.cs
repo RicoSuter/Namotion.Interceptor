@@ -396,6 +396,60 @@ public class DerivedPropertyReattachTests
         Assert.Empty(new PropertyReference(sharedTire, nameof(Tire.Pressure)).GetUsedByProperties().Items.ToArray());
     }
 
+    [Fact]
+    public void WhenSiblingSourceIsReattached_ThenOnlyADependentReachingItThroughTrackedPropertiesFollowsIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var root = new ReferenceRoot(context);
+        var source = new ReferenceSource();
+        root.Source = source;
+        var reader = new ReferenceReader(root, source);
+        root.Readers = [reader];
+        source.Value = 1;
+
+        // Act
+        root.Source = null;
+        root.Source = source;
+        source.Value = 2;
+
+        // Assert: detach dropped the field reader's dependency and nothing recalculated it since.
+        Assert.Equal(1, GetLastKnownValue(reader, nameof(ReferenceReader.ViaField)));
+        Assert.Equal(2, GetLastKnownValue(reader, nameof(ReferenceReader.ViaTrackedPath)));
+    }
+
+    [Fact]
+    public void WhenParentReachedThroughAFieldIsReattached_ThenTheDependentFollowsIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var root = new ReferenceRoot(context);
+        var source = new ReferenceSource();
+        root.Source = source;
+        var reader = new ReferenceReader(root, source);
+        source.Readers = [reader];
+        source.Value = 1;
+
+        // Act
+        root.Source = null;
+        root.Source = source;
+        source.Value = 2;
+
+        // Assert
+        Assert.Equal(2, GetLastKnownValue(reader, nameof(ReferenceReader.ViaField)));
+    }
+
+    private static object? GetLastKnownValue(IInterceptorSubject subject, string propertyName)
+    {
+        return new PropertyReference(subject, propertyName).TryGetDerivedPropertyData()?.LastKnownValue;
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference AddCarSharingATireAndRemoveIt(Garage garage, bool moveBeforeRemoval)
     {

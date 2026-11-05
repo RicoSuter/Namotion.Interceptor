@@ -644,7 +644,7 @@ Nested locks occur in `UpdateDependencies`: `lock(D_data)` (outer, from `Evaluat
 
 ### Value correctness: derived value always reflects current state
 
-After all concurrent writes complete and recalculations settle, every derived property's value matches what its getter would return if called with the current source values. This is guaranteed by four mechanisms working together:
+After all concurrent writes complete and recalculations settle, every derived property's value matches what its getter would return if called with the current source values. The one exception is a source the getter reaches through an untracked reference and that was detached and attached again, see [A source attached again behind an untracked reference](#a-source-attached-again-behind-an-untracked-reference). This is guaranteed by four mechanisms working together:
 
 1. **Used-by-driven recalculation**: Once a dependency's used-by properties include a derived property, any write to that dependency triggers `RecalculateDerivedProperty` via `WriteProperty`. The `IsRecalculating` flag serializes concurrent recalculations of the same derived property: each successful evaluation sees the most recent source values.
 
@@ -734,3 +734,11 @@ public string FullNameWithPrefix => $"Mr. {FullName}";
 When `FullNameWithPrefix` is evaluated, it calls `FullName`'s getter, which reads `FirstName` and `LastName` through the interceptor chain. The recorder captures `FirstName` and `LastName` as direct dependencies of `FullNameWithPrefix`. So when `FirstName` changes, both `FullName` and `FullNameWithPrefix` are recalculated (both appear in `FirstName.UsedByProperties`).
 
 `FullName` itself does not appear in `FullNameWithPrefix.RequiredProperties` or in `FullName.UsedByProperties`, because derived property getters are plain C# property accesses that don't go through the interceptor chain.
+
+### A source attached again behind an untracked reference
+
+Detach drops both directions of every dependency on the detached properties (Case 2 of `DetachProperty`), and attaching a source property does nothing (`AttachProperty` returns early for non-derived properties), so a dependent registers on a source again only when it is recalculated. A dependent that reaches the source through tracked properties is recalculated by the write that attaches the source again, because that write changes one of its dependencies. A dependent that reaches the source through a reference the lifecycle does not track (a field, a captured variable, a service) depends only on the source property itself, so nothing recalculates it: it keeps its last value until another dependency changes or `RecalculateDerivedProperty()` is called. While the source is detached, it has no context, so its writes are not intercepted and no dependent could follow them anyway.
+
+A reference to an ancestor is not affected in the usual case, because detaching the ancestor detaches the dependent's subject too, and attaching it again re-evaluates the dependent. `DerivedPropertyReattachTests` covers both cases.
+
+Restoring the dependency would need either keeping it across the detach, which keeps a detached subject reachable from every dependent that found it through a temporary lookup (the leak Case 2 exists to prevent), or remembering the dependents on the detached source and recalculating them on attach, which adds a lookup to every source property attach. Neither is done, because the case is rare and reaching the source through tracked properties avoids it; [Reaching Other Subjects](../tracking.md#reaching-other-subjects) documents it for users.
