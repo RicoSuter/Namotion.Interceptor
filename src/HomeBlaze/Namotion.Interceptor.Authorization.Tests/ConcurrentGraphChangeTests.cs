@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Authorization.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -183,24 +184,17 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
         using var start = new ManualResetEventSlim();
         using var mutatorDone = new ManualResetEventSlim();
         var readers = Enumerable.Range(0, StressReaderCount)
-            .Select(i => new StressReader(i % 2 == 0 ? denyPolicy : allowPolicy, member, start, mutatorDone))
+            .Select(i => new StressReader(i % 2 == 0 ? () => denyPolicy.CanRead(member) : () => allowPolicy.CanRead(member), start, mutatorDone))
             .ToArray();
         var denyReaders = readers.Where((_, i) => i % 2 == 0).ToArray();
         var allowReaders = readers.Where((_, i) => i % 2 != 0).ToArray();
 
         // Act
-        start.Set();
-        for (var cycle = 0; cycle < StressMutatorCycles; cycle++)
+        RunMutator(start, mutatorDone, readers, () =>
         {
             graph.Step1To3();
             graph.Step4To6();
-        }
-
-        mutatorDone.Set();
-        foreach (var reader in readers)
-        {
-            reader.Join();
-        }
+        });
 
         // Assert
         output.WriteLine($"evaluations={readers.Sum(r => r.Evaluations)} completedAllows={allowReaders.Sum(r => r.Allowed)} wrongAllows={denyReaders.Sum(r => r.Allowed)}");
@@ -208,6 +202,175 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
         Assert.All(readers, reader => Assert.True(reader.Evaluations > 0));
         Assert.Equal(0, denyReaders.Sum(reader => reader.Allowed));
         Assert.True(allowReaders.Sum(reader => reader.Allowed) > 0, "No evaluation of the allow policy completed while the parents moved.");
+    }
+
+    [Fact]
+    public void WhenASubjectMovesBetweenTwoUnreadableStatesDuringItsEvaluation_ThenItIsNotReadable()
+    {
+        // Arrange: the move to state A runs when the member Father of S is matched against S's paths, which were
+        // enumerated in state B, so the member checks see B (a readable member) and the walk sees A (a readable link).
+        var pathProvider = new HookPathProvider();
+        var policy = CompileVisibility(pathProvider);
+        var graph = VisibilityGraph.Create();
+        var subject = Registered(graph.S);
+        Assert.False(policy.CanRead(subject));
+        graph.ToA();
+        Assert.False(policy.CanRead(subject));
+        graph.ToB();
+        Assert.False(policy.CanRead(subject));
+        pathProvider.SetHook(Member(graph.S, nameof(Person.Father)), graph.ToA);
+
+        // Act
+        var readable = policy.CanRead(subject);
+
+        // Assert
+        Assert.False(readable);
+        Assert.False(policy.CanRead(subject));
+    }
+
+    [Fact]
+    public void WhenSingleParentsMoveOnTwoLevelsDuringTheWalk_ThenTheSubjectIsNotReadable()
+    {
+        // Arrange: without any path rule. Mother is unreadable. S moves from X.Father to X.Mother, then X from R.Mother
+        // to R.Father, so S is hidden in every state; the moves run while the walk checks the link X.Father, after it read
+        // S's parents and before it reads X's, so a walk that joins the two states finds R.Father.X.Father.
+        var tagProvider = new HookTagProvider();
+        var policy = CompileWithHiddenMembers(tagProvider, member => member.Name == nameof(Person.Mother));
+        var root = new Person(CreateContext());
+        var x = new Person();
+        var s = new Person();
+        root.Mother = x;
+        x.Father = s;
+        var subject = Registered(s);
+        var states = new List<bool> { policy.CanRead(subject) };
+        tagProvider.SetHook(Member(x, nameof(Person.Father)), () =>
+        {
+            x.Mother = s;
+            states.Add(policy.CanRead(subject));
+            x.Father = null;
+            states.Add(policy.CanRead(subject));
+            root.Father = x;
+            states.Add(policy.CanRead(subject));
+            root.Mother = null;
+            states.Add(policy.CanRead(subject));
+        });
+
+        // Act
+        var readable = policy.CanRead(subject);
+
+        // Assert
+        Assert.Equal([false, false, false, false, false], states);
+        Assert.False(readable);
+    }
+
+    [Fact]
+    public void WhenAParentMovesWhileItsLinkIsChecked_ThenTheSubjectIsNotReadable()
+    {
+        // Arrange: S is under P.Mother; P moves from R.Mother, which is denied, to R.Father, below which the link
+        // Father.Mother is denied, so S is hidden in every state. The members of S are not hidden, so their checks read
+        // no parents; the move runs after the link P.Mother was matched against P's paths in the first state and before
+        // the walk reads P's parents, so a link check that does not share the walk's reads joins the two states.
+        var pathProvider = new HookPathProvider();
+        var root = new Person(CreateContext());
+        var p = new Person();
+        var s = new Person();
+        root.Mother = p;
+        p.Mother = s;
+        var policy = CompileWithHiddenMembers(
+            new HookTagProvider(), member => member.Parent.Subject != s, pathProvider, denyPaths: ["Father.Mother", "Mother"]);
+        var subject = Registered(s);
+        var states = new List<bool> { policy.CanRead(subject) };
+        pathProvider.SetHook(Member(p, nameof(Person.Mother)), () =>
+        {
+            root.Father = p;
+            states.Add(policy.CanRead(subject));
+            root.Mother = null;
+            states.Add(policy.CanRead(subject));
+        });
+
+        // Act
+        var readable = policy.CanRead(subject);
+
+        // Assert
+        Assert.Equal([false, false, false], states);
+        Assert.False(readable);
+    }
+
+    [Fact]
+    public void WhenTheGraphChangesDuringTheFirstVisibilityAttempt_ThenTheAnswerIsForTheChangedGraph()
+    {
+        // Arrange: S moves from R.Mother to R.Father, which is unreadable, while the first attempt checks the link R.Mother.
+        var tagProvider = new HookTagProvider();
+        var policy = CompileWithHiddenMembers(tagProvider, member => member.Name == nameof(Person.Father));
+        var root = new Person(CreateContext());
+        var s = new Person();
+        root.Mother = s;
+        var subject = Registered(s);
+        Assert.True(policy.CanRead(subject));
+        tagProvider.SetHook(Member(root, nameof(Person.Mother)), () =>
+        {
+            root.Father = s;
+            root.Mother = null;
+        });
+
+        // Act
+        var decision = policy.Explain(subject);
+
+        // Assert
+        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(root, nameof(Person.Father))), decision);
+    }
+
+    [Fact]
+    public void WhenTheGraphKeepsChangingDuringEveryVisibilityAttempt_ThenTheSubjectIsHiddenWithoutAReason()
+    {
+        // Arrange: S stays under R.Mother, which is readable, while R.Father gains and loses S at every tag lookup.
+        var tagProvider = new HookTagProvider();
+        var policy = CompileWithHiddenMembers(tagProvider, member => member.Name == nameof(Person.Father));
+        var root = new Person(CreateContext());
+        var s = new Person();
+        root.Mother = s;
+        var subject = Registered(s);
+        Assert.True(policy.CanRead(subject));
+        tagProvider.SetRepeatingHook(() => root.Father = root.Father is null ? s : null);
+
+        // Act
+        var decision = policy.Explain(subject);
+
+        // Assert
+        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null), decision);
+    }
+
+    [Fact]
+    public void WhenASubjectMovesConcurrentlyBetweenTwoUnreadableStates_ThenItIsNeverReadableAndEvaluationsComplete()
+    {
+        // Arrange: every state of the move cycle hides S from the visibility policy and shows it to the allow policy;
+        // only an evaluation that failed closed hides it from both.
+        var visibilityPolicy = CompileVisibility(new HookPathProvider(DenyReaderSpinIterations));
+        var allowPolicy = Compile(new HookPathProvider(), allowPaths: ["**"], denyPaths: null);
+        var graph = VisibilityGraph.Create();
+        var subject = Registered(graph.S);
+        Assert.True(allowPolicy.CanRead(subject));
+        using var start = new ManualResetEventSlim();
+        using var mutatorDone = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, StressReaderCount)
+            .Select(i => new StressReader(i % 2 == 0 ? () => visibilityPolicy.CanRead(subject) : () => allowPolicy.CanRead(subject), start, mutatorDone))
+            .ToArray();
+        var visibilityReaders = readers.Where((_, i) => i % 2 == 0).ToArray();
+        var allowReaders = readers.Where((_, i) => i % 2 != 0).ToArray();
+
+        // Act
+        RunMutator(start, mutatorDone, readers, () =>
+        {
+            graph.ToA();
+            graph.ToB();
+        });
+
+        // Assert
+        output.WriteLine($"evaluations={readers.Sum(r => r.Evaluations)} completedAllows={allowReaders.Sum(r => r.Allowed)} wrongAllows={visibilityReaders.Sum(r => r.Allowed)}");
+        Assert.All(readers, reader => Assert.Null(reader.Exception));
+        Assert.All(readers, reader => Assert.True(reader.Evaluations > 0));
+        Assert.Equal(0, visibilityReaders.Sum(reader => reader.Allowed));
+        Assert.True(allowReaders.Sum(reader => reader.Allowed) > 0, "No evaluation of the allow policy completed while the subject moved.");
     }
 
     private static AuthorizationPolicy Compile(PathProviderBase pathProvider, string[]? allowPaths, string[]? denyPaths)
@@ -218,25 +381,61 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
                 deny: denyPaths is null ? null : [Policies.Rule([PermissionAction.Read], paths: denyPaths)])],
             ["Role"], [], KnownActions, TestTags.Default, pathProvider);
 
+    // Members of S are denied below Priv.Father (state A) and the link Pub.Mother is denied (state B), so S is hidden in
+    // both states for a different reason.
+    private static AuthorizationPolicy CompileVisibility(PathProviderBase pathProvider)
+        => Compile(pathProvider, allowPaths: null, denyPaths: ["Mother.Father.*", "Father.Mother"]);
+
+    private static AuthorizationPolicy CompileWithHiddenMembers(
+        HookTagProvider tagProvider, Func<RegisteredSubjectProperty, bool> isHidden, PathProviderBase? pathProvider = null, string[]? denyPaths = null)
+    {
+        tagProvider.IsHidden = isHidden;
+        return AuthorizationPolicy.Compile(
+            [Policies.Role(
+                "Role",
+                allow: [Policies.Rule([PermissionAction.Read])],
+                deny: [Policies.Rule([PermissionAction.Read], paths: denyPaths, tags: [HookTagProvider.HiddenTag])])],
+            ["Role"], [], KnownActions, tagProvider, pathProvider ?? DefaultPathProvider.Instance);
+    }
+
+    // Runs the mutator's cycles, then always signals the readers, so a failing mutator cannot leave them running.
+    private static void RunMutator(ManualResetEventSlim start, ManualResetEventSlim mutatorDone, StressReader[] readers, Action cycle)
+    {
+        start.Set();
+        try
+        {
+            for (var i = 0; i < StressMutatorCycles; i++)
+            {
+                cycle();
+            }
+        }
+        finally
+        {
+            mutatorDone.Set();
+            foreach (var reader in readers)
+            {
+                reader.Join();
+            }
+        }
+    }
+
     /// <summary>
-    /// Asks the policy about the member on its own thread from the start signal until the mutator is done, at least once,
+    /// Asks a question of the policy on its own thread from the start signal until the mutator is done, at least once,
     /// and keeps its counts and any exception for the test thread to read after <see cref="Join"/>.
     /// </summary>
     private sealed class StressReader
     {
-        private readonly AuthorizationPolicy _policy;
-        private readonly RegisteredSubjectProperty _member;
+        private readonly Func<bool> _isAllowed;
         private readonly ManualResetEventSlim _start;
         private readonly ManualResetEventSlim _mutatorDone;
         private readonly Thread _thread;
 
-        public StressReader(AuthorizationPolicy policy, RegisteredSubjectProperty member, ManualResetEventSlim start, ManualResetEventSlim mutatorDone)
+        public StressReader(Func<bool> isAllowed, ManualResetEventSlim start, ManualResetEventSlim mutatorDone)
         {
-            _policy = policy;
-            _member = member;
+            _isAllowed = isAllowed;
             _start = start;
             _mutatorDone = mutatorDone;
-            _thread = new Thread(Run);
+            _thread = new Thread(Run) { IsBackground = true };
             _thread.Start();
         }
 
@@ -256,7 +455,7 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
                 do
                 {
                     Evaluations++;
-                    if (_policy.CanRead(_member))
+                    if (_isAllowed())
                     {
                         Allowed++;
                     }
@@ -274,9 +473,17 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
     private sealed class HookPathProvider(int spinIterations = 0) : DefaultPathProvider('.')
     {
         private Action? _hook;
+        private RegisteredSubjectProperty? _hookProperty;
         private bool _isRepeating;
 
         public void SetHook(Action hook) => _hook = hook;
+
+        /// <summary>Runs the callback once, when the segment of the given property is looked up.</summary>
+        public void SetHook(RegisteredSubjectProperty property, Action hook)
+        {
+            _hookProperty = property;
+            _hook = hook;
+        }
 
         public void SetRepeatingHook(Action hook)
         {
@@ -286,8 +493,15 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
 
         public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
         {
-            var hook = _isRepeating ? _hook : Interlocked.Exchange(ref _hook, null);
-            hook?.Invoke();
+            if (_isRepeating)
+            {
+                _hook?.Invoke();
+            }
+            else if (_hookProperty is null || ReferenceEquals(property, _hookProperty))
+            {
+                Interlocked.Exchange(ref _hook, null)?.Invoke();
+            }
+
             if (spinIterations > 0)
             {
                 Thread.SpinWait(spinIterations);
@@ -341,6 +555,88 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
         {
             Priv.Mother = X;
             X.Father = S;
+            Priv.Father = null;
+        }
+    }
+
+    /// <summary>
+    /// Tags the members that <see cref="IsHidden"/> selects hidden and runs a callback when the tags of a given member are
+    /// looked up, to change the graph in the middle of an evaluation.
+    /// </summary>
+    private sealed class HookTagProvider : IMemberTagProvider
+    {
+        public const string HiddenTag = "hidden";
+
+        private static readonly ImmutableArray<string> HiddenTags = [HiddenTag];
+
+        private RegisteredSubjectProperty? _hookMember;
+        private Action? _hook;
+        private bool _isRepeating;
+
+        public Func<RegisteredSubjectProperty, bool> IsHidden { get; set; } = _ => false;
+
+        public void SetHook(RegisteredSubjectProperty member, Action hook)
+        {
+            _hookMember = member;
+            _hook = hook;
+        }
+
+        public void SetRepeatingHook(Action hook)
+        {
+            _isRepeating = true;
+            _hook = hook;
+        }
+
+        public ImmutableArray<string> GetTags(RegisteredSubjectProperty member)
+        {
+            if (_isRepeating)
+            {
+                _hook?.Invoke();
+            }
+            else if (ReferenceEquals(member, _hookMember))
+            {
+                Interlocked.Exchange(ref _hook, null)?.Invoke();
+            }
+
+            return IsHidden(member) ? HiddenTags : [];
+        }
+    }
+
+    /// <summary>
+    /// R.Mother is Priv and R.Father is Pub; S moves between Pub.Mother (state B) and Priv.Father (state A), each move
+    /// adding the new parent before removing the old one, so S keeps its registered instance.
+    /// </summary>
+    private sealed class VisibilityGraph
+    {
+        public required Person R { get; init; }
+
+        public required Person Priv { get; init; }
+
+        public required Person Pub { get; init; }
+
+        public required Person S { get; init; }
+
+        public static VisibilityGraph Create()
+        {
+            var root = new Person(CreateContext());
+            var priv = new Person();
+            var pub = new Person();
+            var s = new Person();
+            root.Mother = priv;
+            root.Father = pub;
+            pub.Mother = s;
+            return new VisibilityGraph { R = root, Priv = priv, Pub = pub, S = s };
+        }
+
+        public void ToA()
+        {
+            Priv.Father = S;
+            Pub.Mother = null;
+        }
+
+        public void ToB()
+        {
+            Pub.Mother = S;
             Priv.Father = null;
         }
     }

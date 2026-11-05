@@ -136,13 +136,38 @@ public sealed class AuthorizationPolicy
     public SubjectReadDecision Explain(RegisteredSubject subject)
     {
         ArgumentNullException.ThrowIfNull(subject);
-        if (!HasReadableMember(subject))
+
+        // The member checks, the walk and its link checks record into one instance, so the answer rests on one instant.
+        var reads = ParentReads.Rent();
+        try
+        {
+            for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
+            {
+                reads.Clear();
+                var decision = ExplainOnce(subject, reads);
+                if (reads.AreUnchanged())
+                {
+                    return decision;
+                }
+            }
+
+            return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
+        }
+        finally
+        {
+            ParentReads.Return(reads);
+        }
+    }
+
+    private SubjectReadDecision ExplainOnce(RegisteredSubject subject, ParentReads reads)
+    {
+        if (!HasReadableMember(subject, reads))
         {
             return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
         }
 
         RegisteredSubjectProperty? deniedProperty = null;
-        var isReachable = IsReachable(subject, ref deniedProperty);
+        var isReachable = IsReachable(subject, reads, ref deniedProperty);
         return new SubjectReadDecision(isReachable, HasReadableMember: true, isReachable ? null : deniedProperty);
     }
 
@@ -162,9 +187,11 @@ public sealed class AuthorizationPolicy
         throw new ArgumentException($"Action '{action}' is not a known action of this policy.", nameof(action));
     }
 
-    private bool IsAllowed(RegisteredSubjectProperty member, ulong bit)
+    private bool IsAllowed(RegisteredSubjectProperty member, ulong bit) => IsAllowed(member, bit, sharedReads: null);
+
+    private bool IsAllowed(RegisteredSubjectProperty member, ulong bit, ParentReads? sharedReads)
     {
-        var context = new MatchContext { SharedReads = null };
+        var context = new MatchContext { SharedReads = sharedReads };
         context.SetMember(member);
         return IsAllowed(bit, ref context);
     }
@@ -388,9 +415,9 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    private bool HasReadableMember(RegisteredSubject subject)
+    private bool HasReadableMember(RegisteredSubject subject, ParentReads reads)
     {
-        var context = new MatchContext { SharedReads = null };
+        var context = new MatchContext { SharedReads = reads };
         foreach (var member in subject.Properties)
         {
             context.SetMember(member);
@@ -407,11 +434,11 @@ public sealed class AuthorizationPolicy
     // deniedProperty is the first unreadable link found in depth-first order, or stays null when every chain returns to
     // a subject already walked or passes a subject that is no longer attached. Iterative, so a deep graph cannot
     // overflow the stack; a cursor with untried parents waits in pending, which a single-parent chain never needs.
-    private bool IsReachable(RegisteredSubject subject, ref RegisteredSubjectProperty? deniedProperty)
+    private bool IsReachable(RegisteredSubject subject, ParentReads reads, ref RegisteredSubjectProperty? deniedProperty)
     {
         HashSet<RegisteredSubject>? visited = null;
         List<ParentCursor>? pending = null;
-        var hasCursor = TryEnter(subject, 0, ref visited, out var cursor, out var isRoot);
+        var hasCursor = TryEnter(subject, 0, reads, ref visited, out var cursor, out var isRoot);
         while (!isRoot)
         {
             if (!hasCursor)
@@ -431,14 +458,14 @@ public sealed class AuthorizationPolicy
                 (pending ??= []).Add(cursor with { Next = cursor.Next + 1 });
             }
 
-            if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit))
+            if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit, reads))
             {
                 deniedProperty ??= parent.Property;
                 hasCursor = false;
                 continue;
             }
 
-            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, ref visited, out cursor, out isRoot);
+            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, reads, ref visited, out cursor, out isRoot);
         }
 
         return true;
@@ -447,14 +474,12 @@ public sealed class AuthorizationPolicy
     // Enters a subject: isRoot when it is an attached subject without parents; no cursor when it is no longer attached
     // or was already explored.
     private static bool TryEnter(
-        RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
+        RegisteredSubject subject, int depth, ParentReads reads, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
     {
         cursor = default;
         isRoot = false;
-        var parents = subject.Parents;
-
-        // Read after the parents, see ParentReads.GetParents.
-        if (!subject.IsAttached)
+        var parents = reads.GetParents(subject, out var isAttached);
+        if (!isAttached)
         {
             return false;
         }
