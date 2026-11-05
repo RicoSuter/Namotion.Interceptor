@@ -186,13 +186,23 @@ public sealed class AuthorizationPolicy
 
     // Selectors are checked cheapest first; the paths are enumerated once per evaluation and only when a rule with paths gets that far.
     private bool Matches(CompiledRule rule, ulong bit, bool isDeny, ref MatchContext context)
-        => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, ref context) && MatchesPaths(rule.Paths, isDeny, ref context);
+        => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, isDeny, ref context) && MatchesPaths(rule.Paths, isDeny, ref context);
 
-    private bool MatchesMemberSelectors(CompiledRule rule, ref MatchContext context)
+    private bool MatchesMemberSelectors(CompiledRule rule, bool isDeny, ref MatchContext context)
     {
-        if (rule.Members is not null && !Glob.IsMatchAny(rule.Members, context.MemberName ??= GetName(context.Member)))
+        if (rule.Members is not null)
         {
-            return false;
+            if (!context.IsMemberNameResolved)
+            {
+                context.MemberName = GetName(context.Member);
+                context.IsMemberNameResolved = true;
+            }
+
+            // An unknown name fails closed like incomplete paths: a deny applies to it, an allow does not.
+            if (context.MemberName is null ? !isDeny : !Glob.IsMatchAny(rule.Members, context.MemberName))
+            {
+                return false;
+            }
         }
 
         if (rule.Tags is not null && !HasAllTags(GetTags(ref context), rule.Tags))
@@ -243,9 +253,35 @@ public sealed class AuthorizationPolicy
         return context.Tags;
     }
 
-    /// <summary>The name a member glob matches: the property name, or <c>Property@Attribute</c> for an attribute, nested for an attribute of an attribute.</summary>
-    private static string GetName(RegisteredSubjectProperty member)
-        => member.IsAttribute ? GetName(member.GetAttributedProperty()) + "@" + member.BrowseName : member.Name;
+    /// <summary>
+    /// The name a member glob matches: the property name, or <c>Property@Attribute</c> for an attribute, nested for an
+    /// attribute of an attribute. Null when the attribute's chain of properties is broken: a property is missing or the
+    /// attributes name each other in a cycle, as the registry also tolerates.
+    /// </summary>
+    private static string? GetName(RegisteredSubjectProperty member)
+    {
+        if (!member.IsAttribute)
+        {
+            return member.Name;
+        }
+
+        var name = new System.Text.StringBuilder(member.BrowseName);
+        var remainingSteps = member.Parent.Properties.Length;
+        var current = member;
+        while (current.IsAttribute)
+        {
+            var property = current.Parent.TryGetProperty(current.AttributeMetadata.PropertyName);
+            if (property is null || --remainingSteps < 0)
+            {
+                return null;
+            }
+
+            name.Insert(0, '@').Insert(0, property.IsAttribute ? property.BrowseName : property.Name);
+            current = property;
+        }
+
+        return name.ToString();
+    }
 
     private static bool HasAllTags(ImmutableArray<string> memberTags, string[] requiredTags)
     {
@@ -380,6 +416,7 @@ public sealed class AuthorizationPolicy
     {
         public RegisteredSubjectProperty Member;
         public string? MemberName;
+        public bool IsMemberNameResolved;
         public ImmutableArray<string> Tags;
         public string? MemberSegment;
         public List<PathLink[]>? Paths;
@@ -390,6 +427,7 @@ public sealed class AuthorizationPolicy
         {
             Member = member;
             MemberName = null;
+            IsMemberNameResolved = false;
             Tags = default;
             MemberSegment = null;
         }
