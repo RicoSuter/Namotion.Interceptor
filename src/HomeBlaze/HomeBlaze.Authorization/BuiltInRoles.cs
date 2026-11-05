@@ -59,6 +59,15 @@ public static class BuiltInRoles
     /// <summary>All built-in roles.</summary>
     public static ImmutableArray<AuthorizationRole> All { get; } = [Reader, Operator, Everything];
 
+    /// <summary>Gets what the built-in role named <paramref name="name"/> allows, for people to read, or null for another name.</summary>
+    public static string? GetDescription(string name) => name switch
+    {
+        ReaderName => "Reads every member and its history and executes queries.",
+        OperatorName => $"Includes {ReaderName}, writes every member and executes operations.",
+        EverythingName => "Allows every action on every member.",
+        _ => null
+    };
+
     /// <summary>Gets whether the name is the name of a built-in role.</summary>
     public static bool IsBuiltIn(string name) =>
         string.Equals(name, ReaderName, StringComparison.Ordinal) ||

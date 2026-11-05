@@ -95,7 +95,7 @@ internal sealed class AuthorizationSnapshot
             foreach (var authorization in authorizations)
             {
                 authorizationStatuses.Add((authorization, customRolesError));
-                foreach (var (name, role) in GetRoles(authorization))
+                foreach (var (name, role) in GetRoles(authorization, roleStatuses))
                 {
                     roleStatuses.Add((role, name, customRolesError, null));
                     if (!BuiltInRoles.IsBuiltIn(name))
@@ -108,7 +108,7 @@ internal sealed class AuthorizationSnapshot
         else if (authorizations.Count == 1)
         {
             authorizationStatuses.Add((authorizations[0], null));
-            var roles = GetRoles(authorizations[0]);
+            var roles = GetRoles(authorizations[0], roleStatuses);
             var countsByName = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var (name, _) in roles)
             {
@@ -329,14 +329,21 @@ internal sealed class AuthorizationSnapshot
         }
     }
 
-    private static List<KeyValuePair<string, Role>> GetRoles(Authorization authorization)
+    // The built-in entries always work, so they get no status of their own; they are added to the statuses for the
+    // number of agents that name them.
+    private static List<KeyValuePair<string, Role>> GetRoles(
+        Authorization authorization, ImmutableArray<(Role, string, string?, string?)>.Builder roleStatuses)
     {
         var roles = new List<KeyValuePair<string, Role>>();
         if (authorization.Roles is { } entries)
         {
             foreach (var entry in entries)
             {
-                if (entry.Value is not null)
+                if (entry.Value is { IsBuiltIn: true })
+                {
+                    roleStatuses.Add((entry.Value, entry.Key, null, null));
+                }
+                else if (entry.Value is not null)
                 {
                     roles.Add(entry);
                 }

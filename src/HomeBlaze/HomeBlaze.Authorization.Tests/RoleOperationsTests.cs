@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
@@ -11,6 +12,7 @@ namespace HomeBlaze.Authorization.Tests;
 public sealed class RoleOperationsTests
 {
     private const string DetachedMessage = "The role is not part of an Authorization subject. It may have been deleted.";
+    private const string BuiltInRoleReason = "Built-in roles cannot be edited, renamed or deleted.";
     private const string DetachedAuthorizationMessage = "The Authorization subject is not part of the graph. It may have been deleted.";
 
     private readonly Authorization _authorization;
@@ -25,6 +27,89 @@ public sealed class RoleOperationsTests
         };
         _authorization.ReplaceRoles([new AuthorizationRole { Name = "kitchen" }, new AuthorizationRole { Name = "garden" }]);
         _roleStore = new RecordingRoleStore(_authorization);
+    }
+
+    [Fact]
+    public void WhenRolesAreReplaced_ThenTheBuiltInRolesComeFirstWithTheirRulesAndDescriptions()
+    {
+        // Act
+        _authorization.ReplaceRoles([new AuthorizationRole { Name = "kitchen" }, new AuthorizationRole { Name = "garden" }]);
+
+        // Assert
+        Assert.Equal(
+            [BuiltInRoles.ReaderName, BuiltInRoles.OperatorName, BuiltInRoles.EverythingName, "kitchen", "garden"],
+            _authorization.Roles.Keys);
+        foreach (var builtInRole in BuiltInRoles.All)
+        {
+            var role = _authorization.Roles[builtInRole.Name];
+            Assert.True(role.IsBuiltIn);
+            Assert.Equal(BuiltInRoles.GetDescription(builtInRole.Name), role.Description);
+            Assert.Equal(builtInRole.Includes, role.Includes);
+            Assert.Equal(builtInRole.Allow, role.Allow);
+            Assert.Equal(builtInRole.Deny, role.Deny);
+            Assert.False(role.IsRenameEnabled);
+            Assert.False(role.IsDeleteEnabled);
+            Assert.Equal(BuiltInRoleReason, role.RenameDisabledReason);
+            Assert.Equal(BuiltInRoleReason, role.DeleteDisabledReason);
+        }
+
+        var kitchen = _authorization.Roles["kitchen"];
+        Assert.False(kitchen.IsBuiltIn);
+        Assert.Null(kitchen.Description);
+        Assert.True(kitchen.IsRenameEnabled);
+        Assert.True(kitchen.IsDeleteEnabled);
+        Assert.Null(kitchen.RenameDisabledReason);
+        Assert.Null(kitchen.DeleteDisabledReason);
+    }
+
+    [Fact]
+    public void WhenACustomRoleHasTheNameOfABuiltInRole_ThenTheBuiltInEntryStays()
+    {
+        // Act
+        _authorization.ReplaceRoles([new AuthorizationRole { Name = BuiltInRoles.ReaderName, Allow = [new PermissionRule { Actions = [PermissionAction.Write] }] }]);
+
+        // Assert
+        var reader = _authorization.Roles[BuiltInRoles.ReaderName];
+        Assert.True(reader.IsBuiltIn);
+        Assert.Equal(BuiltInRoles.Reader.Allow, reader.Allow);
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), _authorization.Roles.Keys);
+    }
+
+    [Fact]
+    public void WhenAnAuthorizationIsCreated_ThenItListsOnlyTheBuiltInRoles()
+    {
+        // Act
+        var authorization = new Authorization();
+
+        // Assert
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), authorization.Roles.Keys);
+    }
+
+    [Fact]
+    public async Task WhenABuiltInRoleIsRenamedOrDeleted_ThenBothThrowWithoutAskingTheStore()
+    {
+        // Arrange
+        var reader = _authorization.Roles[BuiltInRoles.ReaderName];
+
+        // Act & Assert
+        var rename = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.RenameAsync("readers", _roleStore, CancellationToken.None));
+        var delete = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.DeleteAsync(_roleStore, CancellationToken.None));
+        Assert.Equal(BuiltInRoleReason, rename.Message);
+        Assert.Equal(BuiltInRoleReason, delete.Message);
+        Assert.Empty(_roleStore.Renames);
+        Assert.Empty(_roleStore.Deletes);
+    }
+
+    [Fact]
+    public void WhenTheRoleIsBuiltIn_ThenNoViewerMayOpenItsEditor()
+    {
+        // Arrange
+        ISubjectEditPermission reader = _authorization.Roles[BuiltInRoles.ReaderName];
+        ISubjectEditPermission kitchen = _authorization.Roles["kitchen"];
+
+        // Act & Assert
+        Assert.False(reader.CanEdit(UnrestrictedPermissions.Instance));
+        Assert.True(kitchen.CanEdit(UnrestrictedPermissions.Instance));
     }
 
     [Fact]
@@ -153,7 +238,7 @@ public sealed class RoleOperationsTests
         // Arrange: the stamp then belongs to rules this subject does not have.
         var kitchen = _authorization.Roles["kitchen"];
         _roleStore.StampReading = () => _authorization.ReplaceRoles(
-            [.. _authorization.Roles.Keys.Select(name => new AuthorizationRole { Name = name })]);
+            [.. _authorization.Roles.Where(entry => !entry.Value.IsBuiltIn).Select(entry => new AuthorizationRole { Name = entry.Key })]);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => kitchen.DeleteAsync(_roleStore, CancellationToken.None));

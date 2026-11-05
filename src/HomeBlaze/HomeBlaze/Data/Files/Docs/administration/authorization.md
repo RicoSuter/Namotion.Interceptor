@@ -155,7 +155,7 @@ An agent with `invoke_operation` and only the role `reader` cannot run an operat
 
 ## Built-in Roles
 
-The built-in roles are defined in code, always available and cannot be changed. Their names are reserved. The tab "Roles" of the edit dialog of a role describes them below "Includes".
+The built-in roles are defined in code, always available and cannot be changed. Their names are reserved. They are listed first below the `Authorization` subject, each with its `Description`, its rules and `UsedByAgents`, and with "Rename" and the Delete button disabled and no "Edit" pencil, see [Adding, Renaming and Deleting Roles](#adding-renaming-and-deleting-roles). The tab "Roles" of the edit dialog of a role describes them below "Includes" as well.
 
 | Role | Allows |
 |------|--------|
@@ -201,7 +201,7 @@ HomeBlaze adds the `Authorization` subject as `Files/Authorization.json` to the 
 
 ### Adding, Renaming and Deleting Roles
 
-Select the `Authorization` subject in the subject browser. Its pane lists the custom roles under "Roles" and has the operation "Add Role"; the subject has no edit dialog. The pane of a role, titled with its name, has the operation "Rename", the "Edit" pencil and the Delete button, and shows the `Status`, `Warning` and `UsedByAgents` of the role, see [Status and Usage](#status-and-usage). The built-in roles are not listed there; the tab "Roles" of the edit dialog of a role describes them. Only a full administrator runs these operations; others see them disabled, and the Delete button shows only to a full administrator.
+Select the `Authorization` subject in the subject browser. Its pane lists the roles under "Roles", the built-in roles first and then the custom roles, and has the operation "Add Role"; the subject has no edit dialog. The pane of a custom role, titled with its name, has the operation "Rename", the "Edit" pencil and the Delete button, and shows the `Status`, `Warning` and `UsedByAgents` of the role, see [Status and Usage](#status-and-usage). The pane of a built-in role shows its rules, its `Description` and `UsedByAgents`, has no "Edit" pencil, and disables the Delete button and "Rename", which says "Built-in roles cannot be edited, renamed or deleted." as tooltip. Only a full administrator runs these operations; others see them disabled, and the Delete button shows only to a full administrator.
 
 To add a role:
 

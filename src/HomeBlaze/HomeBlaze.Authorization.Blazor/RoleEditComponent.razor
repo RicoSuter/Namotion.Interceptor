@@ -166,13 +166,6 @@
 
     private const string NotFullAdministratorPreviewMessage = "Only a full administrator can preview roles.";
 
-    private static readonly (string Name, string Description)[] BuiltInRoleDescriptions =
-    [
-        (BuiltInRoles.ReaderName, "Reads every member and its history and executes queries."),
-        (BuiltInRoles.OperatorName, $"Includes {BuiltInRoles.ReaderName}, writes every member and executes operations."),
-        (BuiltInRoles.EverythingName, "Allows every action on every member.")
-    ];
-
     private string? _name;
 
     // Saving a role replaces Authorization.Roles, which keeps its subject while the role subjects are replaced.
@@ -464,9 +457,9 @@
             <MudText Typo="Typo.subtitle2" Class="mt-6">Built-in roles</MudText>
             <MudText Typo="Typo.body2" Class="mb-2">Defined in code, always available and not editable. The system rules apply to every role.</MudText>
             <MudStack Spacing="1">
-                @foreach (var (name, description) in BuiltInRoleDescriptions)
+                @foreach (var name in BuiltInRoles.All.Select(role => role.Name))
                 {
-                    <MudText Typo="Typo.body2" data-testid="@($"role-edit-builtin-role-{name}")"><b>@name</b>: @description</MudText>
+                    <MudText Typo="Typo.body2" data-testid="@($"role-edit-builtin-role-{name}")"><b>@name</b>: @BuiltInRoles.GetDescription(name)</MudText>
                 }
             </MudStack>
         </div>

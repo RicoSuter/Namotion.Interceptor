@@ -89,7 +89,7 @@ public class RoleStoreTests
         // Assert
         Assert.True(result.Succeeded, result.Error);
         Assert.Contains("The users failed.", result.Warning);
-        Assert.Equal(["household"], graph.Authorization.Roles.Keys);
+        Assert.Equal(["household"], GetCustomRoleNames(graph));
         Assert.NotNull(graph.RoleStore.GetConcurrencyStamp("household"));
         Assert.Null(graph.RoleStore.GetConcurrencyStamp("family"));
     }
@@ -148,7 +148,7 @@ public class RoleStoreTests
         Assert.Equal(BuiltInRoles.ReaderName, row.Name);
         Assert.True(row.IsBuiltIn);
         Assert.DoesNotContain(verification.Roles, role => role.Name == "family");
-        Assert.Empty(graph.Authorization.Roles);
+        Assert.Empty(GetCustomRoleNames(graph));
     }
 
     [Fact]
@@ -202,7 +202,7 @@ public class RoleStoreTests
 
         // Assert
         Assert.True(result.Succeeded, result.Error);
-        Assert.Empty(graph.Authorization.Roles);
+        Assert.Empty(GetCustomRoleNames(graph));
         Assert.Null(graph.RoleStore.GetConcurrencyStamp("family"));
     }
 
@@ -439,7 +439,7 @@ public class RoleStoreTests
         await graph.RoleStore.SaveRoleAsync(null, new AuthorizationRole { Name = "alpha" }, null, CancellationToken.None);
 
         // Assert
-        Assert.Equal(["alpha", "beta", "zeta"], graph.Authorization.Roles.Keys);
+        Assert.Equal(["alpha", "beta", "zeta"], GetCustomRoleNames(graph));
     }
 
     [Fact]
@@ -506,4 +506,7 @@ public class RoleStoreTests
         Assert.True(demoted.Succeeded, demoted.Error);
         Assert.True(result.Succeeded, result.Error);
     }
+
+    private static IEnumerable<string> GetCustomRoleNames(AuthenticationTestGraph graph) =>
+        graph.Authorization.Roles.Where(entry => !entry.Value.IsBuiltIn).Select(entry => entry.Key);
 }

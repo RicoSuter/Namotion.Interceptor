@@ -6,15 +6,16 @@ using HomeBlaze.Authorization.Internal;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Authorization;
 
 /// <summary>
-/// A custom role of an <see cref="Authorization"/>: rules that allow, rules that deny, and the roles it includes.
-/// Its name is its key in <see cref="Authorization.Roles"/>, see <see cref="Title"/>. Its rules change only through the
-/// <see cref="IRoleStore"/>, which replaces every role.
+/// A built-in or custom role of an <see cref="Authorization"/>: rules that allow, rules that deny, and the roles it
+/// includes. Its name is its key in <see cref="Authorization.Roles"/>, see <see cref="Title"/>. The rules of a custom role
+/// change only through the <see cref="IRoleStore"/>, which replaces every role; a built-in role never changes.
 /// </summary>
-[Description("Custom role with the rules it allows and denies")]
+[Description("Role with the rules it allows and denies")]
 [DisplayName("Role")]
 [SubjectIcon("Badge")]
 [ExcludeFromCreation]
@@ -38,6 +39,14 @@ public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvide
     /// </summary>
     [State]
     public partial IReadOnlyList<PermissionRule> Deny { get; internal set; }
+
+    /// <summary>Whether this is a built-in role, see <see cref="BuiltInRoles"/>, which cannot be edited, renamed or deleted.</summary>
+    [State]
+    public partial bool IsBuiltIn { get; internal set; }
+
+    /// <summary>What the role allows, for a built-in role, or null for a custom role.</summary>
+    [State]
+    public partial string? Description { get; internal set; }
 
     /// <summary>
     /// Why the role cannot be used, such as a compile error or a reserved name, or null.
@@ -66,11 +75,35 @@ public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvide
     /// <inheritdoc />
     public string IconName => "Badge";
 
+    /// <summary>Whether <see cref="RenameAsync"/> applies: not for a built-in role.</summary>
+    [Derived]
+    [PropertyAttribute("Rename", KnownAttributes.IsEnabled)]
+    public bool IsRenameEnabled => !IsBuiltIn;
+
+    /// <summary>Why <see cref="RenameAsync"/> does not apply, or null.</summary>
+    [Derived]
+    [PropertyAttribute("Rename", KnownAttributes.DisabledReason)]
+    public string? RenameDisabledReason => IsBuiltIn ? BuiltInRoleReason : null;
+
+    /// <summary>Whether <see cref="DeleteAsync"/> applies: not for a built-in role.</summary>
+    [Derived]
+    [PropertyAttribute("Delete", KnownAttributes.IsEnabled)]
+    public bool IsDeleteEnabled => !IsBuiltIn;
+
+    /// <summary>Why <see cref="DeleteAsync"/> does not apply, or null.</summary>
+    [Derived]
+    [PropertyAttribute("Delete", KnownAttributes.DisabledReason)]
+    public string? DeleteDisabledReason => IsBuiltIn ? BuiltInRoleReason : null;
+
+    internal const string BuiltInRoleReason = "Built-in roles cannot be edited, renamed or deleted.";
+
     public Role()
     {
         Includes = [];
         Allow = [];
         Deny = [];
+        IsBuiltIn = false;
+        Description = null;
         Status = null;
         Warning = null;
         UsedByAgents = 0;
@@ -120,6 +153,9 @@ public partial class Role : ISubjectEditPermission, ITitleProvider, IIconProvide
     public Task DeleteAsync([FromServices] IRoleStore roleStore, CancellationToken cancellationToken) =>
         RoleEdits.DeleteAsync(this, roleStore, cancellationToken);
 
-    /// <summary>The editor changes the rules of the role, which replaces <see cref="Authorization.Roles"/> that holds it.</summary>
-    bool ISubjectEditPermission.CanEdit(IUserPermissions permissions) => permissions.CanAdministerHoldingMembers(this);
+    /// <summary>
+    /// The editor changes the rules of a custom role, which replaces <see cref="Authorization.Roles"/> that holds it; a
+    /// built-in role has no editor.
+    /// </summary>
+    bool ISubjectEditPermission.CanEdit(IUserPermissions permissions) => !IsBuiltIn && permissions.CanAdministerHoldingMembers(this);
 }

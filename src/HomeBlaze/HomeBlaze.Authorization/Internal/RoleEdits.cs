@@ -67,6 +67,11 @@ internal static class RoleEdits
     // The role store replaces every role on each change, so a role no Authorization holds was replaced or deleted since.
     private static string GetHeldName(Role role)
     {
+        if (role.IsBuiltIn)
+        {
+            throw new InvalidOperationException(Role.BuiltInRoleReason);
+        }
+
         var (authorization, name) = role.FindParent();
         if (authorization is null || name is null ||
             !authorization.Roles.TryGetValue(name, out var heldRole) || !ReferenceEquals(heldRole, role))

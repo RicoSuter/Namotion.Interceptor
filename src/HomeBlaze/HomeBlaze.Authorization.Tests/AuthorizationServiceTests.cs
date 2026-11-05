@@ -555,6 +555,48 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAPrincipalNamesABuiltInRole_ThenItsEntryCountsItAndHasNoStatus()
+    {
+        // Arrange
+        var authorization = new Authorization();
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = authorization };
+        var operatorRole = authorization.Roles[BuiltInRoles.OperatorName];
+
+        // Act
+        _service.SetPrincipalRoles(new object(), [BuiltInRoles.OperatorName]);
+        _ = _service.GetRoleNames();
+
+        // Assert
+        await StatusAssert.EqualAsync(1, () => operatorRole.UsedByAgents);
+        Assert.Null(operatorRole.Status);
+        Assert.Null(operatorRole.Warning);
+        Assert.Equal(0, authorization.Roles[BuiltInRoles.ReaderName].UsedByAgents);
+        Assert.Null(_service.GetPolicy([BuiltInRoles.OperatorName]).Error);
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), _service.GetRoleNames());
+    }
+
+    [Fact]
+    public async Task WhenSeveralAuthorizationsExist_ThenTheirBuiltInEntriesHaveNoStatusAndCountTheAgents()
+    {
+        // Arrange
+        var first = new Authorization { Roles = new Dictionary<string, Role> { ["First"] = new() } };
+        var second = new Authorization();
+        _root.Children = new Dictionary<string, IInterceptorSubject> { ["Authorization"] = first, ["Authorization2"] = second };
+        first.ReplaceRoles([new AuthorizationRole { Name = "First" }]);
+
+        // Act
+        _service.SetPrincipalRoles(new object(), [BuiltInRoles.ReaderName]);
+        _ = _service.GetRoleNames();
+
+        // Assert
+        await StatusAssert.EqualAsync(AuthorizationService.SeveralAuthorizationsStatus, () => first.Roles["First"].Status);
+        await StatusAssert.EqualAsync(1, () => first.Roles[BuiltInRoles.ReaderName].UsedByAgents);
+        await StatusAssert.EqualAsync(1, () => second.Roles[BuiltInRoles.ReaderName].UsedByAgents);
+        Assert.Null(first.Roles[BuiltInRoles.ReaderName].Status);
+        Assert.Null(second.Roles[BuiltInRoles.ReaderName].Status);
+    }
+
+    [Fact]
     public async Task WhenAPrincipalNamesARoleBeforeItExists_ThenTheRoleCountsItOnceAdded()
     {
         // Arrange

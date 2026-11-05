@@ -12,11 +12,11 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace HomeBlaze.Authorization;
 
 /// <summary>
-/// The custom roles and the users of the installation, in one subject the operator creates, for example
-/// <c>Files/Authorization.json</c>. Built-in roles are not listed here. Only one may exist; with several, none is used.
+/// The roles and the users of the installation, in one subject the operator creates, for example
+/// <c>Files/Authorization.json</c>. Only one may exist; with several, none is used.
 /// </summary>
 [Category("System")]
-[Description("Custom roles and users that grant people, agents and MCP clients access to the subjects")]
+[Description("Roles and users that grant people, agents and MCP clients access to the subjects")]
 [DisplayName("Authorization")]
 [SubjectIcon("AdminPanelSettings")]
 [SingleInstance]
@@ -24,8 +24,9 @@ namespace HomeBlaze.Authorization;
 public partial class Authorization : IConfigurable, IIconProvider
 {
     /// <summary>
-    /// The custom roles by name, each reachable at the path of this subject followed by its name. Loaded
-    /// from the authentication database and never saved with this subject; replaced as a whole by <see cref="ReplaceRoles"/>.
+    /// The built-in roles, then the custom roles, by name, each reachable at the path of this subject followed by its name.
+    /// The custom roles are loaded from the authentication database and never saved with this subject; replaced as a
+    /// whole by <see cref="ReplaceRoles"/>.
     /// </summary>
     [State]
     [InlinePaths]
@@ -49,26 +50,44 @@ public partial class Authorization : IConfigurable, IIconProvider
 
     public Authorization()
     {
-        Roles = new Dictionary<string, Role>(StringComparer.Ordinal);
+        Roles = CreateRoles([]);
         Users = new Dictionary<string, User>(StringComparer.Ordinal);
         Status = null;
     }
 
     /// <summary>
-    /// Replaces the roles with <paramref name="roles"/>, building a <see cref="Role"/> per entry, in one assignment.
-    /// Called by the role store after a committed change; nothing else changes the roles.
+    /// Replaces the roles with the built-in roles followed by the custom <paramref name="roles"/>, building a
+    /// <see cref="Role"/> per entry, in one assignment. Called by the role store after a committed change; nothing else
+    /// changes the roles.
     /// </summary>
     public void ReplaceRoles(IReadOnlyCollection<AuthorizationRole> roles)
     {
         ArgumentNullException.ThrowIfNull(roles);
+        Roles = CreateRoles(roles);
+    }
 
-        var replaced = new Dictionary<string, Role>(roles.Count, StringComparer.Ordinal);
-        foreach (var role in roles)
+    // A custom role with the name of a built-in role, which the role store refuses, never replaces the built-in entry.
+    private static Dictionary<string, Role> CreateRoles(IReadOnlyCollection<AuthorizationRole> customRoles)
+    {
+        var roles = new Dictionary<string, Role>(BuiltInRoles.All.Length + customRoles.Count, StringComparer.Ordinal);
+        foreach (var role in BuiltInRoles.All)
         {
-            replaced[role.Name] = new Role { Includes = [.. role.Includes], Allow = [.. role.Allow], Deny = [.. role.Deny] };
+            roles[role.Name] = new Role
+            {
+                Includes = [.. role.Includes],
+                Allow = [.. role.Allow],
+                Deny = [.. role.Deny],
+                IsBuiltIn = true,
+                Description = BuiltInRoles.GetDescription(role.Name)
+            };
         }
 
-        Roles = replaced;
+        foreach (var role in customRoles)
+        {
+            roles.TryAdd(role.Name, new Role { Includes = [.. role.Includes], Allow = [.. role.Allow], Deny = [.. role.Deny] });
+        }
+
+        return roles;
     }
 
     /// <summary>

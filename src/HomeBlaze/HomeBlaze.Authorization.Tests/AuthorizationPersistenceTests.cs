@@ -44,7 +44,8 @@ public class AuthorizationPersistenceTests
         Assert.Equal(typeof(Authorization).FullName, root.GetProperty("$type").GetString());
         Assert.False(root.TryGetProperty("roles", out _));
         Assert.False(root.TryGetProperty("status", out _));
-        Assert.Empty(loaded.Roles);
+        Assert.Equal(BuiltInRoles.All.Select(role => role.Name), loaded.Roles.Keys);
+        Assert.All(loaded.Roles.Values, role => Assert.True(role.IsBuiltIn));
     }
 
     [Fact]
