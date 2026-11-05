@@ -111,8 +111,10 @@ public sealed class PropertyReferenceCollection
     /// <returns>True if property was added; false if already exists.</returns>
     /// <remarks>
     /// A successful add is a full memory barrier: the addition is visible to other threads before any later
-    /// read by the calling thread. Dependency registration relies on this to pair with the write generation, and
-    /// needs no barrier from an add that returns false, see the "Concurrent write detection via _writeGeneration" section of docs/design/tracking-derived-properties.md.
+    /// read by the calling thread. Dependency registration relies on this to pair with the write generation. An
+    /// add that returns false needs no barrier: every add of a dependent runs under that dependent's own data lock,
+    /// so the add that succeeded earlier already executed it. See the "Concurrent write detection via
+    /// _writeGeneration" section of docs/design/tracking-derived-properties.md.
     /// </remarks>
     internal bool Add(in PropertyReference property)
     {
@@ -268,8 +270,9 @@ public sealed class PropertyReferenceCollection
                 return false;
             }
 
-            // Cleared before the count changes only so that a caller reading Count and then Items never gets an
-            // older snapshot than that count; nothing in this class or the write generation pairing relies on it.
+            // The clear makes readers rebuild, and in large mode it is the store the write generation pairing relies
+            // on, so it must stay before the barrier in the outer Add. Only its position before the count update is
+            // optional: it keeps a caller that reads Count and then Items from getting an older snapshot.
             Volatile.Write(ref _snapshot, null);
             _buffer[_count] = property;
             Volatile.Write(ref _count, _count + 1);
@@ -283,8 +286,8 @@ public sealed class PropertyReferenceCollection
                 return false;
             }
 
-            // Cleared before the count changes only so that a caller reading Count and then Items never gets an
-            // older snapshot than that count; nothing in this class or the write generation pairing relies on it.
+            // The clear makes readers rebuild, so Items stops listing the removed entry. Only its position before the
+            // count update is optional: it keeps a caller that reads Count and then Items from getting an older snapshot.
             Volatile.Write(ref _snapshot, null);
 
             var lastIndex = _count - 1;

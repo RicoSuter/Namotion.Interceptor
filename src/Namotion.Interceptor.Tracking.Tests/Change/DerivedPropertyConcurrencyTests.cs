@@ -913,7 +913,9 @@ public class DerivedPropertyConcurrencyTests
             root.Children = children;
 
             // Flipping every child twice and then half of them leaves half on each source. Alternating an extra
-            // pass per round alternates which source grows from empty and which shrinks from all children.
+            // pass per round alternates which source grows from empty and which shrinks from all children. So both
+            // checks below see one source still large (shrunk to 20, above the demotion count) and the other small
+            // after a demotion; counts above 32 or below 17 are covered by PropertyReferenceCollectionTests.
             var selectorFlipCount = childCount * (2 + round % 2) + childCount / 2;
 
             // Act - change dependencies concurrently
