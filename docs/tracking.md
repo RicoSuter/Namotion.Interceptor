@@ -263,26 +263,17 @@ person.LastName = "Doe";
 
 ### Reaching Other Subjects
 
-A derived property follows every property it reads, however the getter reached the subject. Detaching a subject drops the dependencies on its properties, and attaching it again does not restore them: a derived property registers again only when it is recalculated. When the getter reaches the subject through tracked properties, the write that attaches it again is itself a dependency and recalculates the derived property. When the getter reaches it through a field, a captured variable or a service, nothing does, and the derived property keeps its old value until another of its dependencies changes or `RecalculateDerivedProperty()` is called.
+A derived property depends on the properties it reads, not on how its getter reached their subject. Detaching a subject drops the dependencies on its properties, and attaching it again restores them only when the derived property is recalculated. If the getter reaches the subject through tracked properties, the write that attaches it again triggers that recalculation. If it reaches the subject through a field, a captured variable or a service, nothing does, and the derived property keeps its old value until another dependency changes or `RecalculateDerivedProperty()` is called:
 
 ```csharp
-[InterceptorSubject]
-public partial class Display
-{
-    private readonly Room _room;
-    private readonly Sensor _sensor;
+[Derived]
+public double? Temperature => _room.Sensor?.Temperature; // follows the sensor when it is attached again
 
-    // Stops following the sensor once it is detached and attached again while the display stays attached
-    [Derived]
-    public double ViaField => _sensor.Temperature;
-
-    // Room.Sensor is a dependency, so attaching the sensor again recalculates this property
-    [Derived]
-    public double? ViaTrackedProperty => _room.Sensor?.Temperature;
-}
+[Derived]
+public double LastTemperature => _sensor.Temperature;   // does not, if the sensor is detached and attached again on its own
 ```
 
-A field that holds an ancestor, such as a parent passed to the constructor, is the common exception: detaching the ancestor detaches the subjects below it too, and attaching them again recalculates their derived properties. Reach a subject through tracked properties when it can be detached and attached again on its own while the derived property stays attached.
+A field holding an ancestor, such as an owner passed to the constructor, is fine: detaching the ancestor also detaches the derived property, and attaching it again recalculates it.
 
 ### Manual Recalculation
 
