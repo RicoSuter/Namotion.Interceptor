@@ -277,4 +277,41 @@ public class DerivedPropertyCleanupTests
         // Verify no zombie backlinks were created
         Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
     }
+
+    [Fact]
+    public void WhenManyDerivedPropertiesReadOneProperty_ThenAllRecalculateAndDetachRemovesThem()
+    {
+        // Arrange
+        const int childCount = 40;
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithContextInheritance();
+
+        var root = new SharedSourceRoot(context);
+        var children = Enumerable
+            .Range(0, childCount)
+            .Select(_ => new SharedSourceChild(root))
+            .ToArray();
+
+        var sharedProperty = new PropertyReference(root, nameof(SharedSourceRoot.Shared));
+
+        // Act - attach all children
+        root.Children = children;
+
+        // Assert
+        Assert.Equal(childCount, sharedProperty.GetUsedByProperties().Count);
+
+        // Act - write the shared property
+        root.Shared = 42;
+
+        // Assert
+        Assert.All(children, child => Assert.Equal(42, child.Mirrored));
+
+        // Act - detach all children
+        root.Children = [];
+
+        // Assert
+        Assert.Equal(0, sharedProperty.GetUsedByProperties().Count);
+    }
 }

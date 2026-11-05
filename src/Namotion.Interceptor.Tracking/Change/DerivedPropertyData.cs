@@ -38,7 +38,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Reentrancy guard for RecalculateDerivedProperty.
     /// Prevents infinite recursion when a derived-with-setter property's
-    /// SetPropertyValueWithInterception re-enters WriteProperty.
+    /// PublishDerivedPropertyValue re-enters WriteProperty.
     /// Only read/written inside lock(this), so no volatile needed.
     /// </summary>
     internal bool IsRecalculating;
@@ -148,7 +148,8 @@ internal sealed class DerivedPropertyData
             LastKnownValue = null;
         }
 
-        // Case 2: snapshot used-by properties, then clear. Snapshot is stable (copy-on-write).
+        // Case 2: snapshot used-by properties, then clear. The snapshot is stable because the collection
+        // never changes an array it handed out.
         var snapshot = _usedByProperties?.ItemsArray ?? [];
         _usedByProperties = null;
         return snapshot;
@@ -311,7 +312,7 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Adds a used-by property. Creates PropertyReferenceCollection on first call
-    /// with the item pre-populated, avoiding a separate CAS Add allocation.
+    /// with the item pre-populated, avoiding a separate Add.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AddUsedByProperty(in PropertyReference dependentProperty)
@@ -323,7 +324,7 @@ internal sealed class DerivedPropertyData
             return;
         }
 
-        // First used-by property: Create collection with item already included (one allocation instead of two).
+        // First used-by property: create the collection with the item already included instead of a separate Add.
         var created = new PropertyReferenceCollection(dependentProperty);
         var existing = Interlocked.CompareExchange(ref _usedByProperties, created, null);
 
