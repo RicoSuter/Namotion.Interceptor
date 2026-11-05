@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Authorization;
 /// <summary>
 /// Selectors and actions of one rule. The rule applies to an action on a member when the action is listed and every
 /// selector that is not empty matches. Whether the rule allows or denies is decided by the list of
-/// <see cref="AuthorizationRole"/> it is in.
+/// <see cref="AuthorizationRole"/> it is in. The lists are never default.
 /// </summary>
 /// <remarks>Two instances are equal when every property is equal element by element, tags and actions ignoring case like matching, the other selector values exactly.</remarks>
 [JsonConverter(typeof(PermissionRuleJsonConverter))]
@@ -25,19 +25,19 @@ public sealed record PermissionRule
     /// parents), an allow rule matches only through the paths that were listed, at most the first 64, and every deny
     /// rule with paths matches.
     /// </remarks>
-    public ImmutableArray<string> Paths { get; init; } = [];
+    public ImmutableArray<string> Paths { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the full or simple names of types or interfaces the member's subject is assignable to; empty for any type.</summary>
-    public ImmutableArray<string> Types { get; init; } = [];
+    public ImmutableArray<string> Types { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the member name globs, <c>*</c> matching any text; empty for all members. An attribute is named <c>Property@Attribute</c>.</summary>
-    public ImmutableArray<string> Members { get; init; } = [];
+    public ImmutableArray<string> Members { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the tags a member must all carry, compared ignoring case; empty for any.</summary>
-    public ImmutableArray<string> Tags { get; init; } = [];
+    public ImmutableArray<string> Tags { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the actions the rule applies to; at least one.</summary>
-    public ImmutableArray<PermissionAction> Actions { get; init; } = [];
+    public ImmutableArray<PermissionAction> Actions { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Whether every property of <paramref name="other"/> is equal element by element, in order.</summary>
     public bool Equals(PermissionRule? other)

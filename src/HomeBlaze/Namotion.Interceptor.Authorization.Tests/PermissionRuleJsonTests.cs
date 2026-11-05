@@ -226,4 +226,20 @@ public class PermissionRuleJsonTests
 
         public string? Comment { get; set; }
     }
+
+    [Fact]
+    public void WhenARuleIsCreatedWithDefaultLists_ThenTheListsAreEmpty()
+    {
+        // Act
+        var rule = new PermissionRule { Paths = default, Types = default, Members = default, Tags = default, Actions = default };
+        var copy = rule with { Tags = default };
+
+        // Assert
+        Assert.True(rule.Paths.IsEmpty);
+        Assert.True(rule.Types.IsEmpty);
+        Assert.True(rule.Members.IsEmpty);
+        Assert.True(rule.Tags.IsEmpty);
+        Assert.True(rule.Actions.IsEmpty);
+        Assert.True(copy.Tags.IsEmpty);
+    }
 }

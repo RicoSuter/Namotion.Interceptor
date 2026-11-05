@@ -22,6 +22,7 @@ namespace Namotion.Interceptor.Authorization
         public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, Namotion.Interceptor.Authorization.PermissionAction action) { }
         public static Namotion.Interceptor.Authorization.AuthorizationPolicy Compile(System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.AuthorizationRole> roles, System.Collections.Generic.IReadOnlyCollection<string> roleNames, System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionRule> systemDenyRules, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.PermissionAction> knownActions, Namotion.Interceptor.Authorization.IMemberTagProvider tagProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider) { }
     }
+    [System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
     public sealed class AuthorizationRole : System.IEquatable<Namotion.Interceptor.Authorization.AuthorizationRole>
     {
         public AuthorizationRole() { }
