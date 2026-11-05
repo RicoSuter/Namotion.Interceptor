@@ -10,8 +10,6 @@ public partial class ConditionalSourceRoot
         Children = [];
     }
 
-    public partial bool UseA { get; set; }
-
     public partial int A { get; set; }
 
     public partial int B { get; set; }
@@ -20,8 +18,9 @@ public partial class ConditionalSourceRoot
 }
 
 /// <summary>
-/// Reads either <see cref="ConditionalSourceRoot.A"/> or <see cref="ConditionalSourceRoot.B"/> of its root
-/// through a plain field, so the child does not reference the root through a tracked property.
+/// Reads either <see cref="ConditionalSourceRoot.A"/> or <see cref="ConditionalSourceRoot.B"/> of its root,
+/// selected by its own <see cref="UseA"/>, through a plain field, so the child does not reference the root
+/// through a tracked property.
 /// </summary>
 [InterceptorSubject]
 public partial class ConditionalSourceChild
@@ -33,6 +32,8 @@ public partial class ConditionalSourceChild
         _root = root;
     }
 
+    public partial bool UseA { get; set; }
+
     [Derived]
-    public int Value => _root.UseA ? _root.A : _root.B;
+    public int Value => UseA ? _root.A : _root.B;
 }

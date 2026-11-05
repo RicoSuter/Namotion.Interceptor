@@ -887,12 +887,14 @@ public class DerivedPropertyConcurrencyTests
     [Fact]
     public async Task WhenManyDependentsChangeDependenciesConcurrently_ThenValuesAndUsedByAgreeAfterWritesSettle()
     {
-        // More than 32 children, so the used-by lists of A and B switch between small and large storage.
-        // Many short rounds rather than one long one: a later write repairs a missed recalculation, so only
-        // races among the last writes of a round stay visible.
+        // More than 32 children, each selecting A or B on its own, so the used-by lists of A and B switch between
+        // small and large storage and both are checked at a mixed split. Many short rounds rather than one long
+        // one: a later write repairs a missed recalculation, so only races among the last writes of a round stay
+        // visible.
         const int roundCount = 200;
         const int childCount = 40;
         const int movingChildCount = 10;
+        const int finalChildCountUsingA = 22;
         const int operationCount = 20;
 
         for (var round = 0; round < roundCount; round++)
@@ -910,15 +912,23 @@ public class DerivedPropertyConcurrencyTests
                 .ToArray();
             root.Children = children;
 
+            // Flipping every child twice and then half of them leaves half on each source. Alternating an extra
+            // pass per round alternates which source grows from empty and which shrinks from all children.
+            var selectorFlipCount = childCount * (2 + round % 2) + childCount / 2;
+
             // Act - change dependencies concurrently
-            await ChangeDependenciesConcurrentlyAsync(root, children[movingChildCount..], operationCount);
+            await ChangeDependenciesConcurrentlyAsync(root, children[movingChildCount..], selectorFlipCount, operationCount);
 
             // Assert
             Assert.Same(children, root.Children);
             AssertValuesAndUsedByAgree(root, children);
 
-            // Act - write every source once more
-            root.UseA = !root.UseA;
+            // Act - select a fixed mixed split and write both sources once more
+            for (var index = 0; index < children.Length; index++)
+            {
+                children[index].UseA = index < finalChildCountUsingA;
+            }
+
             root.A = -1;
             root.B = -2;
 
@@ -929,28 +939,40 @@ public class DerivedPropertyConcurrencyTests
 
     private static void AssertValuesAndUsedByAgree(ConditionalSourceRoot root, ConditionalSourceChild[] children)
     {
-        var expectedValue = root.UseA ? root.A : root.B;
         Assert.All(children, child =>
         {
+            var expectedValue = child.UseA ? root.A : root.B;
             Assert.Equal(expectedValue, child.Value);
             var valueProperty = new PropertyReference(child, nameof(ConditionalSourceChild.Value));
             Assert.Equal(expectedValue, valueProperty.TryGetDerivedPropertyData()?.LastKnownValue);
         });
 
-        var selectedProperty = new PropertyReference(root, root.UseA ? nameof(ConditionalSourceRoot.A) : nameof(ConditionalSourceRoot.B));
-        var unselectedProperty = new PropertyReference(root, root.UseA ? nameof(ConditionalSourceRoot.B) : nameof(ConditionalSourceRoot.A));
-        var selectedUsedBy = selectedProperty.GetUsedByProperties().Items.ToArray();
-        Assert.Equal(children.Length, selectedUsedBy.Length);
-        Assert.All(children, child => Assert.Contains(new PropertyReference(child, nameof(ConditionalSourceChild.Value)), selectedUsedBy));
-        Assert.Empty(unselectedProperty.GetUsedByProperties().Items.ToArray());
+        AssertUsedByIs(new PropertyReference(root, nameof(ConditionalSourceRoot.A)), children.Where(child => child.UseA));
+        AssertUsedByIs(new PropertyReference(root, nameof(ConditionalSourceRoot.B)), children.Where(child => !child.UseA));
+    }
+
+    private static void AssertUsedByIs(PropertyReference source, IEnumerable<ConditionalSourceChild> expectedChildren)
+    {
+        var expected = expectedChildren
+            .Select(child => new PropertyReference(child, nameof(ConditionalSourceChild.Value)))
+            .ToHashSet();
+
+        var usedBy = source.GetUsedByProperties();
+        var count = usedBy.Count;
+        var items = usedBy.Items.ToArray();
+
+        var name = source.Metadata.Name;
+        Assert.True(count == items.Length, $"{name}: count {count} != items {items.Length}");
+        Assert.True(expected.Count == items.Length, $"{name}: expected {expected.Count} items, got {items.Length}");
+        Assert.True(expected.SetEquals(items), $"{name}: used-by does not match the children selecting it");
     }
 
     /// <summary>
-    /// Flips UseA, writes A and B, and detaches and re-attaches the children missing from the staying ones,
-    /// each on its own thread. Ends with all children attached.
+    /// Flips the children's selectors in turn, writes A and B, and detaches and re-attaches the children missing
+    /// from the staying ones, each on its own thread. Ends with all children attached.
     /// </summary>
     private static async Task ChangeDependenciesConcurrentlyAsync(
-        ConditionalSourceRoot root, ConditionalSourceChild[] stayingChildren, int operationCount)
+        ConditionalSourceRoot root, ConditionalSourceChild[] stayingChildren, int selectorFlipCount, int operationCount)
     {
         var children = root.Children;
         using var start = new ManualResetEventSlim();
@@ -958,9 +980,10 @@ public class DerivedPropertyConcurrencyTests
         {
             StartWhenSignaled(start, () =>
             {
-                for (var index = 0; index < operationCount; index++)
+                for (var index = 0; index < selectorFlipCount; index++)
                 {
-                    root.UseA = !root.UseA;
+                    var child = children[index % children.Length];
+                    child.UseA = !child.UseA;
                 }
             }),
             StartWhenSignaled(start, () =>

@@ -4,8 +4,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Thread-safe collection for backward property dependencies (UsedByProperties).
-/// Reads via <see cref="Items"/> return a stable snapshot without locking and without allocating,
-/// except that the first read after a change to a large collection rebuilds the snapshot once under a lock.
+/// Reads via <see cref="Items"/> return a stable snapshot without locking and without allocating, except in
+/// a large collection: a read that finds the snapshot cleared by a change takes the lock, and the first such
+/// read rebuilds the snapshot while the others wait for that copy.
 /// The order of <see cref="Items"/> is unspecified.
 /// </summary>
 public sealed class PropertyReferenceCollection
@@ -110,8 +111,8 @@ public sealed class PropertyReferenceCollection
     /// <returns>True if property was added; false if already exists.</returns>
     /// <remarks>
     /// A successful add is a full memory barrier: the addition is visible to other threads before any later
-    /// read by the calling thread. Dependency registration relies on this to pair with the write generation,
-    /// see the "Concurrent write detection via _writeGeneration" section of docs/design/tracking-derived-properties.md.
+    /// read by the calling thread. Dependency registration relies on this to pair with the write generation, and
+    /// needs no barrier from an add that returns false, see the "Concurrent write detection via _writeGeneration" section of docs/design/tracking-derived-properties.md.
     /// </remarks>
     internal bool Add(in PropertyReference property)
     {
@@ -256,19 +257,19 @@ public sealed class PropertyReferenceCollection
 
         internal bool Add(in PropertyReference property)
         {
-            if (_indices.ContainsKey(property))
-            {
-                return false;
-            }
-
+            // Grown before the index changes, so a failed resize leaves the storage unchanged.
             if (_count == _buffer.Length)
             {
                 Array.Resize(ref _buffer, _buffer.Length * 2);
             }
 
-            _indices.Add(property, _count);
+            if (!_indices.TryAdd(property, _count))
+            {
+                return false;
+            }
 
-            // Cleared before the count changes so a reader that sees the new count cannot get the old snapshot.
+            // Cleared before the count changes only so that a caller reading Count and then Items never gets an
+            // older snapshot than that count; nothing in this class or the write generation pairing relies on it.
             Volatile.Write(ref _snapshot, null);
             _buffer[_count] = property;
             Volatile.Write(ref _count, _count + 1);
@@ -282,7 +283,8 @@ public sealed class PropertyReferenceCollection
                 return false;
             }
 
-            // Cleared before the count changes so a reader that sees the new count cannot get the old snapshot.
+            // Cleared before the count changes only so that a caller reading Count and then Items never gets an
+            // older snapshot than that count; nothing in this class or the write generation pairing relies on it.
             Volatile.Write(ref _snapshot, null);
 
             var lastIndex = _count - 1;
