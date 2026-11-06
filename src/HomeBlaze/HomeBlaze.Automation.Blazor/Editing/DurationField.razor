@@ -1,0 +1,72 @@
+@implements IDisposable
+
+<MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="SetTextAsync" Immediate="true" HelperText="@HelperText"
+              Error="@(_error is not null)" ErrorText="@_error" Style="@Style" />
+
+@code {
+    private const string FormatError = "Use a duration such as 20s, 10m or 1h30m";
+
+    private readonly string _inputId = Guid.NewGuid().ToString("N");
+    private string? _text;
+    private string? _error;
+    private TimeSpan? _shownValue;
+    private bool _isInitialized;
+
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    [Parameter] public TimeSpan? Value { get; set; }
+
+    [Parameter] public EventCallback<TimeSpan?> ValueChanged { get; set; }
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    /// <summary>The rule an error of the field belongs to.</summary>
+    [Parameter] public string? RuleKey { get; set; }
+
+    [Parameter] public string? HelperText { get; set; }
+
+    [Parameter] public string? Style { get; set; }
+
+    // The text stays as typed while it does not parse, and is replaced only when the value changes elsewhere.
+    protected override void OnParametersSet()
+    {
+        if (_isInitialized && Value == _shownValue)
+        {
+            return;
+        }
+
+        _isInitialized = true;
+        _shownValue = Value;
+        _text = Value is { } value ? AutomationDuration.Format(value) : null;
+    }
+
+    private Task SetTextAsync(string? text)
+    {
+        _text = text;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return AcceptAsync(null);
+        }
+
+        if (DurationInput.TryParse(text, out var duration))
+        {
+            return AcceptAsync(duration);
+        }
+
+        _error = FormatError;
+        Draft.SetInputError(_inputId, new AutomationValidationError(RuleKey, $"{Label}: {FormatError}"));
+
+        // Passes the unchanged value on, so that the editor validates the draft again, now with the error of this field.
+        return ValueChanged.InvokeAsync(Value);
+    }
+
+    private Task AcceptAsync(TimeSpan? value)
+    {
+        _error = null;
+        _shownValue = value;
+        Draft.SetInputError(_inputId, null);
+        return ValueChanged.InvokeAsync(value);
+    }
+
+    public void Dispose() => Draft.SetInputError(_inputId, null);
+}

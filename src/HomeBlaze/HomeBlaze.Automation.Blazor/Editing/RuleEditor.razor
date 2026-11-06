@@ -1,0 +1,150 @@
+<MudStack Spacing="3" data-testid="automation-rule-editor">
+    <div class="d-flex flex-wrap align-center gap-3">
+        <div style="flex: 1 1 220px;">
+            <MudTextField T="string" Label="Rule name" Value="@Rule.Name" ValueChanged="SetNameAsync" Immediate="true" />
+        </div>
+        <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
+            @foreach (var mode in Modes)
+            {
+                <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(Rule.Mode == mode ? Variant.Filled : Variant.Outlined)"
+                           OnClick="@(() => SetModeAsync(mode))" data-testid="@($"automation-rule-mode-{mode}")">@AutomationSummary.FormatMode(mode)</MudButton>
+            }
+        </MudButtonGroup>
+        <MudIconButton Icon="@Icons.Material.Filled.Delete" aria-label="Delete rule" OnClick="@(() => Removed.InvokeAsync(Rule))"
+                       data-testid="automation-delete-rule" />
+    </div>
+    @if (Draft.States.Count > 0)
+    {
+        <div style="max-width: 280px;">
+            <MudSelect T="string" Label="Active in state" Value="@(Rule.InState ?? AnyState)" ValueChanged="SetInStateAsync" ToStringFunc="@FormatState">
+                <MudSelectItem Value="@AnyState">@FormatState(AnyState)</MudSelectItem>
+                @foreach (var state in Draft.States)
+                {
+                    <MudSelectItem Value="@state">@state</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+    }
+    else
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">This automation has no states, so the rule is active all the time. "Active in state" appears once states exist.</MudText>
+    }
+    @foreach (var error in Errors)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-rule-error">@error.Message</MudAlert>
+    }
+
+    <section>
+        <MudText Typo="Typo.h6">Runs when any of these happens</MudText>
+        <MudStack Spacing="2" Class="mt-2">
+            @foreach (var item in Rule.Triggers)
+            {
+                @switch (item.Value)
+                {
+                    case PropertyTrigger propertyTrigger:
+                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions" Draft="Draft" RuleKey="@Rule.Key" ItemId="@item.Id"
+                                               TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
+                        break;
+                    case SubjectEventTrigger eventTrigger:
+                        <MudPaper @key="item" Outlined="true" Class="pa-3">
+                            <MudText Typo="Typo.body2">Event @eventTrigger.EventType of @eventTrigger.SubjectPath</MudText>
+                        </MudPaper>
+                        break;
+                }
+            }
+        </MudStack>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddPropertyTriggerAsync"
+                       data-testid="automation-add-property-trigger">Property condition</MudButton>
+        </div>
+    </section>
+
+    <section>
+        <MudText Typo="Typo.h6">Only if</MudText>
+        <div class="mt-2">
+            <GuardEditor Rule="Rule" Draft="Draft" Expressions="_expressions" LastTriggeredAt="@SavedRule?.LastTriggeredAt" Changed="Changed" />
+        </div>
+    </section>
+
+    <section>
+        <MudText Typo="Typo.h6">Then, in this order</MudText>
+        <ol class="pl-6 mt-2">
+            @foreach (var item in Rule.Actions)
+            {
+                <li @key="item"><MudText Typo="Typo.body2" data-testid="automation-action-summary">@DescribeAction(item.Value)</MudText></li>
+            }
+        </ol>
+    </section>
+</MudStack>
+
+@code {
+    private const string AnyState = "";
+    private static readonly AutomationRuleMode[] Modes = [AutomationRuleMode.Off, AutomationRuleMode.DryRun, AutomationRuleMode.On];
+
+    private RuleExpressions _expressions = null!;
+
+    [CascadingParameter] private PendingRows? PendingRows { get; set; }
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
+
+    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    [Parameter] public EventCallback<RuleDraft> Removed { get; set; }
+
+    private AutomationRule? SavedRule => Automation.Rules.GetValueOrDefault(Rule.Key);
+
+    protected override void OnParametersSet() => _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent);
+
+    private Task SetNameAsync(string? name)
+    {
+        Rule.Name = name;
+        return Changed.InvokeAsync();
+    }
+
+    private Task SetModeAsync(AutomationRuleMode mode)
+    {
+        Rule.Mode = mode;
+        return Changed.InvokeAsync();
+    }
+
+    private Task SetInStateAsync(string? state)
+    {
+        Rule.InState = string.IsNullOrEmpty(state) ? null : state;
+        return Changed.InvokeAsync();
+    }
+
+    private Task SetTriggerAsync(DraftItem<AutomationTrigger> item, AutomationTrigger trigger)
+    {
+        item.Value = trigger;
+        return Changed.InvokeAsync();
+    }
+
+    private Task RemoveTriggerAsync(DraftItem<AutomationTrigger> item)
+    {
+        Rule.Triggers.Remove(item);
+        PendingRows?.Clear(PendingRowIds.ForItem(Rule.Key, RulesSection.Triggers, item.Id));
+        return Changed.InvokeAsync();
+    }
+
+    private Task AddPropertyTriggerAsync()
+    {
+        Rule.AddTrigger(new PropertyTrigger());
+        return Changed.InvokeAsync();
+    }
+
+    private static string FormatState(string? state) => string.IsNullOrEmpty(state) ? "Any state" : state;
+
+    private static string DescribeAction(AutomationAction action) => action switch
+    {
+        InvokeOperationAction invoke => $"Call {invoke.OperationPath}",
+        SetPropertyAction write => $"Set {write.PropertyPath} to {write.Value}",
+        ChangeStateAction change => $"Change state to {change.TargetState}",
+        _ => action.GetType().Name
+    };
+}

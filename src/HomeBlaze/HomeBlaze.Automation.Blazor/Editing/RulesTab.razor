@@ -1,0 +1,92 @@
+<div class="d-flex flex-wrap gap-4" style="min-height: 50vh;">
+    <div style="flex: 0 0 240px;" data-testid="automation-rule-list">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Rules run in this order</MudText>
+        <MudStack Spacing="1" Class="mt-1">
+            @for (var index = 0; index < Draft.Rules.Count; index++)
+            {
+                var rule = Draft.Rules[index];
+                var isFirst = index == 0;
+                var isLast = index == Draft.Rules.Count - 1;
+                <MudPaper @key="rule" Outlined="true" Class="pa-2 d-flex align-center gap-1" Style="@GetItemStyle(rule)"
+                          @onclick="@(() => SelectAsync(rule))" data-testid="automation-rule-item">
+                    <div class="flex-grow-1" style="min-width: 0;">
+                        <MudText Typo="Typo.body2" Style="font-weight: 500; overflow-wrap: anywhere;">@rule.DisplayName</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Describe(rule)</MudText>
+                    </div>
+                    @if (Errors.Any(error => error.RuleKey == rule.Key))
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Warning" Size="Size.Small" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@isFirst" aria-label="Move rule up"
+                                   OnClick="@(() => MoveAsync(rule, -1))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@isLast" aria-label="Move rule down"
+                                   OnClick="@(() => MoveAsync(rule, 1))" />
+                </MudPaper>
+            }
+        </MudStack>
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRuleAsync" Class="mt-2" data-testid="automation-add-rule">Add rule</MudButton>
+    </div>
+    <div style="flex: 1 1 480px; min-width: 0;">
+        @if (Draft.FindRule(SelectedRuleKey) is { } selected)
+        {
+            <RuleEditor @key="selected" Automation="Automation" Draft="Draft" Rule="selected" Errors="@GetErrors(selected)" Changed="Changed" Removed="RemoveAsync" />
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Add a rule to start.</MudText>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private PendingRows? PendingRows { get; set; }
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
+
+    [Parameter] public string? SelectedRuleKey { get; set; }
+
+    [Parameter] public EventCallback<string?> SelectedRuleKeyChanged { get; set; }
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private string GetItemStyle(RuleDraft rule) => rule.Key == SelectedRuleKey
+        ? "cursor: pointer; border-color: var(--mud-palette-primary); border-width: 2px;"
+        : "cursor: pointer;";
+
+    private IReadOnlyList<AutomationValidationError> GetErrors(RuleDraft rule) => [.. Errors.Where(error => error.RuleKey == rule.Key)];
+
+    private Task SelectAsync(RuleDraft rule) => SelectedRuleKeyChanged.InvokeAsync(rule.Key);
+
+    private async Task AddRuleAsync()
+    {
+        var rule = Draft.AddRule();
+        await SelectedRuleKeyChanged.InvokeAsync(rule.Key);
+        await Changed.InvokeAsync();
+    }
+
+    private Task MoveAsync(RuleDraft rule, int offset)
+    {
+        Draft.MoveRule(rule, offset);
+        return Changed.InvokeAsync();
+    }
+
+    private async Task RemoveAsync(RuleDraft rule)
+    {
+        var index = Draft.Rules.IndexOf(rule);
+        Draft.RemoveRule(rule);
+        PendingRows?.Clear(PendingRowIds.ForRule(rule.Key));
+        var next = Draft.Rules.Count == 0 ? null : Draft.Rules[Math.Min(index, Draft.Rules.Count - 1)].Key;
+        await SelectedRuleKeyChanged.InvokeAsync(next);
+        await Changed.InvokeAsync();
+    }
+
+    private static string Describe(RuleDraft rule)
+    {
+        var count = rule.Triggers.Count;
+        return $"{AutomationSummary.FormatMode(rule.Mode)}, {count} {(count == 1 ? "trigger" : "triggers")}";
+    }
+}

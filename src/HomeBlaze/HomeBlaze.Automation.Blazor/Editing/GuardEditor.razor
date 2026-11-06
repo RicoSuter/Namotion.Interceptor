@@ -1,0 +1,41 @@
+@inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
+
+@{
+    var (condition, cooldown) = GuardCooldown.Split(Rule.Guard);
+}
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-guard">
+    <ConditionField @key="@GuardFieldId" FieldId="@GuardFieldId" Label="Checked when a trigger fires" Lead="Check" Value="@condition"
+                    ValueChanged="@(value => SetGuardAsync(value, cooldown))"
+                    Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-guard-condition" />
+    <div class="d-flex flex-wrap align-center gap-3 mt-2">
+        <DurationField Label="At most once every" Value="@cooldown" ValueChanged="@(value => SetGuardAsync(condition, value))"
+                       Draft="Draft" RuleKey="@Rule.Key" HelperText="Empty: no limit" Style="max-width: 240px;" />
+        @if (LastTriggeredAt is { } lastTriggeredAt)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">Last triggered @AutomationTime.Format(TimeZone, lastTriggeredAt, TimeProvider.GetUtcNow())</MudText>
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public RuleDraft Rule { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    /// <summary>When the saved rule last triggered, or null.</summary>
+    [Parameter] public DateTimeOffset? LastTriggeredAt { get; set; }
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private string GuardFieldId => PendingRowIds.For(Rule.Key, RulesSection.Guard, RulesSection.Guard, "condition");
+
+    // The guard is written only here, after an edit, so that opening a rule never rewrites the text it holds.
+    private Task SetGuardAsync(string? condition, TimeSpan? cooldown)
+    {
+        Rule.Guard = GuardCooldown.Combine(condition, cooldown);
+        return Changed.InvokeAsync();
+    }
+}

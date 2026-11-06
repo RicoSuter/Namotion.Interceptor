@@ -28,6 +28,9 @@
                 <MudTabPanel Text="General">
                     <GeneralTab Draft="draft" Changed="OnChanged" />
                 </MudTabPanel>
+                <MudTabPanel Text="Rules">
+                    <RulesTab Automation="Automation" Draft="draft" Errors="_errors" @bind-SelectedRuleKey="_selectedRuleKey" Changed="OnChanged" />
+                </MudTabPanel>
             </MudTabs>
         </CascadingValue>
     </MudStack>
@@ -38,6 +41,7 @@
     private AutomationDraft? _draft;
     private IReadOnlyList<AutomationValidationError> _errors = [];
     private int _tabIndex;
+    private string? _selectedRuleKey;
     private bool _isDirty;
     private bool _wasValid = true;
     private bool _isDisposed;
@@ -66,6 +70,7 @@
         {
             _draft = AutomationDraft.From(automation);
             _errors = _draft.Validate();
+            _selectedRuleKey = _draft.Rules.Count > 0 ? _draft.Rules[0].Key : null;
         }
 
         _wasValid = IsValid;

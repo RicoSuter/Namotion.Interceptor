@@ -1,0 +1,83 @@
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-property-trigger">
+    <div class="d-flex align-center">
+        <MudText Typo="Typo.overline">Property condition</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove trigger" OnClick="@(() => Removed.InvokeAsync())" />
+    </div>
+    <ConditionField @key="@ConditionFieldId" FieldId="@ConditionFieldId" Label="Condition" Lead="When" Value="@_trigger.Expression" ValueChanged="SetExpressionAsync"
+                    Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-trigger-condition" />
+    <div class="d-flex flex-wrap gap-3 mt-2">
+        <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" Draft="Draft" RuleKey="@RuleKey"
+                       HelperText="Empty: fires at once" Style="flex: 1 1 160px;" />
+        <div style="flex: 1 1 200px;">
+            <MudSelect T="TriggerActivation" Label="When the rule starts" Value="@_trigger.OnActivation" ValueChanged="SetActivationAsync"
+                       ToStringFunc="@FormatActivation">
+                <MudSelectItem Value="TriggerActivation.EvaluateImmediately">@FormatActivation(TriggerActivation.EvaluateImmediately)</MudSelectItem>
+                <MudSelectItem Value="TriggerActivation.WaitForFalseToTrue">@FormatActivation(TriggerActivation.WaitForFalseToTrue)</MudSelectItem>
+            </MudSelect>
+        </div>
+    </div>
+    @if (_trigger.Rearm is null)
+    {
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRearmAsync" Class="mt-2"
+                   data-testid="automation-add-rearm">Run again only after</MudButton>
+    }
+    else
+    {
+        <div class="d-flex align-start gap-1 mt-3">
+            <div class="flex-grow-1" style="min-width: 0;">
+                <ConditionField @key="@RearmFieldId" FieldId="@RearmFieldId" Label="Run again only after" Lead="When" Value="@_trigger.Rearm" ValueChanged="SetRearmAsync"
+                                Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-trigger-rearm" />
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove the rearm condition" OnClick="RemoveRearmAsync" />
+        </div>
+    }
+</MudPaper>
+
+@code {
+    private PropertyTrigger _trigger = null!;
+
+    [Parameter, EditorRequired] public PropertyTrigger Trigger { get; set; } = null!;
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
+
+    /// <summary>The <see cref="DraftItem{T}.Id"/> of the trigger, which keys its fields in the pending rows of the editor.</summary>
+    [Parameter, EditorRequired] public string ItemId { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
+
+    [Parameter] public EventCallback Removed { get; set; }
+
+    // The component renders again after each edit, before its parent passes the new trigger down. A stale value in that
+    // render would make the expression field reload its text and lose a row that is not finished.
+    protected override void OnParametersSet() => _trigger = Trigger;
+
+    private Task UpdateAsync(PropertyTrigger trigger)
+    {
+        _trigger = trigger;
+        return TriggerChanged.InvokeAsync(trigger);
+    }
+
+    private string ConditionFieldId => PendingRowIds.For(RuleKey, RulesSection.Triggers, ItemId, "condition");
+
+    private string RearmFieldId => PendingRowIds.For(RuleKey, RulesSection.Triggers, ItemId, "rearm");
+
+    private Task SetExpressionAsync(string? expression) => UpdateAsync(_trigger with { Expression = expression ?? string.Empty });
+
+    private Task SetHoldAsync(TimeSpan? hold) => UpdateAsync(_trigger with { For = hold });
+
+    private Task SetActivationAsync(TriggerActivation activation) => UpdateAsync(_trigger with { OnActivation = activation });
+
+    private Task AddRearmAsync() => UpdateAsync(_trigger with { Rearm = string.Empty });
+
+    private Task SetRearmAsync(string? rearm) => UpdateAsync(_trigger with { Rearm = rearm ?? string.Empty });
+
+    private Task RemoveRearmAsync() => UpdateAsync(_trigger with { Rearm = null });
+
+    private static string FormatActivation(TriggerActivation activation) =>
+        activation == TriggerActivation.WaitForFalseToTrue ? "Wait for a change" : "Run if already true";
+}
