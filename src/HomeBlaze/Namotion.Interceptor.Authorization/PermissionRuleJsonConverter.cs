@@ -97,7 +97,16 @@ public sealed class PermissionRuleJsonConverter : JsonConverter<PermissionRule>
     }
 
     private static string GetEchoedName(ReadOnlySpan<char> name)
-        => name.Length <= MaxEchoedNameLength ? name.ToString() : $"{name[..MaxEchoedNameLength]}...";
+    {
+        if (name.Length <= MaxEchoedNameLength)
+        {
+            return name.ToString();
+        }
+
+        // Cutting between the halves of a surrogate pair would leave an invalid character in the message.
+        var length = char.IsHighSurrogate(name[MaxEchoedNameLength - 1]) ? MaxEchoedNameLength - 1 : MaxEchoedNameLength;
+        return $"{name[..length]}...";
+    }
 
     private static Property GetProperty(ReadOnlySpan<char> name)
     {

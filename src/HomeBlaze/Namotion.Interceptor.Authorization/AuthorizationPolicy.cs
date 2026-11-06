@@ -462,7 +462,7 @@ public sealed class AuthorizationPolicy
         }
 
         // Already explored from here, or a cycle: no new route to a root through this subject.
-        if ((parents.Length > 1 || depth >= Limits.CycleTrackingDepth) && !(visited ??= []).Add(subject))
+        if ((parents.Length > 1 || depth >= Limits.WalkVisitedTrackingDepth) && !(visited ??= []).Add(subject))
         {
             return false;
         }

@@ -135,6 +135,19 @@ public class PermissionRuleJsonTests
     }
 
     [Fact]
+    public void WhenTheEchoLimitFallsInsideASurrogatePair_ThenTheMessageEndsBeforeThePair()
+    {
+        // Arrange
+        var propertyName = new string('x', 63) + "\U0001F600" + "TheRest";
+        var json = JsonSerializer.Serialize(new Dictionary<string, object> { ["actions"] = new[] { "read" }, [propertyName] = Array.Empty<string>() });
+
+        // Act & Assert
+        var exception = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PermissionRule>(json));
+        Assert.Contains($"'{new string('x', 63)}...'", exception.Message);
+        Assert.DoesNotContain('\uD83D', exception.Message);
+    }
+
+    [Fact]
     public void WhenPropertyIsRepeated_ThenReadingThrowsNamingIt()
     {
         // Arrange

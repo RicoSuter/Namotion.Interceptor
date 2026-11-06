@@ -3,8 +3,11 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>The bounds that keep compiling and evaluating a policy finite on any role set and any graph.</summary>
 internal static class Limits
 {
-    // A chain of single parents shallower than this is followed without a visited set, so it allocates nothing; deeper, a revisit ends a cycle.
-    public const int CycleTrackingDepth = 256;
+    // The visibility walk tracks every subject from this depth on, so a deep single-parent chain reached from several branches is explored once.
+    public const int WalkVisitedTrackingDepth = 32;
+
+    // Path enumeration follows a branchless chain of single parents this deep without a visited set; deeper, a revisit ends a cycle.
+    public const int ChainCycleTrackingDepth = 256;
 
     // A subject's paths are listed up to this many, so a subject shared through many routes does not make every evaluation enumerate them all.
     public const int MaxPaths = 64;

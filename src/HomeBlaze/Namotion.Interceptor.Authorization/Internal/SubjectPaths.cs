@@ -80,7 +80,7 @@ internal static class SubjectPaths
         while (parents.Length == 1)
         {
             // Start tracking only past the threshold; a revisit then means the chain is a cycle and has no path.
-            if (++depth > Limits.CycleTrackingDepth && !(visited ??= []).Add(current))
+            if (++depth > Limits.ChainCycleTrackingDepth && !(visited ??= []).Add(current))
             {
                 return true;
             }
