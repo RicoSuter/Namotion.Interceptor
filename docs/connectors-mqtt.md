@@ -361,7 +361,7 @@ The server's diagnostics are an `MqttServerDiagnostics`, which adds one member:
 
 | Member | Meaning |
 |---|---|
-| `ConnectedClientCount` | Clients currently connected to the broker. |
+| `ConnectedClientCount` | Client connections currently open on the broker. |
 
 A server has no inbound buffer or retry queue, so only `OutboundChanges` applies there. It is registered while the change queue processor is running and its capacity is `null`, because that queue is unbounded.
 

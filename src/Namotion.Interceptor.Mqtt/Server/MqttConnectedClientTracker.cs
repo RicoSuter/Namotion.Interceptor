@@ -1,28 +1,30 @@
 using System.Collections.Concurrent;
+using System.Net;
 
 namespace Namotion.Interceptor.Mqtt.Server;
 
 /// <summary>
-/// Tracks the IDs of the clients the broker reported connected and not yet disconnected. Keyed by client ID, so a
-/// Disconnected the broker raises without a Connected (a failed CONNACK) cannot lower the count below the clients
-/// that are still connected.
+/// Tracks the connections the broker reported connected and not yet disconnected, each identified by its client ID and
+/// remote endpoint. A Disconnected the broker raises without a Connected (a failed CONNACK) cannot lower the count
+/// below the connections that are still open, and a late Disconnected of an old connection cannot remove a newer
+/// connection of the same client ID.
 /// </summary>
 internal sealed class MqttConnectedClientTracker
 {
-    private readonly ConcurrentDictionary<string, byte> _clientIds = new();
+    private readonly ConcurrentDictionary<(string ClientId, EndPoint? RemoteEndPoint), byte> _connections = new();
 
     /// <summary>
-    /// Gets the number of connected client IDs.
+    /// Gets the number of open connections.
     /// </summary>
-    public int Count => _clientIds.Count;
+    public int Count => _connections.Count;
 
     /// <summary>
-    /// Records a client as connected; a client ID that is already connected is counted once.
+    /// Records a connection as open; a connection that is already open is counted once.
     /// </summary>
-    public void Add(string clientId) => _clientIds.TryAdd(clientId, 0);
+    public void Add(string clientId, EndPoint? remoteEndPoint) => _connections.TryAdd((clientId, remoteEndPoint), 0);
 
     /// <summary>
-    /// Records a client as disconnected; an ID that is not connected is ignored.
+    /// Records a connection as closed; a connection that is not open is ignored.
     /// </summary>
-    public void Remove(string clientId) => _clientIds.TryRemove(clientId, out _);
+    public void Remove(string clientId, EndPoint? remoteEndPoint) => _connections.TryRemove((clientId, remoteEndPoint), out _);
 }

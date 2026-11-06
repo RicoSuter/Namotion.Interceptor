@@ -65,7 +65,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     public override MqttServerDiagnostics Diagnostics { get; }
 
     /// <summary>
-    /// Gets the number of clients currently connected to the broker.
+    /// Gets the number of client connections currently open on the broker.
     /// </summary>
     internal int ConnectedClientCount => _currentConnectedClients?.Count ?? 0;
 
@@ -593,7 +593,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         List<Task> initialStateTasks,
         MqttConnectedClientTracker connectedClients)
     {
-        connectedClients.Add(arg.ClientId);
+        connectedClients.Add(arg.ClientId, arg.RemoteEndPoint);
         _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, connectedClients.Count);
 
         // Publish all current property values to new client
@@ -820,7 +820,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg, MqttConnectedClientTracker connectedClients)
     {
-        connectedClients.Remove(arg.ClientId);
+        connectedClients.Remove(arg.ClientId, arg.RemoteEndPoint);
         _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}.", arg.ClientId, connectedClients.Count);
         return Task.CompletedTask;
     }
