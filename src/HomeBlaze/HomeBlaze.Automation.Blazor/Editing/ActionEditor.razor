@@ -1,3 +1,4 @@
+@implements IDisposable
 @using global::HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
 
@@ -8,16 +9,14 @@
             @switch (_value)
             {
                 case InvokeOperationAction invoke:
-                    <SubjectPathField Label="Call operation" Value="@invoke.OperationPath" CanSelectProperty="@IsOperation"
-                                      ValueChanged="@(path => SetOperationAsync(invoke, path))" />
+                    <SubjectPathField Label="Call operation" Value="@invoke.OperationPath" CanSelectProperty="@IsOperation" ValueChanged="SetOperationAsync" />
                     break;
                 case SetPropertyAction write:
-                    <SubjectPathField Label="Set property" Value="@write.PropertyPath" CanSelectProperty="@IsWritable"
-                                      ValueChanged="@(path => SetAsync(write with { PropertyPath = path ?? string.Empty }))" />
+                    <SubjectPathField Label="Set property" Value="@write.PropertyPath" CanSelectProperty="@IsWritable" ValueChanged="SetPropertyPathAsync" />
                     break;
                 case ChangeStateAction change:
-                    <MudSelect T="string" Label="Change state to" Value="@change.TargetState" data-testid="automation-change-state-target"
-                               ValueChanged="@(state => SetAsync(change with { TargetState = state ?? string.Empty }))">
+                    <MudSelect T="string" Label="Change state to" Value="@change.TargetState" ValueChanged="SetTargetStateAsync"
+                               data-testid="automation-change-state-target">
                         @foreach (var state in States)
                         {
                             <MudSelectItem Value="@state">@state</MudSelectItem>
@@ -27,8 +26,7 @@
             }
         </div>
         <div style="width: 150px;">
-            <MudSelect T="ActionErrorPolicy" Label="On error" Value="@_value.OnError" ToStringFunc="@FormatPolicy"
-                       ValueChanged="@(policy => SetAsync(_value with { OnError = policy }))">
+            <MudSelect T="ActionErrorPolicy" Label="On error" Value="@_value.OnError" ToStringFunc="@FormatPolicy" ValueChanged="SetPolicyAsync">
                 <MudSelectItem Value="ActionErrorPolicy.Continue">@FormatPolicy(ActionErrorPolicy.Continue)</MudSelectItem>
                 <MudSelectItem Value="ActionErrorPolicy.StopRule">@FormatPolicy(ActionErrorPolicy.StopRule)</MudSelectItem>
             </MudSelect>
@@ -51,10 +49,13 @@
 
 @code {
     private const string ValueHelperText = "A value, or an expression such as /Weather/WindGust * 2";
+    private const string ValueKey = "value";
 
     private AutomationAction _value = null!;
     private IReadOnlyList<ArgumentField>? _fields;
+    private Type? _targetType;
     private bool _isTextTarget;
+    private Dictionary<string, string> _errors = [];
 
     [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
 
@@ -72,9 +73,17 @@
 
     [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
 
+    /// <summary>The draft that cannot be saved while an input of this action has an error.</summary>
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    /// <summary>The <see cref="DraftItem{T}.Id"/> of the action, which keys the errors of its inputs in the draft.</summary>
+    [Parameter, EditorRequired] public string ItemId { get; set; } = string.Empty;
+
     [Parameter] public EventCallback<int> Moved { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
+
+    private string InputPrefix => PendingRowIds.ForItem(RuleKey, RulesSection.Actions, ItemId);
 
     // The component renders again after each edit, before its parent passes the new action down. A stale value in that
     // render would make a text field reload and lose what was just typed.
@@ -87,13 +96,49 @@
     private void Refresh()
     {
         _fields = _value is InvokeOperationAction invoke ? GetFields(invoke.OperationPath) : null;
-        _isTextTarget = _value is SetPropertyAction write &&
-            AutomationPreview.ResolveTarget(Automation, RuleKey, write.PropertyPath) is { } target &&
-            (Nullable.GetUnderlyingType(target.Type) ?? target.Type) == typeof(string);
+        _targetType = _value is SetPropertyAction write ? ResolveType(write.PropertyPath) : null;
+        _isTextTarget = _targetType is not null && (Nullable.GetUnderlyingType(_targetType) ?? _targetType) == typeof(string);
+        Validate();
     }
 
     private IReadOnlyList<ArgumentField>? GetFields(string path) =>
         AutomationPreview.ResolveTarget(Automation, RuleKey, path)?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
+
+    private Type? ResolveType(string path) => AutomationPreview.ResolveTarget(Automation, RuleKey, path)?.Type;
+
+    // The errors are registered in the draft, which cannot be saved meanwhile.
+    private void Validate()
+    {
+        Draft.ClearInputErrors(InputPrefix);
+        _errors = [];
+        switch (_value)
+        {
+            case InvokeOperationAction invoke when _fields is not null:
+                foreach (var field in _fields)
+                {
+                    AddError(field.Key, $"{field.Label}", ArgumentFields.Validate(GetArgument(invoke, field.Key), field.Type, field.IsRequired, Expressions));
+                }
+
+                break;
+            case SetPropertyAction write:
+                AddError(ValueKey, "Value", ArgumentFields.Validate(write.Value, _targetType, !_isTextTarget, Expressions));
+                break;
+        }
+    }
+
+    private void AddError(string key, string label, string? error)
+    {
+        if (error is null)
+        {
+            return;
+        }
+
+        _errors[key] = error;
+        var target = _value is InvokeOperationAction invoke ? invoke.OperationPath : (_value as SetPropertyAction)?.PropertyPath;
+        Draft.SetInputError($"{InputPrefix}{Uri.EscapeDataString(key)}", new AutomationValidationError(RuleKey, $"{target}, {label}: {error}"));
+    }
+
+    private string? GetError(string key) => _errors.GetValueOrDefault(key);
 
     private RenderFragment RenderArguments(InvokeOperationAction invoke) => __builder =>
     {
@@ -108,19 +153,28 @@
         }
 
         <MudStack Spacing="2" Class="mt-2 ml-6" data-testid="automation-action-arguments">
+            @{ string? group = null; }
             @foreach (var field in _fields)
             {
+                var fieldGroup = GetGroup(field.Key);
+                if (fieldGroup is not null && fieldGroup != group)
+                {
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">@fieldGroup</MudText>
+                }
+
+                group = fieldGroup;
                 var label = field.IsRequired ? $"{field.Label} *" : field.Label;
                 var argument = GetArgument(invoke, field.Key);
+                var error = GetError(field.Key);
                 if (field.IsTemplate)
                 {
-                    <TemplateField @key="@field.Key" Label="@label" Value="@argument" Expressions="Expressions"
-                                   ValueChanged="@(value => SetArgumentAsync(invoke, field.Key, value))" />
+                    <TemplateField @key="@field.Key" Label="@label" Value="@argument" Expressions="Expressions" IsRequired="@field.IsRequired"
+                                   ValueChanged="@(value => SetArgumentAsync(field.Key, value))" />
                 }
                 else if (field.Choices is { } choices)
                 {
-                    <MudSelect @key="@field.Key" T="string" Label="@label" Value="@argument" Clearable="true"
-                               ValueChanged="@(value => SetArgumentAsync(invoke, field.Key, value))">
+                    <MudSelect @key="@field.Key" T="string" Label="@label" Value="@argument" Clearable="true" Error="@(error is not null)" ErrorText="@error"
+                               ValueChanged="@(value => SetArgumentAsync(field.Key, value))">
                         @foreach (var choice in choices)
                         {
                             <MudSelectItem Value="@choice">@choice</MudSelectItem>
@@ -130,7 +184,7 @@
                 else
                 {
                     <MudTextField @key="@field.Key" T="string" Label="@label" Value="@argument" Immediate="true" HelperText="@ValueHelperText"
-                                  ValueChanged="@(value => SetArgumentAsync(invoke, field.Key, value))" />
+                                  Error="@(error is not null)" ErrorText="@error" ValueChanged="@(value => SetArgumentAsync(field.Key, value))" />
                 }
             }
         </MudStack>
@@ -138,16 +192,16 @@
 
     private RenderFragment RenderValue(SetPropertyAction write) => __builder =>
     {
+        var error = GetError(ValueKey);
         <div class="mt-2 ml-6">
             @if (_isTextTarget)
             {
-                <TemplateField Label="Value" Value="@write.Value" Expressions="Expressions"
-                               ValueChanged="@(value => SetAsync(write with { Value = value ?? string.Empty }))" />
+                <TemplateField Label="Value" Value="@write.Value" Expressions="Expressions" ValueChanged="SetWriteValueAsync" />
             }
             else
             {
                 <MudTextField T="string" Label="Value" Value="@write.Value" Immediate="true" HelperText="@ValueHelperText"
-                              ValueChanged="@(value => SetAsync(write with { Value = value ?? string.Empty }))" />
+                              Error="@(error is not null)" ErrorText="@error" ValueChanged="SetWriteValueAsync" />
             }
         </div>
     };
@@ -159,18 +213,38 @@
         return ValueChanged.InvokeAsync(action);
     }
 
-    // The arguments of another operation are dropped when they do not fit the new one, because the binder rejects a key
-    // that is no parameter or member of the operation.
-    private Task SetOperationAsync(InvokeOperationAction invoke, string? path)
+    // Each keystroke of the path is a change, so the arguments are dropped only once the path leads to an operation, and
+    // then only those that its parameters do not have, because the binder rejects such a key.
+    private Task SetOperationAsync(string? path)
     {
+        if (_value is not InvokeOperationAction invoke)
+        {
+            return Task.CompletedTask;
+        }
+
         var operationPath = path ?? string.Empty;
-        var fields = GetFields(operationPath) ?? [];
-        return SetAsync(invoke with { OperationPath = operationPath, Arguments = ArgumentFields.KeepKnown(fields, invoke.Arguments) });
+        return SetAsync(invoke with { OperationPath = operationPath, Arguments = ArgumentFields.KeepKnown(GetFields(operationPath), invoke.Arguments) });
     }
 
+    private Task SetPropertyPathAsync(string? path) =>
+        _value is SetPropertyAction write ? SetAsync(write with { PropertyPath = path ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetWriteValueAsync(string? value) =>
+        _value is SetPropertyAction write ? SetAsync(write with { Value = value ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetTargetStateAsync(string? state) =>
+        _value is ChangeStateAction change ? SetAsync(change with { TargetState = state ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetPolicyAsync(ActionErrorPolicy policy) => SetAsync(_value with { OnError = policy });
+
     // The binder matches keys without regard to case, so another spelling of the same key is replaced.
-    private Task SetArgumentAsync(InvokeOperationAction invoke, string key, string? value)
+    private Task SetArgumentAsync(string key, string? value)
     {
+        if (_value is not InvokeOperationAction invoke)
+        {
+            return Task.CompletedTask;
+        }
+
         var arguments = invoke.Arguments
             .Where(argument => !string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase))
             .ToDictionary(argument => argument.Key, argument => argument.Value);
@@ -185,6 +259,13 @@
     private static string? GetArgument(InvokeOperationAction invoke, string key) =>
         invoke.Arguments.FirstOrDefault(argument => string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
 
+    /// <summary>The name of the record parameter that a member field belongs to, or null for a field of a parameter.</summary>
+    private static string? GetGroup(string key)
+    {
+        var separator = key.IndexOf('.');
+        return separator < 0 ? null : key[..separator];
+    }
+
     private static bool IsOperation(RegisteredSubjectProperty property) =>
         property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, RequiresConfirmation: false };
 
@@ -192,4 +273,6 @@
         property.TryGetMethodMetadata() is null && property.HasPublicSetter && !property.IsConfigurationProperty();
 
     private static string FormatPolicy(ActionErrorPolicy policy) => policy == ActionErrorPolicy.StopRule ? "Stop rule" : "Continue";
+
+    public void Dispose() => Draft.ClearInputErrors(InputPrefix);
 }

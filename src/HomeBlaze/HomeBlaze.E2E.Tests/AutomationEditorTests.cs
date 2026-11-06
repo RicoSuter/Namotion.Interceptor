@@ -1,3 +1,4 @@
+using HomeBlaze.Automation;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using System.Text.Json;
 using Microsoft.Playwright;
@@ -286,7 +287,12 @@ public class AutomationEditorTests
             Assert.Contains("\"id\": \"state-2\"", json);
             var (_, reopened) = await OpenEditorAsync(name, page);
             await reopened.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
-            await Assertions.Expect(reopened.GetByTestId("automation-event-trigger")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+            var reopenedTrigger = reopened.GetByTestId("automation-event-trigger");
+            await Assertions.Expect(reopenedTrigger).ToHaveCountAsync(1, new() { Timeout = Timeout });
+            await Assertions.Expect(reopenedTrigger.GetByTestId("automation-event-source")).ToHaveTextAsync("This automation");
+            await Assertions.Expect(reopenedTrigger.GetByTestId("automation-event-type")).ToHaveValueAsync("Automation state changed");
+            await reopenedTrigger.GetByTestId("automation-event-filter-advanced").ClickAsync();
+            await Assertions.Expect(reopenedTrigger.GetByTestId("automation-event-filter-text")).ToHaveValueAsync("event/NewState == Running");
             await Assertions.Expect(reopened.GetByTestId("automation-action")).ToHaveCountAsync(2);
         }
         finally
@@ -322,6 +328,115 @@ public class AutomationEditorTests
             Assert.Equal("Idle", rule.GetProperty("actions")[0].GetProperty("targetState").GetString());
             await Assertions.Expect(page.GetByTestId("automation-rule-row")).ToHaveCountAsync(3, new() { Timeout = Timeout });
             await Assertions.Expect(page.GetByTestId("automation-page")).ToContainTextAsync("Rule 3", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenACallOperationIsGivenItsArguments_ThenTheyAreSavedAndMissingOnesBlockSaving()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Started" }).ClickAsync();
+            await dialog.GetByTestId("automation-add-call-operation").ClickAsync();
+            var action = dialog.GetByTestId("automation-action").Last;
+
+            // Act
+            await action.GetByLabel("Call operation", new() { Exact = true }).FillAsync("/Demo/Motor/RunTest");
+            await action.GetByLabel("Speed").FillAsync("50");
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("DurationSeconds", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeDisabledAsync();
+            await action.GetByLabel("DurationSeconds").FillAsync("5");
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await SaveAsync(page, dialog);
+            using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(filePath));
+            var call = saved.RootElement.GetProperty("rules").GetProperty("started").GetProperty("actions")[1];
+            Assert.Equal("/Demo/Motor/RunTest", call.GetProperty("operationPath").GetString());
+            Assert.Equal("50", call.GetProperty("arguments").GetProperty("speed").GetString());
+            Assert.Equal("5", call.GetProperty("arguments").GetProperty("durationSeconds").GetString());
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheOperationPathIsEditedCharacterByCharacter_ThenTheArgumentsAreKept()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].Actions =
+            [
+                new InvokeOperationAction
+                {
+                    Id = "call-1",
+                    OperationPath = "/Demo/Motor/RunTest",
+                    Arguments = new Dictionary<string, string> { ["speed"] = "50", ["durationSeconds"] = "5" }
+                }
+            ];
+        });
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            var action = dialog.GetByTestId("automation-action");
+            var path = action.GetByLabel("Call operation", new() { Exact = true });
+            await Assertions.Expect(action.GetByLabel("Speed")).ToHaveValueAsync("50", new() { Timeout = Timeout });
+
+            // Act
+            await path.PressAsync("End");
+            await path.PressAsync("Backspace");
+            await Assertions.Expect(action.GetByLabel("Speed")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await path.PressSequentiallyAsync("t");
+
+            // Assert
+            await Assertions.Expect(action.GetByLabel("Speed")).ToHaveValueAsync("50", new() { Timeout = Timeout });
+            await Assertions.Expect(action.GetByLabel("DurationSeconds")).ToHaveValueAsync("5");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenActionsAreMovedAndRemoved_ThenTheFileHasThemInTheNewOrder()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Started" }).ClickAsync();
+            await dialog.GetByTestId("automation-add-change-state").ClickAsync();
+            await dialog.GetByTestId("automation-add-change-state").ClickAsync();
+            var actions = dialog.GetByTestId("automation-action");
+            await Assertions.Expect(actions).ToHaveCountAsync(3, new() { Timeout = Timeout });
+
+            // Act
+            await actions.Nth(2).GetByRole(AriaRole.Button, new() { Name = "Move action up" }).ClickAsync();
+            await actions.Nth(0).GetByRole(AriaRole.Button, new() { Name = "Remove action" }).ClickAsync();
+            await Assertions.Expect(actions).ToHaveCountAsync(2, new() { Timeout = Timeout });
+            await SaveAsync(page, dialog);
+
+            // Assert
+            using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(filePath));
+            var ids = saved.RootElement.GetProperty("rules").GetProperty("started").GetProperty("actions").EnumerateArray()
+                .Select(action => action.GetProperty("id").GetString()!).ToArray();
+            Assert.Equal(["state-3", "state-2"], ids);
         }
         finally
         {

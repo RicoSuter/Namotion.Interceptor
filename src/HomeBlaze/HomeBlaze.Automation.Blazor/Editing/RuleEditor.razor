@@ -46,7 +46,7 @@
                                                TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
                         break;
                     case SubjectEventTrigger eventTrigger:
-                        <EventTriggerEditor @key="item" Trigger="eventTrigger" Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions" ItemId="@item.Id"
+                        <EventTriggerEditor @key="item" Trigger="eventTrigger" Automation="Automation" RuleKey="@Rule.Key" ItemId="@item.Id"
                                             TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
                         break;
                 }
@@ -74,7 +74,7 @@
             {
                 var item = Rule.Actions[index];
                 <ActionEditor @key="item" Value="item.Value" Index="index" Count="Rule.Actions.Count" States="Draft.States"
-                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions"
+                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions" Draft="Draft" ItemId="@item.Id"
                               ValueChanged="@(action => SetActionAsync(item, action))" Moved="@(offset => MoveActionAsync(item, offset))"
                               Removed="@(() => RemoveActionAsync(item))" />
             }
@@ -172,7 +172,9 @@
     private Task RemoveActionAsync(DraftItem<AutomationAction> item)
     {
         Rule.Actions.Remove(item);
-        PendingRows?.Clear(PendingRowIds.ForItem(Rule.Key, RulesSection.Actions, item.Id));
+        var prefix = PendingRowIds.ForItem(Rule.Key, RulesSection.Actions, item.Id);
+        PendingRows?.Clear(prefix);
+        Draft.ClearInputErrors(prefix);
         return Changed.InvokeAsync();
     }
 

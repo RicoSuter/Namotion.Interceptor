@@ -19,7 +19,12 @@
     private string? _rendered;
     private bool _isInitialized;
 
+    private static readonly Func<IInterceptorSubject, bool> NoSubject = _ => false;
+
     [Parameter] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Whether an empty text is an error.</summary>
+    [Parameter] public bool IsRequired { get; set; }
 
     [Parameter] public string? Value { get; set; }
 
@@ -44,7 +49,7 @@
     private void Refresh()
     {
         var text = _text ?? string.Empty;
-        _error = text.Length == 0 ? null : Expressions.ValidateTemplate(text);
+        _error = ArgumentFields.Validate(text, typeof(string), IsRequired, Expressions);
         _rendered = _error is null && text.Contains("{{", StringComparison.Ordinal) ? Expressions.RenderTemplate(text) : null;
     }
 
@@ -61,7 +66,8 @@
         var parameters = new DialogParameters<SubjectPathPickerDialog>
         {
             { dialog => dialog.SelectedPath, null },
-            { dialog => dialog.Label, "Value" }
+            { dialog => dialog.Label, "Value" },
+            { dialog => dialog.CanSelectSubject, NoSubject }
         };
 
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };

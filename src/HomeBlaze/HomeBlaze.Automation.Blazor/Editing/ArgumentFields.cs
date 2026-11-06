@@ -9,16 +9,46 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 /// </summary>
 internal static class ArgumentFields
 {
+    private const string RequiredError = "Required";
+
     private static readonly string[] BooleanChoices = ["true", "false"];
 
     public static IReadOnlyList<ArgumentField> Create(MethodMetadata method) =>
         [.. method.Parameters.Where(parameter => parameter.RequiresInput).SelectMany(CreateFields)];
 
-    /// <summary>The arguments whose key belongs to one of the fields, which the binder matches without regard to case; any other key is rejected at run time.</summary>
-    public static Dictionary<string, string> KeepKnown(IReadOnlyList<ArgumentField> fields, IReadOnlyDictionary<string, string> arguments) =>
+    /// <summary>
+    /// The arguments to keep when the operation changes: those whose key belongs to one of the fields, which the binder matches
+    /// without regard to case, because it rejects any other key. All of them while the new operation is not resolved (null),
+    /// such as while its path is being typed.
+    /// </summary>
+    public static Dictionary<string, string> KeepKnown(IReadOnlyList<ArgumentField>? fields, IReadOnlyDictionary<string, string> arguments) =>
         arguments
-            .Where(argument => fields.Any(field => string.Equals(field.Key, argument.Key, StringComparison.OrdinalIgnoreCase)))
+            .Where(argument => fields is null || fields.Any(field => string.Equals(field.Key, argument.Key, StringComparison.OrdinalIgnoreCase)))
             .ToDictionary(argument => argument.Key, argument => argument.Value);
+
+    /// <summary>
+    /// The error of the text of an argument or value, or null. The text of a string is a template, any other text is a constant
+    /// when it converts to the type and otherwise an expression. The type is null while the target is unknown.
+    /// </summary>
+    public static string? Validate(string? text, Type? type, bool isRequired, RuleExpressions expressions)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return isRequired ? RequiredError : null;
+        }
+
+        if (type is null)
+        {
+            return null;
+        }
+
+        if ((Nullable.GetUnderlyingType(type) ?? type) == typeof(string))
+        {
+            return expressions.ValidateTemplate(text);
+        }
+
+        return ParameterConverter.TryConvert(text, type, out _) ? null : expressions.Validate(text);
+    }
 
     private static IEnumerable<ArgumentField> CreateFields(MethodParameter parameter)
     {

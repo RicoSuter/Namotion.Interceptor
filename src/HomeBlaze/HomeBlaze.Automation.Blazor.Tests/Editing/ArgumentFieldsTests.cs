@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Blazor.Editing;
+using HomeBlaze.Automation.Blazor.Tests.Testing;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
@@ -132,5 +133,59 @@ public class ArgumentFieldsTests
         // Assert
         Assert.Equal(["Position", "notification.Message"], kept.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Empty(ArgumentFields.KeepKnown([], arguments));
+    }
+
+    [Fact]
+    public void WhenTheNewOperationIsNotResolvedYet_ThenAllArgumentsAreKept()
+    {
+        // Arrange
+        var arguments = new Dictionary<string, string> { ["speed"] = "3" };
+
+        // Act
+        var kept = ArgumentFields.KeepKnown(null, arguments);
+
+        // Assert
+        Assert.Equal("3", kept["speed"]);
+    }
+
+    [Theory]
+    [InlineData("", typeof(int), true, "Required")]
+    [InlineData("", typeof(int), false, null)]
+    [InlineData("5", typeof(int), true, null)]
+    [InlineData("true", typeof(bool), true, null)]
+    [InlineData("/a/B * 2", typeof(int), true, null)]
+    [InlineData("event/State", typeof(int), true, "not")]
+    [InlineData("5 +", typeof(int), true, "any")]
+    [InlineData("Hello {{ /a/B }}", typeof(string), true, null)]
+    [InlineData("Hello {{", typeof(string), true, "any")]
+    public void WhenAnArgumentIsValidated_ThenItIsRequiredAConstantAnExpressionOrATemplate(string text, Type type, bool isRequired, string? expected)
+    {
+        // Arrange
+        var expressions = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: false);
+
+        // Act
+        var error = ArgumentFields.Validate(text, type, isRequired, expressions);
+
+        // Assert
+        Assert.Equal(expected is null, error is null);
+        if (expected == "Required")
+        {
+            Assert.Equal("Required", error);
+        }
+    }
+
+    [Fact]
+    public void WhenTheTypeIsUnknown_ThenOnlyAMissingRequiredValueIsAnError()
+    {
+        // Arrange
+        var expressions = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: false);
+
+        // Act
+        var text = ArgumentFields.Validate("anything", null, true, expressions);
+        var empty = ArgumentFields.Validate(" ", null, true, expressions);
+
+        // Assert
+        Assert.Null(text);
+        Assert.Equal("Required", empty);
     }
 }

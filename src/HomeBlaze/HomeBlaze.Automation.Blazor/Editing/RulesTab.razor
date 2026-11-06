@@ -81,6 +81,7 @@
         var index = Draft.Rules.IndexOf(rule);
         Draft.RemoveRule(rule);
         PendingRows?.Clear(PendingRowIds.ForRule(rule.Key));
+        Draft.ClearInputErrors(PendingRowIds.ForRule(rule.Key));
         var next = Draft.Rules.Count == 0 ? null : Draft.Rules[Math.Min(index, Draft.Rules.Count - 1)].Key;
         await SelectedRuleKeyChanged.InvokeAsync(next);
         await Changed.InvokeAsync();

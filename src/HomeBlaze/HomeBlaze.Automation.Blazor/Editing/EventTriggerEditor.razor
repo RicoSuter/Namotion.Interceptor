@@ -1,4 +1,5 @@
 @using Namotion.Interceptor.Expressions
+@using Namotion.Interceptor.Registry.Abstractions
 
 <MudPaper Outlined="true" Class="pa-3" data-testid="automation-event-trigger">
     <div class="d-flex align-center">
@@ -8,20 +9,37 @@
     </div>
     <div class="d-flex flex-wrap align-center gap-2">
         <div style="flex: 2 1 260px; min-width: 0;">
-            <SubjectPathField Label="From" Value="@_trigger.SubjectPath" ValueChanged="SetSourceAsync" CanSelectSubject="@HasEvents" />
+            @if (IsOwn)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">From</MudText>
+                <MudText Typo="Typo.body1" data-testid="automation-event-source">This automation</MudText>
+            }
+            else
+            {
+                <SubjectPathField Label="From" Value="@_trigger.SubjectPath" ValueChanged="SetSourceAsync" CanSelectProperty="@NoProperty" CanSelectSubject="@HasEvents" />
+            }
         </div>
-        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SetSourceAsync(AutomationEvents.OwnAutomationPath))"
-                   data-testid="automation-event-own">This automation</MudButton>
+        @if (IsOwn)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SetSourceAsync(string.Empty))"
+                       data-testid="automation-event-other">Another subject</MudButton>
+        }
+        else
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SetSourceAsync(AutomationEvents.OwnAutomationPath))"
+                       data-testid="automation-event-own">This automation</MudButton>
+        }
         <div style="flex: 1 1 200px;">
-            <MudSelect T="string" Label="Event" Value="@_trigger.EventType" ValueChanged="SetEventTypeAsync" data-testid="automation-event-type">
+            <MudSelect T="string" Label="Event" Value="@_trigger.EventType" ValueChanged="SetEventTypeAsync" ToStringFunc="@AutomationEventNames.Humanize"
+                       data-testid="automation-event-type">
                 @foreach (var eventName in _eventNames)
                 {
-                    <MudSelectItem Value="@eventName">@eventName</MudSelectItem>
+                    <MudSelectItem Value="@eventName">@AutomationEventNames.Humanize(eventName)</MudSelectItem>
                 }
             </MudSelect>
         </div>
     </div>
-    @if (_trigger.SubjectPath == AutomationEvents.OwnAutomationPath)
+    @if (IsOwn)
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
             The state changes of this automation, with event/PreviousState, event/NewState and event/Timestamp. Restoring the state after a restart raises no event.
@@ -47,14 +65,16 @@
 
     [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
 
-    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
-
     /// <summary>The <see cref="DraftItem{T}.Id"/> of the trigger, which keys its filter in the pending rows of the editor.</summary>
     [Parameter, EditorRequired] public string ItemId { get; set; } = string.Empty;
 
     [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
+
+    private static readonly Func<RegisteredSubjectProperty, bool> NoProperty = _ => false;
+
+    private bool IsOwn => _trigger.SubjectPath == AutomationEvents.OwnAutomationPath;
 
     private string FilterFieldId => PendingRowIds.For(RuleKey, RulesSection.Triggers, ItemId, "filter");
 
@@ -83,13 +103,10 @@
         return TriggerChanged.InvokeAsync(trigger);
     }
 
-    // A new source keeps the event type when it publishes it too, and otherwise takes its first event type.
+    // A source that is being typed leads nowhere for a while, so the event type is kept until the source publishes events.
     private Task SetSourceAsync(string? path)
     {
-        var eventTypes = GetEventTypes(path);
-        var eventType = eventTypes.Any(type => type.Name == _trigger.EventType)
-            ? _trigger.EventType
-            : eventTypes.FirstOrDefault()?.Name ?? string.Empty;
+        var eventType = AutomationEventNames.Choose(_trigger.EventType, [.. GetEventTypes(path).Select(type => type.Name)]);
         return UpdateAsync(_trigger with { SubjectPath = path ?? string.Empty, EventType = eventType });
     }
 

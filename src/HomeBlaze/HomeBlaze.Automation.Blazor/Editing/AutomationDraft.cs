@@ -66,6 +66,15 @@ public sealed class AutomationDraft
         }
     }
 
+    /// <summary>Clears the errors of the inputs whose id starts with the prefix, such as the ids of the fields of a removed entry.</summary>
+    public void ClearInputErrors(string idPrefix)
+    {
+        foreach (var inputId in _inputErrors.Keys.Where(inputId => inputId.StartsWith(idPrefix, StringComparison.Ordinal)).ToList())
+        {
+            _inputErrors.Remove(inputId);
+        }
+    }
+
     public RuleDraft? FindRule(string? key) => key is null ? null : Rules.Find(rule => rule.Key == key);
 
     public RuleDraft AddRule()
