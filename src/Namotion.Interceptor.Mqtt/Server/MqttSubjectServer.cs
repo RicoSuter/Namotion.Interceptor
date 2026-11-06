@@ -486,8 +486,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     }
 
     /// <summary>
-    /// Gets the topic, with the configured prefix, and the mapping the current mapper gives the property, or a null
-    /// topic when it has none.
+    /// Gets the topic, with the configured prefix, and the mapping the current mapper gives the property's current
+    /// registration, or a null topic when it has none or the property is no longer registered.
     /// </summary>
     internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(RegisteredSubjectProperty property)
     {
@@ -501,9 +501,17 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             return (cached.Topic, cached.Mapping);
         }
 
+        // The caller's registration may predate the versions just read. One discarded by a detach and attach since
+        // has no path, so its missing topic would be cached at the current versions and served until the next change.
+        var currentProperty = propertyReference.TryGetRegisteredProperty();
+        if (currentProperty is null)
+        {
+            return (null, null);
+        }
+
         string? topic = null;
         MqttPropertyMapping? resolvedMapping = null;
-        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
+        if (_configuration.Mapper.TryGetMapping(currentProperty, _subject, out var mapping) && mapping.Topic is not null)
         {
             topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
             resolvedMapping = mapping;

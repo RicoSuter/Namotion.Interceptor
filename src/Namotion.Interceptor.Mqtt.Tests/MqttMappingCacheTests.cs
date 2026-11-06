@@ -1,5 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using MQTTnet;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Client;
@@ -113,7 +116,7 @@ public class MqttMappingCacheTests
 
         // Assert
         Assert.False(retained);
-        Assert.Equal(2, mapper.MappingLookupCount);
+        Assert.Equal(0, mapper.MappingLookupCount);
     }
 
     [Fact]
@@ -133,7 +136,7 @@ public class MqttMappingCacheTests
 
         // Assert
         Assert.False(retained);
-        Assert.Equal(2, mapper.MappingLookupCount);
+        Assert.Equal(0, mapper.MappingLookupCount);
     }
 
     [Fact]
@@ -154,7 +157,7 @@ public class MqttMappingCacheTests
         Assert.Equal("child/value", topicSeenDuringDetach);
         Assert.False(retained);
         Assert.Null(after.Topic);
-        Assert.Equal(2, mapper.MappingLookupCount);
+        Assert.Equal(1, mapper.MappingLookupCount);
     }
 
     [Fact]
@@ -477,6 +480,99 @@ public class MqttMappingCacheTests
         Assert.False(includedAfterDetach);
         Assert.True(includedAfterAttach);
         Assert.Equal("child/value", topicAfterAttach);
+    }
+
+    [Fact]
+    public async Task WhenTheServerLooksUpATopicWithARegistrationDiscardedByAReattach_ThenItComputesTheTopicFromTheCurrentRegistration()
+    {
+        // Arrange: a publish or filter captured the registration, then another thread detached and attached the subject again.
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var server = CreateServer(subject, CreateMapper());
+        var reference = new PropertyReference(child, nameof(MqttCacheTestChild.Value));
+        var captured = reference.TryGetRegisteredProperty()!;
+        subject.Child = null;
+        subject.Child = child;
+        var current = reference.TryGetRegisteredProperty()!;
+
+        // Act
+        var racing = server.TryGetTopicForProperty(captured).Topic;
+        var next = server.TryGetTopicForProperty(current).Topic;
+        var included = server.IsPropertyIncluded(reference);
+
+        // Assert
+        Assert.NotSame(captured, current);
+        Assert.Equal("child/value", next);
+        Assert.True(included);
+        Assert.Equal("child/value", racing);
+    }
+
+    [Fact]
+    public async Task WhenTheClientLooksUpATopicWithARegistrationDiscardedByAReattach_ThenItComputesTheTopicFromTheCurrentRegistration()
+    {
+        // Arrange: an outbound write captured the registration, then another thread detached and attached the subject again.
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        await using var client = CreateClient(subject, CreateMapper());
+        var reference = new PropertyReference(child, nameof(MqttCacheTestChild.Value));
+        var captured = reference.TryGetRegisteredProperty()!;
+        subject.Child = null;
+        subject.Child = child;
+        var current = reference.TryGetRegisteredProperty()!;
+
+        // Act
+        var racing = client.TryGetTopicForProperty(reference, captured).Topic;
+        var next = client.TryGetTopicForProperty(reference, current).Topic;
+
+        // Assert
+        Assert.NotSame(captured, current);
+        Assert.Equal("child/value", next);
+        Assert.Equal("child/value", racing);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsDetachedAndAttachedAgainWhileTheClientSubscribes_ThenItSubscribesAndCachesTheTopicOfTheCurrentRegistration()
+    {
+        // Arrange: the subscribe loop captures every registration up front, and the reattach lands after the
+        // loop mapped the root's Name, standing in for one that lands while an earlier batch awaits its SUBACK.
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        var mapper = new HookedMapper(
+            CreateMapper(),
+            new PropertyReference(subject, nameof(MqttCacheTestRoot.Name)),
+            lookupNumber: 2,
+            () =>
+            {
+                subject.Child = null;
+                subject.Child = child;
+            });
+        await using var client = CreateClient(subject, mapper);
+        var subscribedTopics = new List<string>();
+        var mqttClient = new Mock<IMqttClient>();
+        mqttClient
+            .Setup(c => c.SubscribeAsync(It.IsAny<MqttClientSubscribeOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<MqttClientSubscribeOptions, CancellationToken>((options, _) =>
+                subscribedTopics.AddRange(options.TopicFilters.Select(filter => filter.Topic)));
+        typeof(MqttSubjectClientSource)
+            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(client, mqttClient.Object);
+        var subscribe = typeof(MqttSubjectClientSource)
+            .GetMethod("SubscribeToPropertiesAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Func<CancellationToken, Task>>(client);
+        var reference = new PropertyReference(child, nameof(MqttCacheTestChild.Value));
+
+        // Act
+        await subscribe(CancellationToken.None);
+        var current = reference.TryGetRegisteredProperty()!;
+        var topic = client.TryGetTopicForProperty(reference, current).Topic;
+
+        // Assert
+        Assert.True(mapper.HasRun);
+        Assert.Equal("child/value", topic);
+        Assert.Contains("child/value", subscribedTopics);
     }
 
     [Fact]
@@ -1200,6 +1296,44 @@ public class MqttMappingCacheTests
             duringLookup?.Invoke();
             return result;
         }
+    }
+
+    /// <summary>
+    /// Runs an action once, inside the given forward lookup of one property, after the inner mapper answered: a
+    /// structural change that lands at a chosen point of a loop over several properties.
+    /// </summary>
+    private sealed class HookedMapper(
+        IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> inner,
+        PropertyReference hookedProperty,
+        int lookupNumber,
+        Action action) : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>
+    {
+        private int _lookupCount;
+
+        public bool HasRun { get; private set; }
+
+        public long Version => inner.Version;
+
+        public bool TryGetMapping(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject rootSubject,
+            [NotNullWhen(true)] out MqttPropertyMapping? mapping)
+        {
+            var found = inner.TryGetMapping(property, rootSubject, out mapping);
+            if (property.Reference == hookedProperty && ++_lookupCount == lookupNumber)
+            {
+                HasRun = true;
+                action();
+            }
+
+            return found;
+        }
+
+        public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+            MqttLookupKey key,
+            RegisteredSubject subject,
+            CancellationToken cancellationToken) =>
+            inner.TryGetPropertyAsync(key, subject, cancellationToken);
     }
 }
 
