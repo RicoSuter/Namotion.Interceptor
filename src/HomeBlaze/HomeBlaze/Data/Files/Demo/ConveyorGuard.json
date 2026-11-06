@@ -13,8 +13,9 @@
       "triggers": [
         {
           "$type": "PropertyTrigger",
-          "expression": "/Demo/Conveyor/Temperature > 70",
-          "for": "00:00:30"
+          "expression": "/Demo/Conveyor/Temperature > 40",
+          "for": "00:00:30",
+          "rearm": "/Demo/Conveyor/Temperature < 38"
         }
       ],
       "guard": "./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m",
@@ -39,7 +40,7 @@
       "triggers": [
         {
           "$type": "PropertyTrigger",
-          "expression": "/Demo/Conveyor/Temperature < 60",
+          "expression": "/Demo/Conveyor/Temperature < 35",
           "for": "00:01:00",
           "onActivation": "WaitForFalseToTrue"
         }
