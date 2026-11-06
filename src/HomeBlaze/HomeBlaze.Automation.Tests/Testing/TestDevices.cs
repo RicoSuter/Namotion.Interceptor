@@ -1,0 +1,106 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Messaging;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
+
+namespace HomeBlaze.Automation.Tests.Testing;
+
+/// <summary>Blinds with operations that succeed, fail, never end, wait for the test or need confirmation.</summary>
+[InterceptorSubject]
+public partial class TestBlinds
+{
+    private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile bool _isWaiting;
+    private int _closeCount;
+    private int _openCount;
+
+    [State]
+    public partial bool IsMoving { get; set; }
+
+    [State]
+    public partial bool IsLocked { get; set; }
+
+    [State]
+    public partial int Position { get; set; }
+
+    [State]
+    public partial int Level { get; internal set; }
+
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    public int CloseCount => Volatile.Read(ref _closeCount);
+
+    public int OpenCount => Volatile.Read(ref _openCount);
+
+    public bool IsWaiting => _isWaiting;
+
+    [Derived]
+    [PropertyAttribute(nameof(Open), KnownAttributes.IsEnabled)]
+    public bool Open_IsEnabled => !IsLocked;
+
+    [Operation]
+    public void Close() => Interlocked.Increment(ref _closeCount);
+
+    [Operation]
+    public void Open() => Interlocked.Increment(ref _openCount);
+
+    [Operation(RequiresConfirmation = true)]
+    public void Calibrate() => Position = 0;
+
+    [Operation]
+    public Task MoveToAsync(int position, CancellationToken cancellationToken)
+    {
+        Position = position;
+        return Task.CompletedTask;
+    }
+
+    [Operation]
+    public void Jam() => throw new InvalidOperationException("The motor is jammed.");
+
+    [Operation]
+    public Task HangAsync(CancellationToken cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+
+    [Operation]
+    public async Task WaitAsync(CancellationToken cancellationToken)
+    {
+        _isWaiting = true;
+        await _gate.Task.WaitAsync(cancellationToken);
+        _isWaiting = false;
+    }
+
+    [Query]
+    public int GetPosition() => Position;
+
+    /// <summary>Ends every call of <c>Wait</c>.</summary>
+    public void Release() => _gate.TrySetResult();
+}
+
+/// <summary>A notification channel that keeps what it was sent.</summary>
+[InterceptorSubject]
+public partial class TestNotifier : INotificationPublisher
+{
+    private readonly List<Notification> _sent = [];
+
+    public IReadOnlyList<Notification> Sent
+    {
+        get
+        {
+            lock (_sent)
+            {
+                return [.. _sent];
+            }
+        }
+    }
+
+    public Task<NotificationResult> SendNotificationAsync(Notification notification, CancellationToken cancellationToken)
+    {
+        lock (_sent)
+        {
+            _sent.Add(notification);
+        }
+
+        return Task.FromResult(new NotificationResult());
+    }
+}
