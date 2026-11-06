@@ -158,7 +158,7 @@ public class AutomationPropertyTriggerTests
         await host.FlushAsync();
 
         // Assert
-        Assert.Equal("On: Unknown since 12:00:00, missing /Weather/Gust", statusWhileUnknown);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust", statusWhileUnknown);
         Assert.Equal(1, host.Blinds.CloseCount);
         Assert.Equal("On: Triggered, waiting to rearm", rule.Status);
     }

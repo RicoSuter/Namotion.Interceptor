@@ -21,6 +21,9 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     /// <summary>The paths that led to no value while the expression is unknown.</summary>
     public IReadOnlyList<string> MissingPaths { get; private set; } = [];
 
+    /// <summary>Whether the expression was already true when the trigger became active and the trigger has not fired since.</summary>
+    public bool WasTrueAtActivation { get; private set; }
+
     public bool IsUnknown => UnknownSince is not null;
 
     /// <summary>Activates the trigger with fresh state and returns whether it fires at once.</summary>
@@ -65,14 +68,19 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         HoldStartedAt = null;
         UnknownSince = null;
         MissingPaths = [];
+        WasTrueAtActivation = false;
     }
 
-    private TriggerPhase GetBaselinePhase(bool? value) => value switch
+    private TriggerPhase GetBaselinePhase(bool? value)
     {
-        true => hasRearm ? TriggerPhase.WaitingToRearm : TriggerPhase.WaitingForFalse,
-        false => TriggerPhase.Armed,
-        null => TriggerPhase.AwaitingBaseline
-    };
+        WasTrueAtActivation = value == true;
+        return value switch
+        {
+            true => hasRearm ? TriggerPhase.WaitingToRearm : TriggerPhase.WaitingForFalse,
+            false => TriggerPhase.Armed,
+            null => TriggerPhase.AwaitingBaseline
+        };
+    }
 
     private bool SetBaseline(TriggerObservation observation, DateTimeOffset now)
     {
@@ -141,6 +149,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     {
         Phase = TriggerPhase.WaitingToRearm;
         HoldStartedAt = null;
+        WasTrueAtActivation = false;
         return true;
     }
 

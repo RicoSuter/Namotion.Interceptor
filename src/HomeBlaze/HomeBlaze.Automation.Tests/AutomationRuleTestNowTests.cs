@@ -33,7 +33,7 @@ public class AutomationRuleTestNowTests
         Assert.Null(result.Error);
         Assert.True(result.IsActive);
         Assert.True(result.Triggers[0].Result);
-        Assert.Equal("Fires when true for 00:00:20", result.Triggers[0].Note);
+        Assert.Equal("Fires when true for 20s", result.Triggers[0].Note);
         Assert.Null(result.Triggers[1].Result);
         Assert.Equal("Runs on each TestPressEvent of /Button that passes the filter", result.Triggers[1].Note);
         Assert.True(result.HasGuard);

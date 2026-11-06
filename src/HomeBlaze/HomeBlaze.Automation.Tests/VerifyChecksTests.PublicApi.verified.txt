@@ -75,6 +75,11 @@ namespace HomeBlaze.Automation
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Automation.ActionErrorPolicy OnError { get; init; }
     }
+    public static class AutomationDuration
+    {
+        public static string Format(System.TimeSpan duration) { }
+        public static bool TryParse(string? text, out System.TimeSpan duration) { }
+    }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class AutomationRule : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged

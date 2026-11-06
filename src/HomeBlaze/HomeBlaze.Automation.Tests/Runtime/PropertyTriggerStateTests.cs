@@ -209,6 +209,37 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
+    public void WhenATriggerStartsTrueWithRearm_ThenItWasTrueAtActivationUntilItFires()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), Start);
+        var wasTrueAtStart = state.WasTrueAtActivation;
+        state.Observe(WithRearm(false, true), Start.AddSeconds(1));
+        state.Observe(WithRearm(true, false), Start.AddSeconds(2));
+
+        // Assert
+        Assert.True(wasTrueAtStart);
+        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+        Assert.False(state.WasTrueAtActivation);
+    }
+
+    [Fact]
+    public void WhenATriggerFiresWithoutStartingTrue_ThenItWasNotTrueAtActivation()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(false, null), Start);
+
+        // Act
+        state.Observe(WithRearm(true, false), Start.AddSeconds(1));
+
+        // Assert
+        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+        Assert.False(state.WasTrueAtActivation);
+    }
+
+    [Fact]
     public void WhenATrueBaselineWithRearmIsRearmed_ThenTheNextTrueValueFires()
     {
         // Arrange

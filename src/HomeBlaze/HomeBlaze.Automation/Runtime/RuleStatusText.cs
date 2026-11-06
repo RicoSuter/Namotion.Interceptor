@@ -4,7 +4,9 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The status text of a rule: its mode, then why it is inactive, or the first holding trigger, the first problem, the
-/// first unknown trigger, "Triggered, waiting to rearm" when every trigger fired, and otherwise "Armed". Times are local
+/// first unknown trigger, "Already true, waiting until false" when every trigger found its expression true when it became
+/// active, "Already true, waiting to rearm" when such a trigger waits for its rearm expression, "Triggered, waiting to
+/// rearm" when every trigger fired or waits for false, and otherwise "Armed". Times are local
 /// to the host. The text changes only on a transition, so history records it once per transition.
 /// </summary>
 internal static class RuleStatusText
@@ -25,7 +27,7 @@ internal static class RuleStatusText
         {
             if (trigger is { Phase: TriggerPhase.Holding, HoldStartedAt: { } start, Hold: { } hold })
             {
-                return $"Holding since {FormatTime(start, timeZone)} for {hold:c}";
+                return $"Holding since {FormatTime(start, timeZone)} for {AutomationDuration.Format(hold)}";
             }
         }
 
@@ -45,16 +47,35 @@ internal static class RuleStatusText
             }
         }
 
-        return triggers.Count > 0 && triggers.All(trigger => trigger.Phase is TriggerPhase.WaitingToRearm or TriggerPhase.WaitingForFalse)
-            ? "Triggered, waiting to rearm"
-            : "Armed";
+        return DescribeSettled(triggers);
+    }
+
+    private static string DescribeSettled(IReadOnlyList<TriggerStatus> triggers)
+    {
+        if (triggers.Count == 0 || !triggers.All(trigger => trigger.Phase is TriggerPhase.WaitingToRearm or TriggerPhase.WaitingForFalse))
+        {
+            return "Armed";
+        }
+
+        if (triggers.All(trigger => trigger.Phase == TriggerPhase.WaitingForFalse))
+        {
+            return "Already true, waiting until false";
+        }
+
+        return triggers.All(trigger => trigger.Phase == TriggerPhase.WaitingForFalse || trigger.WasTrueAtActivation)
+            ? "Already true, waiting to rearm"
+            : "Triggered, waiting to rearm";
     }
 
     private static string DescribeUnknown(DateTimeOffset since, IReadOnlyList<string> missingPaths, TimeZoneInfo timeZone) =>
         missingPaths.Count > 0
-            ? $"Unknown since {FormatTime(since, timeZone)}, missing {string.Join(", ", missingPaths)}"
-            : $"Unknown since {FormatTime(since, timeZone)}";
+            ? $"Unknown since {FormatInstant(since, timeZone)}, missing {string.Join(", ", missingPaths)}"
+            : $"Unknown since {FormatInstant(since, timeZone)}";
 
     private static string FormatTime(DateTimeOffset instant, TimeZoneInfo timeZone) =>
         TimeZoneInfo.ConvertTime(instant, timeZone).ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+
+    // A value can stay missing for days, so the text names the day as well.
+    private static string FormatInstant(DateTimeOffset instant, TimeZoneInfo timeZone) =>
+        TimeZoneInfo.ConvertTime(instant, timeZone).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 }

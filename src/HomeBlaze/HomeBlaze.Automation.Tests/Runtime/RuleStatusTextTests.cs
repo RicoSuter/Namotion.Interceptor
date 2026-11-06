@@ -39,7 +39,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.DryRun, null, triggers, oneHourAhead);
 
         // Assert
-        Assert.Equal("DryRun: Holding since 13:00:00 for 00:00:20", text);
+        Assert.Equal("DryRun: Holding since 13:00:00 for 20s", text);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, triggers, TimeZoneInfo.Utc);
 
         // Assert
-        Assert.Equal("On: Unknown since 12:00:00, missing /Weather/Gust, /Weather/Rain", text);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust, /Weather/Rain", text);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, [TriggerStatus.FromProperty(state, null)], TimeZoneInfo.Utc);
 
         // Assert
-        Assert.Equal("On: Unknown since 12:00:05, missing /Weather/Threshold", text);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:05, missing /Weather/Threshold", text);
     }
 
     [Fact]
@@ -89,6 +89,29 @@ public class RuleStatusTextTests
 
         // Assert
         Assert.Equal("On: Triggered, waiting to rearm", text);
+    }
+
+    [Fact]
+    public void WhenEveryTriggerWasTrueAtItsActivation_ThenTheRuleWaitsUntilFalse()
+    {
+        // Act
+        var text = RuleStatusText.Format(AutomationRuleMode.On, null, [Phase(TriggerPhase.WaitingForFalse), Phase(TriggerPhase.WaitingForFalse)], TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal("On: Already true, waiting until false", text);
+    }
+
+    [Fact]
+    public void WhenEveryTriggerWasTrueAtItsActivationAndWaitsForItsRearm_ThenTheStatusSaysSoWithoutClaimingATrigger()
+    {
+        // Arrange
+        var alreadyTrue = Phase(TriggerPhase.WaitingToRearm) with { WasTrueAtActivation = true };
+
+        // Act
+        var text = RuleStatusText.Format(AutomationRuleMode.On, null, [alreadyTrue, Phase(TriggerPhase.WaitingForFalse)], TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal("On: Already true, waiting to rearm", text);
     }
 
     [Fact]

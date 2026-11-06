@@ -91,7 +91,7 @@ public class AutomationRestartTests
 
         // Assert
         Assert.Equal(AutomationTestHost.Start, restoredEntryTime);
-        Assert.Equal("On: Unknown since 12:15:00, missing /Weather/Door", statusWithoutReading);
+        Assert.Equal("On: Unknown since 2026-11-06 12:15:00, missing /Weather/Door", statusWithoutReading);
         Assert.Single(host.Notifier.Sent);
         Assert.Equal("Informed", host.Automation.CurrentState);
         Assert.Equal(["Informed"], stateChanges.ToArray());
