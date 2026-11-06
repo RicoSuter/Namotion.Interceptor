@@ -23,7 +23,10 @@ namespace Namotion.Interceptor.Expressions
     }
     public static class ExpressionVariables
     {
+        public const string Event = "event";
+        public const string Now = "now";
         public const string Subject = "subject";
+        public const string Time = "time";
         public const string Value = "value";
         public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable) { }
         public static bool TryGetVariable(string path, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable, out string? memberPath) { }

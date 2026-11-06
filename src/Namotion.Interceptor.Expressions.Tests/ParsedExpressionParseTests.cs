@@ -108,6 +108,11 @@ public class ParsedExpressionParseTests
     [InlineData("value", '.', "value")]
     [InlineData("subject/Power", '.', null)]
     [InlineData("subjects.Power", '.', null)]
+    [InlineData("now", '/', "now")]
+    [InlineData("time", '.', "time")]
+    [InlineData("event/ButtonState", '/', "event")]
+    [InlineData("nowhere/Power", '/', null)]
+    [InlineData("events.Power", '.', null)]
     public void WhenPathIsChecked_ThenItsFirstSegmentDecidesTheVariable(string path, char separator, string? expected)
     {
         // Act
@@ -126,6 +131,8 @@ public class ParsedExpressionParseTests
     [InlineData("subject[0].Power", '.', "subject", "[0].Power")]
     [InlineData("subjects.Power", '.', null, null)]
     [InlineData("subject/Power", '.', null, null)]
+    [InlineData("event/Button/Name", '/', "event", "Button/Name")]
+    [InlineData("now", '/', "now", null)]
     public void WhenPathIsSplit_ThenMemberPathFollowsTheVariableAndItsSeparator(
         string path, char separator, string? expectedVariable, string? expectedMemberPath)
     {
@@ -202,6 +209,9 @@ public class ParsedExpressionParseTests
     [InlineData("value == subject")]
     [InlineData("Power > subject/Maximum")]
     [InlineData("Power > ./Maximum")]
+    [InlineData("Since < now")]
+    [InlineData("Start <= time")]
+    [InlineData("State == event")]
     public void WhenRightOperandIsAVariableOrHasASlash_ThenItIsAPath(string text)
     {
         // Act

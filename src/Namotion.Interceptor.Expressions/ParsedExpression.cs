@@ -7,8 +7,8 @@ namespace Namotion.Interceptor.Expressions;
 /// An expression parsed once: paths and literals, computed with <c>+ - * /</c>, compared with
 /// <c>== != &lt; &lt;= &gt; &gt;=</c> and combined with <c>and</c> (<c>&amp;&amp;</c>), <c>or</c> (<c>||</c>),
 /// <c>not</c> (<c>!</c>) and parentheses, followed by pipes such as <c>| raw</c>. A bare word after a comparison operator
-/// is text, such as the name of an enum value, unless it holds the path separator or an index, is the variable
-/// <c>value</c> or <c>subject</c>, or is an operand of arithmetic.
+/// is text, such as the name of an enum value, unless it holds the path separator or an index, is a variable of
+/// <see cref="ExpressionVariables"/>, or is an operand of arithmetic.
 /// </summary>
 public sealed class ParsedExpression
 {
@@ -40,8 +40,8 @@ public sealed class ParsedExpression
 
     /// <summary>
     /// Parses the text with paths whose segments the separator divides, such as <c>.</c>. A word after an operator is text,
-    /// such as the name of an enum value, unless it holds the separator or an index or is the variable <c>value</c> or
-    /// <c>subject</c>, which are paths. On failure the error reads
+    /// such as the name of an enum value, unless it holds the separator or an index or is a variable of
+    /// <see cref="ExpressionVariables"/>, which are paths. On failure the error reads
     /// <c>&lt;message&gt; at position &lt;zero-based index&gt;</c>.
     /// </summary>
     /// <exception cref="ArgumentException">The separator is white space, a letter, a digit, a quote, a bracket, or one of <c>| &amp; = ! &lt; &gt; + - *</c>.</exception>

@@ -46,7 +46,7 @@ internal readonly struct ValueBindingContext(
             return binding.Property is { } property ? ExpressionValue.FromProperty(property, value) : ExpressionValue.FromValue(value);
         }
 
-        if (binding.Subject is not { } subject)
+        if (variable != ExpressionVariables.Subject || binding.Subject is not { } subject)
         {
             return ExpressionValue.Missing;
         }

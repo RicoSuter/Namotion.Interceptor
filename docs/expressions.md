@@ -51,12 +51,17 @@ ParsedExpression.TryParse(text, '.', out var expression, out var error);
 
 The separator cannot be white space, a letter, a digit, a quote, a bracket or one of `| & = ! < > + - *`, and `TryParse` throws an `ArgumentException` for such a character. `ParsedExpression.Paths` lists the distinct paths of an expression in order of first appearance, and `SinglePath` is the path of an expression that is nothing but one path. How a path resolves is up to the host. When it comes from the [registry](registry.md#path-syntax), the host can resolve it with a path provider.
 
-Two names are variables with a meaning the host gives them:
+Five names are variables with a meaning the host gives them:
 
 | Variable | Means |
 |----------|-------|
 | `value` | The value the expression is evaluated for, such as the value of a property that is shown |
-| `subject` | The subject of that value, such as the owner of the property |
+| `subject` | The subject of that value, such as the owner of the property, or the publisher of an event |
+| `now` | The current instant, a `DateTimeOffset` in UTC, for a host with a clock |
+| `time` | The local time of day, a `TimeSpan` in the time zone of the host, for a host with a clock |
+| `event` | The event the expression is evaluated for, a record whose members follow the variable, as in `event/State` |
+
+A bare `now`, `time` or `event` after an operator is the variable and not a text, so compare with such a text in quotes, as in `Mode == 'now'`.
 
 A path that starts with a variable, such as `subject/Power`, is resolved with `IExpressionContext.ResolveVariable`; every other path with `ResolvePath`. `ExpressionVariables.TryGetVariable` splits the first segment off a path, with the rest as the member path. A host binds the variables it has a meaning for. An expression that uses a variable the host does not bind is the host's error to report: check `ParsedExpression.Paths` before evaluating and refuse the expression, as the MCP `where` filter does for `value`. At run time an unbound variable resolves to `ExpressionValue.Missing`.
 

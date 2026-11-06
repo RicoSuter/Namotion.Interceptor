@@ -18,7 +18,7 @@ public interface IExpressionContext
     /// Resolves a path that starts with a variable of <see cref="ExpressionVariables"/>. A variable the host does not bind,
     /// or a path that leads nowhere, gives <see cref="ExpressionValue.Missing"/> and does not throw.
     /// </summary>
-    /// <param name="variable"><see cref="ExpressionVariables.Value"/> or <see cref="ExpressionVariables.Subject"/>.</param>
+    /// <param name="variable">One of the names of <see cref="ExpressionVariables"/>.</param>
     /// <param name="memberPath">The rest of the path after the variable and its separator, such as <c>IsCharging</c> for
     /// <c>subject/IsCharging</c> with the separator <c>/</c>, or null for the variable alone.</param>
     ExpressionValue ResolveVariable(string variable, string? memberPath);

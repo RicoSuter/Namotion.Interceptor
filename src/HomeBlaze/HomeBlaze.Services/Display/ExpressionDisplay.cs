@@ -204,6 +204,11 @@ public static class ExpressionDisplay
                 return $"'{variable}' is not available in {placeWithoutVariables}";
             }
 
+            if (variable is not (ExpressionVariables.Value or ExpressionVariables.Subject))
+            {
+                return $"'{variable}' is not available in pages, widgets and value maps";
+            }
+
             if (GetVariablePathError(variable, memberPath) is { } pathError)
             {
                 return pathError;

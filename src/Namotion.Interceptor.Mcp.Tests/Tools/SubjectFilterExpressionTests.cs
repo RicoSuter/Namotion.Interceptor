@@ -280,6 +280,9 @@ public class SubjectFilterExpressionTests
     [InlineData("subject[0] == null", "where: a path ends at a property, not at an entry such as 'subject[0]'")]
     [InlineData("subject. == 1", "where: expected a name after 'subject.'")]
     [InlineData("subject..Name == 1", "where: a path starts at the subject and cannot start with '.'")]
+    [InlineData("Since < now", "where: 'now' is not available in where")]
+    [InlineData("time > 1", "where: 'time' is not available in where")]
+    [InlineData("event.State == 1", "where: 'event' is not available in where")]
     public void WhenFilterUsesWhatWhereDoesNotHave_ThenReturnsError(string where, string expectedError)
     {
         // Act

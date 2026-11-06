@@ -30,7 +30,8 @@ public sealed partial record MarkdownBlockHead(
     public static bool IsValidId(string id) => IdRegex().IsMatch(id);
 
     /// <summary>Gets whether the name is a variable of expressions, which a block cannot have as its name.</summary>
-    public static bool IsReservedId(string id) => id is ExpressionVariables.Value or ExpressionVariables.Subject;
+    public static bool IsReservedId(string id) =>
+        id is ExpressionVariables.Value or ExpressionVariables.Subject or ExpressionVariables.Now or ExpressionVariables.Time or ExpressionVariables.Event;
 
     /// <summary>Gets the error for a name that is a variable of expressions.</summary>
     public static string GetReservedIdError(string id) => $"'{id}' is reserved for expressions and cannot be the name of a block.";

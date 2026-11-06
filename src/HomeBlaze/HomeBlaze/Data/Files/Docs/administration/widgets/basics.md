@@ -92,7 +92,7 @@ The `Label` of a [ValueTile](value-tile.md), a [Gauge](gauge.md), a [Control](co
 :: HomeBlaze.Components.ValueTile Kind=Tile Path=../Pump/CurrentSpeed Label="Target {{ subject/TargetSpeed }}"
 ::
 
-- **`value` and `subject`**: In a widget with a `Path`, `value` is the value that the path leads to, and `subject` is the subject that owns it, or the subject that the path leads to, as in the cases of a [ValueMap](value-map.md#conditions). A card has no `Path`, so its title and subtitle use paths from the page only, and `value` or `subject` there is an error. A `Control` for an operation binds the subject that has the operation as `subject` and no useful `value`.
+- **`value` and `subject`**: In a widget with a `Path`, `value` is the value that the path leads to, and `subject` is the subject that owns it, or the subject that the path leads to, as in the cases of a [ValueMap](value-map.md#conditions). A card has no `Path`, so its title and subtitle use paths from the page only, and `value` or `subject` there is an error. A `Control` for an operation binds the subject that has the operation as `subject` and no useful `value`. The names `now`, `time` and `event` are variables of automations and an error in every widget.
 - **Other paths** resolve from the widget, and so from the page that holds it, as in the text of the page, see [Expression Paths](../pages.md#expression-paths).
 - **Pipes**: `display`, `raw` and `map:name`, see [Pipes](../pages.md#pipes). A map name resolves like the `Map` of the widget, and `{{ subject | map:name }}` applies the map to `subject`, such as a wallbox that the `Path` leads to, so that the label shows the text of its case.
 - **Live**: The text updates when a value that it shows changes.
