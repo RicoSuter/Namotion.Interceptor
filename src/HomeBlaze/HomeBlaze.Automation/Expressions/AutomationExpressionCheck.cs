@@ -17,16 +17,18 @@ internal static class AutomationExpressionCheck
     /// <param name="allowsEvent">Whether an event is captured where the expression is evaluated.</param>
     /// <param name="expression">The expression, or null.</param>
     /// <param name="error">The error, or null.</param>
+    /// <param name="emptySubject">What the error calls a blank text: "condition" or "value".</param>
     public static bool TryParseExpression(
         string? text,
         bool allowsEvent,
         [NotNullWhen(true)] out ParsedExpression? expression,
-        [NotNullWhen(false)] out string? error)
+        [NotNullWhen(false)] out string? error,
+        string emptySubject = "condition")
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             expression = null;
-            error = "the condition is empty";
+            error = $"the {emptySubject} is empty";
             return false;
         }
 

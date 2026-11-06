@@ -145,6 +145,20 @@ public class ArgumentBinderTests
     }
 
     [Fact]
+    public void WhenAnExpressionArgumentIsBlank_ThenBindingFailsWithTheValueIsEmpty()
+    {
+        // Arrange
+        var binder = CreateBinder();
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<int>("speed")], new Dictionary<string, string> { ["speed"] = " " }, out _, out var error);
+
+        // Assert
+        Assert.False(isBound);
+        Assert.Equal("The argument 'speed' is invalid: the value is empty", error);
+    }
+
+    [Fact]
     public void WhenAnArgumentReadsTheEventWithoutAnEventTrigger_ThenBindingFails()
     {
         // Arrange
