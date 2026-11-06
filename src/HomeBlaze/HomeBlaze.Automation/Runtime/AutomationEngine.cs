@@ -200,6 +200,13 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
+    /// <summary>Deactivates every rule and shows it as inactive, once the worker ends.</summary>
+    public void End()
+    {
+        Stop();
+        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.Services.TimeProvider.LocalTimeZone);
+    }
+
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
 
     private void Unload()

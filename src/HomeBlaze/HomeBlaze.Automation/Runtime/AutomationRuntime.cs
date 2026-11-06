@@ -84,7 +84,7 @@ internal sealed class AutomationRuntime
         {
             try
             {
-                _engine.Stop();
+                _engine.End();
             }
             finally
             {

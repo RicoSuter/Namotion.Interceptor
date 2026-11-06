@@ -217,4 +217,26 @@ public class AutomationStateTests
         Assert.Equal(ServiceStatus.Error, host.Automation.Status);
         Assert.StartsWith("Rule 'Started': the run was not saved", host.Automation.StatusMessage);
     }
+
+    [Fact]
+    public async Task WhenTheAutomationStops_ThenEveryRuleShowsThatItIsInactive()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8", TimeSpan.FromSeconds(30)), Invoke("/Blinds/Close"))),
+            ("rain", Create("Rain", AutomationRuleMode.DryRun, [When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")])),
+            ("off", Create("Off", AutomationRuleMode.Off, [When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var holding = host.Rule("retract").Status;
+
+        // Act
+        await host.StopAsync();
+
+        // Assert
+        Assert.Equal("On: Holding since 12:00:00 for 00:00:30", holding);
+        Assert.Equal("On: Inactive: the automation is stopped", host.Rule("retract").Status);
+        Assert.Equal("DryRun: Inactive: the automation is stopped", host.Rule("rain").Status);
+        Assert.Equal("Off", host.Rule("off").Status);
+    }
 }
