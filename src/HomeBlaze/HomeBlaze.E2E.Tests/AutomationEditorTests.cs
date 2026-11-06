@@ -245,7 +245,7 @@ public class AutomationEditorTests
             // Assert
             await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Rule 3", new() { Timeout = Timeout });
             await Assertions.Expect(dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Rule 3" }))
-                .ToContainTextAsync("Dry run, 1 trigger");
+                .ToContainTextAsync("Dry run, any state, 1 trigger");
             await Assertions.Expect(dialog.GetByTestId("automation-property-trigger")).ToHaveCountAsync(1);
             await Assertions.Expect(dialog.GetByTestId("automation-rule-error").First).ToBeVisibleAsync();
             await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeDisabledAsync();

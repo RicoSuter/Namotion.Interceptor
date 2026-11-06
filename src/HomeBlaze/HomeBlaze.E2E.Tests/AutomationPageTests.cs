@@ -59,7 +59,7 @@ public class AutomationPageTests
             await page.WaitUntilInteractiveAsync();
 
             // Act
-            await page.GetByTestId("automation-rule-row").First.GetByRole(AriaRole.Button, new() { Name = "Test now" }).ClickAsync();
+            await page.GetByTestId("automation-rule-row").First.GetByTestId("automation-test-now").ClickAsync();
 
             // Assert
             var dialog = page.GetByRole(AriaRole.Dialog);
@@ -91,6 +91,7 @@ public class AutomationPageTests
             var widget = page.GetByTestId("automation-widget");
             await Assertions.Expect(widget).ToContainTextAsync("Washer", new() { Timeout = Timeout });
             await Assertions.Expect(widget).ToContainTextAsync("Idle since");
+            await Assertions.Expect(widget.GetByTestId("automation-widget-status")).ToBeVisibleAsync();
             await Assertions.Expect(widget.GetByRole(AriaRole.Link, new() { Name = "Washer" })).ToHaveAttributeAsync("href", $"pages/{name}");
         }
         finally

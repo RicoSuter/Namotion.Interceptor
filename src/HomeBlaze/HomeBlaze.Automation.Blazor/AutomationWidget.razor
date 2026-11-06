@@ -21,7 +21,7 @@
                     <MudText Typo="Typo.subtitle1" Style="overflow-wrap: anywhere;">@automation.Title</MudText>
                 }
                 <MudSpacer />
-                <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetStatusColor(automation.Status)" Class="ma-0">@automation.Status</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetStatusColor(automation.Status)" Class="ma-0" data-testid="automation-widget-status">@automation.Status</MudChip>
             </MudStack>
             <MudText Typo="Typo.body2" Class="mud-text-secondary">@DescribeState(automation)</MudText>
             @if (headline is not null)

@@ -130,8 +130,8 @@
         _needsRevalidation = true;
     }
 
-    // An input that shows an error clears it when it is disposed, which happens in the render after the selection, so the
-    // errors are read again after that render. This is no edit, so the dialog does not become dirty.
+    // An input that shows an error clears it when it is disposed, which happens in the render after a selection or an edit
+    // that removed it, so the errors are read again after that render. This is no edit, so the dialog does not become dirty.
     protected override void OnAfterRender(bool firstRender)
     {
         if (!_needsRevalidation || _draft is null)
@@ -153,6 +153,7 @@
     private void OnChanged()
     {
         _errors = _draft?.Validate() ?? [];
+        _needsRevalidation = true;
         SetDirty(true);
         ReportValidity();
     }

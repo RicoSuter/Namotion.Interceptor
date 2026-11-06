@@ -86,9 +86,16 @@
         await Changed.InvokeAsync();
     }
 
-    private static string Describe(RuleDraft rule)
+    private string Describe(RuleDraft rule)
     {
         var count = rule.Triggers.Count;
-        return $"{AutomationSummary.FormatMode(rule.Mode)}, {count} {(count == 1 ? "trigger" : "triggers")}";
+        var triggers = $"{count} {(count == 1 ? "trigger" : "triggers")}";
+        if (Draft.States.Count == 0)
+        {
+            return $"{AutomationSummary.FormatMode(rule.Mode)}, {triggers}";
+        }
+
+        var scope = rule.InState is { } state ? $"in {state}" : "any state";
+        return $"{AutomationSummary.FormatMode(rule.Mode)}, {scope}, {triggers}";
     }
 }
