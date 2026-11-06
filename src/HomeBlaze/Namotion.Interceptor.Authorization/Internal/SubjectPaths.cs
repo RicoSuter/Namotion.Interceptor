@@ -36,7 +36,7 @@ internal static class SubjectPaths
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="pathProvider">The path provider.</param>
-    /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order.</param>
+    /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order, after the paths it already holds.</param>
     /// <param name="maxPaths">The most paths to build; positive.</param>
     /// <param name="reads">Records every parents and attachment read, so the caller can check that they held at one instant.</param>
     /// <returns>
@@ -48,7 +48,7 @@ internal static class SubjectPaths
     /// parents has no paths and returns true.
     /// </returns>
     public static bool TryGetPaths(
-        RegisteredSubject subject, PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths, ParentReads reads)
+        RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, ParentReads reads)
     {
         Debug.Assert(maxPaths > 0, "maxPaths must be positive.");
 
@@ -59,7 +59,8 @@ internal static class SubjectPaths
         }
 
         var builder = new ChainBuilder(pathProvider, paths, maxPaths);
-        var frames = new List<SubjectPropertyParent>(8);
+        var frames = paths.Frames;
+        frames.Clear();
         if (!TryBuildSingleParentChain(subject, parents, frames, reads, ref builder))
         {
             frames.Clear();
@@ -201,11 +202,11 @@ internal static class SubjectPaths
         private readonly PathProviderBase _pathProvider;
         private readonly char _separator;
         private readonly char _indexOpen;
-        private readonly List<PathLink[]> _paths;
+        private readonly PathStore _paths;
         private readonly int _maxPaths;
         private int _built;
 
-        public ChainBuilder(PathProviderBase pathProvider, List<PathLink[]> paths, int maxPaths)
+        public ChainBuilder(PathProviderBase pathProvider, PathStore paths, int maxPaths)
         {
             _pathProvider = pathProvider;
             _separator = pathProvider.PathSeparator;
@@ -229,46 +230,46 @@ internal static class SubjectPaths
                 return false;
             }
 
-            var path = TryGetLinks(frames);
-            if (path is null)
+            if (TryAddLinks(frames))
             {
-                IsComplete = false;
+                _built++;
             }
             else
             {
-                _paths.Add(path);
-                _built++;
+                IsComplete = false;
             }
 
             return IsComplete || _built < _maxPaths;
         }
 
-        /// <summary>The links of the chain root first; null when paths may not pass a property on it or a link cannot be built.</summary>
-        private readonly PathLink[]? TryGetLinks(List<SubjectPropertyParent> frames)
+        /// <summary>Adds the links of the chain root first as a path; false when paths may not pass a property on it or a link cannot be built.</summary>
+        private readonly bool TryAddLinks(List<SubjectPropertyParent> frames)
         {
             // The registry builds and resolves no path through such a property, nor through an attribute of an excluded property.
             foreach (var frame in frames)
             {
                 if (!_pathProvider.IsPropertyEffectivelyIncluded(frame.Property))
                 {
-                    return null;
+                    return false;
                 }
             }
 
-            var links = new PathLink[frames.Count];
-            for (var i = 0; i < links.Length; i++)
+            var start = _paths.BeginPath();
+            for (var i = frames.Count - 1; i >= 0; i--)
             {
-                var frame = frames[frames.Count - 1 - i];
+                var frame = frames[i];
                 var link = GetLink(frame.Property, frame.Index);
                 if (link.Segment is null && link.BareKey is null)
                 {
-                    return null;
+                    _paths.DropPath(start);
+                    return false;
                 }
 
-                links[i] = link;
+                _paths.AddLink(link);
             }
 
-            return links;
+            _paths.EndPath(start);
+            return true;
         }
 
         // These link rules mirror the registry's path reader; SubjectPathsTests cross-checks them against it.

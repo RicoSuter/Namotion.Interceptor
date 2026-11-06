@@ -13,44 +13,47 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// </summary>
 internal sealed class ParentReads
 {
-    // Larger lists are dropped on return, so a search that used the whole budget does not pin its list to the thread.
-    private const int MaxCachedCapacity = 256;
-
-    [ThreadStatic]
-    private static ParentReads? _cached;
+    // Up to this many reads a scan finds a subject's read faster than a lookup.
+    private const int ScannedReads = 8;
 
     private readonly List<Read> _reads = [];
+    private readonly Dictionary<RegisteredSubject, int> _readIndexes = new(ReferenceEqualityComparer.Instance);
+
+    public int Capacity => _reads.Capacity;
 
     /// <summary>
-    /// Gets an empty instance, the thread's cached one when it is free; a nested evaluation on the same thread, such as
-    /// a tag or path provider that calls the policy, gets its own.
+    /// Reads and records the parents of the subject, then whether it is attached. A subject read before in this
+    /// instance returns its recorded read, so the reads stay one per subject and agree with each other.
     /// </summary>
-    public static ParentReads Rent()
-    {
-        var reads = _cached ?? new ParentReads();
-        _cached = null;
-        return reads;
-    }
-
-    /// <summary>Clears the instance and caches it for the thread's next evaluation; it must not be used afterwards.</summary>
-    public static void Return(ParentReads reads)
-    {
-        if (reads._reads.Capacity > MaxCachedCapacity)
-        {
-            return;
-        }
-
-        reads.Clear();
-        _cached = reads;
-    }
-
-    /// <summary>Reads and records the parents of the subject, then whether it is attached.</summary>
     public ImmutableArray<SubjectPropertyParent> GetParents(RegisteredSubject subject, out bool isAttached)
     {
+        var index = IndexOf(subject);
+        if (index >= 0)
+        {
+            var read = _reads[index];
+            isAttached = read.IsAttached;
+            return read.Parents;
+        }
+
         // Parents first: the registry clears the attachment before it removes the last parent.
         var parents = subject.Parents;
         isAttached = subject.IsAttached;
         _reads.Add(new Read(subject, parents, isAttached));
+        if (_reads.Count > ScannedReads)
+        {
+            if (_readIndexes.Count == 0)
+            {
+                for (var i = 0; i < _reads.Count; i++)
+                {
+                    _readIndexes.Add(_reads[i].Subject, i);
+                }
+            }
+            else
+            {
+                _readIndexes.Add(subject, _reads.Count - 1);
+            }
+        }
+
         return parents;
     }
 
@@ -69,7 +72,29 @@ internal sealed class ParentReads
         return true;
     }
 
-    public void Clear() => _reads.Clear();
+    public void Clear()
+    {
+        _reads.Clear();
+        _readIndexes.Clear();
+    }
+
+    private int IndexOf(RegisteredSubject subject)
+    {
+        if (_reads.Count > ScannedReads)
+        {
+            return _readIndexes.TryGetValue(subject, out var index) ? index : -1;
+        }
+
+        for (var i = 0; i < _reads.Count; i++)
+        {
+            if (ReferenceEquals(_reads[i].Subject, subject))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
 
     private readonly record struct Read(RegisteredSubject Subject, ImmutableArray<SubjectPropertyParent> Parents, bool IsAttached);
 }

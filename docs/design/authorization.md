@@ -157,7 +157,7 @@ A policy is built for many cheap questions. The common question, a member decide
 
 The allocations that remain each have a reason:
 
-- **Path rules.** When a rule with paths survives its other selectors, the subject's paths are enumerated: a list of paths, the search frames and one `PathLink` array per path. The paths are memoized for the rest of the call, and `CanRead(subject)` carries them from member to member, so a subject's paths are enumerated once per question about it and once per link on the way to a root whose evaluation reaches a path rule.
+- **Path rules.** When a rule with paths survives its other selectors, the subject's paths are enumerated into lists the thread reuses, so a chain of single parents allocates nothing once they have grown. A search over several parents allocates its stack and the set of subjects on the current chain, and lists grown past 256 paths or reads, or 1,024 links, are dropped after the call instead of being kept by the thread. The paths are memoized for the rest of the call. `CanRead(subject)` carries them from member to member, builds each subject's paths at most once, and takes the paths of a subject's only parent's owner from the subject's paths without their last link, so a chain of any depth is enumerated once.
 - **Attribute names.** A member glob matched against an attribute builds its `Property@Attribute` name.
 - **Types.** The first type rule evaluated for a runtime type caches that type's simple and full names, its base types and its interfaces.
 - **Visibility.** `CanRead(subject)` allocates the visited set when a subject on the way has several parents or the chain is deeper than 32 levels.

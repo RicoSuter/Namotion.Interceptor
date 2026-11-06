@@ -23,11 +23,6 @@ public sealed class AuthorizationPolicy
 
     private const int MaxConsistencyAttempts = 3;
 
-    // The root's single empty path, which a member of the root follows; never mutated, so it is shared.
-    private static readonly List<PathLink[]> RootPaths = [[]];
-
-    private static readonly List<PathLink[]> NoPaths = [];
-
     private static readonly TypeNameCache TypeNames = new();
 
     private readonly CompiledRule[] _allow;
@@ -125,10 +120,11 @@ public sealed class AuthorizationPolicy
     {
         ArgumentNullException.ThrowIfNull(member);
         var bit = GetBit(action);
-        var context = new MatchContext { SharedReads = null };
+        var context = new MatchContext();
         context.SetMember(member);
         var allowed = FindMatch(_allow, bit, isDeny: false, ref context);
         var denied = FindMatch(_deny, bit, isDeny: true, ref context);
+        context.ReturnRentedState();
         return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
     }
 
@@ -138,14 +134,18 @@ public sealed class AuthorizationPolicy
         ArgumentNullException.ThrowIfNull(subject);
 
         // The member checks, the walk and its link checks record into one instance, so the answer rests on one instant.
-        var reads = ParentReads.Rent();
+        var state = EvaluationState.Rent();
         try
         {
             for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
             {
-                reads.Clear();
-                var decision = ExplainOnce(subject, reads);
-                if (reads.AreUnchanged())
+                if (attempt > 0)
+                {
+                    state.Clear();
+                }
+
+                var decision = ExplainOnce(subject, state);
+                if (state.Reads.AreUnchanged())
                 {
                     return decision;
                 }
@@ -155,19 +155,19 @@ public sealed class AuthorizationPolicy
         }
         finally
         {
-            ParentReads.Return(reads);
+            EvaluationState.Return(state);
         }
     }
 
-    private SubjectReadDecision ExplainOnce(RegisteredSubject subject, ParentReads reads)
+    private SubjectReadDecision ExplainOnce(RegisteredSubject subject, EvaluationState state)
     {
-        if (!HasReadableMember(subject, reads))
+        if (!HasReadableMember(subject, state, out var subjectPaths))
         {
             return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
         }
 
         RegisteredSubjectProperty? deniedProperty = null;
-        var isReachable = IsReachable(subject, reads, ref deniedProperty);
+        var isReachable = IsReachable(subject, state, subjectPaths, ref deniedProperty);
         return new SubjectReadDecision(isReachable, HasReadableMember: true, isReachable ? null : deniedProperty);
     }
 
@@ -187,13 +187,13 @@ public sealed class AuthorizationPolicy
         throw new ArgumentException($"Action '{action}' is not a known action of this policy.", nameof(action));
     }
 
-    private bool IsAllowed(RegisteredSubjectProperty member, ulong bit) => IsAllowed(member, bit, sharedReads: null);
-
-    private bool IsAllowed(RegisteredSubjectProperty member, ulong bit, ParentReads? sharedReads)
+    private bool IsAllowed(RegisteredSubjectProperty member, ulong bit)
     {
-        var context = new MatchContext { SharedReads = sharedReads };
+        var context = new MatchContext();
         context.SetMember(member);
-        return IsAllowed(bit, ref context);
+        var allowed = IsAllowed(bit, ref context);
+        context.ReturnRentedState();
+        return allowed;
     }
 
     private bool IsAllowed(ulong bit, ref MatchContext context)
@@ -255,14 +255,19 @@ public sealed class AuthorizationPolicy
             return true;
         }
 
-        context.Paths ??= GetPaths(context.Member.Parent, context.SharedReads, out context.PathsComplete);
-        if (isDeny && !context.PathsComplete)
+        if (!context.HasPaths)
+        {
+            context.Paths = GetPaths(context.Member.Parent, ref context);
+            context.HasPaths = true;
+        }
+
+        if (isDeny && !context.Paths.IsComplete)
         {
             return true;
         }
 
         context.MemberSegment ??= SubjectPaths.GetSegment(_pathProvider!, context.Member);
-        return AnyPathMatches(patterns, context.Paths, new PathLink(context.MemberSegment, null), isDeny);
+        return context.Paths.AnyMatches(patterns, context.MemberSegment, isDeny);
     }
 
     private ImmutableArray<string> GetTags(ref MatchContext context)
@@ -341,12 +346,13 @@ public sealed class AuthorizationPolicy
     // Every path of the subject as of one instant of the graph; a root has the single empty path. Incomplete when a path
     // could not be written, more than MaxPaths exist, the subject has parents but no path was found, the subject or one
     // on a path is no longer attached, or the graph changed during every attempt, which also lists no path, so an allow
-    // cannot match a path that never existed. With sharedReads the reads are only recorded, for the caller to check.
-    private List<PathLink[]> GetPaths(RegisteredSubject subject, ParentReads? sharedReads, out bool isComplete)
+    // cannot match a path that never existed. In a subject evaluation the reads are only recorded, for the evaluation
+    // to check, and each subject's paths are built once per attempt.
+    private PathList GetPaths(RegisteredSubject subject, ref MatchContext context)
     {
-        if (sharedReads is not null)
+        if (context.SharedState is { } sharedState)
         {
-            return GetPathsOnce(subject, sharedReads, out isComplete);
+            return sharedState.GetPaths(subject, _pathProvider!, MaxPaths);
         }
 
         // The answer for a root or a detached subject rests on one subject's parents and attachment, which hold together
@@ -355,79 +361,43 @@ public sealed class AuthorizationPolicy
         var isAttached = subject.IsAttached;
         if (!isAttached || parents.Length == 0)
         {
-            return GetPathsWithoutParents(isAttached, out isComplete);
+            return isAttached ? PathList.Root : PathList.Unknown;
         }
 
-        var reads = ParentReads.Rent();
-        try
+        // The paths live in the state, so the context keeps it until the question is answered.
+        var state = context.RentedState ??= EvaluationState.Rent();
+        for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
         {
-            for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
+            if (attempt > 0)
             {
-                reads.Clear();
-                var paths = GetPathsOnce(subject, reads, out isComplete);
-                if (reads.AreUnchanged())
-                {
-                    return paths;
-                }
+                state.Clear();
             }
 
-            isComplete = false;
-            return NoPaths;
-        }
-        finally
-        {
-            ParentReads.Return(reads);
-        }
-    }
-
-    private List<PathLink[]> GetPathsOnce(RegisteredSubject subject, ParentReads reads, out bool isComplete)
-    {
-        var parents = reads.GetParents(subject, out var isAttached);
-        if (!isAttached || parents.Length == 0)
-        {
-            return GetPathsWithoutParents(isAttached, out isComplete);
-        }
-
-        var paths = new List<PathLink[]>(1);
-        isComplete = SubjectPaths.TryGetPaths(subject, _pathProvider!, paths, MaxPaths, reads) && paths.Count > 0;
-        return paths;
-    }
-
-    // A detached subject has unknown paths, also when it lost its parents, rather than the root's.
-    private static List<PathLink[]> GetPathsWithoutParents(bool isAttached, out bool isComplete)
-    {
-        isComplete = isAttached;
-        return isAttached ? RootPaths : NoPaths;
-    }
-
-    private static bool AnyPathMatches(PathPattern[] patterns, List<PathLink[]> paths, in PathLink member, bool isDeny)
-    {
-        foreach (var pattern in patterns)
-        {
-            for (var i = 0; i < paths.Count; i++)
+            var paths = state.BuildPaths(subject, _pathProvider!, MaxPaths);
+            if (state.Reads.AreUnchanged())
             {
-                if (pattern.Matches(paths[i], member, isDeny))
-                {
-                    return true;
-                }
+                return paths;
             }
         }
 
-        return false;
+        return PathList.Unknown;
     }
 
-    private bool HasReadableMember(RegisteredSubject subject, ParentReads reads)
+    // Also hands out the subject's paths when a rule needed them, for the walk to derive its owners' paths from; none otherwise.
+    private bool HasReadableMember(RegisteredSubject subject, EvaluationState state, out PathList subjectPaths)
     {
-        var context = new MatchContext { SharedReads = reads };
+        var context = new MatchContext { SharedState = state };
         foreach (var member in subject.Properties)
         {
             context.SetMember(member);
             if (IsAllowed(PolicyCompiler.ReadBit, ref context))
             {
+                subjectPaths = context.HasPaths ? context.Paths : default;
                 return true;
             }
         }
 
+        subjectPaths = default;
         return false;
     }
 
@@ -435,11 +405,13 @@ public sealed class AuthorizationPolicy
     // deniedProperty is the first unreadable link found in depth-first order, or stays null when every chain returns to
     // a subject already walked or passes a subject that is no longer attached. Iterative, so a deep graph cannot
     // overflow the stack; a cursor with untried parents waits in pending, which a single-parent chain never needs.
-    private bool IsReachable(RegisteredSubject subject, ParentReads reads, ref RegisteredSubjectProperty? deniedProperty)
+    private bool IsReachable(RegisteredSubject subject, EvaluationState state, PathList subjectPaths, ref RegisteredSubjectProperty? deniedProperty)
     {
         HashSet<RegisteredSubject>? visited = null;
         List<ParentCursor>? pending = null;
-        var hasCursor = TryEnter(subject, 0, reads, ref visited, out var cursor, out var isRoot);
+        var hasCursor = TryEnter(subject, 0, state, ref visited, out var cursor, out var isRoot);
+        var cursorPaths = subjectPaths;
+        var context = new MatchContext { SharedState = state };
         while (!isRoot)
         {
             if (!hasCursor)
@@ -451,6 +423,9 @@ public sealed class AuthorizationPolicy
 
                 cursor = pending[^1];
                 pending.RemoveAt(pending.Count - 1);
+
+                // A waiting cursor's subject has several parents, so its paths give no owner's paths.
+                cursorPaths = default;
             }
 
             var parent = cursor.Parents[cursor.Next];
@@ -459,14 +434,16 @@ public sealed class AuthorizationPolicy
                 (pending ??= []).Add(cursor with { Next = cursor.Next + 1 });
             }
 
-            if (!IsAllowed(parent.Property, PolicyCompiler.ReadBit, reads))
+            SetLink(ref context, parent.Property, cursor, cursorPaths);
+            if (!IsAllowed(PolicyCompiler.ReadBit, ref context))
             {
                 deniedProperty ??= parent.Property;
                 hasCursor = false;
                 continue;
             }
 
-            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, reads, ref visited, out cursor, out isRoot);
+            cursorPaths = context.HasPaths ? context.Paths : default;
+            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, state, ref visited, out cursor, out isRoot);
         }
 
         return true;
@@ -475,11 +452,11 @@ public sealed class AuthorizationPolicy
     // Enters a subject: isRoot when it is an attached subject without parents; no cursor when it is no longer attached
     // or was already explored.
     private static bool TryEnter(
-        RegisteredSubject subject, int depth, ParentReads reads, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
+        RegisteredSubject subject, int depth, EvaluationState state, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
     {
         cursor = default;
         isRoot = false;
-        var parents = reads.GetParents(subject, out var isAttached);
+        var parents = state.Reads.GetParents(subject, out var isAttached);
         if (!isAttached)
         {
             return false;
@@ -501,6 +478,16 @@ public sealed class AuthorizationPolicy
         return true;
     }
 
+    // Prepares the check of a link to the cursor's next parent, whose owner is another subject than the last link's.
+    // Every path of a subject with one parent runs through it, so the owner's paths are the subject's without their
+    // last link, and a deep chain is not enumerated once per link.
+    private static void SetLink(ref MatchContext context, RegisteredSubjectProperty link, in ParentCursor cursor, in PathList cursorPaths)
+    {
+        context.SetMember(link);
+        context.HasPaths = cursor.Parents.Length == 1 && cursorPaths.Count > 0;
+        context.Paths = context.HasPaths ? cursorPaths.WithoutLastLink() : default;
+    }
+
     private readonly record struct ParentCursor(ImmutableArray<SubjectPropertyParent> Parents, int Next, int Depth);
 
     // The facts one question derives, each at most once and only when a rule needs it.
@@ -511,11 +498,15 @@ public sealed class AuthorizationPolicy
         public bool IsMemberNameResolved;
         public ImmutableArray<string> Tags;
         public string? MemberSegment;
-        public List<PathLink[]>? Paths;
-        public bool PathsComplete;
+        public PathList Paths;
+        public bool HasPaths;
 
-        // When set, the paths' parent reads are recorded here for the caller to check, instead of being checked per enumeration.
-        public ParentReads? SharedReads;
+        // When set, the question is part of a subject evaluation: the paths' parent reads are recorded here for the
+        // evaluation to check, instead of being checked per enumeration.
+        public EvaluationState? SharedState;
+
+        // The state a question on its own rented for its paths, which point into it until the question is answered.
+        public EvaluationState? RentedState;
 
         // The paths belong to the subject, not the member, so they are kept for the next member of the same subject.
         public void SetMember(RegisteredSubjectProperty member)
@@ -525,6 +516,15 @@ public sealed class AuthorizationPolicy
             IsMemberNameResolved = false;
             Tags = default;
             MemberSegment = null;
+        }
+
+        public void ReturnRentedState()
+        {
+            if (RentedState is not null)
+            {
+                EvaluationState.Return(RentedState);
+                RentedState = null;
+            }
         }
     }
 }

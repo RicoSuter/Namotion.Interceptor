@@ -157,7 +157,10 @@ internal sealed class PathPattern
         => text.Length > 0 && (char.IsWhiteSpace(text[0]) || char.IsWhiteSpace(text[^1]));
 
     /// <summary>Whether the pattern matches the member path made of the subject's <paramref name="path"/> and <paramref name="member"/>, in the spellings of a deny rule when <paramref name="isDeny"/> is true.</summary>
-    public bool Matches(PathLink[] path, in PathLink member, bool isDeny)
+    public bool Matches(PathLink[] path, in PathLink member, bool isDeny) => Matches(path.AsSpan(), member, isDeny);
+
+    /// <inheritdoc cref="Matches(PathLink[], in PathLink, bool)"/>
+    public bool Matches(ReadOnlySpan<PathLink> path, in PathLink member, bool isDeny)
     {
         // The classic glob over segments: backtracking to the last ** suffices, because ** matches any segments and
         // every other pattern segment exactly one, which bounds the work by pattern length times path length.
