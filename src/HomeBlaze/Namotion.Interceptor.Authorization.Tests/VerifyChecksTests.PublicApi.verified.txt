@@ -11,9 +11,9 @@ namespace Namotion.Interceptor.Authorization
     }
     public sealed class AuthorizationPolicy
     {
-        public const string SystemRoleName = "System";
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.AuthorizationRole> Roles { get; }
         public static Namotion.Interceptor.Authorization.AuthorizationPolicy DenyAll { get; }
+        public static string SystemRoleName { get; }
         public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
         public bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }

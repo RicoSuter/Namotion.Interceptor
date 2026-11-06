@@ -43,6 +43,10 @@ internal static class PolicyCompiler
         return new Result([.. closure], [.. allow], [.. deny], actionBits);
     }
 
+    /// <summary>Creates a policy without rules or known actions, which answers no to every action.</summary>
+    public static AuthorizationPolicy CreateDenyAll()
+        => new([], [], [], FrozenDictionary<string, ulong>.Empty, EmptyTagProvider.Instance, DefaultPathProvider.Instance);
+
     private static FrozenDictionary<string, ulong> BuildActionBits(IReadOnlyCollection<PermissionAction> knownActions)
     {
         var bits = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)

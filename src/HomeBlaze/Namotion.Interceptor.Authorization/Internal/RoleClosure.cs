@@ -3,8 +3,6 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>Resolves role names to the roles they name and every role those include, each once, included roles first.</summary>
 internal static class RoleClosure
 {
-    private const int MaxDepth = 64;
-
     public static List<AuthorizationRole> Resolve(IReadOnlyCollection<AuthorizationRole> roles, IReadOnlyCollection<string> roleNames)
     {
         var rolesByName = new Dictionary<string, AuthorizationRole>(StringComparer.OrdinalIgnoreCase);
@@ -96,9 +94,9 @@ internal static class RoleClosure
 
         // The path holds the principal's role plus one entry per include level.
         path.Add(role.Name);
-        if (path.Count > MaxDepth + 1)
+        if (path.Count > Limits.MaxIncludeDepth + 1)
         {
-            throw new AuthorizationException($"Role '{role.Name}' is nested more than {MaxDepth} levels deep.");
+            throw new AuthorizationException($"Role '{role.Name}' is nested more than {Limits.MaxIncludeDepth} levels deep.");
         }
 
         if (!role.Includes.IsDefaultOrEmpty)

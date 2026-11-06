@@ -11,13 +11,11 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// </summary>
 internal static class SubjectPaths
 {
-    private const int ParentLinksPerPath = 64;
-    private const int CycleDetectionDepthThreshold = 256;
-
     /// <summary>
     /// The segment of the property as the registry spells it when it builds a path: the provider's segment of an included
     /// property, or the browse name of one the provider excludes. An attribute is spelled the same way, so attribute
-    /// paths follow the registry's syntax. A member paths may not pass still has a segment a deny can match.
+    /// paths follow the registry's syntax. A member that paths may not pass through still has a segment, which a deny
+    /// rule can match.
     /// </summary>
     public static string GetSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
         => pathProvider.TryGetPropertySegment(property, out var segment) ? segment : property.BrowseName;
@@ -55,11 +53,6 @@ internal static class SubjectPaths
 
         followedSingleParents = true;
         var parents = reads.GetParents(subject, out _);
-        if (parents.Length == 0)
-        {
-            return true;
-        }
-
         var builder = new ChainBuilder(pathProvider, paths, maxPaths);
         var frames = paths.Frames;
         frames.Clear();
@@ -67,7 +60,7 @@ internal static class SubjectPaths
         {
             followedSingleParents = false;
             frames.Clear();
-            BuildChains(subject, parents, (long)maxPaths * ParentLinksPerPath, frames, reads, ref builder);
+            BuildChains(subject, parents, (long)maxPaths * Limits.ParentLinksPerPath, frames, reads, ref builder);
         }
 
         return builder.IsComplete;
@@ -87,7 +80,7 @@ internal static class SubjectPaths
         while (parents.Length == 1)
         {
             // Start tracking only past the threshold; a revisit then means the chain is a cycle and has no path.
-            if (++depth > CycleDetectionDepthThreshold && !(visited ??= []).Add(current))
+            if (++depth > Limits.CycleTrackingDepth && !(visited ??= []).Add(current))
             {
                 return true;
             }

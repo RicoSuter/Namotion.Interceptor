@@ -26,6 +26,10 @@ public sealed record PermissionRule
     public ImmutableArray<string> Paths { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the full or simple names of types or interfaces the member's subject is assignable to; empty for any type.</summary>
+    /// <remarks>
+    /// In a trimmed application, trimming can remove the implementation of an interface that no code uses, so a rule
+    /// naming such an interface may not match.
+    /// </remarks>
     public ImmutableArray<string> Types { get; init => field = value.IsDefault ? [] : value; } = [];
 
     /// <summary>Gets the member name globs, <c>*</c> matching any text; empty for all members. An attribute is named <c>Property@Attribute</c>.</summary>

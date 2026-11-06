@@ -113,12 +113,25 @@ public class PermissionRuleJsonTests
 
     [Theory]
     [InlineData("""{ "path": ["/Home"], "actions": ["read"] }""", "path")]
-    [InlineData("""{ "actions": ["read"], "selectorWithAVeryLongNameThatDoesNotFitTheStackBufferOfTheConverterAtAll": [] }""", "selectorWithAVeryLongNameThatDoesNotFitTheStackBufferOfTheConverterAtAll")]
+    [InlineData("""{ "actions": ["read"], "selectorWithANameOfSixtyFourCharactersThatFillsTheStackBufferNow": [] }""", "selectorWithANameOfSixtyFourCharactersThatFillsTheStackBufferNow")]
     public void WhenPropertyIsUnknown_ThenReadingThrowsNamingIt(string json, string propertyName)
     {
         // Act & Assert
         var exception = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PermissionRule>(json));
         Assert.Contains($"'{propertyName}'", exception.Message);
+    }
+
+    [Fact]
+    public void WhenUnknownPropertyNameIsLongerThan64Characters_ThenReadingThrowsNamingItsStart()
+    {
+        // Arrange
+        var propertyName = new string('x', 64) + "TheRestOfAVeryLongName";
+        var json = $$"""{ "actions": ["read"], "{{propertyName}}": [] }""";
+
+        // Act & Assert
+        var exception = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PermissionRule>(json));
+        Assert.Contains($"'{new string('x', 64)}...'", exception.Message);
+        Assert.DoesNotContain("TheRestOfAVeryLongName", exception.Message);
     }
 
     [Fact]

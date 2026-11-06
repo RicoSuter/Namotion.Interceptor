@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Text;
 using Namotion.Interceptor.Authorization.Internal;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -13,13 +14,8 @@ namespace Namotion.Interceptor.Authorization;
 /// </summary>
 public sealed class AuthorizationPolicy
 {
-    /// <summary>The name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
-    public const string SystemRoleName = "System";
-
-    // Along a single-parent chain the walk allocates nothing; a branch or this depth starts the visited set, so a subject is explored once and a cycle ends.
-    private const int VisitedTrackingDepth = 32;
-
-    private const int MaxPaths = 64;
+    /// <summary>Gets the name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
+    public static string SystemRoleName { get; } = "System";
 
     private const int MaxConsistencyAttempts = 3;
 
@@ -28,16 +24,16 @@ public sealed class AuthorizationPolicy
     private readonly CompiledRule[] _allow;
     private readonly CompiledRule[] _deny;
     private readonly FrozenDictionary<string, ulong> _actionBits;
-    private readonly IMemberTagProvider? _tagProvider;
-    private readonly PathProviderBase? _pathProvider;
+    private readonly IMemberTagProvider _tagProvider;
+    private readonly PathProviderBase _pathProvider;
 
-    private AuthorizationPolicy(
+    internal AuthorizationPolicy(
         ImmutableArray<AuthorizationRole> roles,
         CompiledRule[] allow,
         CompiledRule[] deny,
         FrozenDictionary<string, ulong> actionBits,
-        IMemberTagProvider? tagProvider,
-        PathProviderBase? pathProvider)
+        IMemberTagProvider tagProvider,
+        PathProviderBase pathProvider)
     {
         Roles = roles;
         _allow = allow;
@@ -48,7 +44,7 @@ public sealed class AuthorizationPolicy
     }
 
     /// <summary>A policy that denies every action; the policy of a principal whose roles failed to compile.</summary>
-    public static AuthorizationPolicy DenyAll { get; } = new([], [], [], FrozenDictionary<string, ulong>.Empty, null, null);
+    public static AuthorizationPolicy DenyAll { get; } = PolicyCompiler.CreateDenyAll();
 
     /// <summary>Gets the roles of the principal and every role they include, included roles first.</summary>
     public ImmutableArray<AuthorizationRole> Roles { get; }
@@ -214,7 +210,7 @@ public sealed class AuthorizationPolicy
 
     // Selectors are checked cheapest first; the paths are enumerated once per evaluation and only when a rule with paths gets that far.
     private bool Matches(CompiledRule rule, ulong bit, bool isDeny, ref MatchContext context)
-        => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, isDeny, ref context) && MatchesPaths(rule.Paths, isDeny, ref context);
+        => (rule.Actions & bit) != 0 && MatchesMemberSelectors(rule, isDeny, ref context) && MatchesPaths(rule, isDeny, ref context);
 
     private bool MatchesMemberSelectors(CompiledRule rule, bool isDeny, ref MatchContext context)
     {
@@ -248,9 +244,9 @@ public sealed class AuthorizationPolicy
 
     // A deny rule fails closed: when some path of the subject could not be written, it may be the one the rule names,
     // and it matches the structural spellings of each link whether or not a property shadows them.
-    private bool MatchesPaths(PathPattern[]? patterns, bool isDeny, ref MatchContext context)
+    private bool MatchesPaths(CompiledRule rule, bool isDeny, ref MatchContext context)
     {
-        if (patterns is null)
+        if (rule.Paths is null)
         {
             return true;
         }
@@ -266,15 +262,15 @@ public sealed class AuthorizationPolicy
             return true;
         }
 
-        context.MemberSegment ??= SubjectPaths.GetSegment(_pathProvider!, context.Member);
-        return context.Paths.AnyMatches(patterns, context.MemberSegment, isDeny);
+        context.MemberSegment ??= SubjectPaths.GetSegment(_pathProvider, context.Member);
+        return context.Paths.AnyMatches(rule.Paths, context.MemberSegment, isDeny);
     }
 
     private ImmutableArray<string> GetTags(ref MatchContext context)
     {
         if (context.Tags.IsDefault)
         {
-            var tags = _tagProvider!.GetTags(context.Member);
+            var tags = _tagProvider.GetTags(context.Member);
             if (tags.IsDefault)
             {
                 throw new InvalidOperationException(
@@ -299,7 +295,7 @@ public sealed class AuthorizationPolicy
             return member.Name;
         }
 
-        var name = new System.Text.StringBuilder(member.BrowseName);
+        var name = new StringBuilder(member.BrowseName);
         var remainingSteps = member.Parent.Properties.Length;
         var current = member;
         while (current.IsAttribute)
@@ -351,7 +347,7 @@ public sealed class AuthorizationPolicy
     {
         if (context.SharedState is { } sharedState)
         {
-            return sharedState.GetPaths(subject, _pathProvider!, MaxPaths, out context.ReleasablePathsStart);
+            return sharedState.GetPaths(subject, _pathProvider, Limits.MaxPaths, out context.ReleasablePathsStart);
         }
 
         // The answer for a root or a detached subject rests on one subject's parents and attachment, which hold together
@@ -372,7 +368,7 @@ public sealed class AuthorizationPolicy
                 state.Clear();
             }
 
-            var paths = state.BuildPaths(subject, _pathProvider!, MaxPaths);
+            var paths = state.BuildPaths(subject, _pathProvider, Limits.MaxPaths);
             if (state.Reads.AreUnchanged())
             {
                 return paths;
@@ -385,7 +381,7 @@ public sealed class AuthorizationPolicy
     // Also hands out the subject's paths when a rule needed them, for the walk to derive its owners' paths from; none otherwise.
     private bool HasReadableMember(RegisteredSubject subject, EvaluationState state, out PathList subjectPaths)
     {
-        var context = new MatchContext { SharedState = state };
+        var context = new MatchContext { SharedState = state, ReleasablePathsStart = -1 };
         foreach (var member in subject.Properties)
         {
             context.SetMember(member);
@@ -410,7 +406,7 @@ public sealed class AuthorizationPolicy
         List<ParentCursor>? pending = null;
         var hasCursor = TryEnter(subject, 0, state, ref visited, out var cursor, out var isRoot);
         var cursorPaths = subjectPaths;
-        var context = new MatchContext { SharedState = state };
+        var context = new MatchContext { SharedState = state, ReleasablePathsStart = -1 };
         while (!isRoot)
         {
             if (!hasCursor)
@@ -466,7 +462,7 @@ public sealed class AuthorizationPolicy
         }
 
         // Already explored from here, or a cycle: no new route to a root through this subject.
-        if ((parents.Length > 1 || depth >= VisitedTrackingDepth) && !(visited ??= []).Add(subject))
+        if ((parents.Length > 1 || depth >= Limits.CycleTrackingDepth) && !(visited ??= []).Add(subject))
         {
             return false;
         }

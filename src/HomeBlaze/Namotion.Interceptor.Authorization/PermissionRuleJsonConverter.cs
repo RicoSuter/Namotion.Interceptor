@@ -16,6 +16,9 @@ public sealed class PermissionRuleJsonConverter : JsonConverter<PermissionRule>
     // Longer than every known name even when fully escaped; a longer name is unknown and read as a string for the message.
     private const int MaxStackNameLength = 64;
 
+    // An unknown name is echoed in the message only up to this length, so a hostile document cannot inflate the message.
+    private const int MaxEchoedNameLength = 64;
+
     private static readonly PermissionActionJsonConverter ActionConverter = new();
 
     private static readonly JsonEncodedText PathsName = JsonEncodedText.Encode("paths");
@@ -81,7 +84,7 @@ public sealed class PermissionRuleJsonConverter : JsonConverter<PermissionRule>
         var property = GetProperty(name);
         if (property == Property.None)
         {
-            throw new JsonException($"A permission rule has no property '{name}'; expected paths, types, members, tags or actions.");
+            throw new JsonException($"A permission rule has no property '{GetEchoedName(name)}'; expected paths, types, members, tags or actions.");
         }
 
         if ((seen & property) != 0)
@@ -92,6 +95,9 @@ public sealed class PermissionRuleJsonConverter : JsonConverter<PermissionRule>
         seen |= property;
         return property;
     }
+
+    private static string GetEchoedName(ReadOnlySpan<char> name)
+        => name.Length <= MaxEchoedNameLength ? name.ToString() : $"{name[..MaxEchoedNameLength]}...";
 
     private static Property GetProperty(ReadOnlySpan<char> name)
     {

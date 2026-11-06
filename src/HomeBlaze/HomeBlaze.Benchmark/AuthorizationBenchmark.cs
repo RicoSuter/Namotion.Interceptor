@@ -91,7 +91,7 @@ public class AuthorizationBenchmark
         _subjects = subjects.ToArray();
     }
 
-    [Benchmark(Baseline = true)]
+    [Benchmark]
     public bool ReadByTag() => _policy.CanRead(_lampBrightness);
 
     /// <summary>The deny rules have only path selectors, so the subject's paths are enumerated to prove none matches; this is the cost of path-only deny rules.</summary>

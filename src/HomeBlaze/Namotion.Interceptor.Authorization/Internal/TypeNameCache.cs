@@ -1,16 +1,20 @@
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Authorization.Internal;
 
-/// <summary>The simple and full names of a runtime type, its base types and its interfaces, cached per type.</summary>
+/// <summary>
+/// The simple and full names of a runtime type, its base types and its interfaces, cached per type. The cache does not
+/// keep a type alive, so a collectible load context can still unload.
+/// </summary>
 internal sealed class TypeNameCache
 {
-    private readonly ConcurrentDictionary<Type, FrozenSet<string>> _namesByType = new();
+    private readonly ConditionalWeakTable<Type, FrozenSet<string>> _namesByType = new();
 
     public bool IsAssignableToAny(Type type, string[] typeNames)
     {
-        var names = _namesByType.GetOrAdd(type, static type => CollectNames(type));
+        var names = _namesByType.GetValue(type, static type => CollectNames(type));
         foreach (var typeName in typeNames)
         {
             if (names.Contains(typeName))
@@ -22,6 +26,8 @@ internal sealed class TypeNameCache
         return false;
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = "Trimming can remove an interface implementation nothing uses, so a Types selector naming such an interface may not match; documented on PermissionRule.Types.")]
     private static FrozenSet<string> CollectNames(Type type)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
