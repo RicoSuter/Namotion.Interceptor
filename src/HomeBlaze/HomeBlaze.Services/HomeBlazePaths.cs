@@ -31,6 +31,9 @@ public static class HomeBlazePaths
     /// <summary>Folder of the ASP.NET Core Data Protection keys, relative to the data directory.</summary>
     public const string DataProtectionKeysDirectory = "DataProtection-Keys";
 
+    /// <summary>Folder of the checkpoint files of automations, relative to the data directory.</summary>
+    public const string AutomationsDirectory = "Automations";
+
     /// <summary>
     /// Resolves the full path of the root configuration file. A relative setting resolves against the working directory.
     /// </summary>

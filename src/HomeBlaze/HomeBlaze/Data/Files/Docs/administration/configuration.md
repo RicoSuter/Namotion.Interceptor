@@ -56,6 +56,7 @@ Data/
 ├── Root.json            root configuration
 ├── Files/               devices, dashboards, pages, Plugins.json, docs
 ├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
+├── Automations/         current state and last runs of automations, one checkpoint file each
 ├── DataProtection-Keys/ ASP.NET Core keys that keep antiforgery tokens valid across restarts
 ├── History/Sqlite/      SQLite history
 └── OpcUa/               OPC UA certificates
@@ -64,6 +65,8 @@ Data/
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
 `DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
+
+`Automations/` holds one checkpoint file per automation, at the path of the automation in the subject graph: `Automations/Demo/ConveyorGuard.json` belongs to `/Demo/ConveyorGuard`. It keeps the current state, when the automation entered it, and the last run of each rule across restarts, and it is replaced as a whole on every change. Deleting an automation deletes its file, and renaming or moving one starts it again from its initial state. To reset an automation by hand, stop HomeBlaze and delete its file.
 
 ---
 
