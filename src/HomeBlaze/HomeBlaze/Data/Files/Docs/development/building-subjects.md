@@ -232,6 +232,7 @@ public partial class Motor
 - Cannot be `partial` (they're computed, not stored)
 - Can combine with `[State]` to display in UI
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
+- Reads another subject through intercepted properties or through a field that holds its owner (see [Shared Child Subjects](#shared-child-subjects)). Through a field that holds any other subject, it stops following that subject once the subject is detached and attached again while this one stays attached
 
 ## Child Subject Collections
 
@@ -474,6 +475,7 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
+| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser instead of an operation button | `OperationPurpose.Delete` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -484,6 +486,7 @@ public partial class Motor
 - Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code
 - Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
+- An operation with `Purpose = OperationPurpose.Delete` deletes or removes the subject. The subject browser shows it as the Delete button of the subject's pane, asks for confirmation before it runs it, whether or not it sets `RequiresConfirmation`, and leaves it out of the operation buttons. The button is disabled while the operation's `IsEnabled` attribute is false. Agents see it as an ordinary operation, so `RequiresConfirmation` still decides whether they may call it. It must take no parameter that requires input, otherwise the purpose is ignored. `Purpose` comes from the `[Operation]` attribute of the method itself and, unlike `RequiresConfirmation`, is not inherited: an override or implementation with its own `[Operation]` has only the purpose it sets itself. A subject stored in a file of a storage gets a `Delete` operation from the storage, which requires confirmation, unless it has a delete operation of its own, and so does a folder of a storage, which is enabled only while the folder is empty
 
 **Where a method is offered:**
 

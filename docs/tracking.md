@@ -261,6 +261,20 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+### Reaching Other Subjects
+
+A derived property depends on the properties it reads, not on how its getter reached their subject. Detaching a subject drops the dependencies on its properties, and attaching it again restores them only when the derived property is recalculated. If the getter reaches the subject through tracked properties, the write that attaches it again triggers that recalculation. If it reaches the subject through a field, a captured variable or a service, nothing does, and the derived property keeps its old value until another dependency changes or `RecalculateDerivedProperty()` is called:
+
+```csharp
+[Derived]
+public double? Temperature => _room.Sensor?.Temperature; // follows the sensor when it is attached again
+
+[Derived]
+public double LastTemperature => _sensor.Temperature;   // does not, if the sensor is detached and attached again on its own
+```
+
+A field holding an ancestor, such as an owner passed to the constructor, is fine: detaching the ancestor also detaches the derived property, and attaching it again recalculates it.
+
 ### Manual Recalculation
 
 When a derived property's getter depends on data outside the interceptor system (external APIs, services, static state, etc.), automatic dependency tracking cannot detect changes. Use `RecalculateDerivedProperty()` to manually trigger recalculation:
