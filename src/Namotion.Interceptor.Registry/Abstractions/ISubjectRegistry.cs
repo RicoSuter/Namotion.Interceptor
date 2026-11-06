@@ -18,12 +18,15 @@ public interface ISubjectRegistry
     RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject);
 
     /// <summary>
-    /// Gets a number that increases after every change to the registered subjects, their parents, children and child
-    /// indices, and after a property is added to a registered subject at run time. It never decreases.
+    /// Gets a number that is odd while the registry changes the registered subjects, their parents, children or child
+    /// indices, and even otherwise. Each such change raises it by two, and a property added to a registered subject at
+    /// run time raises it by two after the property is published. It never decreases.
     /// </summary>
     /// <remarks>
-    /// A cache of anything computed from the registry reads it before computing and serves an entry only while it is
-    /// unchanged, so an entry computed during a change carries the number from before it.
+    /// A reader that reads the same even number before and after reading the registry read no such change; it needs a
+    /// full fence, such as <see cref="Interlocked.MemoryBarrier"/>, before reading the number again. A cache of anything
+    /// computed from the registry reads it before computing and serves an entry only while it is unchanged, so an entry
+    /// computed during a change carries a number from before the change ended.
     /// </remarks>
     long StructureVersion { get; }
 }

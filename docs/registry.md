@@ -58,7 +58,7 @@ var child = garage.TryGetRegisteredProperty(g => g.Cars)!.Children[0]; // Subjec
 - Both entries follow the assigned value, and paths built afterwards use the new index. The rules, including a subject held more than once and a value mutated in place, are in [Child Index Changes](tracking.md#child-index-changes).
 - `Children` of a collection is in position order. A property declared as a dictionary is not reordered by key, so its children stay in the order they were attached, also when its value enumerates as positions. A property declared more broadly, such as `object`, that holds a dictionary with `int` keys has its children ordered by key.
 
-`ISubjectRegistry.StructureVersion` increases after every change to the registered subjects, their parents, children and child indices, and after a property is added at run time, and never decreases. A cache of anything computed from the registry, such as paths, reads it before computing and serves an entry only while it is unchanged.
+`ISubjectRegistry.StructureVersion` is odd while the registry changes the registered subjects, their parents, children or child indices, and even otherwise. Each such change raises it by two, a property added at run time raises it by two after the property is published, and it never decreases. A reader that reads the same even value before and after reading the registry, with a full fence such as `Interlocked.MemoryBarrier()` before the second read, read no such change, not even part of one. A cache of anything computed from the registry, such as paths, reads it before computing and serves an entry only while it is unchanged; an entry computed during a change carries a value from before the change ended and is never served after it.
 
 ## Enumerate property attributes
 
