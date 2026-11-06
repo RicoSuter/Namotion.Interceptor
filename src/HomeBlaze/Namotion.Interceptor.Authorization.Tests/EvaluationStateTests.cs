@@ -54,13 +54,13 @@ public class EvaluationStateTests
         var state = EvaluationState.Rent();
         var paths = state.BuildPaths(Registered(leaf), DefaultPathProvider.Instance, maxPaths: 64);
         var hasBuiltPathsBeforeReturn = HasBuiltPathsSinceRent(state);
+        Assert.Equal(1, paths.Count);
 
         // Act
         EvaluationState.Return(state);
         var rented = EvaluationState.Rent();
 
         // Assert
-        Assert.Equal(1, paths.Count);
         Assert.True(hasBuiltPathsBeforeReturn);
         Assert.Same(state, rented);
         Assert.False(HasBuiltPathsSinceRent(rented));
@@ -68,7 +68,9 @@ public class EvaluationStateTests
     }
 
     private static bool HasBuiltPathsSinceRent(EvaluationState state)
-        => (bool)typeof(EvaluationState)
-            .GetField("_hasBuiltPathsSinceRent", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(state)!;
+    {
+        var field = typeof(EvaluationState).GetField("_hasBuiltPathsSinceRent", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.True(field is not null, "EvaluationState no longer has a field _hasBuiltPathsSinceRent; update this test to the new name of the built-since-rent flag.");
+        return (bool)field.GetValue(state)!;
+    }
 }

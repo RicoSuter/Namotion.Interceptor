@@ -208,7 +208,7 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
         output.WriteLine($"evaluations={readers.Sum(r => r.Evaluations)} completedAllows={allowReaders.Sum(r => r.Allowed)} wrongAllows={denyReaders.Sum(r => r.Allowed)}");
         Assert.All(readers, reader => Assert.Null(reader.Exception));
         Assert.Equal(0, denyReaders.Sum(reader => reader.Allowed));
-        Assert.True(allowReaders.Sum(reader => reader.Allowed) > 0, "No evaluation of the allow policy completed while the parents moved.");
+        Assert.All(allowReaders, reader => Assert.True(reader.SettledAllowed, "The allow policy did not allow the settled graph."));
     }
 
     [Fact]
@@ -385,8 +385,8 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
         output.WriteLine($"evaluations={readers.Sum(r => r.Evaluations)} completedAllows={allowReaders.Sum(r => r.Allowed)} wrongAllows={visibilityReaders.Sum(r => r.Allowed)} completedVisibility={visibilityReaders.Sum(r => r.Completed)}");
         Assert.All(readers, reader => Assert.Null(reader.Exception));
         Assert.Equal(0, visibilityReaders.Sum(reader => reader.Allowed));
-        Assert.True(allowReaders.Sum(reader => reader.Allowed) > 0, "No evaluation of the allow policy completed while the subject moved.");
-        Assert.True(visibilityReaders.Sum(reader => reader.Completed) > 0, "No evaluation of the visibility policy completed while the subject moved.");
+        Assert.All(allowReaders, reader => Assert.True(reader.SettledAllowed, "The allow policy did not allow the settled graph."));
+        Assert.All(visibilityReaders, reader => Assert.True(reader.SettledComplete, "The visibility evaluation did not complete on the settled graph."));
     }
 
     private static AuthorizationPolicy Compile(PathProviderBase pathProvider, string[]? allowPaths, string[]? denyPaths)
@@ -458,8 +458,14 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
 
         public int Allowed { get; private set; }
 
-        /// <summary>Gets how often the completion check held; only evaluations that did not fail closed pass it.</summary>
+        /// <summary>Gets how often the completion check held during the run; only evaluations that did not fail closed pass it.</summary>
         public int Completed { get; private set; }
+
+        /// <summary>Gets whether the evaluation on the settled graph, after the mutator was done, allowed.</summary>
+        public bool SettledAllowed { get; private set; }
+
+        /// <summary>Gets whether the completion check held on the settled graph, after the mutator was done.</summary>
+        public bool SettledComplete { get; private set; }
 
         public Exception? Exception { get; private set; }
 
@@ -484,6 +490,10 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
                     }
                 }
                 while (!_mutatorDone.IsSet);
+
+                // The graph no longer changes, so this evaluation always completes.
+                SettledAllowed = _isAllowed();
+                SettledComplete = _isComplete?.Invoke() == true;
             }
             catch (Exception exception)
             {
