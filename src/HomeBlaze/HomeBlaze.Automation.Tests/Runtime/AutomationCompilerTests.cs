@@ -93,4 +93,146 @@ public class AutomationCompilerTests
         Assert.Null(compiled);
         Assert.Equal(expected, error);
     }
+
+    [Fact]
+    public void WhenSeveralRulesAndTheStatesAreInvalid_ThenAllErrorsAreCombinedInTheCompilerOrder()
+    {
+        // Arrange
+        var rules = new Dictionary<string, AutomationRule>
+        {
+            ["a"] = Rule("A", triggers: []),
+            ["b"] = Rule("B", actions: [])
+        };
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompile(["Day", "Day"], "Day", rules, ["b"], out var compiled, out var error);
+
+        // Assert
+        Assert.False(isCompiled);
+        Assert.Null(compiled);
+        Assert.Equal("The state 'Day' is defined twice; Rule 'B': it has no action; Rule 'A': it has no trigger", error);
+    }
+
+    [Fact]
+    public void WhenOneRuleHasSeveralErrors_ThenGuardTriggerAndActionErrorsAreReportedInOrder()
+    {
+        // Arrange
+        var rule = Rule(
+            guard: "event/Gesture == Release",
+            triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }],
+            actions: [new InvokeOperationAction { OperationPath = "" }]);
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
+
+        // Assert
+        Assert.False(isCompiled);
+        Assert.Null(compiled);
+        Assert.Equal(
+            "Rule 'Storm': guard: " + EventOnly + "; trigger 1: the event type is missing; action 1: the operation path is missing",
+            error);
+    }
+
+    [Theory]
+    [InlineData("", 0)]
+    [InlineData("   ", 3)]
+    public void WhenAPropertyTriggerExpressionIsBlank_ThenItIsRejected(string expression, int position)
+    {
+        // Arrange
+        var rule = Rule(triggers: [new PropertyTrigger { Expression = expression }]);
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
+
+        // Assert
+        Assert.False(isCompiled);
+        Assert.Null(compiled);
+        Assert.Equal($"Rule 'Storm': trigger 1: expected a value at position {position}", error);
+    }
+
+    [Fact]
+    public void WhenTheHoldIsZero_ThenTheTriggerIsAccepted()
+    {
+        // Arrange
+        var rule = Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.Zero }]);
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
+
+        // Assert
+        Assert.True(isCompiled, error);
+        Assert.NotNull(compiled);
+        Assert.Single(compiled.PropertyTriggers);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void WhenAStateNameIsBlank_ThenTheErrorSaysAStateNeedsAName(string blank)
+    {
+        // Arrange
+        var rules = new Dictionary<string, AutomationRule>();
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompile(["Day", blank], "Day", rules, [], out _, out var error);
+
+        // Assert
+        Assert.False(isCompiled);
+        Assert.Equal("A state needs a name", error);
+    }
+
+    [Theory]
+    [InlineData("", "1", "the property path is missing")]
+    [InlineData("/Blinds/Level", "{{ /Weather/Gust", "value: '{{' is not closed at position 0")]
+    public void WhenASetPropertyActionIsInvalid_ThenItIsRejected(string path, string value, string expected)
+    {
+        // Arrange
+        var rule = Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = path, Value = value }]);
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
+
+        // Assert
+        Assert.False(isCompiled);
+        Assert.Null(compiled);
+        Assert.Equal($"Rule 'Storm': action 'set': {expected}", error);
+    }
+
+    [Fact]
+    public void WhenTheRuleHasAnEventTrigger_ThenAnActionArgumentMayReadTheEvent()
+    {
+        // Arrange
+        var rule = Rule(
+            triggers: [new SubjectEventTrigger { SubjectPath = "/Button", EventType = "TestPressEvent" }],
+            actions: [EventArgumentAction()]);
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
+
+        // Assert
+        Assert.True(isCompiled, error);
+        Assert.NotNull(compiled);
+    }
+
+    [Fact]
+    public void WhenTheRuleHasNoEventTrigger_ThenAnActionArgumentCannotReadTheEvent()
+    {
+        // Arrange
+        var rule = Rule(actions: [EventArgumentAction()]);
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
+
+        // Assert
+        Assert.False(isCompiled);
+        Assert.Null(compiled);
+        Assert.Equal("Rule 'Storm': action 'notify': argument 'Message': " + EventOnly, error);
+    }
+
+    private static InvokeOperationAction EventArgumentAction() => new()
+    {
+        Id = "notify",
+        OperationPath = "/Notifier/Send",
+        Arguments = new Dictionary<string, string> { ["Message"] = "{{ event/Gesture }}" }
+    };
 }

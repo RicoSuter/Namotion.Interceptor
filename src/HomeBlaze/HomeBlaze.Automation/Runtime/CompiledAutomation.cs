@@ -5,7 +5,7 @@ internal sealed class CompiledAutomation(IReadOnlyList<CompiledRule> rules, IRea
 {
     public static CompiledAutomation Empty { get; } = new([], [], null);
 
-    public IReadOnlyList<CompiledRule> Rules { get; } = rules;
+    public IReadOnlyList<CompiledRule> Rules { get; } = rules.ToArray();
 
     public IReadOnlyList<string> States { get; } = states;
 
