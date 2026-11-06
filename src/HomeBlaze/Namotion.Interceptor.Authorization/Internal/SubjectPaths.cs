@@ -27,7 +27,7 @@ internal static class SubjectPaths
     /// root, in the order the parents are listed. Every subject a chain passes above the starting subject must be
     /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
     /// it. A path is its links from the root's property down to the property holding the subject, each in every
-    /// spelling the path reader resolves. A chain passes only properties the path provider effectively includes (see
+    /// spelling the path reader resolves and in its structural spellings (see <see cref="PathLink"/>). A chain passes only properties the path provider effectively includes (see
     /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain through an
     /// excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
     /// subject without parents and has a path, the first path is the one the registry's
@@ -41,7 +41,8 @@ internal static class SubjectPaths
     /// <param name="reads">Records every parents and attachment read, so the caller can check that they held at one instant.</param>
     /// <returns>
     /// True when every chain was built; false when a chain could not be built (it passes a property paths may not
-    /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, or
+    /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, an
+    /// [InlinePaths] property without an index has its own segment shadowed by another property's, or
     /// the chain passes a subject that is no longer attached), more than <paramref name="maxPaths"/> chains exist, or
     /// the search took more than 64 parent links per allowed path before every chain was found. A subject without
     /// parents has no paths and returns true.
@@ -274,30 +275,33 @@ internal static class SubjectPaths
         private readonly PathLink GetLink(RegisteredSubjectProperty property, object? index)
         {
             var ownSegment = GetSegment(_pathProvider, property);
-            if (index is null)
-            {
-                return new PathLink(ownSegment, null, null);
-            }
-
-            var text = PathExtensions.FormatPathIndex(index);
+            var text = index is null ? null : PathExtensions.FormatPathIndex(index);
             if (!InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name))
             {
-                return new PathLink(ownSegment, text, null);
+                return new PathLink(ownSegment, text);
             }
 
-            var bareKey = IsReadBare(property, text, ownSegment) ? text : null;
-
-            // The explicit form only reads back while the own segment still resolves to this property.
+            // The own segment, alone or with the key, reads back only while it still resolves to this property. Deny
+            // rules match the structural spellings regardless, so a property added later that shadows one cannot lift a deny.
             var segment = ResolvesTo(property, ownSegment) ? ownSegment : null;
-            return new PathLink(segment, text, bareKey);
+            if (text is null)
+            {
+                return new PathLink(segment, null, null, ownSegment, null);
+            }
+
+            var structuralBareKey = IsSingleName(text, ownSegment) ? text : null;
+            var bareKey = structuralBareKey is not null && ResolvesTo(property, text) ? text : null;
+            return new PathLink(segment, text, bareKey, ownSegment, structuralBareKey);
         }
 
-        /// <summary>The reader takes the text as this key alone when it is one non-empty name that resolves to the property and is not its own segment.</summary>
-        private readonly bool IsReadBare(RegisteredSubjectProperty property, string text, string ownSegment)
+        /// <summary>
+        /// Whether the reader can take the text as a key alone: one non-empty name that is not the property's own
+        /// segment. It takes it only while the name also resolves to the property.
+        /// </summary>
+        private readonly bool IsSingleName(string text, string ownSegment)
             => text.Length > 0 &&
                text.AsSpan().IndexOfAny(_separator, _indexOpen) < 0 &&
-               text != ownSegment &&
-               ResolvesTo(property, text);
+               text != ownSegment;
 
         private readonly bool ResolvesTo(RegisteredSubjectProperty property, string segment)
             => _pathProvider.TryGetPropertyFromSegment(property.Parent, segment, out var resolved) && resolved.Name == property.Name;

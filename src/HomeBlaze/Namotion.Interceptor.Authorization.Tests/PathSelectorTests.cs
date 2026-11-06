@@ -246,19 +246,101 @@ public class PathSelectorTests
     }
 
     [Fact]
-    public void WhenAnInlineKeyIsShadowedByAProperty_ThenTheBareSpellingNamesTheProperty()
+    public void WhenAnInlineKeyIsShadowedByAProperty_ThenAnAllowInTheBareSpellingNamesOnlyThePropertyAndADenyBoth()
     {
         // Arrange
         var home = Create();
         var door = AddArea(home, "Wifi");
+        var bareAllow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Wifi/**"])]));
         var bare = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi/**"])]));
         var explicitForm = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Areas[Wifi]/**"])]));
 
         // Act & Assert
+        Assert.True(bareAllow.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        Assert.False(bareAllow.CanRead(Member(door, nameof(Light.Brightness))));
         Assert.False(bare.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.True(bare.CanRead(Member(door, nameof(Light.Brightness))));
+        Assert.False(bare.CanRead(Member(door, nameof(Light.Brightness))));
         Assert.False(explicitForm.CanRead(Member(door, nameof(Light.Brightness))));
         Assert.True(explicitForm.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+    }
+
+    [Fact]
+    public void WhenAnAttributeAddedLaterShadowsTheBareSpellingOfAnInlineKey_ThenADenyInThatSpellingStillApplies()
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Garage/**"])]));
+        var member = Member(door, nameof(Light.Brightness));
+        var deniedBefore = !policy.CanRead(member);
+
+        // Act
+        Member(home, nameof(Home.Wifi)).AddAttribute("Garage", typeof(string), _ => "x", null);
+
+        // Assert
+        Assert.True(deniedBefore);
+        Assert.False(policy.CanRead(member));
+    }
+
+    [Theory]
+    [InlineData("/Areas[Garage]/**")]
+    [InlineData("/Areas/**")]
+    public void WhenAnAttributeAddedLaterShadowsTheOwnSegmentOfAnInlineProperty_ThenADenyInTheExplicitSpellingStillApplies(string deniedPath)
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: [deniedPath])]));
+        var member = Member(door, nameof(Light.Brightness));
+        var deniedBefore = !policy.CanRead(member);
+
+        // Act
+        Member(home, nameof(Home.Wifi)).AddAttribute("Areas", typeof(string), _ => "x", null);
+
+        // Assert
+        Assert.True(deniedBefore);
+        Assert.False(policy.CanRead(member));
+    }
+
+    [Fact]
+    public void WhenAnAttributeAddedLaterShadowsTheBareSpellingOfAnInlineKey_ThenAnAllowInThatSpellingStopsMatching()
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Garage/**"])]));
+        var member = Member(door, nameof(Light.Brightness));
+        var allowedBefore = policy.CanRead(member);
+
+        // Act
+        Member(home, nameof(Home.Wifi)).AddAttribute("Garage", typeof(string), _ => "x", null);
+
+        // Assert
+        Assert.True(allowedBefore);
+        Assert.False(policy.CanRead(member));
+    }
+
+    [Fact]
+    public void WhenTheOwnSegmentOfAnInlinePropertyWithoutAnIndexIsShadowed_ThenADenyWithPathsAppliesAndAnAllowWithPathsDoesNot()
+    {
+        // Arrange
+        var light = new Light();
+        _ = new TestShadowedInlineReference(CreateContext()) { Label = "label", Child = light };
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var deny = AuthorizationPolicy.Compile(
+            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["Other.**"])])], ["Reader"], [],
+            KnownActions, TestTags.Default, pathProvider);
+        var allow = AuthorizationPolicy.Compile(
+            [Role("Reader", allow: [Rule(Read, paths: ["Child.**"])])], ["Reader"], [],
+            KnownActions, TestTags.Default, pathProvider);
+
+        // Act
+        var denyPolicyAllows = deny.CanRead(Member(light, nameof(Light.IsOn)));
+        var allowPolicyAllows = allow.CanRead(Member(light, nameof(Light.IsOn)));
+
+        // Assert
+        Assert.False(denyPolicyAllows);
+        Assert.False(allowPolicyAllows);
     }
 
     [Fact]

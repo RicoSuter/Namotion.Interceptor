@@ -246,7 +246,8 @@ public sealed class AuthorizationPolicy
         return true;
     }
 
-    // A deny rule fails closed: when some path of the subject could not be written, it may be the one the rule names.
+    // A deny rule fails closed: when some path of the subject could not be written, it may be the one the rule names,
+    // and it matches the structural spellings of each link, which a property added later cannot shadow.
     private bool MatchesPaths(PathPattern[]? patterns, bool isDeny, ref MatchContext context)
     {
         if (patterns is null)
@@ -261,7 +262,7 @@ public sealed class AuthorizationPolicy
         }
 
         context.MemberSegment ??= SubjectPaths.GetSegment(_pathProvider!, context.Member);
-        return AnyPathMatches(patterns, context.Paths, new PathLink(context.MemberSegment, null, null));
+        return AnyPathMatches(patterns, context.Paths, new PathLink(context.MemberSegment, null), isDeny);
     }
 
     private ImmutableArray<string> GetTags(ref MatchContext context)
@@ -399,13 +400,13 @@ public sealed class AuthorizationPolicy
         return isAttached ? RootPaths : NoPaths;
     }
 
-    private static bool AnyPathMatches(PathPattern[] patterns, List<PathLink[]> paths, in PathLink member)
+    private static bool AnyPathMatches(PathPattern[] patterns, List<PathLink[]> paths, in PathLink member, bool isDeny)
     {
         foreach (var pattern in patterns)
         {
             for (var i = 0; i < paths.Count; i++)
             {
-                if (pattern.Matches(paths[i], member))
+                if (pattern.Matches(paths[i], member, isDeny))
                 {
                     return true;
                 }
