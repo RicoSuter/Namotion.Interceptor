@@ -397,6 +397,8 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Power - -100 == 7500", true)]
     [InlineData("Total > Phase1 + Phase2", true)]
     [InlineData("Total < Phase1 + Phase2", false)]
+    [InlineData("Power - (Offset) == 7300", true)]
+    [InlineData("Power * (Offset + 1) == 747400", true)]
     public void WhenOperandsAreNumbers_ThenArithmeticComputes(string text, bool expected)
     {
         // Arrange
@@ -504,6 +506,56 @@ public class ParsedExpressionEvaluationTests
 
         // Assert
         Assert.Equal(TimeSpan.FromMinutes(38), result.Value);
+    }
+
+    [Theory]
+    [InlineData("Meter/Local + 1h > Meter/Local", true)]
+    [InlineData("Meter/Local - 1h < Meter/Local", true)]
+    [InlineData("Meter/Offset == Meter/Local", true)]
+    [InlineData("Meter/Local == Meter/Offset", true)]
+    [InlineData("Meter/Offset != Meter/Local", false)]
+    [InlineData("Meter/Offset < Meter/Local", false)]
+    [InlineData("Meter/Local >= Meter/Offset", true)]
+    public void WhenDateTimeAndDateTimeOffsetAreCompared_ThenTheyCompareByInstant(string text, bool expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["Meter/Offset"] = new DateTimeOffset(2026, 11, 6, 14, 0, 0, TimeSpan.FromHours(1)),
+            ["Meter/Local"] = new DateTime(2026, 11, 6, 13, 0, 0, DateTimeKind.Utc)
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenDurationOverflows_ThenTheComparisonIsUnknown()
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["Interval"] = TimeSpan.FromDays(10675198) };
+
+        // Act
+        var result = EvaluateCondition("Interval + 10675198d > 0m", values);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenNumberIsDividedByZero_ThenTheResultIsMissing()
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["Power"] = 7400m };
+
+        // Act
+        var result = EvaluateCondition("Power / 0 == null", values);
+
+        // Assert
+        Assert.True(result);
     }
 
     private static Dictionary<string, object?> CreateTimeValues() => new()

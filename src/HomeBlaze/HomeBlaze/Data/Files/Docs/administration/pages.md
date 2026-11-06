@@ -219,11 +219,11 @@ The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
 
 With the pipe `map` a condition shows the text of a case instead, such as `{{ /Demo/Conveyor/CurrentSpeed > 500 | map:fastslow }}` with a map whose cases have `Value=True` and `Value=False`.
 
-- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`.
+- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`. A word in arithmetic is a path, so `mymotor/Speed > Limit + 5` reads `Limit` as a path.
 - **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
-- **Arithmetic**: `+`, `-`, `*` and `/` compute with numbers, dates and durations, with a space after the operator: `{{ /Demo/Meter/Import - /Demo/Meter/Export }}`. A duration is written like `90s`, `15m` or `1h30m`, and a date minus a date is a duration. A computed value is shown without the unit of a property.
+- **Arithmetic**: `+`, `-`, `*` and `/` compute with numbers, dates and durations, with a space after the operator: `{{ /Demo/Meter/Import - /Demo/Meter/Export }}`. A duration is written like `90s`, `15m` or `1h30m`, a date minus a date is a duration, and a date plus or minus a duration is a date. A computed value is shown without the unit of a property.
 - **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works

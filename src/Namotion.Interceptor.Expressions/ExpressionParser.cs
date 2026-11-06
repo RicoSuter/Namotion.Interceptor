@@ -52,10 +52,19 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
         SkipWhitespace();
         if (_position < text.Length)
         {
-            throw CreateError($"unexpected '{text[_position]}'");
+            throw CreateError(DescribeUnexpectedCharacter());
         }
 
         return new ParsedExpression(text, pathSeparator, body, pipes, [.. _paths]);
+    }
+
+    private string DescribeUnexpectedCharacter()
+    {
+        var character = text[_position];
+        var next = _position + 1;
+        var isGluedOperator = character is '+' or '-' or '*' or '/' &&
+            next < text.Length && !char.IsWhiteSpace(text[next]) && text[next] != '(';
+        return isGluedOperator ? $"put a space after '{character}'" : $"unexpected '{character}'";
     }
 
     private ExpressionNode ParseOr()
@@ -233,8 +242,8 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
     }
 
     // A duration is one or more pairs of a number and a unit, from the largest unit to the smallest and each unit at most
-    // once, with an optional sign before the first pair: 90s, 1h30m, 1.5d, -5m. Such a token was an invalid number before,
-    // so reading it as a duration changes no expression that parsed.
+    // once, with an optional sign before the first pair: 90s, 1h30m, 1.5d, -5m. A unit letter never parses as a double, so
+    // a duration never takes the place of a number.
     private static bool TryParseDuration(string token, out TimeSpan duration)
     {
         duration = TimeSpan.Zero;
@@ -258,7 +267,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
             ticks += partTicks;
         }
 
-        if (ticks > TimeSpan.MaxValue.Ticks)
+        if (ticks >= TimeSpan.MaxValue.Ticks)
         {
             return false;
         }

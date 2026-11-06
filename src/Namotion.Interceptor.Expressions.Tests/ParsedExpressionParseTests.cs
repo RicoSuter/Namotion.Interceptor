@@ -230,8 +230,9 @@ public class ParsedExpressionParseTests
     [InlineData("a -", "expected a value after '-' at position 3")]
     [InlineData("a * ", "expected a value after '*' at position 4")]
     [InlineData("a == - b", "expected a value after '==' at position 5")]
-    [InlineData("a -5", "unexpected '-' at position 2")]
-    [InlineData("a +b", "unexpected '+' at position 2")]
+    [InlineData("a -5", "put a space after '-' at position 2")]
+    [InlineData("a +b", "put a space after '+' at position 2")]
+    [InlineData("Now -5m", "put a space after '-' at position 4")]
     public void WhenExpressionIsInvalid_ThenErrorHasMessageAndPosition(string text, string expectedError)
     {
         // Act
@@ -354,25 +355,6 @@ public class ParsedExpressionParseTests
         Parse(text);
     }
 
-    private struct RecordingContext : IExpressionContext
-    {
-        public string? Variable;
-        public string? MemberPath;
-
-        public ExpressionValue ResolvePath(string path) => ExpressionValue.Missing;
-
-        public ExpressionValue ResolveVariable(string variable, string? memberPath)
-        {
-            Variable = variable;
-            MemberPath = memberPath;
-            return ExpressionValue.Missing;
-        }
-
-        public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => input;
-
-        public string ToText(ExpressionValue result) => string.Empty;
-    }
-
     [Theory]
     [InlineData("Interval > 1h30m")]
     [InlineData("Interval > -5m")]
@@ -402,5 +384,24 @@ public class ParsedExpressionParseTests
 
         // Assert
         Assert.Equal(expectedPaths, expression.Paths.ToArray());
+    }
+
+    private struct RecordingContext : IExpressionContext
+    {
+        public string? Variable;
+        public string? MemberPath;
+
+        public ExpressionValue ResolvePath(string path) => ExpressionValue.Missing;
+
+        public ExpressionValue ResolveVariable(string variable, string? memberPath)
+        {
+            Variable = variable;
+            MemberPath = memberPath;
+            return ExpressionValue.Missing;
+        }
+
+        public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => input;
+
+        public string ToText(ExpressionValue result) => string.Empty;
     }
 }

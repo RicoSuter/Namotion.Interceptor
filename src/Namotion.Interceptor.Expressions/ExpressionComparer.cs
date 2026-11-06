@@ -3,10 +3,10 @@ using System.Globalization;
 namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
-/// Compares two values that are not null: a boolean only for equality, an enum
-/// by its name without regard to case and only for equality, a text without regard to case for equality and ordinal for
-/// order, a date against ISO 8601 text, a duration against a duration, a float as a float, and NaN never. A null result means the pair has no order, so the
-/// comparison is unknown.
+/// Compares two values that are not null: a boolean only for equality, an enum by its name without regard to case and
+/// only for equality, a text without regard to case for equality and ordinal for order, a date against ISO 8601 text,
+/// a duration against a duration, a float as a float, and NaN never. A null result means the pair has no order, so
+/// the comparison is unknown.
 /// </summary>
 internal static class ExpressionComparer
 {
@@ -84,7 +84,12 @@ internal static class ExpressionComparer
             return otherInstant is { } literalInstant ? instant.CompareTo(literalInstant) : null;
         }
 
-        return other is DateTimeOffset otherDate ? instant.CompareTo(otherDate) : null;
+        return other switch
+        {
+            DateTimeOffset otherDate => instant.CompareTo(otherDate),
+            DateTime otherDateTime => instant.CompareTo(ToInstant(otherDateTime)),
+            _ => null
+        };
     }
 
     private static int? CompareDateTime(DateTime dateTime, object other, DateTimeOffset? otherInstant)
@@ -94,7 +99,12 @@ internal static class ExpressionComparer
             return otherInstant is { } literalInstant ? ToInstant(dateTime).CompareTo(literalInstant) : null;
         }
 
-        return other is DateTime otherDateTime ? ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)) : null;
+        return other switch
+        {
+            DateTime otherDateTime => ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)),
+            DateTimeOffset otherInstantValue => ToInstant(dateTime).CompareTo(otherInstantValue),
+            _ => null
+        };
     }
 
     private static int? CompareNumber(object value, object other)

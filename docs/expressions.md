@@ -79,7 +79,7 @@ Two values that are not null compare by these rules, in the class `ExpressionCom
 - **NaN** never compares: the comparison is unknown.
 - **Enums** compare with a text by name without regard to case, for `==` and `!=` only. Two values of the same enum type compare by order with every operator.
 - **Texts** compare without regard to case for `==` and `!=`, and by ordinal order for `<`, `<=`, `>` and `>=`.
-- **Dates**: a `DateTime` or `DateTimeOffset` compares with a text literal in ISO 8601. A text without an offset is read as UTC, and so is a `DateTime` without a kind.
+- **Dates**: a `DateTime` or `DateTimeOffset` compares with a text literal in ISO 8601, and a `DateTime` and a `DateTimeOffset` compare by their instants. A text without an offset is read as UTC, and so is a `DateTime` without a kind.
 - **Durations**: a `TimeSpan` compares with another `TimeSpan`, such as a duration literal: `Interval > 1m30s`.
 - **Booleans** compare with booleans for `==` and `!=` only.
 - **Every other pair** has no order, so the comparison is unknown.
@@ -89,11 +89,11 @@ Two values that are not null compare by these rules, in the class `ExpressionCom
 Two values that are not null compute by these rules, in the class `ExpressionArithmetic`:
 
 - **Numbers** of any numeric type compute as `double`. A division by zero, or any other result that is no finite number, is missing.
-- **Instants**: a `DateTimeOffset` or `DateTime` minus another one is a `TimeSpan`, and an instant plus or minus a `TimeSpan` is an instant, so `Now - StartedAt > 15m` tests an elapsed time. A `DateTime` without a kind is read as UTC.
+- **Instants**: a `DateTimeOffset` or `DateTime` minus another one is a `TimeSpan`, and an instant plus or minus a `TimeSpan`, or a `TimeSpan` plus an instant, is an instant, so `Now - StartedAt > 15m` tests an elapsed time. Instant arithmetic gives a `DateTimeOffset`, and a `DateTime` is read by its kind, as UTC when the kind is unspecified.
 - **Durations**: two `TimeSpan` values add and subtract.
 - **Every other pair**, such as a text, a boolean, an instant plus an instant or a duration times a number, is missing, and so is a result beyond the range of its type.
 
-A missing operand makes the result missing, so a comparison with it is unknown. A computed value has no property, so a host shows it without the unit of a property. Arithmetic boxes its result, so an expression with arithmetic allocates on every evaluation; an expression without it allocates nothing.
+A missing operand makes the result missing, like a path that leads nowhere, so `== null` is true and every other comparison with it is unknown. A computed value has no property, so a host shows it without the unit of a property. Arithmetic boxes its result, so an expression with arithmetic allocates on every evaluation; an expression without it allocates nothing.
 
 ## Hosting an expression
 
