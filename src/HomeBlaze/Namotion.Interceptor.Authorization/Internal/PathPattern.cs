@@ -6,8 +6,8 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>
 /// A compiled path pattern. It matches a member path, the path of the member's subject followed by the member, when
 /// it matches the whole of it: <c>*</c> alone is one segment, <c>**</c> zero or more. For an allow rule a pattern segment
-/// matches a link in any spelling the reader resolves; for a deny rule in any structural spelling, so a property added
-/// later that shadows a spelling does not lift the deny.
+/// matches a link in any spelling the reader resolves; for a deny rule in any structural spelling, whether or not a
+/// property shadows it.
 /// </summary>
 internal sealed class PathPattern
 {

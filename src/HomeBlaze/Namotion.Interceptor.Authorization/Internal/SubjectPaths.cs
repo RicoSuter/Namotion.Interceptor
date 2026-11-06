@@ -286,7 +286,7 @@ internal static class SubjectPaths
             }
 
             // The own segment, alone or with the key, reads back only while it still resolves to this property. Deny
-            // rules match the structural spellings regardless, so a property added later that shadows one cannot lift a deny.
+            // rules match the structural spellings whether or not a property shadows them.
             var segment = ResolvesTo(property, ownSegment) ? ownSegment : null;
             if (text is null)
             {
