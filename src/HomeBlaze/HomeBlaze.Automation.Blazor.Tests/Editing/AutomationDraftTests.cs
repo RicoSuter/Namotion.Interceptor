@@ -213,4 +213,43 @@ public class AutomationDraftTests
         // Assert
         Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(saved.Triggers)).Rearm);
     }
+
+    [Fact]
+    public void WhenADraftIsEdited_ThenTheSourceAutomationIsUntouchedUntilApplied()
+    {
+        // Arrange
+        var arguments = new Dictionary<string, string> { ["notification.Message"] = "Done" };
+        var automation = TestAutomations.Create(source =>
+        {
+            source.States = ["Idle", "Running"];
+            source.InitialState = "Idle";
+            source.RuleOrder = ["finished"];
+            source.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["finished"] = Rule("Finished", "Running", new InvokeOperationAction { Id = "call-1", OperationPath = "/Notify/Send", Arguments = arguments }, Enter("Idle"))
+            };
+        });
+        var draft = AutomationDraft.From(automation);
+        var rule = draft.Rules[0];
+
+        // Act
+        draft.RenameState("Running", "Busy");
+        rule.Name = "Changed";
+        rule.Guard = "/a/B";
+        var call = rule.Actions[0];
+        call.Value = ((InvokeOperationAction)call.Value) with { OperationPath = "/Other/Send" };
+        ((Dictionary<string, string>)((InvokeOperationAction)call.Value).Arguments)["notification.Message"] = "Edited";
+
+        // Assert
+        var source = automation.Rules["finished"];
+        Assert.Equal(["Idle", "Running"], automation.States.ToArray());
+        Assert.Equal("Finished", source.Name);
+        Assert.Equal("Running", source.InState);
+        Assert.Null(source.Guard);
+        var sourceCall = Assert.IsType<InvokeOperationAction>(source.Actions[0]);
+        Assert.Equal("/Notify/Send", sourceCall.OperationPath);
+        Assert.Equal("Done", sourceCall.Arguments["notification.Message"]);
+        Assert.Equal("Done", arguments["notification.Message"]);
+        Assert.Equal("Idle", Assert.IsType<ChangeStateAction>(source.Actions[1]).TargetState);
+    }
 }

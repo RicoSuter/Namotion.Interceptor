@@ -43,7 +43,7 @@ public sealed class RuleDraft
     {
         var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, Guard = rule.Guard };
         draft.Triggers.AddRange(rule.Triggers.OfType<AutomationTrigger>().Select(trigger => new DraftItem<AutomationTrigger>(trigger)));
-        draft.Actions.AddRange(rule.Actions.OfType<AutomationAction>().Select(action => new DraftItem<AutomationAction>(action)));
+        draft.Actions.AddRange(rule.Actions.OfType<AutomationAction>().Select(action => new DraftItem<AutomationAction>(CopyArguments(action))));
         return draft;
     }
 
@@ -75,6 +75,11 @@ public sealed class RuleDraft
         Triggers = [.. Triggers.Select(trigger => Normalize(trigger.Value))],
         Actions = [.. Actions.Select(action => action.Value)]
     };
+
+    // The deserialized arguments are a mutable dictionary that the live action shares, so the draft holds its own copy.
+    private static AutomationAction CopyArguments(AutomationAction action) => action is InvokeOperationAction invoke
+        ? invoke with { Arguments = new Dictionary<string, string>(invoke.Arguments) }
+        : action;
 
     private void AddAction(AutomationAction action, string prefix) =>
         Actions.Add(new DraftItem<AutomationAction>(action with { Id = DraftKeys.NewActionId(prefix, Actions.Select(existing => existing.Value.Id)) }));
