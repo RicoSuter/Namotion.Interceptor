@@ -31,6 +31,9 @@
                 <MudTabPanel Text="Rules">
                     <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" />
                 </MudTabPanel>
+                <MudTabPanel Text="States">
+                    <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" RuleOpened="OpenRule" />
+                </MudTabPanel>
             </MudTabs>
         </CascadingValue>
     </MudStack>
@@ -103,6 +106,15 @@
     private void OnTabChanged(int index)
     {
         _tabIndex = index;
+        _needsRevalidation = true;
+    }
+
+    private const int RulesTabIndex = 1;
+
+    private void OpenRule(string ruleKey)
+    {
+        _selectedRuleKey = ruleKey;
+        _tabIndex = RulesTabIndex;
         _needsRevalidation = true;
     }
 

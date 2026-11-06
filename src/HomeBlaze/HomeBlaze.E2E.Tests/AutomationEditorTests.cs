@@ -828,6 +828,129 @@ public class AutomationEditorTests
         }
     }
 
+    [Fact]
+    public async Task WhenAStateIsRenamedAndAnotherIsAddedInTheDiagram_ThenTheRulesFollowAndTheChangeIsSavedAndShownAgain()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+
+            // Act
+            await dialog.GetByTestId("automation-state-node-Running").ClickAsync();
+            var stateName = dialog.GetByLabel("State name");
+            await stateName.FillAsync("Washing");
+            await stateName.PressAsync("Tab");
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Washing")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await dialog.GetByTestId("automation-add-state").ClickAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-State 3")).ToBeVisibleAsync();
+            await SaveAsync(page, dialog);
+
+            // Assert
+            var json = await _fixture.ReadFileAsync(filePath);
+            Assert.Contains("\"inState\": \"Washing\"", json);
+            Assert.Contains("\"targetState\": \"Washing\"", json);
+            Assert.Contains("\"State 3\"", json);
+            Assert.DoesNotContain("\"Running\"", json);
+            var (_, reopened) = await OpenEditorAsync(name, page);
+            await reopened.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await Assertions.Expect(reopened.GetByTestId("automation-state-node-Washing")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(reopened.GetByTestId("automation-state-edge")).ToHaveCountAsync(2);
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStateIsRenamedToAnotherStateOrToNothing_ThenAnErrorShowsAndTheNameIsNotApplied()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await dialog.GetByTestId("automation-state-node-Running").ClickAsync();
+            var stateName = dialog.GetByLabel("State name");
+
+            // Act
+            await stateName.FillAsync("Idle");
+            await stateName.PressAsync("Tab");
+
+            // Assert
+            var selected = dialog.GetByTestId("automation-selected-state");
+            await Assertions.Expect(selected).ToContainTextAsync("Use a name that no other state has", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
+            await stateName.FillAsync("  ");
+            await stateName.PressAsync("Tab");
+            await Assertions.Expect(selected).ToContainTextAsync("Use a name that no other state has", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Idle")).ToHaveCountAsync(1);
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeOfTheDiagramIsClicked_ThenItsRuleOpensInTheRulesTab()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+
+            // Act
+            // The label, because the middle of the box of an edge is mostly empty space that takes no click.
+            await dialog.GetByTestId("automation-state-edge").Filter(new() { HasTextString = "Finished" }).Locator("text").First.ClickAsync();
+
+            // Assert
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Finished", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSpaceIsPressedOnAFocusedState_ThenTheStateIsSelectedAndThePageDoesNotScroll()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await page.EvaluateAsync("""
+                () => {
+                    window.__spacePrevented = [];
+                    document.addEventListener('keydown', event => { if (event.key === ' ') { window.__spacePrevented.push(event.defaultPrevented); } });
+                }
+                """);
+
+            // Act
+            await dialog.GetByTestId("automation-state-node-Running").FocusAsync();
+            await page.Keyboard.PressAsync("Space");
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-selected-state")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            var prevented = await page.EvaluateAsync<bool[]>("() => window.__spacePrevented");
+            Assert.Contains(true, prevented);
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
     /// <summary>Opens the page of the automation, or uses the open one, and opens its edit dialog with its Edit button.</summary>
     private async Task<(IPage Page, ILocator Dialog)> OpenEditorAsync(string name, IPage? page = null)
     {

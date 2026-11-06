@@ -1,4 +1,7 @@
 @using System.Globalization
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JavaScript
 
 <style>
     .automation-state-diagram [data-automation-clickable="true"] { cursor: pointer; outline: none; }
@@ -7,7 +10,7 @@
     .automation-state-diagram [data-automation-clickable="true"]:hover .automation-state-box,
     .automation-state-diagram [data-automation-clickable="true"]:focus-visible .automation-state-box { stroke: var(--mud-palette-primary); stroke-width: 3; }
 </style>
-<div class="automation-state-diagram" style="overflow-x: auto;" data-testid="automation-state-diagram">
+<div @ref="_container" class="automation-state-diagram" style="overflow-x: auto;" data-testid="automation-state-diagram">
     <svg viewBox="@($"0 0 {Format(Layout.Width)} {Format(Layout.Height)}")" width="@Format(Layout.Width)" height="@Format(Layout.Height)"
          style="display: block;" role="@(IsInteractive ? "group" : "img")" aria-label="@GetDescription()">
         <defs>
@@ -61,6 +64,10 @@
 @code {
     // Each diagram has its own arrow marker, because a page and an open editor show a diagram at the same time.
     private readonly string _markerId = $"automation-arrow-{Guid.NewGuid():N}";
+    private ElementReference _container;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _keyGuard;
+    private bool _isDisposed;
 
     [Parameter, EditorRequired] public StateDiagramLayout Layout { get; set; } = null!;
 
@@ -72,6 +79,68 @@
     [Parameter] public EventCallback<string> StateClicked { get; set; }
 
     [Parameter] public EventCallback<string> RuleClicked { get; set; }
+
+    // A key down cannot be prevented per key in Blazor, and preventing it for all keys would break Tab, so Space, which would scroll
+    // the page, is prevented in the browser on the focused states and edges.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !IsInteractive)
+        {
+            return;
+        }
+
+        try
+        {
+            var module = await JavaScript.InvokeAsync<IJSObjectReference>("import", "./_content/HomeBlaze.Automation.Blazor/Diagram/StateDiagram.razor.js");
+            var keyGuard = await module.InvokeAsync<IJSObjectReference>("preventSpaceScroll", _container);
+            if (_isDisposed)
+            {
+                await ReleaseAsync(keyGuard, module);
+                return;
+            }
+
+            _module = module;
+            _keyGuard = keyGuard;
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone or the script failed to load; the diagram still works.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        var keyGuard = _keyGuard;
+        var module = _module;
+        _keyGuard = null;
+        _module = null;
+        await ReleaseAsync(keyGuard, module);
+    }
+
+    private static async Task ReleaseAsync(IJSObjectReference? keyGuard, IJSObjectReference? module)
+    {
+        try
+        {
+            if (keyGuard is not null)
+            {
+                await keyGuard.InvokeVoidAsync("dispose");
+                await keyGuard.DisposeAsync();
+            }
+
+            if (module is not null)
+            {
+                await module.DisposeAsync();
+            }
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            // The circuit is gone, and the browser released the references with the page.
+        }
+    }
+
+    private static bool IsInteropFailure(Exception exception) =>
+        exception is JSDisconnectedException or JSException or OperationCanceledException;
 
     private bool IsInteractive => StateClicked.HasDelegate || RuleClicked.HasDelegate;
 

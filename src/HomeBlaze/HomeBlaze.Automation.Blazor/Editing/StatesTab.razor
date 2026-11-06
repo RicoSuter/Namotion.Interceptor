@@ -1,0 +1,144 @@
+<div class="d-flex flex-wrap gap-4" data-testid="automation-states-tab">
+    <div style="flex: 1 1 480px; min-width: 0;">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            Edges are rules that are active in a state and change to another one. Click a state to edit it, an edge to open its rule.
+        </MudText>
+        <div class="my-2">
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddStateAsync" data-testid="automation-add-state">State</MudButton>
+        </div>
+        @if (Draft.States.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">No states yet. With states, a rule can be active in one state and change to another.</MudText>
+        }
+        else
+        {
+            var layout = CreateLayout();
+            <StateDiagram Layout="layout" SelectedState="@_selectedState" StateClicked="SelectState" RuleClicked="OpenRuleAsync" />
+            @if (layout.OtherRules.Count > 0)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
+                    Rules that are no edge, because they change no state or change it in a way the diagram cannot show. They stay in the Rules tab.
+                </MudText>
+                <div class="d-flex flex-wrap gap-1">
+                    @foreach (var rule in layout.OtherRules)
+                    {
+                        <MudChip T="string" Size="Size.Small" OnClick="@(() => OpenRuleAsync(rule.Key))">@rule.Name</MudChip>
+                    }
+                </div>
+            }
+        }
+    </div>
+    @if (_selectedState is { } state && Draft.States.Contains(state))
+    {
+        var usage = Draft.GetStateUsage(state);
+        <MudPaper Outlined="true" Class="pa-3" Style="flex: 0 1 300px;" data-testid="automation-selected-state">
+            <MudText Typo="Typo.overline">Selected state</MudText>
+            <MudTextField T="string" Label="State name" Value="@_name" ValueChanged="RenameAsync"
+                          Error="@(_renameError is not null)" ErrorText="@_renameError" />
+            <MudCheckBox T="bool" Value="@(Draft.InitialState == state)" ValueChanged="@(_ => SetInitialAsync(state))"
+                         Disabled="@(Draft.InitialState == state)" Label="Initial state" />
+            @RenderRules("Entered by", usage.EnteredBy)
+            @RenderRules("Active in this state", usage.ActiveIn)
+            @RenderRules("Left by", usage.LeftBy)
+            <div class="d-flex flex-wrap align-center gap-2 mt-3">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Disabled="@usage.IsUsed"
+                           OnClick="@(() => RemoveStateAsync(state))" data-testid="automation-delete-state">Delete state</MudButton>
+                @if (usage.IsUsed)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Used by @usage.UseCount @(usage.UseCount == 1 ? "rule" : "rules"). Change them first.</MudText>
+                }
+            </div>
+        </MudPaper>
+    }
+</div>
+
+@code {
+    private string? _selectedState;
+    private string? _name;
+    private string? _renameError;
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
+
+    [Parameter] public EventCallback Changed { get; set; }
+
+    [Parameter] public EventCallback<string> RuleOpened { get; set; }
+
+    private StateDiagramLayout CreateLayout() => StateDiagramLayout.Create(
+        Draft.States,
+        Draft.InitialState,
+        Automation.CurrentState,
+        [.. Draft.Rules.Select(rule => new StateDiagramRule(rule.Key, rule.DisplayName, rule.InState, [.. rule.Actions.Select(action => action.Value)]))]);
+
+    private void SelectState(string state)
+    {
+        _selectedState = state;
+        _name = state;
+        _renameError = null;
+    }
+
+    private Task OpenRuleAsync(string ruleKey) => RuleOpened.InvokeAsync(ruleKey);
+
+    private async Task AddStateAsync()
+    {
+        SelectState(Draft.AddState());
+        await Changed.InvokeAsync();
+    }
+
+    // The field commits when it is left or Enter is pressed, not per keystroke, so that references are rewritten once with the
+    // final name. The typed text stays in the field while it is rejected.
+    private async Task RenameAsync(string? newName)
+    {
+        _name = newName;
+        if (_selectedState is not { } state || newName == state)
+        {
+            _renameError = null;
+            return;
+        }
+
+        if (!Draft.RenameState(state, newName ?? string.Empty))
+        {
+            _renameError = "Use a name that no other state has";
+            return;
+        }
+
+        SelectState(newName!.Trim());
+        await Changed.InvokeAsync();
+    }
+
+    private Task SetInitialAsync(string state)
+    {
+        Draft.InitialState = state;
+        return Changed.InvokeAsync();
+    }
+
+    private async Task RemoveStateAsync(string state)
+    {
+        if (Draft.RemoveState(state))
+        {
+            _selectedState = null;
+            await Changed.InvokeAsync();
+        }
+    }
+
+    private RenderFragment RenderRules(string title, IReadOnlyList<RuleDraft> rules) => __builder =>
+    {
+        <div class="mt-2">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@title</MudText>
+            @if (rules.Count == 0)
+            {
+                <MudText Typo="Typo.body2">None</MudText>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var rule in rules)
+                    {
+                        <MudLink @key="rule" Typo="Typo.body2" OnClick="@(() => OpenRuleAsync(rule.Key))">@rule.DisplayName</MudLink>
+                    }
+                </div>
+            }
+        </div>
+    };
+}
