@@ -25,6 +25,7 @@ public class AuthorizationBenchmark
 
     private Building _building;
     private AuthorizationPolicy _policy;
+    private AuthorizationPolicy _readPathDenyPolicy;
     private RegisteredSubjectProperty _lampBrightness;
     private RegisteredSubjectProperty _restrictedLampBrightness;
     private RegisteredSubject[] _subjects;
@@ -70,6 +71,10 @@ public class AuthorizationBenchmark
         var role = new AuthorizationRole { Name = "Operator", Allow = [.. allow], Deny = [.. deny] };
         _policy = AuthorizationPolicy.Compile([role], ["Operator"], [], [PermissionAction.Read, PermissionAction.Write, Execute], new TagProvider(), DefaultPathProvider.Instance);
 
+        deny.Add(new PermissionRule { Paths = ["Floors[Floor49].**"], Actions = [PermissionAction.Read] });
+        var readPathDenyRole = new AuthorizationRole { Name = "Operator", Allow = [.. allow], Deny = [.. deny] };
+        _readPathDenyPolicy = AuthorizationPolicy.Compile([readPathDenyRole], ["Operator"], [], [PermissionAction.Read, PermissionAction.Write, Execute], new TagProvider(), DefaultPathProvider.Instance);
+
         _lampBrightness = Member(_building.Floors["Floor5"].Lamps["Lamp3"], nameof(Lamp.Brightness));
         _restrictedLampBrightness = Member(_building.Floors["Floor45"].Lamps["Lamp3"], nameof(Lamp.Brightness));
 
@@ -102,19 +107,28 @@ public class AuthorizationBenchmark
     public bool CanReadSubject() => _policy.CanRead(_lampBrightness.Parent);
 
     [Benchmark]
-    public int BrowseShapedEvaluation()
+    public int BrowseShapedEvaluation() => Browse(_policy);
+
+    /// <summary>A read deny with paths, so the subject's paths are needed for its members and for every link to the root.</summary>
+    [Benchmark]
+    public bool CanReadSubjectUnderReadPathDeny() => _readPathDenyPolicy.CanRead(_lampBrightness.Parent);
+
+    [Benchmark]
+    public int BrowseShapedEvaluationUnderReadPathDeny() => Browse(_readPathDenyPolicy);
+
+    private int Browse(AuthorizationPolicy policy)
     {
         var readable = 0;
         foreach (var subject in _subjects)
         {
-            if (!_policy.CanRead(subject))
+            if (!policy.CanRead(subject))
             {
                 continue;
             }
 
             foreach (var member in subject.Properties)
             {
-                if (_policy.CanRead(member))
+                if (policy.CanRead(member))
                 {
                     readable++;
                 }
