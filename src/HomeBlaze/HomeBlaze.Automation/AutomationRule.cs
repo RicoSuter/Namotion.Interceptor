@@ -6,7 +6,7 @@ namespace HomeBlaze.Automation;
 
 /// <summary>
 /// A rule of an automation: its triggers request runs, its guard decides whether a run executes, and its actions run
-/// in order. Its key in the rules of its automation is its identity, so its state paths survive renaming.
+/// in order. Its key in <see cref="Automation.Rules"/> is its identity, so its state paths survive renaming.
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
