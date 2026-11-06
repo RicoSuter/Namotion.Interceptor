@@ -136,6 +136,8 @@
     private bool _hasHistory;
     private string? _runsError;
     private string? _loadedRunsKey;
+    private CancellationTokenSource? _loadCancellation;
+    private int _loadVersion;
     private bool _isDisposed;
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
@@ -156,19 +158,29 @@
         }
 
         _loadedRunsKey = runsKey;
-        await LoadRunsAsync(automation);
-        if (!_isDisposed)
+        if (_loadCancellation is { } previous)
+        {
+            await previous.CancelAsync();
+            previous.Dispose();
+        }
+
+        var cancellation = _loadCancellation = new CancellationTokenSource();
+        var version = ++_loadVersion;
+        await LoadRunsAsync(automation, version, cancellation.Token);
+        if (!_isDisposed && version == _loadVersion)
         {
             StateHasChanged();
         }
     }
 
-    private async Task LoadRunsAsync(Automation automation)
+    // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs.
+    private async Task LoadRunsAsync(Automation automation, int version, CancellationToken cancellationToken)
     {
         IHistoryStore[] stores = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
-        _hasHistory = stores.Length > 0;
-        if (!_hasHistory)
+        if (stores.Length == 0)
         {
+            _hasHistory = false;
+            _runsError = null;
             _runs = GetLastRuns(automation);
             return;
         }
@@ -176,11 +188,21 @@
         try
         {
             var now = TimeProvider.GetUtcNow();
-            _runs = await RunHistory.LoadAsync(stores, GetRunSources(automation), now - RunWindow, now, MaxRuns, CancellationToken.None);
-            _runsError = null;
+            var runs = await RunHistory.LoadAsync(stores, GetRunSources(automation), now - RunWindow, now, MaxRuns, cancellationToken);
+            if (version == _loadVersion)
+            {
+                _hasHistory = true;
+                _runs = runs;
+                _runsError = null;
+            }
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // Superseded by a newer load or disposed: the newer load or nobody shows the runs.
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException && version == _loadVersion)
+        {
+            _hasHistory = true;
             _runsError = $"The runs could not be read from history: {exception.Message}";
         }
     }
@@ -196,14 +218,22 @@
 
     private async Task TestAsync(string key, AutomationRule rule)
     {
-        var result = rule.TestNow();
-        var path = PathResolver.GetPath(rule, PathStyle.Canonical);
+        AutomationRuleTestResult result;
+        try
+        {
+            result = rule.TestNow();
+        }
+        catch (InvalidOperationException exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+            return;
+        }
+
         var parameters = new DialogParameters<RuleTestDialog>
         {
             { dialog => dialog.Result, result },
             { dialog => dialog.Rule, rule },
-            { dialog => dialog.EvaluatedAt, TimeZone.Format(TimeProvider.GetUtcNow()) },
-            { dialog => dialog.QueryPath, path is null ? null : $"{path}/{nameof(AutomationRule.TestNow)}" }
+            { dialog => dialog.EvaluatedAt, AutomationTime.Format(TimeZone, TimeProvider.GetUtcNow(), TimeProvider.GetUtcNow()) }
         };
 
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
@@ -236,10 +266,10 @@
     }
 
     private string FormatInstant(DateTimeOffset? instant, string fallback) =>
-        instant is { } value ? TimeZone.Format(value) : fallback;
+        instant is { } value ? AutomationTime.Format(TimeZone, value, TimeProvider.GetUtcNow()) : fallback;
 
     private string GetCurrentDetail(Automation automation) =>
-        automation.StateEnteredAt is { } since ? $"Current, since {TimeZone.ToZoned(since):HH:mm}" : "Current";
+        automation.StateEnteredAt is { } since ? $"Current, since {AutomationTime.Format(TimeZone, since, TimeProvider.GetUtcNow())}" : "Current";
 
     private static StateDiagramLayout CreateLayout(Automation automation) => StateDiagramLayout.Create(
         automation.States,
@@ -258,7 +288,7 @@
     }
 
     private static string GetRunsKey(Automation automation) =>
-        string.Join(",", automation.Rules.Select(pair => $"{pair.Key}:{pair.Value.RunCount}"));
+        string.Join(",", automation.Rules.Select(pair => $"{pair.Key}:{pair.Value.Name}:{pair.Value.RunCount}"));
 
     private static IReadOnlyList<RunEntry> GetLastRuns(Automation automation) =>
     [
@@ -268,5 +298,10 @@
             .Select(pair => new RunEntry(null, pair.Rule.Name ?? pair.Key, pair.Rule.LastRunOutcome, pair.Rule.LastRunMessage))
     ];
 
-    public void Dispose() => _isDisposed = true;
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+    }
 }

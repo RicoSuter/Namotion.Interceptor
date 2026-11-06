@@ -99,6 +99,34 @@ public class AutomationPageTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheStateIsReset_ThenTheDiagramAndTheRuleStatusesFollow()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var page = await OpenPageAsync(name);
+            await page.WaitUntilInteractiveAsync();
+            await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).ToContainTextAsync("Current", new() { Timeout = Timeout });
+            automation.InitialState = "Running";
+            await automation.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Act
+            await page.GetByTestId("automation-reset").ClickAsync();
+            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Reset", Exact = true }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.GetByTestId("automation-state-node-Running")).ToContainTextAsync("Current", new() { Timeout = Timeout });
+            await Assertions.Expect(page.GetByTestId("automation-state-node-Idle")).Not.ToContainTextAsync("Current");
+            await Assertions.Expect(page.GetByTestId("automation-rule-row").Nth(1)).Not.ToContainTextAsync("Inactive outside state");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
     private async Task<IPage> OpenPageAsync(string name)
     {
         var page = await _fixture.CreatePageAsync();

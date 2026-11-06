@@ -2,6 +2,7 @@
 @implements ISubjectComponent
 @inject SubjectPathResolver PathResolver
 @inject ITimeZoneDisplay TimeZone
+@inject TimeProvider TimeProvider
 
 @if (Subject is Automation automation)
 {
@@ -46,7 +47,7 @@
             return "No current state";
         }
 
-        return automation.StateEnteredAt is { } since ? $"{state} since {TimeZone.Format(since)}" : state;
+        return automation.StateEnteredAt is { } since ? $"{state} since {AutomationTime.Format(TimeZone, since, TimeProvider.GetUtcNow())}" : state;
     }
 
     private static IEnumerable<(string Name, string? Status)> GetRuleStatuses(Automation automation) =>

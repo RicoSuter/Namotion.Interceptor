@@ -31,6 +31,10 @@
                     <MudText Typo="Typo.body2" Style="flex: 1; overflow-wrap: anywhere; font-family: monospace;">@Rule.Guard</MudText>
                     <MudChip T="string" Size="Size.Small" Color="@GetColor(Result.GuardResult)" Class="ma-0">@FormatResult(Result.GuardResult)</MudChip>
                 </div>
+                @if (Result.GuardMissingPaths.Count > 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="mb-3">No value: @string.Join(", ", Result.GuardMissingPaths)</MudText>
+                }
             }
             <MudText Typo="Typo.subtitle2">Actions it would run</MudText>
             <ol class="pl-6 mb-3">
@@ -39,10 +43,6 @@
                     <li><MudText Typo="Typo.body2" Style="overflow-wrap: anywhere;">@action</MudText></li>
                 }
             </ol>
-            @if (QueryPath is not null)
-            {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">Agents get the same result through invoke_query on @QueryPath.</MudText>
-            }
         }
     </DialogContent>
     <DialogActions>
@@ -61,9 +61,6 @@
 
     /// <summary>When the rule was evaluated, as the viewer reads it.</summary>
     [Parameter] public string EvaluatedAt { get; set; } = string.Empty;
-
-    /// <summary>The path of the query that agents call, or null for a rule without a path.</summary>
-    [Parameter] public string? QueryPath { get; set; }
 
     protected override void OnParametersSet() =>
         _verdict = RuleTestSummary.Describe(Result, Array.Exists(Rule.Triggers, trigger => trigger is SubjectEventTrigger));
