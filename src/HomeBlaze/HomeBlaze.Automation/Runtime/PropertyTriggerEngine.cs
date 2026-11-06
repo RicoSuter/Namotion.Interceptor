@@ -45,8 +45,9 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
         return requests;
     }
 
+    /// <summary>Observes the change of a property that is still watched and evaluates the active triggers that read it.</summary>
     public IReadOnlyList<RunRequest> OnPropertyChanged(IReadOnlyList<CompiledRule> rules, PropertyChangedInput input) =>
-        _values.TryApply(input.Property, input.Value, input.Revision)
+        TryObserve(input)
             ? ObserveWhere(rules, trigger => Array.IndexOf(trigger.Dependencies, input.Property) >= 0)
             : [];
 
@@ -60,13 +61,13 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
         return ObserveWhere(rules, _ => true);
     }
 
-    /// <summary>Observes the changes that are newer than the observed values and returns their properties.</summary>
+    /// <summary>Observes the changes of watched properties that are newer than the observed values and returns their properties.</summary>
     public HashSet<PropertyReference> Apply(IEnumerable<PropertyChangedInput> changes)
     {
         var changed = new HashSet<PropertyReference>();
         foreach (var change in changes)
         {
-            if (_values.TryApply(change.Property, change.Value, change.Revision))
+            if (TryObserve(change))
             {
                 changed.Add(change.Property);
             }
@@ -98,6 +99,11 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
             trigger.Dependencies = [];
         }
     }
+
+    // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
+    // value from a trigger that reads the property again later.
+    private bool TryObserve(PropertyChangedInput change) =>
+        IsWatched(change.Property) && _values.TryApply(change.Property, change.Value, change.Revision);
 
     private static IEnumerable<CompiledPropertyTrigger> ActiveTriggers(IReadOnlyList<CompiledRule> rules) =>
         rules.Where(rule => rule.IsActivated)
