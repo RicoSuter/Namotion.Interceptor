@@ -40,7 +40,7 @@ public class AutomationRunTests
 
     [Theory]
     [InlineData(AutomationRuleMode.On, AutomationRunOutcome.CompletedWithErrors, "action 'Close' failed: /Blinds/Close: the authorization failed: The policy store is offline")]
-    [InlineData(AutomationRuleMode.DryRun, AutomationRunOutcome.DryRun, "Would run /Blinds/Close: /Blinds/Close: the authorization failed: The policy store is offline")]
+    [InlineData(AutomationRuleMode.DryRun, AutomationRunOutcome.DryRun, "Would run /Blinds/Close: the authorization failed: The policy store is offline")]
     public async Task WhenTheAuthorizerThrows_ThenTheRunIsRecordedWithTheFailure(AutomationRuleMode mode, AutomationRunOutcome outcome, string message)
     {
         // Arrange

@@ -89,7 +89,7 @@ public class AutomationRuleTestNowTests
 
         // Assert
         Assert.Null(result.Error);
-        Assert.Equal(["/Blinds/Close: /Blinds/Close: the authorization failed: The policy store is offline"], result.Actions.ToArray());
+        Assert.Equal(["/Blinds/Close: the authorization failed: The policy store is offline"], result.Actions.ToArray());
     }
 
     [Fact]

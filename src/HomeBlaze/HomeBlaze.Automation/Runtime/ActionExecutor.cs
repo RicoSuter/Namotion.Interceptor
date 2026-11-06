@@ -67,11 +67,15 @@ internal sealed class ActionExecutor(
 
     /// <summary>Describes the call with its bound arguments without running it, or why it could not run.</summary>
     public string Describe(InvokeOperationAction action, ActionScope scope) =>
-        TryPrepareOperation(action, scope, CancellationToken.None, out var operation, out var error) ? operation.Description : $"{action.OperationPath}: {error}";
+        TryPrepareOperation(action, scope, CancellationToken.None, out var operation, out var error) ? operation.Description : NameTarget(action.OperationPath, error);
 
     /// <summary>Describes the write with its bound value without running it, or why it could not run.</summary>
     public string Describe(SetPropertyAction action, ActionScope scope) =>
-        TryPrepareWrite(action, scope, out var write, out var error) ? write.Description : $"{action.PropertyPath}: {error}";
+        TryPrepareWrite(action, scope, out var write, out var error) ? write.Description : NameTarget(action.PropertyPath, error);
+
+    // Refusals already start with the path; binding errors name only the argument.
+    private static string NameTarget(string path, string error) =>
+        error.StartsWith(path, StringComparison.Ordinal) ? error : $"{path}: {error}";
 
     private bool TryPrepareOperation(
         InvokeOperationAction action,

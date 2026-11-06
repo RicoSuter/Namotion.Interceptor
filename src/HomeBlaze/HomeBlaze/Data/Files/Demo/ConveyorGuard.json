@@ -40,7 +40,7 @@
       "triggers": [
         {
           "$type": "PropertyTrigger",
-          "expression": "/Demo/Conveyor/Temperature < 35",
+          "expression": "/Demo/Conveyor/Temperature < 37",
           "for": "00:01:00",
           "onActivation": "WaitForFalseToTrue"
         }
