@@ -448,4 +448,69 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(7300d, result.Value);
         Assert.Null(result.Property);
     }
+
+    [Theory]
+    [InlineData("Now - EnteredAt > 30m", true)]
+    [InlineData("Now - EnteredAt == 38m", true)]
+    [InlineData("Now - EnteredAt < 1h", true)]
+    [InlineData("Now == EnteredAt + 38m", true)]
+    [InlineData("Now == 38m + EnteredAt", true)]
+    [InlineData("EnteredAt == Now - 38m", true)]
+    [InlineData("EnteredAt + 10m == '2026-11-06T14:12:00Z'", true)]
+    [InlineData("Now - Created == 40m", true)]
+    [InlineData("Interval + 30s == 2m", true)]
+    [InlineData("Interval - 30s == 1m", true)]
+    [InlineData("Now - EnteredAt - Interval == 36m30s", true)]
+    public void WhenOperandsAreInstantsOrDurations_ThenArithmeticGivesInstantsAndDurations(string text, bool expected)
+    {
+        // Arrange
+        var values = CreateTimeValues();
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("Now + EnteredAt > 0m")]
+    [InlineData("Interval - EnteredAt > 0m")]
+    [InlineData("Now - 5 > 0m")]
+    [InlineData("Interval * 2 > 1m")]
+    [InlineData("Interval / 2 > 1m")]
+    [InlineData("EnteredAt + 3000000d > Now")]
+    public void WhenTimeArithmeticHasNoMeaning_ThenTheComparisonIsUnknown(string text)
+    {
+        // Arrange
+        var values = CreateTimeValues();
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenInstantIsSubtractedFromInstant_ThenTheValueIsATimeSpan()
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse("Now - EnteredAt", '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(CreateTimeValues());
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(38), result.Value);
+    }
+
+    private static Dictionary<string, object?> CreateTimeValues() => new()
+    {
+        ["Now"] = new DateTimeOffset(2026, 11, 6, 14, 40, 0, TimeSpan.Zero),
+        ["EnteredAt"] = new DateTimeOffset(2026, 11, 6, 15, 2, 0, TimeSpan.FromHours(1)),
+        ["Created"] = new DateTime(2026, 11, 6, 14, 0, 0, DateTimeKind.Unspecified),
+        ["Interval"] = TimeSpan.FromSeconds(90)
+    };
 }

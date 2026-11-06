@@ -134,7 +134,7 @@ internal static class ExpressionComparer
         (value is double number && double.IsNaN(number)) || (value is float single && float.IsNaN(single));
 
     // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
-    private static DateTimeOffset ToInstant(DateTime dateTime) =>
+    internal static DateTimeOffset ToInstant(DateTime dateTime) =>
         dateTime.Kind == DateTimeKind.Unspecified
             ? new DateTimeOffset(dateTime, TimeSpan.Zero)
             : new DateTimeOffset(dateTime);
