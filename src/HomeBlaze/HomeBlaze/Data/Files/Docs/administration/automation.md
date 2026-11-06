@@ -102,10 +102,10 @@ A property condition fires when its expression changes from not true to true, ne
 
 | Field | Meaning |
 |---|---|
-| **When** | The condition, such as `/Weather/WS90/WindGust > 8`. Conditions are combined with `and`, `or`, `not` and parentheses. |
+| **Fires when** | The condition, such as `/Weather/WS90/WindGust > 8`. Conditions are combined with `and`, `or`, `not` and parentheses. |
 | **For at least** | A hold: the condition must stay true this long before the trigger fires, such as `20s`, `10m` or `1h30m`. The hold restarts when the condition becomes false or unknown. Empty fires at once. |
-| **When the rule starts** | **Run if already true**, the default: when the rule becomes active and the condition is true, the hold starts then. **Wait for a change**: a condition that is already true when the rule becomes active does not fire until it has been false and true again. With **Run again only after**, it waits for the rearm condition instead of plain false, and the status reads "Already true, waiting to rearm" until then. |
-| **Run again only after** | A rearm condition. After the trigger fired, it fires again only once this condition is true, instead of once the condition is false. With `/Weather/WS90/WindGust > 8` and `/Weather/WS90/WindGust < 6`, gusts that move around 8 fire once per storm. |
+| **When the rule starts** | **Run if already true**, the default: when the rule becomes active and the condition is true, the hold starts then. **Wait for a change**: a condition that is already true when the rule becomes active does not fire until it has been false and true again. With **Fires again only once**, it waits for the rearm condition instead of plain false, and the status reads "Already true, waiting to rearm" until then. |
+| **Fires again only once** | A rearm condition, added with the **Fires again only once** button. After the trigger fired, it fires again only once this condition is true, instead of once the condition is false. With `/Weather/WS90/WindGust > 8` and `/Weather/WS90/WindGust < 6`, gusts that move around 8 fire once per storm. |
 
 A rule becomes active when the automation starts, when its mode leaves Off, when a saved change replaces its trigger, and when the automation enters the state the rule is active in. Holds start again after a restart, because the time a value held during the downtime is unknown.
 
@@ -147,7 +147,7 @@ A value is missing when its path leads nowhere or the value is null, and device 
 | false | No | Yes, without a rearm condition | Armed |
 | unknown | No | No | Unknown since a time, with the missing paths |
 
-With a **Run again only after** condition, a false expression does not rearm: only a true rearm condition does, even while the expression is unknown.
+With a **Fires again only once** condition, a false expression does not rearm: only a true rearm condition does, even while the expression is unknown.
 
 An Only if that is unknown rejects the run, recorded as **Rejected by Only if** with the missing paths. An unknown rule is no error, so the automation keeps its status. To detect an outage, write it out: `/Weather/WS90/Temperature == null` is true while the value is missing, and `now - /Weather/WS90/LastUpdated > 15m` covers a subject that keeps its last values and implements `ILastUpdatedProvider`.
 
@@ -253,7 +253,7 @@ The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that 
 | `On: Holding since 13:00:00 for 20s` | A condition is true and waits for its hold. |
 | `On: Triggered, waiting to rearm` | Every trigger fired and waits until its condition is false, or its rearm condition true. |
 | `On: Already true, waiting until false` | With **Wait for a change**, every condition was true when the rule became active. |
-| `On: Already true, waiting to rearm` | The same with a **Run again only after** condition: it waits for that condition. |
+| `On: Already true, waiting to rearm` | The same with a **Fires again only once** condition: it waits for that condition. |
 | `On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust` | A condition needs values that are missing. |
 | `On: Inactive outside state Running` | The automation is in another state. |
 | `On: Inactive: the automation is disabled` | The automation is disabled. |
