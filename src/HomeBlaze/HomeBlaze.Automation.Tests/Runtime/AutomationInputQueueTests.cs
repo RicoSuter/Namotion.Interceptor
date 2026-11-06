@@ -36,24 +36,25 @@ public class AutomationInputQueueTests
     }
 
     [Fact]
-    public void WhenAnInputContinuesAChainBeyondTheLimit_ThenItIsDroppedAndCounted()
+    public async Task WhenAnInputContinuesAChainBeyondTheLimit_ThenItIsDroppedAndCounted()
     {
         // Arrange
         var queue = new AutomationInputQueue();
 
         // Act
         var isEnqueued = queue.TryEnqueue(new GraphChangedInput(AutomationInputQueue.MaxChainDepth + 1));
-        var faults = queue.TakeFaults();
-        var faultsAfterTaking = queue.TakeFaults();
+        var resynchronize = Assert.IsType<ResynchronizeInput>(await queue.ReadAsync(CancellationToken.None));
+        var faults = queue.TakeDroppedInputs(resynchronize).Faults;
+        var faultsAfterTaking = queue.TakeDroppedInputs(resynchronize).Faults;
 
         // Assert
         Assert.False(isEnqueued);
         Assert.Equal(new QueueFaults(0, 1), faults);
-        Assert.False(faultsAfterTaking.HasFaults);
+        Assert.Equal(new QueueFaults(0, 0), faultsAfterTaking);
     }
 
     [Fact]
-    public void WhenTheQueueIsFull_ThenInputsAreDroppedAndCounted()
+    public async Task WhenTheQueueIsFull_ThenInputsAreDroppedAndCounted()
     {
         // Arrange
         var queue = new AutomationInputQueue();
@@ -64,11 +65,12 @@ public class AutomationInputQueueTests
 
         // Act
         var isEnqueued = queue.TryEnqueue(TickInput.Instance);
+        var (accepted, resynchronize) = await ReadUntilResynchronizationAsync(queue);
 
         // Assert
         Assert.False(isEnqueued);
-        Assert.Equal(AutomationInputQueue.Capacity, queue.Count);
-        Assert.Equal(new QueueFaults(1, 0), queue.TakeFaults());
+        Assert.Equal(AutomationInputQueue.Capacity, accepted.Count);
+        Assert.Equal(new QueueFaults(1, 0), queue.TakeDroppedInputs(resynchronize).Faults);
     }
 
     [Fact]
@@ -136,7 +138,7 @@ public class AutomationInputQueueTests
     }
 
     [Fact]
-    public void WhenAnInputIsAtTheLimit_ThenItIsAcceptedAndTheNextDepthIsRejected()
+    public async Task WhenAnInputIsAtTheLimit_ThenItIsAcceptedAndTheNextDepthIsRejected()
     {
         // Arrange
         var queue = new AutomationInputQueue();
@@ -144,12 +146,13 @@ public class AutomationInputQueueTests
         // Act
         var isAtLimitEnqueued = queue.TryEnqueue(new GraphChangedInput(AutomationInputQueue.MaxChainDepth));
         var isBeyondLimitEnqueued = queue.TryEnqueue(new GraphChangedInput(AutomationInputQueue.MaxChainDepth + 1));
+        var (accepted, resynchronize) = await ReadUntilResynchronizationAsync(queue);
 
         // Assert
         Assert.True(isAtLimitEnqueued);
         Assert.False(isBeyondLimitEnqueued);
-        Assert.Equal(1, queue.Count);
-        Assert.Equal(new QueueFaults(0, 1), queue.TakeFaults());
+        Assert.Equal(AutomationInputQueue.MaxChainDepth, Assert.Single(accepted).ChainDepth);
+        Assert.Equal(new QueueFaults(0, 1), queue.TakeDroppedInputs(resynchronize).Faults);
     }
 
     [Fact]
@@ -176,5 +179,20 @@ public class AutomationInputQueueTests
         Assert.True(dropped.HasGraphChange);
         Assert.Equal(new QueueFaults(1, 0), dropped.Faults);
         Assert.False(queue.HasWork);
+    }
+
+    private static async Task<(List<AutomationInput> Accepted, ResynchronizeInput Resynchronize)> ReadUntilResynchronizationAsync(AutomationInputQueue queue)
+    {
+        var accepted = new List<AutomationInput>();
+        while (true)
+        {
+            var input = await queue.ReadAsync(CancellationToken.None);
+            if (input is ResynchronizeInput resynchronize)
+            {
+                return (accepted, resynchronize);
+            }
+
+            accepted.Add(input);
+        }
     }
 }

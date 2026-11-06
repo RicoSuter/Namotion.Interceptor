@@ -5,10 +5,10 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The bounded input queue of one automation. Writers never wait. An input that does not fit, or that continues a
 /// feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the count and makes
-/// up for what it can in queue order; external events are never dropped silently. The chain depth flows with the asynchronous flow of a run while the
-/// run is active, so the property writes, operations and events of a run cause inputs one deeper than the input of the
-/// run. Work that outlives the run, and changes applied later on another flow (for example a device confirming a write
-/// from its own thread), start a new chain.
+/// up for what it can in queue order; external events are never dropped silently. The chain depth flows with the
+/// asynchronous flow of a run while the run is active, so the property writes, operations and events of a run cause
+/// inputs one deeper than the input of the run. Work that outlives the run, and changes applied later on another flow
+/// (for example a device confirming a write from its own thread), start a new chain.
 /// </summary>
 internal sealed class AutomationInputQueue
 {
@@ -24,6 +24,7 @@ internal sealed class AutomationInputQueue
 
     private readonly Lock _dropLock = new();
     private DroppedInputs? _openBatch;
+    // The queued inputs that count against the capacity: all but flushes and resynchronizations.
     private int _count;
     private int _resynchronizations;
     private int _overloaded;
@@ -34,9 +35,6 @@ internal sealed class AutomationInputQueue
     /// 0 otherwise, also for work that captured the context of a run that has ended.
     /// </summary>
     public static int CausedChainDepth => CurrentRun.Value is { IsActive: true } run ? run.Depth : 0;
-
-    /// <summary>The queued inputs that count against <see cref="Capacity"/>: all but flushes and resynchronizations.</summary>
-    public int Count => Volatile.Read(ref _count);
 
     /// <summary>Whether an input other than a flush is queued.</summary>
     public bool HasWork => Volatile.Read(ref _count) > 0 || Volatile.Read(ref _resynchronizations) > 0;
@@ -114,15 +112,6 @@ internal sealed class AutomationInputQueue
         }
 
         return input;
-    }
-
-    /// <summary>Gets the inputs dropped since the last call and counts from zero again.</summary>
-    public QueueFaults TakeFaults()
-    {
-        lock (_dropLock)
-        {
-            return TakeCounts();
-        }
     }
 
     /// <summary>
