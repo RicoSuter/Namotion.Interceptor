@@ -55,7 +55,8 @@ namespace HomeBlaze.Automation
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Enters the initial state and clears the last trigger times of the rules.", Icon="RestartAlt", Position=1, Title="Reset State")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Enters the initial state, clears the last trigger times and starts every rule ove" +
+            "r.", Icon="RestartAlt", Position=1, Title="Reset State")]
         public void ResetState() { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }

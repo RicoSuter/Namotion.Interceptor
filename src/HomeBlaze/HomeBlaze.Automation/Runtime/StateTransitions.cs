@@ -55,9 +55,10 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
 
     /// <summary>
     /// Enters the initial state with a new entry time and clears the trigger times of the rules, after the checkpoint with
-    /// both was written; publishes the state-change event when the state changed. Returns why nothing changed, or null.
+    /// both was written; then runs <paramref name="restartRules"/> and publishes the state-change event when the state
+    /// changed, so that the rules that start over receive that event. Returns why nothing changed, or null.
     /// </summary>
-    public string? Reset(CompiledAutomation snapshot, IEnumerable<AutomationRule> rules)
+    public string? Reset(CompiledAutomation snapshot, IEnumerable<AutomationRule> rules, Action restartRules)
     {
         var previous = automation.CurrentState;
         var initialState = snapshot.States.Count > 0 ? snapshot.InitialState : null;
@@ -75,6 +76,7 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
 
         logger.LogInformation("The automation {Automation} was reset to its initial state {State}.", automation.Title, initialState);
         Enter(initialState, now);
+        restartRules();
         if (initialState is not null && !string.Equals(previous, initialState, StringComparison.Ordinal))
         {
             Publish(previous, initialState, now);

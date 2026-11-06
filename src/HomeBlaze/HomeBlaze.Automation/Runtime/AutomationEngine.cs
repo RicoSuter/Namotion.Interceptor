@@ -137,12 +137,14 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     /// <summary>
-    /// Enters the initial state and clears the trigger times. A saved reset clears the error shown unless the configuration
-    /// is invalid, since a reset is how an automation leaves a saved state that its configuration no longer has.
+    /// Enters the initial state, clears the trigger times and starts every active rule over as if it entered its state:
+    /// fresh holds, the activation policy of its triggers applies again and its event triggers subscribe again, also when the
+    /// state did not change. A saved reset clears the error shown unless the configuration is invalid, since a reset is how
+    /// an automation leaves a saved state that its configuration no longer has.
     /// </summary>
     public Task ResetStateAsync()
     {
-        if (_states.Reset(_snapshot, _automation.Rules.Values) is { } error)
+        if (_states.Reset(_snapshot, _automation.Rules.Values, RestartRules) is { } error)
         {
             _status.Fail(error);
             return Task.CompletedTask;
@@ -153,8 +155,20 @@ internal sealed class AutomationEngine : IRuleRunHost
             _status.SetRunning();
         }
 
-        ApplyScopeChange();
         return Task.CompletedTask;
+    }
+
+    private void RestartRules()
+    {
+        foreach (var rule in _snapshot.Rules)
+        {
+            if (rule.IsActivated)
+            {
+                Deactivate(rule);
+            }
+        }
+
+        ApplyScopeChange();
     }
 
     /// <summary>
