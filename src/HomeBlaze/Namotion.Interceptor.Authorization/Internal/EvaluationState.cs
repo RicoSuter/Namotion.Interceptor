@@ -10,16 +10,20 @@ namespace Namotion.Interceptor.Authorization.Internal;
 internal sealed class EvaluationState
 {
     // Larger instances are dropped on return, so a search that used the whole budget does not pin its lists to the thread.
-    private const int MaxCachedCapacity = 256;
-    private const int MaxCachedLinks = 4 * MaxCachedCapacity;
+    public const int MaxCachedCapacity = 256;
+    public const int MaxCachedLinks = 4 * MaxCachedCapacity;
 
     [ThreadStatic]
     private static EvaluationState? _cached;
 
     private readonly Dictionary<RegisteredSubject, PathList> _builtPaths = new(ReferenceEqualityComparer.Instance);
 
-    // Whether paths were built since the last clear; most evaluations build none, so they skip clearing and checking them.
+    // Whether paths were built since the last clear; most evaluations build none, so they skip clearing them.
     private bool _hasBuiltPaths;
+
+    // Whether paths were built since the instance was rented; a clear between attempts keeps it, so Return still checks
+    // the capacities the earlier attempts grew.
+    private bool _hasBuiltPathsSinceRent;
 
     public ParentReads Reads { get; } = new();
 
@@ -40,12 +44,13 @@ internal sealed class EvaluationState
     public static void Return(EvaluationState state)
     {
         if (state.Reads.Capacity > MaxCachedCapacity ||
-            (state._hasBuiltPaths && (state.Paths.IsLargerThan(MaxCachedCapacity, MaxCachedLinks) || state._builtPaths.EnsureCapacity(0) > MaxCachedCapacity)))
+            (state._hasBuiltPathsSinceRent && (state.Paths.IsLargerThan(MaxCachedCapacity, MaxCachedLinks) || state._builtPaths.EnsureCapacity(0) > MaxCachedCapacity)))
         {
             return;
         }
 
         state.Clear();
+        state._hasBuiltPathsSinceRent = false;
         _cached = state;
     }
 
@@ -91,6 +96,7 @@ internal sealed class EvaluationState
         }
 
         _hasBuiltPaths = true;
+        _hasBuiltPathsSinceRent = true;
         var first = Paths.Count;
         var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, Paths, maxPaths, Reads, out var followedSingleParents) && Paths.Count > first;
         var count = Paths.Count - first;
