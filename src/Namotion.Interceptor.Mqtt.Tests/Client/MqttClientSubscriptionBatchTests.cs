@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging.Abstractions;
+using MQTTnet.Packets;
+using MQTTnet.Server;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -25,6 +28,7 @@ public partial class MqttClientSubscriptionBatchTests
 {
     // More than one batch of 1000 topics, so the last item's topic is subscribed by the second packet.
     private const int ItemCount = 1500;
+    private const int SubscriptionBatchSize = 1000;
 
     [InterceptorSubject]
     public partial class BatchTestItem
@@ -119,6 +123,76 @@ public partial class MqttClientSubscriptionBatchTests
             stateRecorder.Dispose();
             await source.StopAsync(CancellationToken.None);
             await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTopicsExceedOneSubscriptionBatch_ThenTheClientSendsThemInSeveralSubscribePackets()
+    {
+        // Arrange: a plain broker, so every SUBSCRIBE packet the client sends can be inspected.
+        var brokerPort = GetFreeTcpPort();
+        var brokerOptions = new MqttServerOptionsBuilder()
+            .WithDefaultEndpoint()
+            .WithDefaultEndpointPort(brokerPort)
+            .WithDefaultEndpointBoundIPAddress(IPAddress.Loopback)
+            .Build();
+        using var broker = new MqttServerFactory().CreateMqttServer(brokerOptions);
+        var topicFilterCountsPerPacket = new ConcurrentQueue<int>();
+        broker.InterceptingInboundPacketAsync += args =>
+        {
+            if (args.Packet is MqttSubscribePacket subscribePacket)
+            {
+                topicFilterCountsPerPacket.Enqueue(subscribePacket.TopicFilters.Count);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var clientContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithSourceTransactions()
+            .WithSourceMonitoring();
+        var clientRoot = new BatchTestRoot(clientContext)
+        {
+            Items = CreateItems(clientContext)
+        };
+
+        await using var source = new MqttSubjectClientSource(
+            clientRoot,
+            new MqttClientConfiguration
+            {
+                BrokerHost = "127.0.0.1",
+                BrokerPort = brokerPort,
+                Mapper = new MqttCompositeMapper(
+                    new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+                    new MqttAttributeMapper("mqtt"))
+            },
+            NullLogger<MqttSubjectClientSource>.Instance);
+
+        try
+        {
+            await broker.StartAsync();
+
+            // Act
+            await source.StartAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => topicFilterCountsPerPacket.Sum() >= ItemCount,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "The client should subscribe the topic of every item.");
+            var topicFilterCounts = topicFilterCountsPerPacket.ToArray();
+            Assert.Equal(ItemCount, topicFilterCounts.Sum());
+            Assert.True(topicFilterCounts.Length > 1, $"Expected several SUBSCRIBE packets, got {topicFilterCounts.Length}.");
+            Assert.All(topicFilterCounts, count => Assert.InRange(count, 1, SubscriptionBatchSize));
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync();
         }
     }
 

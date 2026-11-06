@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -187,6 +188,39 @@ public class StructureVersionTests
         Assert.NotNull(registry.TryGetRegisteredSubject(subject));
         Assert.Contains(observed, version => version % 2 == 1);
         Assert.Equal(0, registry.StructureVersion % 2);
+    }
+
+    [Fact]
+    public async Task WhenAChildIndexChangeIsInProgress_ThenStructureVersionIsOdd()
+    {
+        // Arrange: a reorder attaches and detaches nothing and runs no user code while the registry updates the
+        // indices, so the test holds the lock the update takes next to stop the change while it is in progress.
+        var (context, registry) = CreateContext();
+        var first = new Person();
+        var second = new Person();
+        var root = new Person(context) { Children = [first, second] };
+        var property = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Children))!;
+        var childrenLock = typeof(RegisteredSubjectProperty)
+            .GetField("_children", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(property)!;
+        var before = registry.StructureVersion;
+
+        // Act
+        long observedDuringChange;
+        Task reorder;
+        lock (childrenLock)
+        {
+            reorder = Task.Run(() => root.Children = [second, first]);
+            SpinWait.SpinUntil(() => registry.StructureVersion % 2 == 1 || reorder.IsCompleted, TimeSpan.FromSeconds(30));
+            observedDuringChange = registry.StructureVersion;
+        }
+
+        await reorder.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(before + 1, observedDuringChange);
+        Assert.Equal(before + 2, registry.StructureVersion);
+        Assert.Equal([second, first], property.Children.Select(child => child.Subject));
     }
 
     private static void AssertRisenToAnEvenValue(long before, long after)

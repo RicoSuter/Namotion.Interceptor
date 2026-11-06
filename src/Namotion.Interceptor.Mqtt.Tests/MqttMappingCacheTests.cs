@@ -682,6 +682,30 @@ public class MqttMappingCacheTests
     }
 
     [Fact]
+    public async Task WhenTheServerLooksUpACachedTopic_ThenNothingIsAllocated()
+    {
+        // Arrange: every published change looks the topic up again, so a cache hit must not allocate.
+        var subject = CreateRootSubject();
+        await using var server = CreateServer(subject, CreateMapper());
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
+
+        // Warm up: the JIT and the provider's per-type caches are one-time costs.
+        for (var warmup = 0; warmup < 100; warmup++)
+        {
+            server.TryGetTopicForProperty(property.Reference);
+        }
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var topic = server.TryGetTopicForProperty(property.Reference).Topic;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.Equal("name", topic);
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public async Task WhenTheStructureChangesAnywhere_ThenTheServerComputesTheTopicOnceMore()
     {
         // Arrange
