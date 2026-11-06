@@ -129,10 +129,12 @@ public class AutomationStateTests
         host.Automation.ResetState();
         await host.FlushAsync();
         var nameAfterReset = host.Weather.Name;
+        var triggeredAfterReset = host.Rule("started").LastTriggeredAt;
         await host.RestartAsync();
 
         // Assert
         Assert.NotNull(triggeredBeforeReset);
+        Assert.Null(triggeredAfterReset);
         Assert.Equal("Running to Idle", nameAfterReset);
         Assert.Equal("Idle", host.Automation.CurrentState);
         Assert.Null(host.Rule("started").LastTriggeredAt);

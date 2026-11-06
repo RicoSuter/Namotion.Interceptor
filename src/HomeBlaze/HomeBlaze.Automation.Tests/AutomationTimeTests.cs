@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reactive;
 using HomeBlaze.Automation.Tests.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -50,5 +51,53 @@ public class AutomationTimeTests
         // Assert
         Assert.Equal("Day", stateAfterStart);
         Assert.Equal("Night", host.Automation.CurrentState);
+    }
+
+    [Fact]
+    public async Task WhenRestartedWithASavedStateOfTheWrongPeriod_ThenTheStateIsReconciled()
+    {
+        // Arrange
+        var start = DateTimeOffset.Parse("2026-03-29T19:00:00Z", CultureInfo.InvariantCulture); // 21:00 in Zurich
+        await using var host = await AutomationTestHost.StartAsync(DayAndNight(), start, Zurich);
+        var savedState = host.Automation.CurrentState;
+        await host.StopAsync();
+        host.Time.Advance(TimeSpan.FromHours(2));
+        var stateChanges = new List<string>();
+        using var subscription = host.Automation.Subscribe(Observer.Create<AutomationStateChangedEvent>(change => stateChanges.Add(change.NewState)));
+
+        // Act
+        await host.RestartAsync();
+
+        // Assert
+        Assert.Equal("Day", savedState);
+        Assert.Equal("Night", host.Automation.CurrentState);
+        Assert.Equal(["Night"], stateChanges.ToArray());
+    }
+
+    [Theory]
+    [InlineData("2026-03-28T20:00:00Z", "2026-03-29T06:31:00Z", "03-28 21:30 Night", "03-29 08:30 Day")] // daylight saving time starts at 02:00
+    [InlineData("2026-10-24T19:00:00Z", "2026-10-25T07:31:00Z", "10-24 21:30 Night", "10-25 08:30 Day")] // daylight saving time ends at 03:00
+    public async Task WhenTheTimeRunsThroughANightWithAClockChange_ThenTheStateChangesOnceAtEachLocalTime(
+        string start, string end, string expectedEvening, string expectedMorning)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(DayAndNight(), DateTimeOffset.Parse(start, CultureInfo.InvariantCulture), Zurich);
+        var stateChanges = new List<string>();
+        using var subscription = host.Automation.Subscribe(Observer.Create<AutomationStateChangedEvent>(change =>
+            stateChanges.Add($"{TimeZoneInfo.ConvertTime(change.Timestamp, Zurich):MM-dd HH:mm} {change.NewState}")));
+        var stateAtStart = host.Automation.CurrentState;
+
+        // Act
+        var endTime = DateTimeOffset.Parse(end, CultureInfo.InvariantCulture);
+        while (host.Time.GetUtcNow() < endTime)
+        {
+            host.Time.Advance(TimeSpan.FromMinutes(1));
+            await host.FlushAsync();
+        }
+
+        // Assert
+        Assert.Equal("Day", stateAtStart);
+        Assert.Equal([expectedEvening, expectedMorning], stateChanges.ToArray());
+        Assert.Equal("Day", host.Automation.CurrentState);
     }
 }
