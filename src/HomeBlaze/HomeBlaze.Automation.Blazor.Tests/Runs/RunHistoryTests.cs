@@ -58,6 +58,37 @@ public class RunHistoryTests
     }
 
     [Fact]
+    public async Task WhenTheCountDropsToZero_ThenTheResetIsNoRunAndTheNextIncreaseIs()
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add(Finished + "/RunCount", Start, 5)
+            .Add(Finished + "/RunCount", Start.AddMinutes(1), 0)
+            .Add(Finished + "/RunCount", Start.AddMinutes(2), 1);
+
+        // Act
+        var runs = await LoadAsync(store);
+
+        // Assert
+        Assert.Equal(Start.AddMinutes(2), Assert.Single(runs).At);
+    }
+
+    [Fact]
+    public async Task WhenTheCountIsEqualToThePreviousOne_ThenItIsNoRun()
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add(Finished + "/RunCount", Start, 5)
+            .Add(Finished + "/RunCount", Start.AddMinutes(1), 5);
+
+        // Act
+        var runs = await LoadAsync(store);
+
+        // Assert
+        Assert.Empty(runs);
+    }
+
+    [Fact]
     public async Task WhenTheCountBeforeTheWindowIsKnown_ThenTheFirstSampleInTheWindowIsARun()
     {
         // Arrange

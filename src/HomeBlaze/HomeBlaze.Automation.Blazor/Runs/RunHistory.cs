@@ -7,7 +7,8 @@ namespace HomeBlaze.Automation.Blazor.Runs;
 /// <summary>
 /// Reads the recent runs of rules from history. Every sample of the <c>RunCount</c> of a rule that follows a known count
 /// is a run, also when two runs in a row are the same, and its outcome and message are those held at the time of the
-/// sample. A count that follows no sample or a null sample is the count restored when the automation started, not a run.
+/// sample. A count that follows no sample or a null sample is the count restored when the automation started, and a count that
+/// is equal or lower is a counter reset, neither is a run.
 /// </summary>
 public static class RunHistory
 {
@@ -45,7 +46,7 @@ public static class RunHistory
         var runTimes = new List<DateTimeOffset>();
         foreach (var point in series.Points)
         {
-            if (previous?.Number is not null && point.Number is not null)
+            if (previous?.Number is { } before && point.Number is { } after && after > before)
             {
                 runTimes.Add(point.Timestamp);
             }
