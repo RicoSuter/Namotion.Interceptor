@@ -225,6 +225,20 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// Deletes a subject that a test created through the UI, found by its file name under the root without the extension,
+    /// with its file, unless it is gone already.
+    /// </summary>
+    public async Task DeleteStoredSubjectByNameAsync(string name)
+    {
+        var root = GetRoot();
+        var subject = root.Children.FirstOrDefault(pair => pair.Key == name || pair.Key == $"{name}.json").Value;
+        if (subject is not null)
+        {
+            await root.DeleteSubjectAsync(subject, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
     /// Writes a page of the demo folder, given by its file name, through the page like an editor does, which also
     /// loads the page again.
     /// </summary>

@@ -58,3 +58,94 @@ public class PendingRowsTests
         Assert.False(pending.Any);
     }
 }
+
+public class PendingRowsLifecycleTests
+{
+    [Fact]
+    public void WhenAFieldIsMarkedOrCleared_ThenChangedIsRaisedOncePerChange()
+    {
+        // Arrange
+        var pending = new PendingRows();
+        var raised = 0;
+        pending.Changed += () => raised++;
+
+        // Act
+        pending.Set("a", true);
+        pending.Set("a", true);
+        pending.Set("a", false);
+        pending.Set("a", false);
+
+        // Assert
+        Assert.Equal(2, raised);
+    }
+
+    [Fact]
+    public void WhenARuleIsRemoved_ThenClearingItsPrefixForgetsItsFieldsAndNotThoseOfARuleWithTheSameStart()
+    {
+        // Arrange
+        var pending = new PendingRows();
+        pending.Set(PendingRowIds.For("rule-1", "trigger", "t1", "condition"), true);
+        pending.Set(PendingRowIds.For("rule-1", "guard", "g1", "condition"), true);
+        pending.Set(PendingRowIds.For("rule-10", "trigger", "t1", "condition"), true);
+        var raised = 0;
+        pending.Changed += () => raised++;
+
+        // Act
+        pending.Clear(PendingRowIds.ForRule("rule-1"));
+
+        // Assert
+        Assert.True(pending.Any);
+        Assert.Equal(1, raised);
+        pending.Clear(PendingRowIds.ForRule("rule-10"));
+        Assert.False(pending.Any);
+    }
+
+    [Fact]
+    public void WhenItemsAreReordered_ThenTheirFieldIdsStayTheSame()
+    {
+        // Arrange
+        var first = new DraftItem<string>("first");
+        var second = new DraftItem<string>("second");
+        var items = new List<DraftItem<string>> { first, second };
+        var before = items.Select(item => PendingRowIds.For("rule-1", "trigger", item.Id, "condition")).ToList();
+
+        // Act
+        DraftLists.Move(items, second, -1);
+        var after = items.Select(item => PendingRowIds.For("rule-1", "trigger", item.Id, "condition")).ToList();
+
+        // Assert
+        Assert.Equal(first, items[1]);
+        Assert.Equal(before[0], after[1]);
+        Assert.Equal(before[1], after[0]);
+        Assert.NotEqual(before[0], before[1]);
+    }
+
+    [Fact]
+    public void WhenTheTrackerIsDisposed_ThenItsFieldIsCleared()
+    {
+        // Arrange
+        var pending = new PendingRows();
+        var tracker = new PendingRowTracker(pending, "rule-1/trigger/t1/condition");
+        tracker.Report(true);
+
+        // Act
+        tracker.Dispose();
+
+        // Assert
+        Assert.False(pending.Any);
+    }
+
+    [Fact]
+    public void WhenTheTrackerHasNoRegistry_ThenReportingDoesNothing()
+    {
+        // Arrange
+        var tracker = new PendingRowTracker(null, "a");
+
+        // Act
+        tracker.Report(true);
+        tracker.Dispose();
+
+        // Assert
+        Assert.NotNull(tracker);
+    }
+}

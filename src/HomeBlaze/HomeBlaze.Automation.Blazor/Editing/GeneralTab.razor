@@ -1,26 +1,12 @@
 <MudStack Spacing="3">
     <MudTextField T="string" Label="Name" Value="@Draft.Name" ValueChanged="SetNameAsync" Immediate="true"
                   HelperText="The title of the automation." data-testid="automation-name" />
-    <MudSwitch T="bool" Value="@Draft.Enabled" ValueChanged="SetEnabledAsync" Color="Color.Primary"
+    <MudSwitch T="bool" Value="@Draft.Enabled" ValueChanged="SetEnabledAsync" Color="Color.Primary" data-testid="automation-enabled"
                Label="Enabled: the rules observe their triggers. A disabled automation keeps its state." />
-    @if (Errors.Count > 0)
-    {
-        <MudAlert Severity="Severity.Warning" data-testid="automation-errors">
-            <MudText Typo="Typo.body2">Fix these before saving:</MudText>
-            <ul class="pl-4">
-                @foreach (var error in Errors)
-                {
-                    <li><MudText Typo="Typo.body2">@Describe(error)</MudText></li>
-                }
-            </ul>
-        </MudAlert>
-    }
 </MudStack>
 
 @code {
     [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
-
-    [Parameter] public IReadOnlyList<AutomationValidationError> Errors { get; set; } = [];
 
     [Parameter] public EventCallback Changed { get; set; }
 
@@ -35,7 +21,4 @@
         Draft.Enabled = isEnabled;
         return Changed.InvokeAsync();
     }
-
-    private string Describe(AutomationValidationError error) =>
-        Draft.FindRule(error.RuleKey) is { } rule ? $"Rule '{rule.DisplayName}': {error.Message}" : error.Message;
 }

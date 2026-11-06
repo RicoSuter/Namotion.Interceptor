@@ -1,5 +1,6 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -57,12 +58,15 @@ public class AutomationEditorTests
             await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running", new() { Timeout = Timeout });
 
             // Act
-            await dialog.GetByLabel("Enabled", new() { Exact = false }).ClickAsync();
+            await dialog.GetByTestId("automation-enabled").ClickAsync();
             await SaveAsync(page, dialog);
 
             // Assert
             Assert.Contains("\"enabled\": false", await _fixture.ReadFileAsync(filePath));
+            // The worker sets both after it applied the configuration, which the host requests after the write, so they
+            // prove that the running automation took the new configuration.
             await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Stopped", new() { Timeout = Timeout });
+            await Assertions.Expect(page.GetByTestId("automation-rule-row").First).ToContainTextAsync("the automation is disabled", new() { Timeout = Timeout });
         }
         finally
         {
@@ -91,6 +95,92 @@ public class AutomationEditorTests
         finally
         {
             await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheDialogIsOpened_ThenItIsNotDirtyUntilSomethingIsEdited()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            // Act
+            var (_, dialog) = await OpenEditorAsync(name);
+            var editor = dialog.GetByTestId("automation-editor");
+
+            // Assert
+            await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "false");
+            await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Washing machine");
+            await Assertions.Expect(editor).ToHaveAttributeAsync("data-dirty", "true", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheDialogIsCanceledAfterAnEdit_ThenTheAutomationAndItsFileAreUnchanged()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            var before = await _fixture.ReadFileAsync(filePath);
+            await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Washing machine");
+            await dialog.GetByTestId("automation-enabled").ClickAsync();
+
+            // Act
+            await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+            await Assertions.Expect(dialog).ToHaveCountAsync(0);
+
+            // Assert
+            await Assertions.Expect(page.GetByTestId("automation-page").GetByRole(AriaRole.Heading, new() { Name = "Washer" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running");
+            Assert.Equal(before, await _fixture.ReadFileAsync(filePath));
+            var (_, reopened) = await OpenEditorAsync(name, page);
+            await Assertions.Expect(reopened.GetByLabel("Name", new() { Exact = true })).ToHaveValueAsync("Washer");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAutomationIsCreatedInTheCreateDialog_ThenItsFileExistsAndItsPageOpens()
+    {
+        // Arrange
+        var name = $"Created{Guid.NewGuid():N}";
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}browser");
+        await page.WaitUntilInteractiveAsync();
+        try
+        {
+            // Act
+            await page.Locator("#scrollContainer button:has-text('Create')").First.ClickAsync();
+            await SubjectSetupDialogTests.PickTypeAsync(page, "automation");
+            await page.GetByTestId("create-name-input").FillAsync(name);
+            var dialog = SubjectSetupDialogTests.Dialog(page);
+            await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Created by test");
+            await Assertions.Expect(SubjectSetupDialogTests.CreateButton(page)).ToBeEnabledAsync(new() { Timeout = Timeout });
+            await SubjectSetupDialogTests.CreateButton(page).ClickAsync();
+            await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // Assert
+            var filePath = _fixture.GetPagePath($"{name}.json");
+            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), timeout: TimeSpan.FromSeconds(30), message: "The automation file was not written");
+            Assert.Contains("\"name\": \"Created by test\"", await _fixture.ReadFileAsync(filePath));
+            await page.GotoAsync($"{_fixture.ServerAddress}pages/{name}");
+            await Assertions.Expect(page.GetByTestId("automation-page").GetByRole(AriaRole.Heading, new() { Name = "Created by test" }))
+                .ToBeVisibleAsync(new() { Timeout = Timeout });
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectByNameAsync(name);
         }
     }
 
