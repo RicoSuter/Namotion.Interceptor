@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -100,5 +101,75 @@ public class AutomationPreviewTests
         Assert.NotNull(target);
         Assert.NotNull(target.TryGetMethodMetadata());
         Assert.Null(AutomationPreview.ResolveTarget(host.Automation, null, "/Blinds/Missing"));
+    }
+
+    [Fact]
+    public async Task WhenTheExpressionIsNotBoolean_ThenTheResultIsNullAndTheValueIsKept()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Gust = 9;
+
+        // Act
+        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Gust", allowsEvent: false);
+
+        // Assert
+        Assert.Null(preview.Result);
+        Assert.Equal(9.0, preview.Value);
+    }
+
+    [Fact]
+    public async Task WhenTwoValuesAreMissing_ThenTheMissingPathsAreThoseOfTheSingleEvaluation()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+
+        // Act
+        var preview = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Rain > 0 && /Weather/Hail > 0", allowsEvent: false);
+
+        // Assert
+        Assert.Null(preview.Result);
+        Assert.Equal(["/Weather/Rain", "/Weather/Hail"], preview.MissingPaths.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenADateIsEvaluatedWithATimeZone_ThenTheTextUsesIt()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.LastUpdated = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var zone = new TimeZoneDisplayService();
+        zone.SetResolved(TimeZonePreference.Automatic, TimeZoneInfo.CreateCustomTimeZone("plus5", TimeSpan.FromHours(5), "plus5", "plus5"));
+
+        // Act
+        var viewer = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/LastUpdated", allowsEvent: false, zone);
+        var server = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/LastUpdated", allowsEvent: false);
+
+        // Assert
+        Assert.Contains("+05:00", viewer.Text);
+        Assert.NotEqual(viewer.Text, server.Text);
+    }
+
+    [Fact]
+    public async Task WhenASecretOrExcludedValueIsPreviewed_ThenItIsMissing()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.ApiKey = "secret";
+        host.Weather.RawPayload = "payload";
+
+        // Act
+        var secret = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/ApiKey", allowsEvent: false);
+        var excluded = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/RawPayload", allowsEvent: false);
+        var template = AutomationPreview.Render(host.Automation, "retract", "{{ /Weather/ApiKey | raw }}|{{ /Weather/RawPayload | raw }}", allowsEvent: false);
+
+        // Assert
+        Assert.Null(secret.Value);
+        Assert.Null(secret.Text);
+        Assert.Equal(["/Weather/ApiKey"], secret.MissingPaths.ToArray());
+        Assert.Null(excluded.Value);
+        Assert.DoesNotContain("secret", template.Text);
+        Assert.DoesNotContain("payload", template.Text);
+        Assert.Equal(["/Weather/ApiKey", "/Weather/RawPayload"], template.MissingPaths.ToArray());
     }
 }

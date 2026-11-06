@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services.Display;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -13,7 +14,14 @@ namespace HomeBlaze.Automation;
 /// </summary>
 public static class AutomationPreview
 {
-    public static AutomationExpressionPreview Evaluate(Automation automation, string? ruleKey, string? expression, bool allowsEvent)
+    /// <summary>
+    /// Evaluates the expression once against the live graph. <see cref="AutomationExpressionPreview.Result"/> is the value
+    /// as a condition: true or false for a boolean, null for anything else or a missing value. The text shows dates in the
+    /// zone of <paramref name="timeZone"/>, as pages do for the viewer, and in the server zone when it is null.
+    /// <see cref="AutomationExpressionPreview.Value"/> may be a live subject for an expression that leads to one; display it, do not modify it.
+    /// </summary>
+    public static AutomationExpressionPreview Evaluate(
+        Automation automation, string? ruleKey, string? expression, bool allowsEvent, ITimeZoneDisplay? timeZone = null)
     {
         if (!AutomationExpressionCheck.TryParseExpression(expression, allowsEvent, out var parsed, out var error))
         {
@@ -21,18 +29,19 @@ public static class AutomationPreview
         }
 
         var evaluation = CreateEvaluation(automation, ruleKey);
-        var result = evaluation.EvaluateCondition(parsed);
-        IReadOnlyList<string> missingPaths = [.. evaluation.MissingPaths];
         var value = evaluation.Evaluate(parsed);
         return new AutomationExpressionPreview
         {
-            Result = result,
+            Result = value.Value as bool?,
             Value = value.IsMissing ? null : value.Value,
-            Text = value.IsMissing ? null : ExpressionDisplay.ToText(value, timeZone: null),
-            MissingPaths = missingPaths
+            Text = value.IsMissing ? null : ExpressionDisplay.ToText(value, timeZone),
+            MissingPaths = [.. evaluation.MissingPaths]
         };
     }
 
+    /// <summary>
+    /// Renders the template with the current values in the server zone, which is where the runtime renders the texts it sends.
+    /// </summary>
     public static AutomationExpressionPreview Render(Automation automation, string? ruleKey, string? template, bool allowsEvent)
     {
         if (!AutomationExpressionCheck.TryParseTemplate(template, allowsEvent, out var parsed, out var error))
@@ -45,7 +54,10 @@ public static class AutomationPreview
         return new AutomationExpressionPreview { Value = text, Text = text, MissingPaths = [.. evaluation.MissingPaths] };
     }
 
-    /// <summary>Resolves the property or operation an action targets, or null when the path leads nowhere.</summary>
+    /// <summary>
+    /// Resolves the property or operation an action targets, or null when the path leads nowhere. The result is metadata for
+    /// display only: callers must not read or write its value, which may be secret.
+    /// </summary>
     public static RegisteredSubjectProperty? ResolveTarget(Automation automation, string? ruleKey, string? path) =>
         string.IsNullOrWhiteSpace(path) ? null : AutomationPaths.ResolveTarget(automation.Services.PathResolver, path, GetAnchor(automation, ruleKey));
 
