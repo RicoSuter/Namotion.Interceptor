@@ -1,0 +1,10 @@
+namespace HomeBlaze.Automation.Blazor.Editing;
+
+/// <summary>The rules that change to a state, are active in it, and leave it, some of them from any state.</summary>
+public sealed record StateUsage(IReadOnlyList<RuleDraft> EnteredBy, IReadOnlyList<RuleDraft> ActiveIn, IReadOnlyList<RuleDraft> LeftBy)
+{
+    /// <summary>The number of rules that would refer to a state that no longer exists if it were deleted.</summary>
+    public int UseCount => EnteredBy.Union(ActiveIn).Count();
+
+    public bool IsUsed => UseCount > 0;
+}

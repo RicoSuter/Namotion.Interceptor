@@ -1,0 +1,216 @@
+using HomeBlaze.Automation.Blazor.Editing;
+using HomeBlaze.Automation.Blazor.Tests.Testing;
+
+namespace HomeBlaze.Automation.Blazor.Tests.Editing;
+
+public class AutomationDraftTests
+{
+    private static AutomationRule Rule(string name, string? inState, params AutomationAction[] actions) => new()
+    {
+        Name = name,
+        Mode = AutomationRuleMode.On,
+        InState = inState,
+        Triggers = [new PropertyTrigger { Expression = "/Laundry/Plug/Power > 500" }],
+        Actions = actions
+    };
+
+    private static ChangeStateAction Enter(string state) => new() { Id = "state-1", TargetState = state };
+
+    private static Automation CreateWasher() => TestAutomations.Create(automation =>
+    {
+        automation.Name = "Washer";
+        automation.States = ["Idle", "Running"];
+        automation.InitialState = "Idle";
+        automation.RuleOrder = ["started"];
+        automation.Rules = new Dictionary<string, AutomationRule>
+        {
+            ["finished"] = Rule("Finished", "Running", new InvokeOperationAction { Id = "call-1", OperationPath = "/Notify/Send" }, Enter("Idle")),
+            ["started"] = Rule("Started", "Idle", Enter("Running"))
+        };
+    });
+
+    [Fact]
+    public void WhenTheDraftIsRead_ThenItHasTheConfigurationWithTheRulesInRunOrder()
+    {
+        // Act
+        var draft = AutomationDraft.From(CreateWasher());
+
+        // Assert
+        Assert.Equal("Washer", draft.Name);
+        Assert.Equal(["Idle", "Running"], draft.States.ToArray());
+        Assert.Equal("Idle", draft.InitialState);
+        Assert.Equal(["started", "finished"], draft.Rules.Select(rule => rule.Key).ToArray());
+        Assert.Equal(2, draft.Rules[1].Actions.Count);
+    }
+
+    [Fact]
+    public void WhenTheDraftIsApplied_ThenTheAutomationHasItsConfigurationAndOrder()
+    {
+        // Arrange
+        var automation = CreateWasher();
+        var draft = AutomationDraft.From(automation);
+        draft.Name = " Washing machine ";
+        draft.Rules[0].Name = "Start";
+        var added = draft.AddRule();
+        draft.MoveRule(added, -2);
+
+        // Act
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.Equal("Washing machine", automation.Name);
+        Assert.Equal([added.Key, "started", "finished"], automation.RuleOrder);
+        Assert.Equal("Start", automation.Rules["started"].Name);
+        Assert.Equal(AutomationRuleMode.DryRun, automation.Rules[added.Key].Mode);
+        Assert.Equal("Idle", automation.InitialState);
+    }
+
+    [Fact]
+    public void WhenARuleIsAdded_ThenItHasANewKeyAnEmptyConditionAndRunsDry()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+
+        // Act
+        var rule = draft.AddRule();
+
+        // Assert
+        Assert.Matches("^[a-z][a-z0-9]{3}$", rule.Key);
+        Assert.Equal("Rule 3", rule.Name);
+        Assert.Equal(AutomationRuleMode.DryRun, rule.Mode);
+        Assert.IsType<PropertyTrigger>(Assert.Single(rule.Triggers).Value);
+    }
+
+    [Fact]
+    public void WhenANewRuleIsIncomplete_ThenTheDraftIsInvalidUntilItIsFilledIn()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+        var rule = draft.AddRule();
+
+        // Act
+        var incomplete = draft.Validate();
+        rule.Triggers[0].Value = new PropertyTrigger { Expression = "/Laundry/Plug/Power < 5" };
+        rule.AddChangeState("Idle");
+        var complete = draft.Validate();
+
+        // Assert
+        Assert.Contains(incomplete, error => error.RuleKey == rule.Key && error.Message == "it has no action");
+        Assert.Empty(complete);
+    }
+
+    [Fact]
+    public void WhenAStateIsRenamed_ThenTheInitialStateAndTheRulesFollow()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+
+        // Act
+        var isRenamed = draft.RenameState("Idle", " Standby ");
+
+        // Assert
+        Assert.True(isRenamed);
+        Assert.Equal(["Standby", "Running"], draft.States.ToArray());
+        Assert.Equal("Standby", draft.InitialState);
+        Assert.Equal("Standby", draft.Rules[0].InState);
+        Assert.Equal(["Standby"], draft.Rules[1].TargetStates.ToArray());
+    }
+
+    [Theory]
+    [InlineData("Running")]
+    [InlineData(" ")]
+    public void WhenTheNewNameIsTakenOrBlank_ThenTheStateIsNotRenamed(string name)
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+
+        // Act
+        var isRenamed = draft.RenameState("Idle", name);
+
+        // Assert
+        Assert.False(isRenamed);
+        Assert.Equal(["Idle", "Running"], draft.States.ToArray());
+    }
+
+    [Fact]
+    public void WhenAStateIsUsed_ThenItsUsageNamesTheRulesAndItCannotBeRemoved()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+
+        // Act
+        var usage = draft.GetStateUsage("Running");
+        var isRemoved = draft.RemoveState("Running");
+
+        // Assert
+        Assert.Equal(["started"], usage.EnteredBy.Select(rule => rule.Key).ToArray());
+        Assert.Equal(["finished"], usage.ActiveIn.Select(rule => rule.Key).ToArray());
+        Assert.Equal(["finished"], usage.LeftBy.Select(rule => rule.Key).ToArray());
+        Assert.Equal(2, usage.UseCount);
+        Assert.False(isRemoved);
+    }
+
+    [Fact]
+    public void WhenAnUnusedInitialStateIsRemoved_ThenTheFirstStateBecomesInitial()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+        var added = draft.AddState();
+        draft.InitialState = added;
+
+        // Act
+        var isRemoved = draft.RemoveState(added);
+
+        // Assert
+        Assert.Equal("State 3", added);
+        Assert.True(isRemoved);
+        Assert.Equal("Idle", draft.InitialState);
+    }
+
+    [Fact]
+    public void WhenAnInputHasAnError_ThenTheDraftIsInvalidUntilTheErrorIsCleared()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+        var error = new AutomationValidationError("finished", "For at least: use a duration such as 20s");
+
+        // Act
+        draft.SetInputError("hold", error);
+        var withError = draft.Validate();
+        draft.SetInputError("hold", null);
+        var withoutError = draft.Validate();
+
+        // Assert
+        Assert.Equal(error, Assert.Single(withError));
+        Assert.Empty(withoutError);
+    }
+
+    [Fact]
+    public void WhenActionsAreAdded_ThenEachGetsTheNextFreeIdOfItsKind()
+    {
+        // Arrange
+        var finished = AutomationDraft.From(CreateWasher()).Rules[1];
+
+        // Act
+        finished.AddCallOperation();
+        finished.AddSetProperty();
+        finished.AddChangeState("Running");
+
+        // Assert
+        Assert.Equal(["call-1", "state-1", "call-2", "set-1", "state-2"], finished.Actions.Select(action => action.Value.Id).ToArray());
+    }
+
+    [Fact]
+    public void WhenAnEmptyRearmIsSaved_ThenTheRuleHasNoRearm()
+    {
+        // Arrange
+        var rule = AutomationDraft.From(CreateWasher()).Rules[0];
+        rule.Triggers[0].Value = new PropertyTrigger { Expression = "/Laundry/Plug/Power > 500", Rearm = " " };
+
+        // Act
+        var saved = rule.ToRule();
+
+        // Assert
+        Assert.Null(Assert.IsType<PropertyTrigger>(Assert.Single(saved.Triggers)).Rearm);
+    }
+}
