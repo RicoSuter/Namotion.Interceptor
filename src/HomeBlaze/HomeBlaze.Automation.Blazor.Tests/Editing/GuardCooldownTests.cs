@@ -24,7 +24,6 @@ public class GuardCooldownTests
     [Theory]
     [InlineData("not /Blinds/IsMoving")]
     [InlineData("/a/B or /c/D")]
-    [InlineData("(/a/B or /c/D)")]
     [InlineData("(/a/B) and /c/D")]
     [InlineData("/a/B ")]
     public void WhenACombinedGuardIsSplit_ThenTheConditionAndTheCooldownAreBack(string condition)
@@ -37,6 +36,19 @@ public class GuardCooldownTests
 
         // Assert
         Assert.Equal(condition, splitCondition);
+        Assert.Equal(TimeSpan.FromMinutes(30), cooldown);
+    }
+
+    [Fact]
+    public void WhenTheConditionIsWrappedInParentheses_ThenTheSplitDropsOnePair()
+    {
+        // Act
+        var (wrapped, _) = GuardCooldown.Split(GuardCooldown.Combine("(/a/B or /c/D)", TimeSpan.FromMinutes(30)));
+        var (handWritten, cooldown) = GuardCooldown.Split("(/a/B) and (" + Cooldown30 + ")");
+
+        // Assert
+        Assert.Equal("/a/B or /c/D", wrapped);
+        Assert.Equal("/a/B", handWritten);
         Assert.Equal(TimeSpan.FromMinutes(30), cooldown);
     }
 

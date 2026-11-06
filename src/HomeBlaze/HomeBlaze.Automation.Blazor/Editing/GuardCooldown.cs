@@ -55,14 +55,11 @@ internal static class GuardCooldown
             cooldown > TimeSpan.Zero;
     }
 
-    // Parentheses keep an "or" of the condition from taking the cooldown into one of its branches. A condition that is
-    // wrapped already is wrapped again, so that unwrapping gives back exactly what was written.
-    private static string Wrap(string condition) => NeedsParentheses(condition) ? $"({condition})" : condition;
+    // Parentheses keep a top-level "or" of the condition from taking the cooldown into one of its branches. The pair that
+    // a condition has on its own is dropped when the guard is split, so a hand-written "(a) and (cooldown)" reads as "a".
+    private static string Wrap(string condition) => HasTopLevelOr(condition) ? $"({condition})" : condition;
 
-    private static string Unwrap(string condition) =>
-        IsWrapped(condition) && NeedsParentheses(condition[1..^1]) ? condition[1..^1] : condition;
-
-    private static bool NeedsParentheses(string condition) => IsWrapped(condition) || HasTopLevelOr(condition);
+    private static string Unwrap(string condition) => IsWrapped(condition) ? condition[1..^1] : condition;
 
     private static bool IsWrapped(string text) =>
         text.Length >= 2 &&

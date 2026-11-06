@@ -24,12 +24,12 @@
             </MudAlert>
         }
         <CascadingValue Value="_pendingRows">
-            <MudTabs Elevation="0" Border="true" @bind-ActivePanelIndex="_tabIndex" TabPanelsClass="pt-3">
+            <MudTabs Elevation="0" Border="true" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnTabChanged" TabPanelsClass="pt-3">
                 <MudTabPanel Text="General">
                     <GeneralTab Draft="draft" Changed="OnChanged" />
                 </MudTabPanel>
                 <MudTabPanel Text="Rules">
-                    <RulesTab Automation="Automation" Draft="draft" Errors="_errors" @bind-SelectedRuleKey="_selectedRuleKey" Changed="OnChanged" />
+                    <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" />
                 </MudTabPanel>
             </MudTabs>
         </CascadingValue>
@@ -43,6 +43,7 @@
     private int _tabIndex;
     private string? _selectedRuleKey;
     private bool _isDirty;
+    private bool _needsRevalidation;
     private bool _wasValid = true;
     private bool _isDisposed;
 
@@ -98,6 +99,37 @@
             StateHasChanged();
         }
     });
+
+    private void OnTabChanged(int index)
+    {
+        _tabIndex = index;
+        _needsRevalidation = true;
+    }
+
+    private void OnRuleSelected(string? key)
+    {
+        _selectedRuleKey = key;
+        _needsRevalidation = true;
+    }
+
+    // An input that shows an error clears it when it is disposed, which happens in the render after the selection, so the
+    // errors are read again after that render. This is no edit, so the dialog does not become dirty.
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!_needsRevalidation || _draft is null)
+        {
+            return;
+        }
+
+        _needsRevalidation = false;
+        var errors = _draft.Validate();
+        ReportValidity();
+        if (!errors.SequenceEqual(_errors))
+        {
+            _errors = errors;
+            StateHasChanged();
+        }
+    }
 
     /// <summary>Every tab raises this after each edit of the draft, so that the errors and the validity follow it.</summary>
     private void OnChanged()

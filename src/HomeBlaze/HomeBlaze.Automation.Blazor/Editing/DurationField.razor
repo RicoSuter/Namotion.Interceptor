@@ -1,10 +1,11 @@
 @implements IDisposable
 
-<MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="SetTextAsync" Immediate="true" HelperText="@HelperText"
+<MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="SetTextAsync" Immediate="true" OnBlur="OnBlurAsync" HelperText="@HelperText"
               Error="@(_error is not null)" ErrorText="@_error" Style="@Style" />
 
 @code {
     private const string FormatError = "Use a duration such as 20s, 10m or 1h30m";
+    private const string PositiveError = "Use a duration above 0";
 
     private readonly string _inputId = Guid.NewGuid().ToString("N");
     private string? _text;
@@ -27,6 +28,9 @@
 
     [Parameter] public string? Style { get; set; }
 
+    /// <summary>Whether zero is no duration, as for a cooldown, where it means none.</summary>
+    [Parameter] public bool MustBePositive { get; set; }
+
     // The text stays as typed while it does not parse, and is replaced only when the value changes elsewhere.
     protected override void OnParametersSet()
     {
@@ -48,13 +52,24 @@
             return AcceptAsync(null);
         }
 
-        if (DurationInput.TryParse(text, out var duration))
+        if (!DurationInput.TryParse(text, out var duration))
         {
-            return AcceptAsync(duration);
+            // A number or a literal that still lacks its unit is being typed; the error shows when the field is left.
+            return IsInProgress(text) ? Task.CompletedTask : RejectAsync(FormatError);
         }
 
-        _error = FormatError;
-        Draft.SetInputError(_inputId, new AutomationValidationError(RuleKey, $"{Label}: {FormatError}"));
+        return MustBePositive && duration <= TimeSpan.Zero ? RejectAsync(PositiveError) : AcceptAsync(duration);
+    }
+
+    private Task OnBlurAsync() =>
+        string.IsNullOrWhiteSpace(_text) || DurationInput.TryParse(_text, out _) || _error is not null ? Task.CompletedTask : RejectAsync(FormatError);
+
+    private static bool IsInProgress(string text) => DurationInput.IsMissingUnit(text);
+
+    private Task RejectAsync(string error)
+    {
+        _error = error;
+        Draft.SetInputError(_inputId, new AutomationValidationError(RuleKey, $"{Label}: {error}"));
 
         // Passes the unchanged value on, so that the editor validates the draft again, now with the error of this field.
         return ValueChanged.InvokeAsync(Value);

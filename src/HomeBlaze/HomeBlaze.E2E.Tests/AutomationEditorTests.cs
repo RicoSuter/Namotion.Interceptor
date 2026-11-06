@@ -85,7 +85,7 @@ public class AutomationEditorTests
             var (page, dialog) = await OpenEditorAsync(name);
             await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
             await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Finished" }).ClickAsync();
-            await Assertions.Expect(dialog.GetByLabel("For at least")).ToHaveValueAsync("10m", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Finished", new() { Timeout = Timeout });
 
             // Act
             await dialog.GetByLabel("Rule name").FillAsync("Done");
@@ -121,7 +121,7 @@ public class AutomationEditorTests
             var (_, dialog) = await OpenEditorAsync(name);
             await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
             await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Finished" }).ClickAsync();
-            await Assertions.Expect(dialog.GetByLabel("For at least")).ToHaveValueAsync("10m", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Finished", new() { Timeout = Timeout });
             var save = dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
 
             // Act
@@ -248,6 +248,117 @@ public class AutomationEditorTests
             await Assertions.Expect(dialog.GetByTestId("automation-property-trigger")).ToHaveCountAsync(1);
             await Assertions.Expect(dialog.GetByTestId("automation-rule-error").First).ToBeVisibleAsync();
             await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeDisabledAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheRulesTabIsOpenedAndRulesAreSelected_ThenTheDialogStaysClean()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+
+            // Act
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Finished" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Finished", new() { Timeout = Timeout });
+            await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Started" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToHaveAttributeAsync("data-dirty", "false");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheMoveButtonOfARuleIsClicked_ThenTheSelectedRuleStays()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+
+            // Act
+            await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Finished" })
+                .GetByRole(AriaRole.Button, new() { Name = "Move rule up" }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-rule-item").First).ToContainTextAsync("Finished", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheCooldownIsBeingTypedOrIsZero_ThenAnErrorShowsOnlyForWhatCannotBecomeValid()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            var cooldown = dialog.GetByLabel("At most once every");
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Started", new() { Timeout = Timeout });
+
+            // Act
+            await cooldown.PressSequentiallyAsync("30");
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
+            await cooldown.FillAsync("0s");
+            await Assertions.Expect(dialog.GetByTestId("automation-guard")).ToContainTextAsync("Use a duration above 0", new() { Timeout = Timeout });
+            await Assertions.Expect(cooldown).ToHaveValueAsync("0s");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAParenthesisIsTypedIntoTheGuardOfARuleWithACooldown_ThenTheCooldownIsKept()
+    {
+        // Arrange
+        const string condition = "(/Demo/Motor/Temperature > 1 or /Demo/Motor/Temperature < 0)";
+        const string cooldown = "./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m";
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].Guard = cooldown;
+        });
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByLabel("At most once every")).ToHaveValueAsync("30m", new() { Timeout = Timeout });
+
+            // Act
+            await dialog.GetByTestId("automation-guard-condition-advanced").ClickAsync();
+            await dialog.GetByTestId("automation-guard-condition-text").PressSequentiallyAsync(condition);
+            await Assertions.Expect(dialog.GetByTestId("automation-guard-condition-text")).ToHaveValueAsync(condition);
+            await SaveAsync(page, dialog);
+
+            // Assert
+            using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(filePath));
+            var guard = saved.RootElement.GetProperty("rules").GetProperty("started").GetProperty("guard").GetString();
+            Assert.Equal($"{condition} and ({cooldown})", guard);
         }
         finally
         {

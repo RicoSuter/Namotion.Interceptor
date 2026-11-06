@@ -17,10 +17,12 @@
                     {
                         <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Warning" Size="Size.Small" />
                     }
-                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@isFirst" aria-label="Move rule up"
-                                   OnClick="@(() => MoveAsync(rule, -1))" />
-                    <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@isLast" aria-label="Move rule down"
-                                   OnClick="@(() => MoveAsync(rule, 1))" />
+                    <span class="d-flex" @onclick:stopPropagation="true">
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@isFirst" aria-label="Move rule up"
+                                       OnClick="@(() => MoveAsync(rule, -1))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@isLast" aria-label="Move rule down"
+                                       OnClick="@(() => MoveAsync(rule, 1))" />
+                    </span>
                 </MudPaper>
             }
         </MudStack>
