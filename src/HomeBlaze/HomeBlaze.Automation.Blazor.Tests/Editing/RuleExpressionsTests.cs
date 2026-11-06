@@ -1,3 +1,6 @@
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
 
@@ -51,5 +54,23 @@ public class RuleExpressionsTests
 
         // Assert
         Assert.Equal("Sum 3", text);
+    }
+
+    [Fact]
+    public void WhenAnExpressionUsesARelativePath_ThenItResolvesFromTheSavedRule()
+    {
+        // Arrange
+        var automation = TestAutomations.Create();
+        ((IInterceptorSubject)automation).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry().WithParents());
+        automation.Rules = new Dictionary<string, AutomationRule> { ["rule"] = new() { Name = "Rule" } };
+        var expressions = new RuleExpressions(automation, "rule", allowsEvent: false);
+
+        // Act
+        var preview = expressions.Preview("./Name == Rule");
+
+        // Assert
+        Assert.NotNull(preview);
+        Assert.True(preview.Result);
+        Assert.Equal("Rule", expressions.RenderTemplate("{{ ./Name }}"));
     }
 }

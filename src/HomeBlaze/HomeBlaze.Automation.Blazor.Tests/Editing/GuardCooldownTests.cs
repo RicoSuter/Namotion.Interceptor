@@ -56,6 +56,8 @@ public class GuardCooldownTests
     [InlineData("/a/B and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 0s)")]
     [InlineData("(/a/B and (" + Cooldown30 + "))")]
     [InlineData("/a/B) and (" + Cooldown30 + ")")]
+    [InlineData("/a/B or /c/D and (" + Cooldown30 + ")")]
+    [InlineData("/a/B || /c/D && (" + Cooldown30 + ")")]
     public void WhenTheGuardHasAnotherForm_ThenItIsTheConditionWithoutACooldown(string guard)
     {
         // Act

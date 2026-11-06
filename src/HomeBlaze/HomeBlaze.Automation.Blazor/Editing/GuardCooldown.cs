@@ -36,16 +36,16 @@ internal static class GuardCooldown
         }
 
         var index = guard.LastIndexOf(Separator, StringComparison.Ordinal);
-        if (index > 0 &&
-            guard.EndsWith(')') &&
-            TryParseCooldown(guard[(index + Separator.Length)..^1], out var cooldown) &&
-            IsBalanced(guard[..index]))
+        if (index > 0 && guard.EndsWith(')') && TryParseCooldown(guard[(index + Separator.Length)..^1], out var cooldown) && IsCombinedCondition(guard[..index]))
         {
             return (Unwrap(guard[..index]), cooldown);
         }
 
         return (guard, null);
     }
+
+    // Combine joins the cooldown to a condition with "or" only inside parentheses; "a or b and (cooldown)" reads as "a or (b and cooldown)".
+    private static bool IsCombinedCondition(string condition) => IsBalanced(condition) && !HasTopLevelOr(condition);
 
     private static bool TryParseCooldown(string text, out TimeSpan cooldown)
     {

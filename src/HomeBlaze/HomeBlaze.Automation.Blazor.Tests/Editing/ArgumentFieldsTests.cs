@@ -37,4 +37,71 @@ public class ArgumentFieldsTests
         Assert.False(fields[6].IsRequired);
         Assert.True(fields[6].IsTemplate);
     }
+
+    private sealed record Unsupported
+    {
+        public string? Text { get; init; }
+
+        public List<int> Numbers { get; init; } = [];
+    }
+
+    private sealed record Options
+    {
+        public bool Enabled { get; init; }
+
+        public DayOfWeek Day { get; init; }
+    }
+
+    [Fact]
+    public void WhenARecordIsNullableOrHasUnsupportedMembers_ThenItIsOneWholeValueField()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null)
+        {
+            Parameters =
+            [
+                new MethodParameter { Name = "optional", Type = typeof(Notification), IsNullable = true },
+                new MethodParameter { Name = "unsupported", Type = typeof(Unsupported) }
+            ]
+        };
+
+        // Act
+        var fields = ArgumentFields.Create(method);
+
+        // Assert
+        Assert.Equal(["optional", "unsupported"], fields.Select(field => field.Key).ToArray());
+    }
+
+    [Fact]
+    public void WhenARecordHasBooleanAndEnumMembers_ThenTheyHaveChoices()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null)
+        {
+            Parameters = [new MethodParameter { Name = "options", Type = typeof(Options) }]
+        };
+
+        // Act
+        var fields = ArgumentFields.Create(method);
+
+        // Assert
+        Assert.Equal(["true", "false"], fields.Single(field => field.Key == "options.Enabled").Choices);
+        Assert.Contains("Monday", fields.Single(field => field.Key == "options.Day").Choices!);
+    }
+
+    [Fact]
+    public void WhenAParameterIsRuntimeProvided_ThenItHasNoField()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null)
+        {
+            Parameters = [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }]
+        };
+
+        // Act
+        var fields = ArgumentFields.Create(method);
+
+        // Assert
+        Assert.Empty(fields);
+    }
 }
