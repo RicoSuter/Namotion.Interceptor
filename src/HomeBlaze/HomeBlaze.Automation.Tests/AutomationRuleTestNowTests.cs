@@ -77,6 +77,22 @@ public class AutomationRuleTestNowTests
     }
 
     [Fact]
+    public async Task WhenTheAuthorizerThrows_ThenTheTestShowsTheFailureInsteadOfThrowing()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation => automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))),
+            authorizer: new ThrowingAuthorizer());
+
+        // Act
+        var result = host.Rule("retract").TestNow();
+
+        // Assert
+        Assert.Null(result.Error);
+        Assert.Equal(["/Blinds/Close: /Blinds/Close: the authorization failed: The policy store is offline"], result.Actions.ToArray());
+    }
+
+    [Fact]
     public async Task WhenTheRuleIsInvalid_ThenTheTestReturnsTheError()
     {
         // Arrange

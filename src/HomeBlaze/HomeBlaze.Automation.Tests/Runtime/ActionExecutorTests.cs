@@ -119,6 +119,27 @@ public class ActionExecutorTests
     }
 
     [Fact]
+    public async Task WhenTheAuthorizerThrows_ThenTheActionIsRefusedWithTheReason()
+    {
+        // Arrange
+        var executor = CreateExecutor(new ThrowingAuthorizer());
+        var write = new SetPropertyAction { PropertyPath = "/Blinds/Position", Value = "5" };
+
+        // Act
+        var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), CreateScope(), CancellationToken.None);
+        var written = executor.SetProperty(write, CreateScope());
+        var described = executor.Describe(write, CreateScope());
+
+        // Assert
+        Assert.False(call.IsSuccess);
+        Assert.Equal("/Blinds/Close: the authorization failed: The policy store is offline", call.Message);
+        Assert.Equal("/Blinds/Position: the authorization failed: The policy store is offline", written.Message);
+        Assert.Equal("/Blinds/Position: /Blinds/Position: the authorization failed: The policy store is offline", described);
+        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Equal(0, _blinds.Position);
+    }
+
+    [Fact]
     public async Task WhenAnOperationDoesNotEnd_ThenItTimesOutAfterOneMinute()
     {
         // Arrange

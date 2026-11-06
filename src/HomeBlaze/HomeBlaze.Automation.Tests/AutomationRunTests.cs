@@ -38,6 +38,28 @@ public class AutomationRunTests
         Assert.Equal("DryRun: Triggered, waiting to rearm", rule.Status);
     }
 
+    [Theory]
+    [InlineData(AutomationRuleMode.On, AutomationRunOutcome.CompletedWithErrors, "action 'Close' failed: /Blinds/Close: the authorization failed: The policy store is offline")]
+    [InlineData(AutomationRuleMode.DryRun, AutomationRunOutcome.DryRun, "Would run /Blinds/Close: /Blinds/Close: the authorization failed: The policy store is offline")]
+    public async Task WhenTheAuthorizerThrows_ThenTheRunIsRecordedWithTheFailure(AutomationRuleMode mode, AutomationRunOutcome outcome, string message)
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation => automation.Rules = Keyed(("retract", Create("Retract", mode, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")]))),
+            authorizer: new ThrowingAuthorizer());
+        var rule = host.Rule("retract");
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1L, rule.RunCount);
+        Assert.Equal(outcome, rule.LastRunOutcome);
+        Assert.Equal(message, rule.LastRunMessage);
+        Assert.Equal(0, host.Blinds.CloseCount);
+    }
+
     [Fact]
     public async Task WhenAnActionFails_ThenTheStatusShowsTheErrorUntilAFullySuccessfulRun()
     {
