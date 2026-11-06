@@ -51,10 +51,13 @@ public class AutomationEventTriggerTests
 
         // Act
         host.Button.Press("Release");
+        await host.FlushAsync();
+        var closesAfterThePressOfTheOldSource = host.Blinds.CloseCount;
         replacement.Press("Release");
         await host.FlushAsync();
 
         // Assert
+        Assert.Equal(0, closesAfterThePressOfTheOldSource);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
