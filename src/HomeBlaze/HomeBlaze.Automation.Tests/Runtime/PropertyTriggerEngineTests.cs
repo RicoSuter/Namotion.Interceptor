@@ -1,5 +1,6 @@
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor;
@@ -19,7 +20,7 @@ public class PropertyTriggerEngineTests
         var weather = new TestSensor();
         graph.Add("Weather", weather);
         weather.Gust = 3;
-        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance);
+        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance, () => "Storm");
         Assert.True(AutomationCompiler.TryCompileRule("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")), [], out var rule, out var error), error);
         var staleChange = new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Gust)), 9.0, 0, 0);
 
@@ -34,5 +35,41 @@ public class PropertyTriggerEngineTests
         Assert.Empty(applied);
         Assert.Empty(activationRequests);
         Assert.Equal(TriggerPhase.Armed, rule.PropertyTriggers[0].State.Phase);
+    }
+
+    [Fact]
+    public void WhenATriggerBecomesUnknownAndKnownAgain_ThenTheLogsNameTheAutomation()
+    {
+        // Arrange
+        var graph = new TestGraph();
+        var weather = new TestSensor();
+        graph.Add("Weather", weather);
+        var logger = new MessageLogger();
+        var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), logger, () => "Storm");
+        Assert.True(AutomationCompiler.TryCompileRule("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")), [], out var rule, out var error), error);
+        rule.IsActivated = true;
+
+        // Act
+        engine.Activate([rule], [rule]);
+        engine.OnPropertyChanged([rule], new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Gust)), 3.0, 0, 0));
+
+        // Assert
+        Assert.Equal(
+        [
+            "The trigger 1 (/Weather/Gust > 8) of rule Retract in automation Storm is unknown, missing /Weather/Gust.",
+            "The trigger 1 (/Weather/Gust > 8) of rule Retract in automation Storm is known again."
+        ], logger.Messages.ToArray());
+    }
+
+    private sealed class MessageLogger : ILogger
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 }

@@ -15,10 +15,10 @@ internal sealed class AutomationTriggers
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
 
-    public AutomationTriggers(AutomationServices services, AutomationInputQueue queue, ILogger logger)
+    public AutomationTriggers(AutomationServices services, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName)
     {
         _queue = queue;
-        _propertyTriggers = new PropertyTriggerEngine(services.PathResolver, services.TimeProvider, logger);
+        _propertyTriggers = new PropertyTriggerEngine(services.PathResolver, services.TimeProvider, logger, getAutomationName);
         _eventTriggers = new EventTriggerEngine(services.PathResolver, services.TimeProvider, queue);
     }
 

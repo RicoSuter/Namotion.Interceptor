@@ -11,7 +11,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// evaluates them against the observed values on changes, ticks and graph changes, and returns the run requests of the
 /// triggers that fire. Used by the worker only, except <see cref="IsWatched"/>, which writer threads call.
 /// </summary>
-internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger)
+internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger, Func<string> getAutomationName)
 {
     private readonly ObservedValues _values = new();
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
@@ -179,11 +179,14 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
 
         if (trigger.State.IsUnknown)
         {
-            logger.LogInformation("The {Trigger} of rule {Rule} is unknown, missing {Paths}.", trigger.Description, trigger.Rule.Name, string.Join(", ", trigger.State.MissingPaths));
+            logger.LogInformation(
+                "The {Trigger} of rule {Rule} in automation {Automation} is unknown, missing {Paths}.",
+                trigger.Description, trigger.Rule.Name, getAutomationName(), string.Join(", ", trigger.State.MissingPaths));
         }
         else
         {
-            logger.LogInformation("The {Trigger} of rule {Rule} is known again.", trigger.Description, trigger.Rule.Name);
+            logger.LogInformation(
+                "The {Trigger} of rule {Rule} in automation {Automation} is known again.", trigger.Description, trigger.Rule.Name, getAutomationName());
         }
     }
 }

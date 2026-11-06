@@ -29,7 +29,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = new AutomationTriggers(services, queue, logger);
+        _triggers = new AutomationTriggers(services, queue, logger, () => Name);
         _dispatcher = new RunDispatcher(this, services, keeper, logger);
         _states = new StateTransitions(automation, keeper, services.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
