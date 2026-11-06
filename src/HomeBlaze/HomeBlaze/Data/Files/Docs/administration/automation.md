@@ -18,7 +18,7 @@ This page is the operator guide. The syntax of expressions is the one of [page e
 3. Keep the rule in **Dry run** and save. Each time the rule would run, the page lists the run with its actions and their values, and nothing is executed.
 4. Switch the rule to **On** once its runs look right.
 
-The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor: it records a run when the temperature stays above 40 for 30 seconds, rearms once it is below 38, and returns to Normal when it stays below 37 for a minute.
+The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor: both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds (at most once every 10 minutes, rearming once it is below 38), and would return to Normal when it stays below 37 for a minute.
 
 ---
 
@@ -88,7 +88,7 @@ classDiagram
 - **Rules** process each input in the order of the Rules tab, and several rules can run for one input. Each rule has a key such as `k3f9` that never changes, so that its path, such as `/Automations/Storm/Rules[k3f9]/LastTriggeredAt`, stays the same when the rule is renamed or moved in the list.
 - **States** are optional names, such as `Idle` and `Running`. A rule can be **Active in state**: it observes its triggers only while the automation is in that state, and it starts again with fresh holds each time the automation enters it. A rule without a state is active in every state, also in an automation without states.
 - **The initial state** is the state of a new automation and the state that **Reset state** on the page enters. Reset state also clears the last trigger times of the rules.
-- **A state changes** only through a **Change state** action of a rule of the same automation. Once a rule changed the state, it finishes its own actions and the rules after it skip that input; the rules of the new state see the inputs that follow. What should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, see [Events](#events).
+- **A state changes** only through a **Change state** action of a rule of the same automation. Once a rule changed the state, it finishes its own actions and the rules after it skip that input; the rules after it that would have run for that input are recorded as **Canceled** runs, and the rules of the new state see the inputs that follow. The outcome Canceled is also recorded when a feedback chain overflows or the automation stops. What should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, see [Events](#events).
 
 ---
 
@@ -118,7 +118,7 @@ An event trigger fires on every event of one type that a subject publishes, also
 | Field | Meaning |
 |---|---|
 | **From** | The subject that publishes the events, or **This automation**, whose events are its own state changes. |
-| **Event** | The event type, such as `ButtonEvent` of a Hue button or `SwitchEvent` of a Shelly switch. A subject publishes the event types `T` of the `IObservable<T>` interfaces it implements. |
+| **Event** | The event type, such as `ButtonEvent` of a Hue button or `SwitchEvent` of a Shelly switch. The dropdown shows the name with its words split, such as "Button", and the configuration stores the type name `ButtonEvent`. A subject publishes the event types `T` of the `IObservable<T>` interfaces it implements. |
 | **Only events where** | A filter over the event, such as `event/ButtonState == Release`. The rows of the filter offer the fields of the event. |
 
 `event` is the event and `subject` its publisher, as in `event/ButtonState` or `subject/Name`. The arguments of the actions of a rule with an event trigger can read both; they hold the event that started the run. A state change of an automation has the fields `event/PreviousState`, `event/NewState` and `event/Timestamp`, and restoring the state after a restart raises no event.
@@ -144,8 +144,10 @@ A value is missing when its path leads nowhere or the value is null, and device 
 | The condition is | The trigger fires | The trigger rearms | The rule status |
 |---|---|---|---|
 | true | Yes, once the hold elapsed | No | Holding, then Triggered |
-| false | No | Yes | Armed |
+| false | No | Yes, without a rearm condition | Armed |
 | unknown | No | No | Unknown since a time, with the missing paths |
+
+With a **Run again only after** condition, a false expression does not rearm: only a true rearm condition does, even while the expression is unknown.
 
 An Only if that is unknown rejects the run, recorded as **Rejected by Only if** with the missing paths. An unknown rule is no error, so the automation keeps its status. To detect an outage, write it out: `/Weather/WS90/Temperature == null` is true while the value is missing, and `now - /Weather/WS90/LastUpdated > 15m` covers a subject that keeps its last values and implements `ILastUpdatedProvider`.
 
@@ -156,8 +158,9 @@ An Only if that is unknown rejects the run, recorded as **Rejected by Only if** 
 Conditions, filters and the arguments of actions are expressions with the syntax of [page expressions](pages.md#live-expressions):
 
 - **Paths** are absolute, such as `/Weather/WS90/WindGust`, or start at the rule: `./LastTriggeredAt` is a property of the rule, and `../CurrentState` or `../StateEnteredAt` one of its automation.
-- **Variables**: `now` is the current instant, `time` the local time of day of the host, `event` the captured event and `subject` its publisher. `event` and `subject` are available in event filters and in the arguments of a rule with an event trigger only.
+- **Variables**: `now` is the current instant, `time` the local time of day of the host, `event` the captured event and `subject` its publisher. `event` and `subject` are available in event filters and in the arguments of a rule with an event trigger only; in a rule with both kinds of trigger, they read as missing on a run that a property trigger started.
 - **Arithmetic**: numbers add, subtract, multiply and divide; an instant minus an instant is a duration; an instant plus or minus a duration is an instant. An operator stands between spaces, as in `now - ../StateEnteredAt > 10m`. A division by zero, or any missing operand, is missing.
+- **Pipes**: conditions, filters and value expressions take no pipes. Only the `{{ }}` of a text template takes the pipes `display` and `raw`, without arguments, as in `{{ ../StateEnteredAt | raw }}`.
 - **Durations** are written with their units from the largest to the smallest: `30s`, `15m`, `2h`, `8h30m`, `1.5d`. `time >= 8h30m and time < 21h30m` is true during the day.
 - **Secrets**: secret configuration values and properties marked `[ExcludeFromExpressions]` are missing in automations, so that a notification cannot send them.
 - **Bare words are text**: a word without `/` right of a comparison is a text, so `/Living/Heating/Mode == Away` compares with the text `Away`, which suits an enum. `/Door/OpenedAt > Now` compares with the text "Now", not with the time; the variable is `now` in lowercase. The editor warns about such a word when it differs from a variable only in case, or when it is compared with a number, a date, a duration or a boolean.
@@ -215,7 +218,7 @@ The page of an automation shows its status and last error, a **Reset state**, wh
 
 Recent runs come from history: every run increments the `RunCount` of its rule, also two identical runs in a row, and the page lists the runs of the last seven days, at most 20, with the outcome and the message each run left in `LastRunOutcome` and `LastRunMessage`. A run counts when its `RunCount` sample follows a known one. Without a [history store](../architecture/design/history.md), the page shows the last run of each rule.
 
-The widget of an automation, placed on a page, shows its title with a link to its page, its status, its state and since when, and the first rule that holds a condition or misses values, or the last error.
+The widget of an automation, placed on a page, shows its title with a link to its page, its status, its state and since when, and the error of the automation or, when there is none, the first rule that holds a condition or misses values.
 
 ---
 
@@ -254,8 +257,9 @@ The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that 
 | `On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust` | A condition needs values that are missing. |
 | `On: Inactive outside state Running` | The automation is in another state. |
 | `On: Inactive: the automation is disabled` | The automation is disabled. |
-| `Inactive: the automation is stopped` | The automation is stopped. |
-| `Not applied: the configuration is invalid` | The saved configuration is invalid, so the previous one keeps running. |
+| `On: Inactive: the automation is stopped` | The automation is stopped. |
+| `On: Not applied yet` | The configuration was not applied yet, which is the case before the first start. |
+| `On: Not applied: the configuration is invalid` | The saved configuration is invalid, so the previous one keeps running. |
 
 ---
 

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Services;
@@ -50,6 +51,8 @@ public partial class SampleAutomationTests
         foreach (var json in examples)
         {
             using var automation = Deserialize(json, provider);
+            var written = new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider).Serialize(automation);
+            errors.AddRange(FindUnreadMembers(JsonDocument.Parse(json).RootElement, JsonDocument.Parse(written).RootElement, automation.Name ?? "?"));
             errors.AddRange(AutomationValidator.Validate(automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
                 .Select(error => $"{automation.Name}: {error.Message}"));
         }
@@ -57,6 +60,39 @@ public partial class SampleAutomationTests
         // Assert
         Assert.Equal(4, examples.Length);
         Assert.Empty(errors);
+    }
+
+    // A member the model does not know is dropped on deserialization, so it is missing when the automation is written again.
+    private static IEnumerable<string> FindUnreadMembers(JsonElement example, JsonElement written, string path)
+    {
+        if (example.ValueKind == JsonValueKind.Object && written.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var member in example.EnumerateObject())
+            {
+                if (!written.TryGetProperty(member.Name, out var counterpart))
+                {
+                    yield return $"{path}: '{member.Name}' is not read";
+                    continue;
+                }
+
+                foreach (var error in FindUnreadMembers(member.Value, counterpart, $"{path}/{member.Name}"))
+                {
+                    yield return error;
+                }
+            }
+        }
+        else if (example.ValueKind == JsonValueKind.Array && written.ValueKind == JsonValueKind.Array)
+        {
+            var pairs = example.EnumerateArray().Zip(written.EnumerateArray());
+            var index = 0;
+            foreach (var (item, counterpart) in pairs)
+            {
+                foreach (var error in FindUnreadMembers(item, counterpart, $"{path}[{index++}]"))
+                {
+                    yield return error;
+                }
+            }
+        }
     }
 
     private static ServiceProvider CreateServices()
