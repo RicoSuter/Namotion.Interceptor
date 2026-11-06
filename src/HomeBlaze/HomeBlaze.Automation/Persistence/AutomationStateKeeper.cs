@@ -25,7 +25,7 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
     {
         try
         {
-            var checkpoint = Store.Read();
+            var checkpoint = Store.Read() is { } read ? WithoutNullRules(read) : null;
             if (checkpoint is not null)
             {
                 Persisted = checkpoint;
@@ -90,6 +90,19 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
         rule.LastRunOutcome = run?.LastRunOutcome;
         rule.LastRunMessage = run?.LastRunMessage;
         rule.RunCount = run?.RunCount ?? 0;
+    }
+
+    // A file may hold an explicit null for the rules or for a rule, which the keeper never expects.
+    private static AutomationCheckpoint WithoutNullRules(AutomationCheckpoint checkpoint)
+    {
+        if (checkpoint.Rules is null)
+        {
+            return checkpoint with { Rules = new Dictionary<string, RuleCheckpoint>() };
+        }
+
+        return checkpoint.Rules.Values.Any(rule => rule is null)
+            ? checkpoint with { Rules = checkpoint.Rules.Where(pair => pair.Value is not null).ToDictionary(pair => pair.Key, pair => pair.Value) }
+            : checkpoint;
     }
 
     public static AutomationCheckpoint WithState(AutomationCheckpoint checkpoint, string? state, DateTimeOffset enteredAt) =>

@@ -44,6 +44,29 @@ public sealed class AutomationStateKeeperTests : IDisposable
         Assert.NotNull(error);
     }
 
+    [Theory]
+    [InlineData("""{ "currentState": "Idle", "rules": null }""")]
+    [InlineData("""{ "currentState": "Idle", "rules": { "retract": null } }""")]
+    public void WhenTheCheckpointHoldsNullRules_ThenItLoadsWithoutRuns(string json)
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "Storm.json");
+        File.WriteAllText(path, json);
+        var keeper = new AutomationStateKeeper(new AutomationCheckpointStore(path));
+        var rule = new AutomationRule();
+
+        // Act
+        var checkpoint = keeper.Load(out var error);
+        keeper.RestoreAllRules(new Dictionary<string, AutomationRule> { ["retract"] = rule });
+
+        // Assert
+        Assert.Null(error);
+        Assert.NotNull(checkpoint);
+        Assert.Equal("Idle", checkpoint.CurrentState);
+        Assert.Empty(keeper.Persisted.Rules);
+        Assert.Equal(0L, rule.RunCount);
+    }
+
     [Fact]
     public void WhenRulesAreRestored_ThenOnlyRulesWithoutARunCountGetThePersistedRuns()
     {
