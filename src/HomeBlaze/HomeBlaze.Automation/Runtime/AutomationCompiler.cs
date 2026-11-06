@@ -251,9 +251,14 @@ internal static class AutomationCompiler
             return "the operation path is missing";
         }
 
+        if (action.Arguments is null)
+        {
+            return "the arguments are missing";
+        }
+
         foreach (var (name, value) in action.Arguments)
         {
-            if (!AutomationExpressionCheck.TryParseTemplate(value, allowsEvent, out _, out var error))
+            if (CheckValue(value, allowsEvent) is { } error)
             {
                 return $"argument '{name}': {error}";
             }
@@ -269,6 +274,21 @@ internal static class AutomationCompiler
             return "the property path is missing";
         }
 
-        return AutomationExpressionCheck.TryParseTemplate(action.Value, allowsEvent, out _, out var error) ? null : $"value: {error}";
+        if (action.Value is null)
+        {
+            return "the value is missing";
+        }
+
+        return CheckValue(action.Value, allowsEvent) is { } error ? $"value: {error}" : null;
+    }
+
+    private static string? CheckValue(string? value, bool allowsEvent)
+    {
+        if (value is null)
+        {
+            return "the value is missing";
+        }
+
+        return AutomationExpressionCheck.TryParseTemplate(value, allowsEvent, out _, out var error) ? null : error;
     }
 }

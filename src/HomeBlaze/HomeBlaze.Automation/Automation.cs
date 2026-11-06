@@ -208,7 +208,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     // after the runs recorded on the old instances meanwhile.
     partial void OnRulesChanging(ref Dictionary<string, AutomationRule> newValue, ref bool cancel)
     {
-        newValue ??= new Dictionary<string, AutomationRule>();
+        newValue = WithoutNullRules(newValue);
         if (Rules is not { } current)
         {
             return;
@@ -221,5 +221,21 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
                 rule.CopyRuntimeStateFrom(previous);
             }
         }
+    }
+
+    // An explicit null rule becomes an empty one, so that its key is reported as an invalid rule.
+    private static Dictionary<string, AutomationRule> WithoutNullRules(Dictionary<string, AutomationRule>? rules)
+    {
+        if (rules is null)
+        {
+            return new Dictionary<string, AutomationRule>();
+        }
+
+        if (!rules.ContainsValue(null!))
+        {
+            return rules;
+        }
+
+        return rules.ToDictionary(pair => pair.Key, pair => pair.Value ?? new AutomationRule(), rules.Comparer);
     }
 }

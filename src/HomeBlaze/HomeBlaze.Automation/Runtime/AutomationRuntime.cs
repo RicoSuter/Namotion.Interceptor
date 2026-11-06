@@ -69,11 +69,11 @@ internal sealed class AutomationRuntime
     {
         var context = ((IInterceptorSubject)_automation).Context;
         using var changes = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(OnPropertyChanged);
-        _engine.Start();
-        _engine.RefreshRuleStatuses();
-        using var ticker = StartTicker();
         try
         {
+            _engine.Start();
+            _engine.RefreshRuleStatuses();
+            using var ticker = StartTicker();
             while (!cancellationToken.IsCancellationRequested)
             {
                 var input = await _queue.ReadAsync(cancellationToken);

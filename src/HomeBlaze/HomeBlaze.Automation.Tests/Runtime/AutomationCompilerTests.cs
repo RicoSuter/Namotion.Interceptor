@@ -75,7 +75,24 @@ public class AutomationCompilerTests
                 Arguments = new Dictionary<string, string> { ["notification.Message"] = "{{ /Weather/Gust" }
             }]),
             "Rule 'Storm': action 'notify': argument 'notification.Message': '{{' is not closed at position 0"
-        }
+        },
+        {
+            [], null,
+            Rule(actions: [new InvokeOperationAction { Id = "close", OperationPath = "/Blinds/Close", Arguments = null! }]),
+            "Rule 'Storm': action 'close': the arguments are missing"
+        },
+        {
+            [], null,
+            Rule(actions: [new InvokeOperationAction
+            {
+                Id = "speed",
+                OperationPath = "/Motor/SetTargetSpeed",
+                Arguments = new Dictionary<string, string> { ["speed"] = null! }
+            }]),
+            "Rule 'Storm': action 'speed': argument 'speed': the value is missing"
+        },
+        { [], null, Rule(triggers: [null!], actions: [null!]), "Rule 'Storm': trigger 1: the type is unknown; action 1: the type is unknown" },
+        { [null!], null, Rule(), "A state needs a name; Choose the initial state" }
     };
 
     [Theory]
@@ -92,6 +109,21 @@ public class AutomationCompilerTests
         Assert.False(isCompiled);
         Assert.Null(compiled);
         Assert.Equal(expected, error);
+    }
+
+    [Fact]
+    public void WhenTheRuleOrderHoldsNull_ThenTheRulesAreCompiledInKeyOrder()
+    {
+        // Arrange
+        var rules = new Dictionary<string, AutomationRule> { ["b"] = Rule("B"), ["a"] = Rule("A") };
+
+        // Act
+        var isCompiled = AutomationCompiler.TryCompile([], null, rules, [null!, "b"], out var compiled, out var error);
+
+        // Assert
+        Assert.True(isCompiled, error);
+        Assert.NotNull(compiled);
+        Assert.Equal(["b", "a"], compiled.Rules.Select(rule => rule.Key).ToArray());
     }
 
     [Fact]
@@ -184,10 +216,11 @@ public class AutomationCompilerTests
     [Theory]
     [InlineData("", "1", "the property path is missing")]
     [InlineData("/Blinds/Level", "{{ /Weather/Gust", "value: '{{' is not closed at position 0")]
-    public void WhenASetPropertyActionIsInvalid_ThenItIsRejected(string path, string value, string expected)
+    [InlineData("/Blinds/Level", null, "the value is missing")]
+    public void WhenASetPropertyActionIsInvalid_ThenItIsRejected(string path, string? value, string expected)
     {
         // Arrange
-        var rule = Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = path, Value = value }]);
+        var rule = Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = path, Value = value! }]);
 
         // Act
         var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);

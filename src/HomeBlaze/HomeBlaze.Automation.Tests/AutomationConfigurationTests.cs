@@ -136,4 +136,58 @@ public class AutomationConfigurationTests
         // Assert
         Assert.Equal("Not applied: the configuration is invalid", host.Rule("broken").Status);
     }
+
+    [Fact]
+    public async Task WhenAnActionHasNoArgumentsAtTheStart_ThenTheConfigurationIsShownAsInvalid()
+    {
+        // Arrange
+        var rule = On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close") with { Arguments = null! });
+
+        // Act
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", rule)));
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, host.Automation.Status);
+        Assert.Equal(
+            "The configuration is invalid and was not applied; the previous one keeps running: Rule 'Retract': action 'Close': the arguments are missing",
+            host.Automation.StatusMessage);
+        Assert.Equal("Not applied: the configuration is invalid", host.Rule("retract").Status);
+    }
+
+    [Fact]
+    public async Task WhenASaveHasAnActionWithoutArguments_ThenThePreviousConfigurationKeepsRunning()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+        var broken = On("Retract", When("/Weather/Gust > 5"), Invoke("/Blinds/Close") with { Arguments = null! });
+
+        // Act
+        await SaveAsync(host, Keyed(("retract", broken)));
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(
+            "The configuration is invalid and was not applied; the previous one keeps running: Rule 'Retract': action 'Close': the arguments are missing",
+            host.Automation.StatusMessage);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(1L, host.Rule("retract").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenARuleIsNull_ThenTheConfigurationIsShownAsInvalid()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+
+        // Act
+        await SaveAsync(host, new Dictionary<string, AutomationRule> { ["retract"] = Retract(), ["broken"] = null! });
+
+        // Assert
+        Assert.Equal(
+            "The configuration is invalid and was not applied; the previous one keeps running: Rule 'broken': it has no trigger; it has no action",
+            host.Automation.StatusMessage);
+        Assert.Equal("Not applied: the configuration is invalid", host.Rule("broken").Status);
+    }
 }
