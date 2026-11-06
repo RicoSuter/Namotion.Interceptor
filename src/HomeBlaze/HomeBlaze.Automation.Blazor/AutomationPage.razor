@@ -1,0 +1,272 @@
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(Automation))]
+@implements ISubjectComponent
+@implements IDisposable
+@using global::HomeBlaze.Components.Dialogs
+@using global::HomeBlaze.History.Abstractions
+@using global::HomeBlaze.Services.Components
+@using Namotion.Interceptor.Registry.Abstractions
+@inject ITimeZoneDisplay TimeZone
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject SubjectComponentRegistry ComponentRegistry
+@inject SubjectPathResolver PathResolver
+@inject TimeProvider TimeProvider
+
+@if (Subject is Automation automation)
+{
+    var path = PathResolver.GetPath(automation, PathStyle.Canonical);
+    <div class="d-flex flex-column gap-4 pt-2 pt-sm-4 pb-4" data-testid="automation-page">
+        @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
+        <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12">
+            <MudIcon Icon="@Icons.Material.Filled.AutoMode" />
+            <MudStack Spacing="0" Style="min-width: 0;">
+                <MudText Typo="Typo.h5" Style="overflow-wrap: anywhere;">@automation.Title</MudText>
+                @if (path is not null)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@path</MudText>
+                }
+            </MudStack>
+            <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetStatusColor(automation.Status)" Class="ma-0" data-testid="automation-status">@automation.Status</MudChip>
+            @if (automation.StatusMessage is { Length: > 0 } statusMessage)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@statusMessage</MudText>
+            }
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="@(() => ResetAsync(automation))"
+                       data-testid="automation-reset">Reset state</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="@(() => EditAsync(automation))"
+                       data-testid="automation-edit">Edit</MudButton>
+        </MudStack>
+
+        @if (automation.States.Length > 0)
+        {
+            <section>
+                <MudText Typo="Typo.h6">State</MudText>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Read only. Edit the states in the States tab of the editor.</MudText>
+                <div class="mt-2" style="overflow-x: auto;">
+                    <StateDiagram Layout="@CreateLayout(automation)" CurrentDetail="@GetCurrentDetail(automation)" />
+                </div>
+            </section>
+        }
+
+        <section>
+            <MudText Typo="Typo.h6">Rules</MudText>
+            @if (automation.Rules.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">No rules yet. Add one with Edit.</MudText>
+            }
+            else
+            {
+                <div style="overflow-x: auto;">
+                    <MudSimpleTable Dense="true" Hover="true" Class="mt-2">
+                        <thead>
+                            <tr>
+                                <th>Rule</th>
+                                <th>Mode</th>
+                                <th>Status</th>
+                                <th>Last triggered</th>
+                                <th>Runs</th>
+                                <th aria-label="Actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var key in automation.GetRuleKeysInOrder())
+                            {
+                                var rule = automation.Rules[key];
+                                <tr data-testid="automation-rule-row">
+                                    <td>
+                                        <MudText Typo="Typo.body2" Style="font-weight: 500;">@(rule.Name ?? key)</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@DescribeScope(automation, rule)</MudText>
+                                    </td>
+                                    <td>@AutomationSummary.FormatMode(rule.Mode)</td>
+                                    <td style="overflow-wrap: anywhere;">@AutomationSummary.GetStatusText(rule.Status)</td>
+                                    <td>@FormatInstant(rule.LastTriggeredAt, "Never")</td>
+                                    <td>@(rule.RunCount ?? 0)</td>
+                                    <td>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
+                                                   OnClick="@(() => TestAsync(key, rule))">Test now</MudButton>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </div>
+            }
+        </section>
+
+        <section>
+            <MudText Typo="Typo.h6">Recent runs</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                @(_hasHistory ? "From history: the runs of the last seven days." : "Without a history store: the last run of each rule.")
+            </MudText>
+            @if (_runsError is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@_runsError</MudAlert>
+            }
+            else if (_runs.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2" data-testid="automation-no-runs">No runs yet.</MudText>
+            }
+            else
+            {
+                <MudStack Spacing="1" Class="mt-2">
+                    @foreach (var run in _runs)
+                    {
+                        <div class="d-flex flex-wrap align-center gap-2" data-testid="automation-run">
+                            <MudText Typo="Typo.caption" Style="min-width: 160px;">@FormatInstant(run.At, "Last run")</MudText>
+                            <MudText Typo="Typo.body2" Style="font-weight: 500;">@run.RuleName</MudText>
+                            @if (run.Outcome is { } outcome)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetOutcomeColor(outcome)" Class="ma-0">@AutomationSummary.FormatOutcome(outcome)</MudChip>
+                            }
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary" Style="overflow-wrap: anywhere;">@run.Message</MudText>
+                        </div>
+                    }
+                </MudStack>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private const int MaxRuns = 20;
+    private static readonly TimeSpan RunWindow = TimeSpan.FromDays(7);
+
+    private IReadOnlyList<RunEntry> _runs = [];
+    private bool _hasHistory;
+    private string? _runsError;
+    private string? _loadedRunsKey;
+    private bool _isDisposed;
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    // The run counts are rendered, so a run or a saved configuration renders the page again, and the runs are read once
+    // per change of the counts.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Subject is not Automation automation)
+        {
+            return;
+        }
+
+        var runsKey = GetRunsKey(automation);
+        if (runsKey == _loadedRunsKey)
+        {
+            return;
+        }
+
+        _loadedRunsKey = runsKey;
+        await LoadRunsAsync(automation);
+        if (!_isDisposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadRunsAsync(Automation automation)
+    {
+        IHistoryStore[] stores = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
+        _hasHistory = stores.Length > 0;
+        if (!_hasHistory)
+        {
+            _runs = GetLastRuns(automation);
+            return;
+        }
+
+        try
+        {
+            var now = TimeProvider.GetUtcNow();
+            _runs = await RunHistory.LoadAsync(stores, GetRunSources(automation), now - RunWindow, now, MaxRuns, CancellationToken.None);
+            _runsError = null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _runsError = $"The runs could not be read from history: {exception.Message}";
+        }
+    }
+
+    private IReadOnlyList<RunSource> GetRunSources(Automation automation) =>
+    [
+        .. automation.GetRuleKeysInOrder()
+            .Select(key => (Key: key, Rule: automation.Rules[key]))
+            .Select(pair => (pair.Key, pair.Rule, Path: PathResolver.GetPath(pair.Rule, PathStyle.Canonical)))
+            .Where(rule => rule.Path is not null)
+            .Select(rule => new RunSource(rule.Rule.Name ?? rule.Key, rule.Path!))
+    ];
+
+    private async Task TestAsync(string key, AutomationRule rule)
+    {
+        var result = rule.TestNow();
+        var path = PathResolver.GetPath(rule, PathStyle.Canonical);
+        var parameters = new DialogParameters<RuleTestDialog>
+        {
+            { dialog => dialog.Result, result },
+            { dialog => dialog.Rule, rule },
+            { dialog => dialog.EvaluatedAt, TimeZone.Format(TimeProvider.GetUtcNow()) },
+            { dialog => dialog.QueryPath, path is null ? null : $"{path}/{nameof(AutomationRule.TestNow)}" }
+        };
+
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<RuleTestDialog>($"Test now: {rule.Name ?? key}", parameters, options);
+    }
+
+    private Task EditAsync(Automation automation) =>
+        SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, automation, $"Edit {automation.Title}");
+
+    private async Task ResetAsync(Automation automation)
+    {
+        var isConfirmed = await DialogService.ShowMessageBoxAsync(
+            "Reset state",
+            "Enter the initial state and clear the last trigger times of the rules?",
+            yesText: "Reset",
+            cancelText: "Cancel");
+        if (isConfirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            automation.ResetState();
+        }
+        catch (InvalidOperationException exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private string FormatInstant(DateTimeOffset? instant, string fallback) =>
+        instant is { } value ? TimeZone.Format(value) : fallback;
+
+    private string GetCurrentDetail(Automation automation) =>
+        automation.StateEnteredAt is { } since ? $"Current, since {TimeZone.ToZoned(since):HH:mm}" : "Current";
+
+    private static StateDiagramLayout CreateLayout(Automation automation) => StateDiagramLayout.Create(
+        automation.States,
+        automation.InitialState,
+        automation.CurrentState,
+        [.. automation.GetRuleKeysInOrder().Select(key => StateDiagramRule.From(key, automation.Rules[key]))]);
+
+    private static string? DescribeScope(Automation automation, AutomationRule rule)
+    {
+        if (rule.InState is { } state)
+        {
+            return $"Active in state {state}";
+        }
+
+        return automation.States.Length > 0 ? "Any state" : null;
+    }
+
+    private static string GetRunsKey(Automation automation) =>
+        string.Join(",", automation.Rules.Select(pair => $"{pair.Key}:{pair.Value.RunCount}"));
+
+    private static IReadOnlyList<RunEntry> GetLastRuns(Automation automation) =>
+    [
+        .. automation.GetRuleKeysInOrder()
+            .Select(key => (Key: key, Rule: automation.Rules[key]))
+            .Where(pair => pair.Rule.LastRunOutcome is not null)
+            .Select(pair => new RunEntry(null, pair.Rule.Name ?? pair.Key, pair.Rule.LastRunOutcome, pair.Rule.LastRunMessage))
+    ];
+
+    public void Dispose() => _isDisposed = true;
+}

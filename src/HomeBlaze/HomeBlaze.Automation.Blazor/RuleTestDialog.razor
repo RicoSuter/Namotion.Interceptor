@@ -1,0 +1,103 @@
+<MudDialog data-testid="automation-test-dialog">
+    <DialogContent>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">Evaluated at @EvaluatedAt with the current values. Nothing was executed or recorded.</MudText>
+        <MudAlert Severity="@(_verdict.WouldRun ? Severity.Success : Severity.Info)" Dense="true" Class="my-3" data-testid="automation-test-verdict">@_verdict.Text</MudAlert>
+        @if (Result.Error is null)
+        {
+            <MudText Typo="Typo.subtitle2">Triggers</MudText>
+            <MudStack Spacing="1" Class="mb-3">
+                @foreach (var trigger in Result.Triggers)
+                {
+                    <div data-testid="automation-test-trigger">
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.body2" Style="flex: 1; overflow-wrap: anywhere; font-family: monospace;">@DescribeTrigger(trigger.Number)</MudText>
+                            <MudChip T="string" Size="Size.Small" Color="@GetColor(trigger.Result)" Class="ma-0">@GetResultText(trigger)</MudChip>
+                        </div>
+                        @if (trigger.Note is { } note)
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@note</MudText>
+                        }
+                        @if (trigger.MissingPaths.Count > 0)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">No value: @string.Join(", ", trigger.MissingPaths)</MudText>
+                        }
+                    </div>
+                }
+            </MudStack>
+            @if (Result.HasGuard)
+            {
+                <MudText Typo="Typo.subtitle2">Only if</MudText>
+                <div class="d-flex align-center gap-2 mb-3" data-testid="automation-test-guard">
+                    <MudText Typo="Typo.body2" Style="flex: 1; overflow-wrap: anywhere; font-family: monospace;">@Rule.Guard</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@GetColor(Result.GuardResult)" Class="ma-0">@FormatResult(Result.GuardResult)</MudChip>
+                </div>
+            }
+            <MudText Typo="Typo.subtitle2">Actions it would run</MudText>
+            <ol class="pl-6 mb-3">
+                @foreach (var action in Result.Actions)
+                {
+                    <li><MudText Typo="Typo.body2" Style="overflow-wrap: anywhere;">@action</MudText></li>
+                }
+            </ol>
+            @if (QueryPath is not null)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Agents get the same result through invoke_query on @QueryPath.</MudText>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RuleTestVerdict _verdict = new(false, string.Empty);
+
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter, EditorRequired] public AutomationRuleTestResult Result { get; set; } = null!;
+
+    [Parameter, EditorRequired] public AutomationRule Rule { get; set; } = null!;
+
+    /// <summary>When the rule was evaluated, as the viewer reads it.</summary>
+    [Parameter] public string EvaluatedAt { get; set; } = string.Empty;
+
+    /// <summary>The path of the query that agents call, or null for a rule without a path.</summary>
+    [Parameter] public string? QueryPath { get; set; }
+
+    protected override void OnParametersSet() =>
+        _verdict = RuleTestSummary.Describe(Result, Array.Exists(Rule.Triggers, trigger => trigger is SubjectEventTrigger));
+
+    private void Close() => MudDialog?.Close();
+
+    private string DescribeTrigger(int number) =>
+        GetTrigger(number) is { } trigger ? Describe(trigger) : $"Trigger {number}";
+
+    private string GetResultText(AutomationTriggerTestResult trigger) =>
+        GetTrigger(trigger.Number) is SubjectEventTrigger ? "on event" : FormatResult(trigger.Result);
+
+    private AutomationTrigger? GetTrigger(int number) =>
+        number > 0 && number <= Rule.Triggers.Length ? Rule.Triggers[number - 1] : null;
+
+    private static string Describe(AutomationTrigger trigger) => trigger switch
+    {
+        PropertyTrigger property => property.Expression,
+        SubjectEventTrigger { Filter.Length: > 0 } subjectEvent => $"{subjectEvent.EventType} of {subjectEvent.SubjectPath} where {subjectEvent.Filter}",
+        SubjectEventTrigger subjectEvent => $"{subjectEvent.EventType} of {subjectEvent.SubjectPath}",
+        _ => trigger.GetType().Name
+    };
+
+    private static string FormatResult(bool? result) => result switch
+    {
+        true => "true",
+        false => "false",
+        null => "unknown"
+    };
+
+    private static Color GetColor(bool? result) => result switch
+    {
+        true => Color.Success,
+        false => Color.Default,
+        null => Color.Warning
+    };
+}

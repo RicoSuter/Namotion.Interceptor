@@ -1,0 +1,37 @@
+using HomeBlaze.Automation;
+
+namespace HomeBlaze.E2E.Tests.Infrastructure;
+
+/// <summary>
+/// A dry-run automation of a washing machine with the states Idle and Running over the demo motor. Its conditions never
+/// become true there, so no rule runs during a test.
+/// </summary>
+internal static class WasherAutomation
+{
+    public static void Configure(HomeBlaze.Automation.Automation automation)
+    {
+        automation.Name = "Washer";
+        automation.States = ["Idle", "Running"];
+        automation.InitialState = "Idle";
+        automation.RuleOrder = ["started", "finished"];
+        automation.Rules = new Dictionary<string, AutomationRule>
+        {
+            ["started"] = new()
+            {
+                Name = "Started",
+                Mode = AutomationRuleMode.DryRun,
+                InState = "Idle",
+                Triggers = [new PropertyTrigger { Expression = "/Demo/Motor/Temperature > 1000" }],
+                Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Running" }]
+            },
+            ["finished"] = new()
+            {
+                Name = "Finished",
+                Mode = AutomationRuleMode.DryRun,
+                InState = "Running",
+                Triggers = [new PropertyTrigger { Expression = "/Demo/Motor/Temperature < 5", For = TimeSpan.FromMinutes(10) }],
+                Actions = [new ChangeStateAction { Id = "state-1", TargetState = "Idle" }]
+            }
+        };
+    }
+}

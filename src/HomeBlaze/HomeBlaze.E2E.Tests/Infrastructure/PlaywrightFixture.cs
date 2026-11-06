@@ -199,6 +199,21 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// Stores a new automation, configured before it is stored, as a JSON file of the root storage, as the create dialog
+    /// does. The automation starts once it is in the graph; delete it with <see cref="DeleteStoredSubjectAsync"/>.
+    /// </summary>
+    /// <returns>The name of the automation under the root, which is its path, the path of its file and the automation.</returns>
+    public async Task<(string Name, string FilePath, HomeBlaze.Automation.Automation Automation)> AddStoredAutomationAsync(
+        Action<HomeBlaze.Automation.Automation> configure)
+    {
+        var name = $"Automation{Guid.NewGuid():N}";
+        var automation = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<HomeBlaze.Automation.Automation>();
+        configure(automation);
+        await GetRoot().AddSubjectAsync($"{name}.json", automation, CancellationToken.None);
+        return (name, GetPagePath($"{name}.json"), automation);
+    }
+
+    /// <summary>
     /// Deletes a subject of <see cref="AddStoredMotorAsync"/> with its file, unless it is gone already.
     /// </summary>
     public async Task DeleteStoredSubjectAsync(string filePath, IInterceptorSubject subject)

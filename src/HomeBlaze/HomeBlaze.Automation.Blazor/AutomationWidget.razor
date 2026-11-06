@@ -1,0 +1,54 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Automation))]
+@implements ISubjectComponent
+@inject SubjectPathResolver PathResolver
+@inject ITimeZoneDisplay TimeZone
+
+@if (Subject is Automation automation)
+{
+    var path = PathResolver.GetPath(automation, PathStyle.Canonical);
+    var headline = AutomationSummary.GetHeadline(automation.Status, automation.StatusMessage, GetRuleStatuses(automation));
+    <MudPaper Class="pa-3" data-testid="automation-widget">
+        <MudStack Spacing="1">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.AutoMode" Size="Size.Small" />
+                @if (path is not null)
+                {
+                    <MudLink Href="@($"pages{path}")" Typo="Typo.subtitle1" Style="overflow-wrap: anywhere;">@automation.Title</MudLink>
+                }
+                else
+                {
+                    <MudText Typo="Typo.subtitle1" Style="overflow-wrap: anywhere;">@automation.Title</MudText>
+                }
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" Color="@AutomationColors.GetStatusColor(automation.Status)" Class="ma-0">@automation.Status</MudChip>
+            </MudStack>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@DescribeState(automation)</MudText>
+            @if (headline is not null)
+            {
+                <MudText Typo="Typo.caption" Style="overflow-wrap: anywhere;" data-testid="automation-widget-headline">@headline</MudText>
+            }
+        </MudStack>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    private string DescribeState(Automation automation)
+    {
+        if (automation.States.Length == 0)
+        {
+            return automation.Rules.Count == 1 ? "No states, 1 rule" : $"No states, {automation.Rules.Count} rules";
+        }
+
+        if (automation.CurrentState is not { } state)
+        {
+            return "No current state";
+        }
+
+        return automation.StateEnteredAt is { } since ? $"{state} since {TimeZone.Format(since)}" : state;
+    }
+
+    private static IEnumerable<(string Name, string? Status)> GetRuleStatuses(Automation automation) =>
+        automation.GetRuleKeysInOrder().Select(key => (automation.Rules[key].Name ?? key, automation.Rules[key].Status));
+}
