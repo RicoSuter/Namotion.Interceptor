@@ -1,0 +1,56 @@
+{
+  "$type": "HomeBlaze.Automation.Automation",
+  "name": "Conveyor guard",
+  "enabled": true,
+  "states": [ "Normal", "Hot" ],
+  "initialState": "Normal",
+  "ruleOrder": [ "overheat", "cooled" ],
+  "rules": {
+    "overheat": {
+      "name": "Slow down when hot",
+      "mode": "DryRun",
+      "inState": "Normal",
+      "triggers": [
+        {
+          "$type": "PropertyTrigger",
+          "expression": "/Demo/Conveyor/Temperature > 70",
+          "for": "00:00:30"
+        }
+      ],
+      "guard": "./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m",
+      "actions": [
+        {
+          "$type": "InvokeOperation",
+          "id": "slow-down",
+          "operationPath": "/Demo/Conveyor/SetTargetSpeed",
+          "arguments": { "speed": "300" }
+        },
+        {
+          "$type": "ChangeState",
+          "id": "hot",
+          "targetState": "Hot"
+        }
+      ]
+    },
+    "cooled": {
+      "name": "Back to normal",
+      "mode": "DryRun",
+      "inState": "Hot",
+      "triggers": [
+        {
+          "$type": "PropertyTrigger",
+          "expression": "/Demo/Conveyor/Temperature < 60",
+          "for": "00:01:00",
+          "onActivation": "WaitForFalseToTrue"
+        }
+      ],
+      "actions": [
+        {
+          "$type": "ChangeState",
+          "id": "normal",
+          "targetState": "Normal"
+        }
+      ]
+    }
+  }
+}

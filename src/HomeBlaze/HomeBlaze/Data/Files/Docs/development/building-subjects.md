@@ -160,6 +160,10 @@ A property with `IsCumulative = true` is a counter that only grows and is named 
 
 The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device or service that owns the counter (for example a reboot that clears it) may restart the value at 0 or step it back once, and a change of the counter's source passes through `null`. A consumer that computes deltas treats a decrease as such a reset and restarts after `null`, counting no change for that interval.
 
+### Readings Are Null Until Observed
+
+A property that holds a reading of a device or a service, such as a temperature, a power or the state of a door, is nullable and stays `null` until the subject received the value from its source. Do not restore it at startup from a cache, a file or the history, and set it back to `null` when the source stops reporting it, as an integration does for a sensor that went offline. Automations and page expressions treat `null` as unknown: a rule over a reading waits after a restart until the device reports, instead of acting on a value from before the restart. A subject whose values can be old should also implement `ILastUpdatedProvider`, so that a rule can check their age, as in `now - /Devices/Meter/LastUpdated < 1m`.
+
 ### Interface Inheritance and Attribute Merging
 
 When a class implements an interface with `[State]` properties, the attributes are **merged**. Class values take priority; interface values fill in any fields the class doesn't specify.
