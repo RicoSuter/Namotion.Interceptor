@@ -17,12 +17,15 @@ internal sealed class AutomationInputQueue
 
     private static readonly AsyncLocal<RunMarker?> CurrentRun = new();
 
-    // Not created for a single reader: that unbounded channel cannot count its items, which IsEmpty needs.
-    private readonly Channel<AutomationInput> _channel = Channel.CreateUnbounded<AutomationInput>();
+    private readonly Channel<AutomationInput> _channel = Channel.CreateUnbounded<AutomationInput>(new UnboundedChannelOptions
+    {
+        SingleReader = true
+    });
 
     private readonly Lock _dropLock = new();
     private DroppedInputs? _openBatch;
     private int _count;
+    private int _resynchronizations;
     private int _overloaded;
     private int _feedbackChains;
 
@@ -35,7 +38,8 @@ internal sealed class AutomationInputQueue
     /// <summary>The queued inputs that count against <see cref="Capacity"/>: all but flushes and resynchronizations.</summary>
     public int Count => Volatile.Read(ref _count);
 
-    public bool IsEmpty => _channel.Reader.Count == 0;
+    /// <summary>Whether an input other than a flush is queued.</summary>
+    public bool HasWork => Volatile.Read(ref _count) > 0 || Volatile.Read(ref _resynchronizations) > 0;
 
     /// <summary>Marks the flow as running an input of the depth until the scope is disposed.</summary>
     public static RunScope EnterRun(int inputChainDepth)
@@ -100,7 +104,11 @@ internal sealed class AutomationInputQueue
     public async ValueTask<AutomationInput> ReadAsync(CancellationToken cancellationToken)
     {
         var input = await _channel.Reader.ReadAsync(cancellationToken);
-        if (input is not (FlushInput or ResynchronizeInput))
+        if (input is ResynchronizeInput)
+        {
+            Interlocked.Decrement(ref _resynchronizations);
+        }
+        else if (input is not FlushInput)
         {
             Interlocked.Decrement(ref _count);
         }
@@ -109,8 +117,13 @@ internal sealed class AutomationInputQueue
     }
 
     /// <summary>Gets the inputs dropped since the last call and counts from zero again.</summary>
-    public QueueFaults TakeFaults() =>
-        new(Interlocked.Exchange(ref _overloaded, 0), Interlocked.Exchange(ref _feedbackChains, 0));
+    public QueueFaults TakeFaults()
+    {
+        lock (_dropLock)
+        {
+            return TakeCounts();
+        }
+    }
 
     /// <summary>
     /// Gets the inputs that the resynchronization took, with the drops counted since the last call; later drops queue a
@@ -124,12 +137,15 @@ internal sealed class AutomationInputQueue
             {
                 _openBatch = null;
             }
+
+            resynchronize.Dropped.Faults = TakeCounts();
         }
 
-        resynchronize.Dropped.Faults = TakeFaults();
         return resynchronize.Dropped;
     }
 
+    // The count and the batch change together under the lock, so that the resynchronization that takes the batch also
+    // takes the count of every drop in it, including the drops of events, which the batch does not keep.
     private void Drop(AutomationInput input, ref int counter)
     {
         lock (_dropLock)
@@ -137,16 +153,28 @@ internal sealed class AutomationInputQueue
             if (_openBatch is not { } batch)
             {
                 batch = new DroppedInputs();
+                Interlocked.Increment(ref _resynchronizations);
                 if (_channel.Writer.TryWrite(new ResynchronizeInput(batch)))
                 {
                     _openBatch = batch;
                 }
+                else
+                {
+                    Interlocked.Decrement(ref _resynchronizations);
+                }
             }
 
             batch.Add(input);
+            counter++;
         }
+    }
 
-        Interlocked.Increment(ref counter);
+    private QueueFaults TakeCounts()
+    {
+        var faults = new QueueFaults(_overloaded, _feedbackChains);
+        _overloaded = 0;
+        _feedbackChains = 0;
+        return faults;
     }
 
     internal sealed class RunMarker(int depth)

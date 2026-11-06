@@ -175,6 +175,6 @@ public class AutomationInputQueueTests
         var dropped = queue.TakeDroppedInputs(Assert.IsType<ResynchronizeInput>(last));
         Assert.True(dropped.HasGraphChange);
         Assert.Equal(new QueueFaults(1, 0), dropped.Faults);
-        Assert.True(queue.IsEmpty);
+        Assert.False(queue.HasWork);
     }
 }

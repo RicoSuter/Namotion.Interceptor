@@ -122,7 +122,7 @@ internal sealed class AutomationRuntime
 
     private void CompleteOrRequeue(FlushInput flush)
     {
-        if (!_queue.IsEmpty && _queue.EnqueueFlush(flush))
+        if (_queue.HasWork && _queue.EnqueueFlush(flush))
         {
             return;
         }

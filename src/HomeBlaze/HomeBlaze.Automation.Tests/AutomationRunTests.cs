@@ -159,4 +159,22 @@ public class AutomationRunTests
         await AsyncTestHelpers.WaitUntilAsync(() => flush.IsCompleted, timeout: TimeSpan.FromSeconds(5));
         Assert.True(flush.IsCompletedSuccessfully);
     }
+
+    [Fact]
+    public async Task WhenTwoFlushesAreQueuedTogether_ThenBothComplete()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+            automation.Rules = Keyed(("wait", On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait")))));
+        host.Weather.Rain = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        var flushes = Task.WhenAll(host.FlushAsync(), host.FlushAsync());
+
+        // Act
+        host.Blinds.Release();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => flushes.IsCompleted, timeout: TimeSpan.FromSeconds(5));
+        Assert.True(flushes.IsCompletedSuccessfully);
+    }
 }
