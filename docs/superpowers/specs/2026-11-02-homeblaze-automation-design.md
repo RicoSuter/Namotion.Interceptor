@@ -86,6 +86,9 @@ classDiagram
         Actions : Configuration
         Status : State
         LastTriggeredAt : State
+        RunCount : State, cumulative
+        LastRunOutcome : State
+        LastRunMessage : State
     }
     class Trigger {
         <<abstract value>>
@@ -131,6 +134,18 @@ classDiagram
 
 Rules are child subjects in `Rules: Dictionary<string, AutomationRule>`, so their status is addressable, shown in the property panel, usable on pages, and recorded by history like any other state. The key is a stable identifier generated when the rule is created, never its user-editable name, so paths such as `/Automations/Storm/Rules[k3f9]/LastTriggeredAt` survive renaming and reordering; rule order is a separate configuration value. `AutomationRule` is `[ExcludeFromCreation]`. Triggers and actions are plain value objects inside the rule's configuration, serialized with explicit, stable type discriminators and statically registered JSON metadata; an unknown discriminator is rejected rather than replaced. Actions carry stable identifiers for run diagnostics.
 
+### Runs and History
+
+Runs are recorded through the existing history system instead of a run log of the automation's own. History records scalar `[State]` properties, and tracking suppresses equal values, so each rule exposes three of them:
+
+| Property | Type | Purpose |
+|---|---|---|
+| `RunCount` | `long`, `[State(IsCumulative = true)]` | Increments on every recorded run, so every run is a history sample, also two identical ones in a row. Its `Delta` aggregation gives runs per hour or day. |
+| `LastRunOutcome` | enum: `Succeeded`, `CompletedWithErrors`, `StoppedAfterError`, `RejectedByGuard`, `DryRun`, `Canceled` | The outcome of the last run. |
+| `LastRunMessage` | `string` | A short summary: the executed actions with rendered arguments, the error of a failed action, or the missing paths of a rejection. |
+
+The page lists recent runs from history: one entry per `RunCount` sample, with the outcome and message read at or before that sample's time, so repeated identical runs are shown correctly. Without a history store, the page shows only the last run of each rule. The automation's `CurrentState` is a `[State]` string as well, so history also gives a state timeline. Full errors remain in the normal logs; the message stays short and within the history's size limit for strings.
+
 `CurrentState`, `StateEnteredAt`, `LastTriggeredAt`, and the statuses are `[State]` with internal setters, restored from the checkpoint and changed only by the worker. Configuration is edited only through the normal Save flow, so a Save can never overwrite runtime state.
 
 ### Operations and Queries
@@ -163,9 +178,10 @@ The automation's expression context resolves absolute registry paths, and relati
 |---|---|---|
 | `now` | The current UTC instant | Every automation expression |
 | `time` | The local time of day in the host's configured time zone, as a duration | Every automation expression |
-| `value`, `subject` | The captured event payload and its publisher, following the existing variable conventions | Event filters and the arguments of a run started by that event |
+| `event` | The captured event payload, for example `event/ButtonState` or `event/NewState` | Event filters and the arguments of a run started by that event |
+| `subject` | The publisher of the event, following the existing variable convention | Event filters and the arguments of a run started by that event |
 
-The existing `ValueBindingContext` deliberately rejects members of `value`; event payload member access therefore needs an automation-specific `IExpressionContext` that reads the payload fields of the discovered event types.
+In widgets and value maps, `value` is the value itself and has no members, which `ValueBindingContext` enforces. The payload is a record with fields, so it gets its own variable `event` instead of giving `value` members in one context only. An automation-specific `IExpressionContext` reads the payload fields of the discovered event types.
 
 Automation expressions follow the displayability rules of page expressions: secret configuration values and properties marked `[ExcludeFromExpressions]` evaluate as missing. Otherwise a notification template could send a secret.
 
@@ -187,7 +203,7 @@ Unknown is a distinct outcome, never folded into false:
 
 The status is logged once per transition into and out of unknown. It is not an error: `IMonitoredService.Status` stays `Running`, because an offline sensor should not turn every dependent automation red. Outages are detected explicitly with `== null`, `IsConnected`, or `now - <subject>/LastUpdated`, which are not unknown in the cases they are written for.
 
-A guard that evaluates to unknown rejects the request like false, and the run record names the missing paths. An input a rule must wait for therefore belongs in its trigger, not its guard, as the door reminder example shows.
+A guard that evaluates to unknown rejects the request like false, recorded as `RejectedByGuard` with the missing paths in `LastRunMessage`. An input a rule must wait for therefore belongs in its trigger, not its guard, as the door reminder example shows.
 
 ## Triggers and Activation
 
@@ -248,7 +264,7 @@ Changes caused by an automation may generate later inputs. The runtime must iden
 
 ## Checkpoint and Restart
 
-The checkpoint holds `CurrentState`, `StateEnteredAt`, and each rule's `LastTriggeredAt`, keyed by rule identifier. It is runtime state, not configuration: a `[Configuration]` property would rewrite the whole configuration file, or the page an automation is placed on, on every trigger, and `IConfigurationWriter` writes the live subject, so a new value would be visible before it is saved.
+The checkpoint holds `CurrentState`, `StateEnteredAt`, and each rule's `LastTriggeredAt`, `RunCount`, `LastRunOutcome`, and `LastRunMessage`, keyed by rule identifier. It holds no list, so its size does not grow with the number of runs; `RunCount` is persisted so that the cumulative counter keeps growing across restarts. It is runtime state, not configuration: a `[Configuration]` property would rewrite the whole configuration file, or the page an automation is placed on, on every trigger, and `IConfigurationWriter` writes the live subject, so a new value would be visible before it is saved.
 
 Each automation owns one checkpoint file in a runtime folder of the data directory, next to `Root.json` and `Files`, like `DataProtection-Keys`. Its path mirrors the automation's path, for example `Data/Automations/Automations/Storm.json` for `/Automations/Storm`, and the folder is a new constant in `HomeBlazePaths`. The folder is not browsed storage, so the file is neither a subject nor visible in the UI. Deleting the automation deletes its checkpoint. Renaming or moving it changes its path, so it starts from `InitialState` with no trigger times, and logs that once.
 
@@ -276,24 +292,24 @@ An automation runs as its own principal, and the authorization library (`Namotio
 
 ### Errors
 
-Each action has an error dropdown with `Continue` selected by default and `StopRule` as the alternative. Always log the failure with automation, rule, action, and source context, and record it in the bounded run history. `Continue` attempts the remaining actions; `StopRule` skips them. `StopRule` does not stop unrelated rules that remain eligible for the original input, unless the failed rule already changed state. Neither policy rolls back successful actions or implies retry.
+Each action has an error dropdown with `Continue` selected by default and `StopRule` as the alternative. Always log the failure with automation, rule, action, and source context, and record it in the rule's run properties. `Continue` attempts the remaining actions; `StopRule` skips them. `StopRule` does not stop unrelated rules that remain eligible for the original input, unless the failed rule already changed state. Neither policy rolls back successful actions or implies retry.
 
 A run with any action, filter, or argument evaluation failure is unsuccessful even if later actions complete. A later run that executes actions and completes all of them successfully clears `StatusMessage` and restores `Running`. A guard rejection, unknown input, canceled stale request, or empty evaluation is not a successful run. While stopped or disabled, `Status` can be `Stopped` while the last error message remains available for the lifetime of the subject instance.
 
-Run records distinguish succeeded, completed with errors, stopped after an error, rejected by the guard, would have run (dry run), and canceled. History is bounded and in memory; full errors remain in normal logs. Cancellation from stopping, disabling, or replacing configuration is not an action failure and does not erase an earlier error. A run timeout is a recorded failure. An operation that does not cooperate with cancellation must not allow a replacement run to overlap it.
+`LastRunOutcome` distinguishes succeeded, completed with errors, stopped after an error, rejected by the guard, dry run, and canceled. Cancellation from stopping, disabling, or replacing configuration is not an action failure and does not erase an earlier error. A run timeout is a recorded failure. An operation that does not cooperate with cancellation must not allow a replacement run to overlap it.
 
 ## Modes and Rule Status
 
 | | `Off` | `DryRun` | `On` |
 |---|---|---|---|
 | Triggers observed | No | Yes | Yes |
-| Actions executed | No | No, recorded as "would have run" with rendered arguments | Yes |
+| Actions executed | No | No, recorded as a run with outcome `DryRun` and the rendered arguments as message | Yes |
 | `ChangeState` | No | Not executed, so follow-up rules do not run | Yes |
 | `LastTriggeredAt` set | No | No | Yes |
 
 A dry run does not simulate state changes; only the first step of a multi-step workflow is observable that way. `TestNow` works in every mode.
 
-A rule's `Status` shows its mode and armed, holding with elapsed and required duration, triggered and waiting to rearm, or unknown with the missing paths. Its page also shows the last trigger time, the last guard rejection, and the last error.
+A rule's `Status` shows its mode and armed, holding with elapsed and required duration, triggered and waiting to rearm, or unknown with the missing paths. Its page also shows the last trigger time and the last run's outcome and message.
 
 ## Examples
 
@@ -384,17 +400,19 @@ The first trigger covers integrations that empty their values when a sensor goes
 
 ## Authoring and UI
 
-`HomeBlaze.Automation.Blazor` provides a compact widget, an edit component, and a page component for live state, rule status, and run history. No setup component is needed; the create dialog uses the edit component with `IsCreating`.
+`HomeBlaze.Automation.Blazor` provides a compact widget, an edit component, and a page component. The page shows the automation's status, a read-only state diagram with the current state and its duration (hidden without states), the rules with their mode, live status, last trigger time and a "Test now" button, and the recent runs from history. It has an "Edit" button that opens the edit component as a dialog. No setup component is needed; the create dialog uses the edit component with `IsCreating`.
+
+The edit component is a dialog with three tabs: General, Rules, and States. The Rules tab lists the rules in run order on the left and edits the selected rule on the right, in the sections "Runs when any of these happens" (triggers), "Only if" (guard and cooldown), and "Then, in this order" (actions). The States tab shows the state diagram with a panel for the selected state: its name, whether it is the initial state, the rules that enter, are active in, and leave it, and a delete button that is disabled while rules use the state.
 
 The edit component implements `ISubjectEditComponent`, initializes its local draft once in `OnInitialized`, and applies changes only in `SaveAsync`. Because runtime state lives in the checkpoint and `[State]` properties, saving a draft of names, rules, triggers, actions, or diagram positions cannot replace it. Editing a form or dragging a graph node must not execute device commands.
 
-Use one reusable expression editor for triggers, rearm expressions, guards, event filters, and expression arguments, in a reusable UI layer below the host. It supplies the appropriate field catalog: event filters choose payload fields, such as `value/ButtonState`, and other expressions choose subject/property paths with `SubjectPathField` and the variables. All persist expression strings and validate them with the shared parser. The current `ExpressionEditDialog` in `HomeBlaze.Host` wraps `SubjectPathPicker` and is a starting point, not a complete boolean builder.
+Use one reusable expression component for triggers, rearm expressions, guards, event filters, and expression arguments, in a reusable UI layer below the host. It shows simple rows with the current value and result of each row, or the advanced expression, with a toggle between them. It supplies the appropriate field catalog: event filters choose payload fields, such as `event/ButtonState`, and other expressions choose subject/property paths with `SubjectPathField` and the variables. All persist expression strings and validate them with the shared parser. The current `ExpressionEditDialog` in `HomeBlaze.Host` wraps `SubjectPathPicker` and is a starting point, not a complete boolean builder.
 
 The canonical representation of each expression is its string. The simple editor presents rows of field, operator, and value combined with AND or OR, and generates the string; it does not persist a second model. The advanced editor exposes the expression directly. Switch back to simple controls only when they can represent the expression faithfully; otherwise keep advanced mode and preserve the expression unchanged. Holds, rearm expressions, activation policy, state scope, and typed actions remain structured configuration, and the cooldown control is a view over the guard.
 
 Operation actions use registry operation metadata for their parameters, including records with a form per member. Every action exposes its error dropdown, and property triggers expose `OnActivation` with immediate evaluation selected.
 
-Named states can also be presented as a state diagram, using the diagram facilities already referenced by `HomeBlaze.Components`. The rule list is canonical, and diagram edits must not create a second transition store. A rule containing `ChangeState` produces an edge from its state restriction to that target, with its other actions shown alongside it. Rules without a simple source/target pair remain visible in the rule list rather than being forced into a misleading edge.
+The state diagram uses the diagram facilities already referenced by `HomeBlaze.Components`. The rule list is canonical, and diagram edits must not create a second transition store. A rule containing `ChangeState` produces an edge from its state restriction to that target, with its other actions shown alongside it. Rules without a simple source/target pair remain visible in the rule list rather than being forced into a misleading edge.
 
 Validate names, references, expression syntax, event types and payload fields, operation parameters, authorization, and action policies in `ApplyConfigurationAsync` before applying a new immutable configuration snapshot. A malformed configuration is reported without partly installing new subscriptions or abandoning a still-valid running configuration. A missing runtime device is a resolvable source/target issue, distinct from invalid syntax.
 
@@ -415,7 +433,8 @@ For migration coverage from v1, the reference implementations are `TriggerThingS
 | Unknown values | A missing input never fires, rearms, or passes a guard, and the rule shows the missing paths. `== null` and `now - LastUpdated` conditions detect outages. |
 | Expressions | Arithmetic on numbers, instants, and durations evaluates as specified, existing expressions keep their meaning, and triggers referencing `now` or `time` flip within one second under a controlled `TimeProvider`. Secret and excluded values evaluate as missing. |
 | Templates | Notification text renders current values, including in record members; a missing value renders the placeholder and the action still runs. An unknown non-string argument fails the action. |
-| Modes and test | A dry-run rule records "would have run" with rendered arguments and changes nothing, including state and `LastTriggeredAt`. `TestNow` returns the evaluation through the UI and `invoke_query`, and executes and records nothing. |
+| Run history | Every run, including two identical ones in a row, increments `RunCount` and is listed on the page from history with its outcome and message. Without a history store the last run is shown. The checkpoint file keeps a constant size. |
+| Modes and test | A dry-run rule records a run with outcome `DryRun` and the rendered arguments, and changes nothing else, including state and `LastTriggeredAt`. `TestNow` returns the evaluation through the UI and `invoke_query`, and executes and records nothing. |
 | Authorization | An action denied for the automation's principal fails validation and execution. An operation requiring confirmation is rejected. |
 | State-change trigger | A real change publishes old/new state and can start rules in the same or another automation. Follow-up rules in the same automation wait for the current rule's action list. |
 | Action errors | `Continue` attempts remaining commands, `StopRule` skips them, and neither undoes an already changed state. The latest failure survives later successes within that run. A later fully successful run clears it; guard rejections do not. |
@@ -424,9 +443,9 @@ For migration coverage from v1, the reference implementations are `TriggerThingS
 
 ## Scope and Validation
 
-The first version includes the subjects and runtime, event discovery from `IObservable<T>`, property triggers with holds and rearm, guards, the three action types with templated arguments, rule modes and `TestNow`, the checkpoint file, arithmetic and time variables in expressions, authorization integration once available, the editor with state-diagram projection, and bounded run diagnostics. It does not include arbitrary scripts, history functions in expressions, a sun subject, state-dependent locks for all callers, dry runs with simulated state, computed deadlines instead of the one-second re-evaluation, exactly-once delivery, persistent action continuations, automatic retries, parallel action execution, a new message bus, or automatic conversion of v1 configuration.
+The first version includes the subjects and runtime, event discovery from `IObservable<T>`, property triggers with holds and rearm, guards, the three action types with templated arguments, rule modes and `TestNow`, the checkpoint file, arithmetic and time variables in expressions, authorization integration once available, the editor with state-diagram projection, and run properties recorded by history. It does not include arbitrary scripts, history functions in expressions, a sun subject, state-dependent locks for all callers, dry runs with simulated state, computed deadlines instead of the one-second re-evaluation, exactly-once delivery, persistent action continuations, automatic retries, parallel action execution, a new message bus, or automatic conversion of v1 configuration.
 
-Prefer the existing expression interpreter and cached metadata over new reflection on hot paths or dynamic compilation. New public APIs and configuration shapes require the appropriate snapshots and serialization compatibility tests. The implementer chooses concrete API names, exact queue/history limits, and data structures while preserving the contracts above.
+Prefer the existing expression interpreter and cached metadata over new reflection on hot paths or dynamic compilation. New public APIs and configuration shapes require the appropriate snapshots and serialization compatibility tests. The implementer chooses concrete API names, exact queue limits, and data structures while preserving the contracts above.
 
 Verification covers the acceptance scenarios with controllable clocks and event synchronization, including observed property pulses, holds, rearm hysteresis, unknown transitions, feedback chains, rapid source replacement, checkpoint write failure, and restart. The arithmetic extension needs parser and evaluator tests for precedence, units, unknown propagation, and unchanged meaning of existing expressions. Use integration tests targeted to HomeBlaze UI for the authoring work, including round-tripping rule and diagram edits. Core rule tests use fake operations and clocks rather than physical devices. No benchmarks or long-running connector tester runs are required.
 
@@ -472,8 +491,9 @@ The arithmetic extension changes existing documentation: the library's `docs/exp
 - `HomeBlaze.Abstractions.Messaging.INotificationPublisher`: the notification operation in the examples.
 - `Namotion.Interceptor.Authorization` (pull request #791): roles and allow/deny rules for the automation's principal.
 - `HomeBlaze.Abstractions.Messaging.IEvent` and `HomeBlaze.Abstractions.Devices.DeviceEvent`, with `ButtonEvent` and `SwitchEvent`: the event convention; `HueButton` and `ShellySwitch` are existing `IObservable<T>` sources.
+- `HomeBlaze.History` with `HistoryEligibility` and `IHistoryStore.GetSampleAtOrBeforeAsync`: recording and reading the run properties.
 - `SubjectPathField`, `ExpressionEditDialog`, and the diagram dependencies of `HomeBlaze.Components`: authoring UI foundations.
 
 ## Review Points
 
-The semantics above capture the design discussion. The worker and rule-selection details, run history scope, the lexical form of duration literals, the checkpoint file format, and the UI projection are author proposals that the implementation plan may refine. The arithmetic extension changes the shared expression grammar used by pages and value maps, and the authorization integration depends on pull request #791; both are planned as separate steps.
+The semantics above capture the design discussion. The worker and rule-selection details, the lexical form of duration literals, the checkpoint file format, and the UI projection are author proposals that the implementation plan may refine. The arithmetic extension changes the shared expression grammar used by pages and value maps, and the authorization integration depends on pull request #791; both are planned as separate steps.
