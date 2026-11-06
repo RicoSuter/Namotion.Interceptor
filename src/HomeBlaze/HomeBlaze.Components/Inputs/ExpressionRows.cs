@@ -109,6 +109,9 @@ internal static class ExpressionRows
     private static bool IsQuoted(string token) =>
         token.Length >= 2 && token[0] is '"' or '\'' && token.IndexOf(token[0], 1) == token.Length - 1;
 
-    private static bool StartsLikeNumber(string token) =>
-        char.IsDigit(token[0]) || (token.Length > 1 && token[0] is '-' or '+' or '.' && char.IsDigit(token[1]));
+    private static bool StartsLikeNumber(string token)
+    {
+        var unsigned = token[0] is '-' or '+' ? token.AsSpan(1) : token.AsSpan();
+        return unsigned.Length > 0 && (char.IsDigit(unsigned[0]) || (unsigned[0] == '.' && unsigned.Length > 1 && char.IsDigit(unsigned[1])));
+    }
 }

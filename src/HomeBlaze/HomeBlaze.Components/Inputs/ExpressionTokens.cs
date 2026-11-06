@@ -1,6 +1,9 @@
 namespace HomeBlaze.Components.Inputs;
 
-/// <summary>Splits an expression at white space outside quotes and brackets, keeping every token as it is written.</summary>
+/// <summary>
+/// Splits an expression at white space outside quotes and brackets, keeping every token as it is written. Like the
+/// expression parser, it reads a quote inside brackets as part of the key, and a bracket inside a quote as text.
+/// </summary>
 internal static class ExpressionTokens
 {
     /// <summary>Gets the tokens, or null when a quote or a bracket is not closed.</summary>
@@ -38,7 +41,7 @@ internal static class ExpressionTokens
             {
                 quote = character == quote ? '\0' : quote;
             }
-            else if (character is '"' or '\'')
+            else if (character is '"' or '\'' && bracketDepth == 0)
             {
                 quote = character;
             }

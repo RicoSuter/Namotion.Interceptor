@@ -21,19 +21,21 @@ internal static class ExpressionHints
     /// <param name="readValue">Reads the current value of the path left of a comparison, or null when the host has no values.</param>
     public static IReadOnlyList<string> GetBareWordHints(string? text, char pathSeparator, Func<string, object?>? readValue)
     {
-        var tokens = ExpressionTokens.Split(text);
-        if (tokens is null)
+        var split = ExpressionTokens.Split(text);
+        if (split is null)
         {
             return [];
         }
 
+        var tokens = split.Select(Unwrap).ToArray();
         var hints = new List<string>();
-        for (var index = 1; index + 1 < tokens.Count; index++)
+        for (var index = 0; index < tokens.Length; index++)
         {
-            if (ExpressionRows.Operators.Contains(tokens[index]) &&
-                IsBareWord(tokens[index + 1], pathSeparator) &&
-                !IsFollowedByArithmetic(tokens, index + 2) &&
-                GetHint(tokens[index - 1], tokens[index + 1], readValue) is { } hint)
+            var isRightOfComparison = index >= 2 && ExpressionRows.Operators.Contains(tokens[index - 1]);
+            var hint = isRightOfComparison && IsBareWord(tokens[index], pathSeparator) && !IsFollowedByArithmetic(tokens, index + 1)
+                ? GetTextHint(tokens[index - 2], tokens[index], readValue)
+                : GetCaseHint(tokens[index], pathSeparator);
+            if (hint is not null)
             {
                 hints.Add(hint);
             }
@@ -42,11 +44,17 @@ internal static class ExpressionHints
         return hints;
     }
 
-    // In "x > Now - 5m" the word is an operand of arithmetic, which reads it as a path, not as text.
-    private static bool IsFollowedByArithmetic(IReadOnlyList<string> tokens, int index) =>
-        index < tokens.Count && ArithmeticSymbols.Contains(tokens[index]);
+    // Parentheses around a condition are not part of its tokens.
+    private static string Unwrap(string token) => token.TrimStart('(').TrimEnd(')');
 
-    private static string? GetHint(string left, string word, Func<string, object?>? readValue)
+    // In "x > Now - 5m" the word is an operand of arithmetic, which reads it as a path, not as text.
+    private static bool IsFollowedByArithmetic(string[] tokens, int index) =>
+        index < tokens.Length &&
+        tokens[index].Length > 0 &&
+        ArithmeticSymbols.Contains(tokens[index][..1]) &&
+        (tokens[index].Length == 1 || tokens[index][1] == '(');
+
+    private static string? GetTextHint(string left, string word, Func<string, object?>? readValue)
     {
         var variable = Array.Find(Variables, variable => variable.Equals(word, StringComparison.OrdinalIgnoreCase));
         if (variable is not null)
@@ -56,6 +64,22 @@ internal static class ExpressionHints
 
         return IsNeverText(readValue?.Invoke(left))
             ? $"'{word}' is read as the text \"{word}\", which never equals the value of {left}. Write a path with '/', or a number."
+            : null;
+    }
+
+    // Variables are case-sensitive, so a path that starts with one in another case is an ordinary path that does not exist.
+    private static string? GetCaseHint(string token, char pathSeparator)
+    {
+        if (token.Length == 0 || token[0] is '"' or '\'')
+        {
+            return null;
+        }
+
+        var end = token.AsSpan().IndexOfAny(pathSeparator, '[');
+        var segment = end < 0 ? token : token[..end];
+        var variable = Array.Find(Variables, variable => variable.Equals(segment, StringComparison.OrdinalIgnoreCase));
+        return variable is not null && variable != segment
+            ? $"'{segment}' is not the variable {variable}: variables are written in lowercase."
             : null;
     }
 
