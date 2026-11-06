@@ -9,7 +9,9 @@
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="PublicApiGenerator" />
         <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+        <PackageReference Include="Verify.Xunit" />
         <PackageReference Include="xunit" />
         <PackageReference Include="xunit.runner.visualstudio">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
