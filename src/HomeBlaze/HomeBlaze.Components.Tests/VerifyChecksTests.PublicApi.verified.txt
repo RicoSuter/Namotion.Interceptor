@@ -1813,6 +1813,8 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> HasPendingRowChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
@@ -1829,7 +1831,7 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override void OnParametersSet() { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     public sealed class ExpressionPreview : System.IEquatable<HomeBlaze.Components.Inputs.ExpressionPreview>
     {
@@ -1847,6 +1849,8 @@ namespace HomeBlaze.Components.Inputs
         public System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? CanSelectSubject { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Class { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? ErrorText { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? IsPropertyVisible { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

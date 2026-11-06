@@ -1,3 +1,6 @@
+using System.Globalization;
+using Namotion.Interceptor.Expressions;
+
 namespace HomeBlaze.Components.Inputs;
 
 /// <summary>
@@ -7,12 +10,16 @@ namespace HomeBlaze.Components.Inputs;
 internal sealed class ExpressionFieldModel
 {
     private List<ExpressionRow> _rows = [];
+    private List<PendingRow?> _pending = [];
 
-    public ExpressionFieldModel(string? text)
+    public ExpressionFieldModel(string? text, char pathSeparator = '/')
     {
+        PathSeparator = pathSeparator;
         Load(text);
         IsAdvanced = !CanShowSimple;
     }
+
+    public char PathSeparator { get; set; }
 
     public string Text { get; private set; } = string.Empty;
 
@@ -21,25 +28,30 @@ internal sealed class ExpressionFieldModel
     /// <summary>Whether the text has the simple form, so that the rows can show it.</summary>
     public bool CanShowSimple { get; private set; }
 
+    /// <summary>The rows as they are written in <see cref="Text"/>.</summary>
     public IReadOnlyList<ExpressionRow> Rows => _rows;
 
-    /// <summary>Why the last row edit was not taken, or null when it was.</summary>
-    public string? Error { get; private set; }
+    /// <summary>Whether a row holds an edit that is not part of <see cref="Text"/>, because it is invalid or not finished.</summary>
+    public bool HasPendingRow => _pending.Exists(pending => pending is not null);
 
     /// <summary>Takes a text from outside the rows: from the owner of the field or from the advanced input. Never rewrites it.</summary>
     public void Load(string? text)
     {
         Text = text ?? string.Empty;
-        Error = null;
         CanShowSimple = ExpressionRows.TryParse(Text, out var rows);
         _rows = [.. rows];
+        _pending = [.. _rows.Select(_ => (PendingRow?)null)];
         if (!CanShowSimple)
         {
             IsAdvanced = true;
         }
     }
 
-    public void ShowAdvanced() => IsAdvanced = true;
+    public void ShowAdvanced()
+    {
+        IsAdvanced = true;
+        _pending = [.. _rows.Select(_ => (PendingRow?)null)];
+    }
 
     /// <summary>Shows the rows; false when the text does not have the simple form.</summary>
     public bool ShowSimple()
@@ -53,36 +65,48 @@ internal sealed class ExpressionFieldModel
         return true;
     }
 
+    /// <summary>The row as the user sees it: the pending edit when there is one, otherwise the row of the text.</summary>
+    public ExpressionRow GetDisplayRow(int index) => _pending[index]?.Row ?? _rows[index];
+
+    public string? GetPathError(int index) => _pending[index]?.PathError;
+
+    public string? GetValueError(int index) => _pending[index]?.ValueError;
+
     /// <summary>
     /// Takes an edited row. A typed value that is not one token is written as text in quotes, so that it cannot change
-    /// the structure of the expression; a path that is not one path, or a value that cannot be quoted, is rejected with
-    /// <see cref="Error"/> and the row stays as it was.
+    /// the structure of the expression. A path or value that cannot be written as typed stays a pending edit of the row,
+    /// with its error when it is invalid, until a later edit of the row is valid: <see cref="Text"/> does not change.
+    /// A path that is not finished, such as a lone separator, is pending without an error.
     /// </summary>
     public void SetRow(int index, ExpressionRow row)
     {
-        var error = Normalize(row, out var normalized);
-        Error = error;
-        if (error is null)
+        var check = Check(row);
+        if (check.IsApplicable)
         {
-            _rows[index] = normalized;
+            _rows[index] = check.Row;
+            _pending[index] = null;
             Emit();
+            return;
         }
+
+        _pending[index] = new PendingRow(row, check.PathError, check.ValueError);
     }
 
     public void AddRow()
     {
-        Error = null;
         _rows.Add(ExpressionRow.Empty(_rows.Count == 0 ? string.Empty : ExpressionRows.Combinators[0]));
+        _pending.Add(null);
         Emit();
     }
 
     public void RemoveRow(int index)
     {
-        Error = null;
         _rows.RemoveAt(index);
+        _pending.RemoveAt(index);
         if (index == 0 && _rows.Count > 0)
         {
             _rows[0] = _rows[0] with { Combinator = string.Empty };
+            _pending[0] = _pending[0] is { } first ? first with { Row = first.Row with { Combinator = string.Empty } } : null;
         }
 
         Emit();
@@ -95,31 +119,92 @@ internal sealed class ExpressionFieldModel
         CanShowSimple = true;
     }
 
-    private static string? Normalize(ExpressionRow row, out ExpressionRow normalized)
+    private RowCheck Check(ExpressionRow row)
     {
-        normalized = row;
         var path = row.Path.Trim();
-        if (path.Length > 0 && !(IsSingleToken(path) && ExpressionRows.IsPath(path)))
+        if (path.Length > 0 && !IsFinishedPath(path))
         {
-            return "A path is one word without spaces, brackets or operators.";
+            return new RowCheck(false, row, IsUnfinishedPath(path) ? null : $"Not a valid path: {path}", null);
         }
 
-        var value = row.Value.Trim();
-        if (value.Length > 0 && !(IsSingleToken(value) && ExpressionRows.IsOperand(value)))
-        {
-            if (value.Contains('"') && value.Contains('\''))
-            {
-                return "A value cannot hold both kinds of quotes.";
-            }
-
-            var quote = value.Contains('"') ? '\'' : '"';
-            value = quote + value + quote;
-        }
-
-        normalized = row with { Path = path, Value = value };
-        return null;
+        var (value, valueError) = NormalizeValue(row.Value.Trim());
+        return valueError is null
+            ? new RowCheck(true, row with { Path = path, Value = value }, null, null)
+            : new RowCheck(false, row, null, valueError);
     }
+
+    private bool IsFinishedPath(string path) =>
+        !IsUnfinishedPath(path) && IsSingleToken(path) && ExpressionRows.IsPath(path) && ParsesText($"{path} == 1");
+
+    private bool IsUnfinishedPath(string path) =>
+        path.EndsWith(PathSeparator) || path is "." or ".." || path.Count(c => c == '[') > path.Count(c => c == ']');
+
+    private (string Value, string? Error) NormalizeValue(string value)
+    {
+        if (value.Length == 0)
+        {
+            return (value, null);
+        }
+
+        if (!IsSingleToken(value) || !ExpressionRows.IsOperand(value) || IsPathLikeText(value))
+        {
+            return Quote(value);
+        }
+
+        if (Parses(value))
+        {
+            return (value, null);
+        }
+
+        if (value.Contains(',') && Parses(value.Replace(',', '.')))
+        {
+            return (value, "Use '.' as the decimal point.");
+        }
+
+        if (!StartsLikeNumber(value))
+        {
+            return Quote(value);
+        }
+
+        return IsInstantOrTime(value) ? Quote(value) : (value, $"Not a valid number: {value}. Put text in quotes.");
+    }
+
+    // A token with the path separator or an index is a path lookup unless it starts like a path.
+    private bool IsPathLikeText(string value) =>
+        (value.Contains(PathSeparator) || value.Contains('[')) &&
+        !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
+        !StartsLikePath(value);
+
+    private bool StartsLikePath(string value) =>
+        value.StartsWith(PathSeparator) || value.StartsWith("." + PathSeparator) || value.StartsWith(".." + PathSeparator) ||
+        ExpressionVariables.TryGetVariable(value, PathSeparator, out _);
+
+    private (string Value, string? Error) Quote(string value)
+    {
+        if (value.Contains('"') && value.Contains('\''))
+        {
+            return (value, "A value cannot hold both kinds of quotes.");
+        }
+
+        var quote = value.Contains('"') ? '\'' : '"';
+        return ($"{quote}{value}{quote}", null);
+    }
+
+    private bool Parses(string operand) => ParsesText($"x == {operand}");
+
+    private bool ParsesText(string text) => ParsedExpression.TryParse(text, PathSeparator, out _, out _);
+
+    private static bool StartsLikeNumber(string value) =>
+        char.IsDigit(value[0]) || (value[0] is '-' or '+' or '.' && value.Length > 1);
+
+    private static bool IsInstantOrTime(string value) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _) ||
+        TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out _);
 
     private static bool IsSingleToken(string text) =>
         ExpressionTokens.Split(text) is [var token] && token == text;
+
+    private sealed record PendingRow(ExpressionRow Row, string? PathError, string? ValueError);
+
+    private sealed record RowCheck(bool IsApplicable, ExpressionRow Row, string? PathError, string? ValueError);
 }
