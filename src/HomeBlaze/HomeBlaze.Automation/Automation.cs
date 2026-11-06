@@ -99,8 +99,15 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         return Task.CompletedTask;
     }
 
-    /// <summary>The keys of the rules in the order they process an input: those in <see cref="RuleOrder"/> first, then the others in key order.</summary>
-    public IReadOnlyList<string> GetRuleKeysInOrder() => AutomationCompiler.OrderKeys(Rules.Keys, RuleOrder);
+    /// <summary>
+    /// The rules with their keys in the order they process an input: those in <see cref="RuleOrder"/> first, then the others in key order.
+    /// Reads <see cref="Rules"/> once, so the pairs are consistent even when the configuration is replaced meanwhile.
+    /// </summary>
+    public IReadOnlyList<KeyValuePair<string, AutomationRule>> GetRulesInOrder()
+    {
+        var rules = Rules;
+        return [.. AutomationCompiler.OrderKeys(rules.Keys, RuleOrder).Select(key => new KeyValuePair<string, AutomationRule>(key, rules[key]))];
+    }
 
     public IDisposable Subscribe(IObserver<AutomationStateChangedEvent> observer) => _stateChanged.Subscribe(observer);
 

@@ -166,9 +166,9 @@ public class AutomationCompilerTests
     }
 
     [Theory]
-    [InlineData("", 0)]
-    [InlineData("   ", 3)]
-    public void WhenAPropertyTriggerExpressionIsBlank_ThenItIsRejected(string expression, int position)
+    [InlineData("")]
+    [InlineData("   ")]
+    public void WhenAPropertyTriggerExpressionIsBlank_ThenItIsRejected(string expression)
     {
         // Arrange
         var rule = Rule(triggers: [new PropertyTrigger { Expression = expression }]);
@@ -179,7 +179,7 @@ public class AutomationCompilerTests
         // Assert
         Assert.False(isCompiled);
         Assert.Null(compiled);
-        Assert.Equal($"Rule 'Storm': trigger 1: expected a value at position {position}", error);
+        Assert.Equal("Rule 'Storm': trigger 1: the condition is empty", error);
     }
 
     [Fact]

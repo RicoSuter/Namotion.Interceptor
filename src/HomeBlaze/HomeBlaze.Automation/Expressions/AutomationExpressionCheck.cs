@@ -13,7 +13,7 @@ internal static class AutomationExpressionCheck
     private const string DisplayPipe = "display";
     private const string RawPipe = "raw";
 
-    /// <param name="text">The expression; null is empty and fails.</param>
+    /// <param name="text">The expression; null and white space are empty and fail.</param>
     /// <param name="allowsEvent">Whether an event is captured where the expression is evaluated.</param>
     /// <param name="expression">The expression, or null.</param>
     /// <param name="error">The error, or null.</param>
@@ -23,7 +23,14 @@ internal static class AutomationExpressionCheck
         [NotNullWhen(true)] out ParsedExpression? expression,
         [NotNullWhen(false)] out string? error)
     {
-        if (!ParsedExpression.TryParse(text ?? string.Empty, AutomationPaths.Separator, out expression, out error))
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            expression = null;
+            error = "the condition is empty";
+            return false;
+        }
+
+        if (!ParsedExpression.TryParse(text, AutomationPaths.Separator, out expression, out error))
         {
             return false;
         }

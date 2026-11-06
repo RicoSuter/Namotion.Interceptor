@@ -16,7 +16,9 @@ public class AutomationExpressionCheckTests
     [InlineData("subject/Name == WS90", false, "'subject' " + EventOnly)]
     [InlineData("now/Ticks > 1", false, "'now' has no members")]
     [InlineData("/Weather/Gust | raw", false, "An expression of an automation takes no pipes")]
-    [InlineData("", false, "expected a value at position 0")]
+    [InlineData("", false, "the condition is empty")]
+    [InlineData("   ", false, "the condition is empty")]
+    [InlineData("/Weather/Gust >", false, "expected a value after '>' at position 15")]
     public void WhenAnExpressionIsParsed_ThenItsVariablesAndPipesMustFitAutomations(string text, bool allowsEvent, string? expectedError)
     {
         // Act
