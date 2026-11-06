@@ -52,15 +52,7 @@ internal static class AutomationCompiler
         [NotNullWhen(true)] out CompiledRule? compiled,
         [NotNullWhen(false)] out string? error)
     {
-        var errors = new List<string>();
-        var candidate = new CompiledRule(key, rule, CompileGuard(rule.Guard, errors));
-        if (rule.InState is { } state && !states.Contains(state, StringComparer.Ordinal))
-        {
-            errors.Add($"'{state}' is not a state");
-        }
-
-        CompileTriggers(candidate, rule.Triggers, errors);
-        CheckActions(rule.Actions, candidate.AllowsEvent, states, errors);
+        var candidate = Compile(key, rule, states, out var errors);
         if (errors.Count > 0)
         {
             compiled = null;
@@ -71,6 +63,27 @@ internal static class AutomationCompiler
         compiled = candidate;
         error = null;
         return true;
+    }
+
+    /// <summary>The errors of a rule as <see cref="TryCompileRule"/> finds them, without the name of the rule in front.</summary>
+    public static IReadOnlyList<string> GetRuleErrors(string key, AutomationRule rule, IReadOnlyList<string> states)
+    {
+        Compile(key, rule, states, out var errors);
+        return errors;
+    }
+
+    private static CompiledRule Compile(string key, AutomationRule rule, IReadOnlyList<string> states, out List<string> errors)
+    {
+        errors = [];
+        var candidate = new CompiledRule(key, rule, CompileGuard(rule.Guard, errors));
+        if (rule.InState is { } state && !states.Contains(state, StringComparer.Ordinal))
+        {
+            errors.Add($"'{state}' is not a state");
+        }
+
+        CompileTriggers(candidate, rule.Triggers, errors);
+        CheckActions(rule.Actions, candidate.AllowsEvent, states, errors);
+        return candidate;
     }
 
     /// <summary>The keys in the configured order first, then the remaining keys in ordinal order.</summary>
@@ -94,7 +107,8 @@ internal static class AutomationCompiler
     public static string DescribeAction(AutomationAction? action, int index) =>
         action is { Id.Length: > 0 } ? $"action '{action.Id}'" : $"action {index + 1}";
 
-    private static List<string> CheckStates(IReadOnlyList<string> states, string? initialState)
+    /// <summary>The errors of the state names and the initial state.</summary>
+    public static List<string> CheckStates(IReadOnlyList<string> states, string? initialState)
     {
         var errors = new List<string>();
         var names = new HashSet<string>(StringComparer.Ordinal);

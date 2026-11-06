@@ -53,6 +53,7 @@ namespace HomeBlaze.Automation
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        public System.Collections.Generic.IReadOnlyList<string> GetRuleKeysInOrder() { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Enters the initial state, clears the last trigger times and starts every rule ove" +
@@ -181,6 +182,18 @@ namespace HomeBlaze.Automation
         public string? Note { get; init; }
         public required int Number { get; init; }
         public bool? Result { get; init; }
+    }
+    public sealed class AutomationValidationError : System.IEquatable<HomeBlaze.Automation.AutomationValidationError>
+    {
+        public AutomationValidationError(string? RuleKey, string Message) { }
+        public string Message { get; init; }
+        public string? RuleKey { get; init; }
+    }
+    public static class AutomationValidator
+    {
+        public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }
+        public static string? ValidateExpression(string? text, bool allowsEvent) { }
+        public static string? ValidateTemplate(string? text, bool allowsEvent) { }
     }
     public sealed class ChangeStateAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.ChangeStateAction>
     {
