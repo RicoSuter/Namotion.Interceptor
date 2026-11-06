@@ -10,7 +10,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// Binds configured texts to the parameters of an operation or to a property. The text of a string is a text template.
 /// Any other text is a constant when it converts to the type, otherwise an expression whose value is converted; an
 /// unknown expression fails. A record parameter binds its members from <c>parameter.Member</c> keys, as the operation
-/// dialog does per member. Keys match without regard to case. Collects a display of the bound values.
+/// dialog does per member. Keys match without regard to case, and a key that names no parameter or member fails. Values
+/// are the raw stored values, as in expressions and configuration files, so a constant is never scaled by the unit of
+/// its parameter. Collects a display of the bound values.
 /// </summary>
 internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allowsEvent)
 {
@@ -27,6 +29,12 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
         [NotNullWhen(false)] out string? error)
     {
         var inputs = parameters.Where(parameter => parameter.RequiresInput).ToArray();
+        if (!TryValidateKeys(inputs, arguments, out error))
+        {
+            values = null;
+            return false;
+        }
+
         var bound = new object?[inputs.Length];
         for (var index = 0; index < inputs.Length; index++)
         {
@@ -60,6 +68,50 @@ internal sealed class ArgumentBinder(AutomationEvaluation evaluation, bool allow
 
         return TryEvaluate(name, text, type, out value, out error);
     }
+
+    private static bool TryValidateKeys(
+        MethodParameter[] inputs, IReadOnlyDictionary<string, string> arguments, [NotNullWhen(false)] out string? error)
+    {
+        foreach (var key in arguments.Keys)
+        {
+            if (!TryValidateKey(inputs, arguments, key, out error))
+            {
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    private static bool TryValidateKey(
+        MethodParameter[] inputs, IReadOnlyDictionary<string, string> arguments, string key, [NotNullWhen(false)] out string? error)
+    {
+        error = null;
+        if (inputs.Any(parameter => IsSame(parameter.Name, key)))
+        {
+            return true;
+        }
+
+        var separator = key.IndexOf('.');
+        var owner = separator < 0 ? null : inputs.FirstOrDefault(parameter => IsSame(parameter.Name, key[..separator]));
+        if (owner is null || !ParameterConverter.IsSupportedObject(owner.Type))
+        {
+            error = $"The argument '{key}' matches no parameter of the operation";
+        }
+        else if (!ParameterConverter.GetObjectMembers(owner.Type).Any(member => IsSame(member.Name, key[(separator + 1)..])))
+        {
+            error = $"The argument '{key}' matches no member of '{owner.Name}'";
+        }
+        else if (TryFind(arguments, owner.Name, out _))
+        {
+            error = $"The argument '{owner.Name}' is given both whole and per member";
+        }
+
+        return error is null;
+    }
+
+    private static bool IsSame(string left, string right) => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
     private bool TryBindParameter(
         MethodParameter parameter, IReadOnlyDictionary<string, string> arguments, out object? value, [NotNullWhen(false)] out string? error)

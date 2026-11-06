@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Messaging;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
@@ -155,5 +156,111 @@ public class ArgumentBinderTests
         // Assert
         Assert.False(isBound);
         Assert.Equal("The argument 'message' is invalid: 'event' is only available in event filters and in the arguments of a rule with an event trigger", error);
+    }
+
+    [Fact]
+    public void WhenAConstantIsBoundToAPercentParameter_ThenItIsTheRawStoredValue()
+    {
+        // Arrange
+        var binder = CreateBinder();
+        var parameter = new MethodParameter { Name = "volume", Type = typeof(decimal), Unit = StateUnit.Percent };
+
+        // Act
+        var isBound = binder.TryBindParameters([parameter], new Dictionary<string, string> { ["volume"] = "0.5" }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        Assert.Equal(0.5m, Assert.Single(values!));
+    }
+
+    [Fact]
+    public void WhenAnArgumentKeyMatchesNoParameter_ThenBindingFails()
+    {
+        // Arrange
+        var binder = CreateBinder();
+        var arguments = new Dictionary<string, string> { ["speed"] = "5", ["Sped"] = "6" };
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<int>("speed")], arguments, out _, out var error);
+
+        // Assert
+        Assert.False(isBound);
+        Assert.Equal("The argument 'Sped' matches no parameter of the operation", error);
+    }
+
+    [Fact]
+    public void WhenAMemberKeyMatchesNoMemberOfTheRecord_ThenBindingFails()
+    {
+        // Arrange
+        var binder = CreateBinder();
+        var arguments = new Dictionary<string, string> { ["notification.Message"] = "Hi", ["notification.Typo"] = "x" };
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<Notification>("notification")], arguments, out _, out var error);
+
+        // Assert
+        Assert.False(isBound);
+        Assert.Equal("The argument 'notification.Typo' matches no member of 'notification'", error);
+    }
+
+    [Fact]
+    public void WhenAParameterHasAWholeKeyAndMemberKeys_ThenBindingFails()
+    {
+        // Arrange
+        var binder = CreateBinder();
+        var arguments = new Dictionary<string, string> { ["notification"] = "Hi", ["notification.Message"] = "Hi" };
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<Notification>("notification")], arguments, out _, out var error);
+
+        // Assert
+        Assert.False(isBound);
+        Assert.Equal("The argument 'notification' is given both whole and per member", error);
+    }
+
+    [Fact]
+    public void WhenAnArgumentReadsTheEventWithAnEventTrigger_ThenItBindsTheEventValue()
+    {
+        // Arrange
+        var payload = new TestPressEvent { Timestamp = Now, DeviceId = "b1", Gesture = "Release" };
+        var evaluation = new AutomationEvaluation(_graph.Resolver, _rule, Now, TimeZoneInfo.Utc, new CapturedEvent(_sensor, payload));
+        var binder = new ArgumentBinder(evaluation, allowsEvent: true);
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<string>("message")], new Dictionary<string, string> { ["message"] = "{{ event/Gesture }}" }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        Assert.Equal("Release", Assert.Single(values!));
+    }
+
+    [Fact]
+    public void WhenARecordParameterLacksARequiredMember_ThenBindingFailsWithTheError()
+    {
+        // Arrange
+        var binder = CreateBinder();
+        var arguments = new Dictionary<string, string> { ["notification.Title"] = "Hi" };
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<Notification>("notification")], arguments, out _, out var error);
+
+        // Assert
+        Assert.False(isBound);
+        Assert.StartsWith("The argument 'notification' is invalid: ", error);
+        Assert.Contains("Message", error);
+    }
+
+    [Fact]
+    public void WhenAnEnumArgumentIsAConstant_ThenItIsBoundByName()
+    {
+        // Arrange
+        var binder = CreateBinder();
+
+        // Act
+        var isBound = binder.TryBindParameters([Parameter<NotificationPriority>("priority")], new Dictionary<string, string> { ["priority"] = "high" }, out var values, out var error);
+
+        // Assert
+        Assert.True(isBound, error);
+        Assert.Equal(NotificationPriority.High, Assert.Single(values!));
     }
 }
