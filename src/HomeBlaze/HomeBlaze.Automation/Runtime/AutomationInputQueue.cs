@@ -3,7 +3,7 @@ using System.Threading.Channels;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The bounded input queue of one automation. Writers only enqueue and never wait. An input that does not fit, or that
+/// The bounded input queue of one automation. Writers of changes and events never wait. An input that does not fit, or that
 /// continues a feedback chain beyond <see cref="MaxChainDepth"/>, is dropped and counted, and the worker reports the
 /// count; external events are never dropped silently. The chain depth flows with the asynchronous flow of a run while the
 /// run is active, so the property writes, operations and events of a run cause inputs one deeper than the input of the
@@ -58,6 +58,36 @@ internal sealed class AutomationInputQueue
 
         Interlocked.Increment(ref _overloaded);
         return false;
+    }
+
+    /// <summary>
+    /// Enqueues an input that a caller waits for, waiting for room instead of dropping it. Returns false once the queue is
+    /// closed.
+    /// </summary>
+    public async Task<bool> EnqueueWhenRoomAsync(AutomationInput input)
+    {
+        while (await _channel.Writer.WaitToWriteAsync())
+        {
+            if (_channel.Writer.TryWrite(input))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Refuses every later input and returns the inputs that were still queued.</summary>
+    public List<AutomationInput> Close()
+    {
+        _channel.Writer.TryComplete();
+        var remaining = new List<AutomationInput>();
+        while (_channel.Reader.TryRead(out var input))
+        {
+            remaining.Add(input);
+        }
+
+        return remaining;
     }
 
     public ValueTask<AutomationInput> ReadAsync(CancellationToken cancellationToken) => _channel.Reader.ReadAsync(cancellationToken);

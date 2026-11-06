@@ -14,6 +14,7 @@ internal sealed class AutomationTriggers
     private readonly AutomationInputQueue _queue;
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
+    private readonly List<CompiledRule> _droppedActivations = [];
 
     public AutomationTriggers(AutomationServices services, AutomationInputQueue queue, ILogger logger)
     {
@@ -26,7 +27,8 @@ internal sealed class AutomationTriggers
 
     /// <summary>
     /// Subscribes the event triggers of the rules that became active, publishes the watched set of all active rules and
-    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input.
+    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input. An
+    /// activation the queue drops is kept for <see cref="Resynchronize"/>.
     /// </summary>
     public void Activate(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
     {
@@ -36,10 +38,30 @@ internal sealed class AutomationTriggers
         }
 
         _propertyTriggers.Refresh(rules);
-        if (activated.Count > 0)
+        if (activated.Count > 0 && !_queue.TryEnqueue(new ActivationInput(activated, AutomationInputQueue.CausedChainDepth)))
         {
-            _queue.TryEnqueue(new ActivationInput(activated, AutomationInputQueue.CausedChainDepth));
+            _droppedActivations.AddRange(activated);
         }
+    }
+
+    /// <summary>
+    /// Evaluates the triggers again after the queue dropped inputs: forgets the observed values, so that a dropped change
+    /// is read from the graph, binds the paths again, evaluates the active property triggers and activates those whose
+    /// activation was dropped. Returns the runs they request in rule order.
+    /// </summary>
+    public IReadOnlyList<RunRequest> Resynchronize(IReadOnlyList<CompiledRule> rules)
+    {
+        _propertyTriggers.ForgetValues();
+        var requests = new List<RunRequest>(OnGraphChanged(rules));
+        if (_droppedActivations.Count == 0)
+        {
+            return requests;
+        }
+
+        var activated = _droppedActivations.Where(rule => rule.IsActivated && rules.Contains(rule)).Distinct().ToList();
+        _droppedActivations.Clear();
+        requests.AddRange(_propertyTriggers.Activate(activated, rules));
+        return [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
     }
 
     public static void Deactivate(CompiledRule rule)
@@ -82,4 +104,17 @@ internal sealed class AutomationTriggers
     /// <summary>Activates the property triggers of the rules and returns the runs they request at once.</summary>
     public IReadOnlyList<RunRequest> OnActivation(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules) =>
         _propertyTriggers.Activate(activated, rules);
+
+    private static int IndexOf(IReadOnlyList<CompiledRule> rules, CompiledRule rule)
+    {
+        for (var index = 0; index < rules.Count; index++)
+        {
+            if (ReferenceEquals(rules[index], rule))
+            {
+                return index;
+            }
+        }
+
+        return rules.Count;
+    }
 }

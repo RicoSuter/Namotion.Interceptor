@@ -1,6 +1,7 @@
 using System.Reactive;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -139,5 +140,23 @@ public class AutomationRunTests
         // Assert
         Assert.Equal(sizeAfterOneRun, new FileInfo(host.CheckpointPath).Length);
         Assert.Contains("\"runCount\": 2", await File.ReadAllTextAsync(host.CheckpointPath));
+    }
+
+    [Fact]
+    public async Task WhenTheAutomationStopsWithAFlushPending_ThenTheFlushCompletes()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+            automation.Rules = Keyed(("wait", On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait")))));
+        host.Weather.Rain = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        var flush = host.FlushAsync();
+
+        // Act
+        await host.StopAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => flush.IsCompleted, timeout: TimeSpan.FromSeconds(5));
+        Assert.True(flush.IsCompletedSuccessfully);
     }
 }

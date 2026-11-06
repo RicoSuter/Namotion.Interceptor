@@ -60,6 +60,9 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
         return ObserveWhere(rules, _ => true);
     }
 
+    /// <summary>Forgets the observed values, so that the next evaluations read the properties, such as after changes were dropped.</summary>
+    public void ForgetValues() => _values.Clear();
+
     /// <summary>Resolves the properties of the active triggers again and publishes them.</summary>
     public void Refresh(IReadOnlyList<CompiledRule> rules)
     {

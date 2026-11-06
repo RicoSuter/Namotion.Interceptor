@@ -53,5 +53,8 @@ internal sealed class ObservedValues
         }
     }
 
+    /// <summary>Forgets every value, so that each property is read again on its next evaluation.</summary>
+    public void Clear() => _values.Clear();
+
     private readonly record struct ObservedValue(object? Value, long Revision);
 }

@@ -101,7 +101,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     public IDisposable Subscribe(IObserver<AutomationStateChangedEvent> observer) => _stateChanged.Subscribe(observer);
 
-    /// <summary>Completes once every input queued so far, and every input those caused, was processed.</summary>
+    /// <summary>Completes once every input queued so far, and every input those caused, was processed, or the worker stopped.</summary>
     internal Task FlushAsync() => Volatile.Read(ref _runtime)?.FlushAsync() ?? Task.CompletedTask;
 
     internal void PublishStateChanged(AutomationStateChangedEvent stateChanged) => _stateChanged.OnNext(stateChanged);
@@ -120,8 +120,9 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         await base.StopAsync(cancellationToken);
 
         // A stop before the worker ran leaves the runtime of the start behind.
-        if (Interlocked.Exchange(ref _runtime, null) is not null)
+        if (Interlocked.Exchange(ref _runtime, null) is { } runtime)
         {
+            runtime.Close();
             Status = ServiceStatus.Stopped;
         }
     }
@@ -174,7 +175,8 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     partial void OnRuleOrderChanging(ref string[] newValue, ref bool cancel) => newValue ??= [];
 
     // A Save replaces the rule instances; the new ones take the run properties before they are attached, so that the
-    // history of a run count never sees it start again.
+    // history of a run count never sees it start again. The worker copies them again when it applies the configuration,
+    // after the runs recorded on the old instances meanwhile.
     partial void OnRulesChanging(ref Dictionary<string, AutomationRule> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<string, AutomationRule>();

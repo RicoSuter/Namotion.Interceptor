@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -84,5 +85,55 @@ public class AutomationConfigurationTests
 
         // Assert
         Assert.DoesNotContain("\"retract\"", await File.ReadAllTextAsync(host.CheckpointPath));
+    }
+
+    [Fact]
+    public async Task WhenARunEndsAfterTheRulesWereReplaced_ThenTheNewRuleKeepsTheRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("wait", On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait")))));
+        host.Weather.Rain = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        var replacement = On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait"));
+
+        // Act
+        host.Automation.Rules = Keyed(("wait", replacement));
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        host.Blinds.Release();
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Same(replacement, host.Rule("wait"));
+        Assert.Equal(1L, replacement.RunCount);
+        Assert.Equal(AutomationRunOutcome.Succeeded, replacement.LastRunOutcome);
+        Assert.Equal(AutomationTestHost.Start, replacement.LastTriggeredAt);
+    }
+
+    [Fact]
+    public async Task WhenValidRulesAreSetButNotApplied_ThenTheNewRuleSaysItIsNotAppliedYet()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+
+        // Act
+        host.Automation.Rules = Keyed(("retract", Retract("/Weather/Gust > 5")));
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("Not applied yet", host.Rule("retract").Status);
+    }
+
+    [Fact]
+    public async Task WhenAnInvalidConfigurationAddsARule_ThenTheNewRuleSaysTheConfigurationIsInvalid()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
+
+        // Act
+        await SaveAsync(host, Keyed(("retract", Retract()), ("broken", Retract("/Weather/Gust >"))));
+
+        // Assert
+        Assert.Equal("Not applied: the configuration is invalid", host.Rule("broken").Status);
     }
 }

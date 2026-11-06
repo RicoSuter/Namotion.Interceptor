@@ -31,15 +31,25 @@ internal sealed class AutomationRuntime
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
-    public Task FlushAsync()
+    public async Task FlushAsync()
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_queue.TryEnqueue(new FlushInput(completion)))
+        if (await _queue.EnqueueWhenRoomAsync(new FlushInput(completion)))
         {
-            completion.TrySetException(new InvalidOperationException("The input queue of the automation is full."));
+            await completion.Task;
         }
+    }
 
-        return completion.Task;
+    /// <summary>Refuses later inputs and completes the flushes still queued, since nothing is processed anymore.</summary>
+    public void Close()
+    {
+        foreach (var input in _queue.Close())
+        {
+            if (input is FlushInput flush)
+            {
+                flush.Completion.TrySetResult();
+            }
+        }
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -60,6 +70,7 @@ internal sealed class AutomationRuntime
         finally
         {
             _engine.Stop();
+            Close();
         }
     }
 

@@ -75,6 +75,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         _appliedConfigurationVersion = version;
         var rules = _automation.Rules;
+        TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
         if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
         {
@@ -104,20 +105,30 @@ internal sealed class AutomationEngine : IRuleRunHost
         return DispatchAsync(_triggers.OnActivation(rules, _snapshot.Rules), cancellationToken);
     }
 
+    /// <summary>
+    /// Reports the dropped inputs and evaluates the triggers against the current values. After a feedback chain was
+    /// stopped, the runs this requests are skipped, because running them would continue the chain.
+    /// </summary>
     public Task ReportFaultsAsync(QueueFaults faults, CancellationToken cancellationToken)
     {
-        if (faults.FeedbackChains > 0)
+        if (faults.Overloaded > 0)
         {
-            _status.Fail($"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped: {faults.FeedbackChains} inputs were dropped.");
+            _status.Fail($"The input queue overflowed: {faults.Overloaded} inputs were dropped and the rules were evaluated again.");
         }
 
-        if (faults.Overloaded == 0)
+        if (faults.FeedbackChains == 0)
         {
-            return Task.CompletedTask;
+            return DispatchAsync(_triggers.Resynchronize(_snapshot.Rules), cancellationToken);
         }
 
-        _status.Fail($"The input queue overflowed: {faults.Overloaded} inputs were dropped and the rules were evaluated again.");
-        return OnGraphChangedAsync(cancellationToken);
+        _status.Fail($"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped: {faults.FeedbackChains} inputs were dropped.");
+        var skipped = _triggers.Resynchronize(_snapshot.Rules);
+        if (skipped.Count > 0)
+        {
+            _logger.LogWarning("The automation {Automation} skipped {Count} runs that would have continued a stopped feedback chain.", Name, skipped.Count);
+        }
+
+        return Task.CompletedTask;
     }
 
     public void ReportUnexpectedError(Exception exception)
@@ -126,8 +137,13 @@ internal sealed class AutomationEngine : IRuleRunHost
         _status.SetError(exception.Message);
     }
 
-    public void RefreshRuleStatuses() =>
-        RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.Services.TimeProvider.LocalTimeZone);
+    public void RefreshRuleStatuses()
+    {
+        var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
+            ? RuleStatusPublisher.NotAppliedInvalid
+            : RuleStatusPublisher.NotAppliedYet;
+        RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.Services.TimeProvider.LocalTimeZone, notApplied);
+    }
 
     public void Stop()
     {
@@ -138,6 +154,19 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
+
+    // Runs are recorded on the applied instances until now, so the copy made when the rules were set may miss the last
+    // ones; this one comes after every run and is the one that counts.
+    private void TakeRunsOfReplacedRules(IReadOnlyDictionary<string, AutomationRule> rules)
+    {
+        foreach (var rule in _snapshot.Rules)
+        {
+            if (rules.TryGetValue(rule.Key, out var subject) && !ReferenceEquals(subject, rule.Rule))
+            {
+                subject.CopyRuntimeStateFrom(rule.Rule);
+            }
+        }
+    }
 
     private void Replace(CompiledAutomation compiled)
     {
