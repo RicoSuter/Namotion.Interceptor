@@ -205,7 +205,9 @@ internal sealed class AutomationRuntime
             _queue.TryEnqueue(new PropertyChangedInput(
                 change.Property, change.GetNewValue<object?>(), change.Revision, AutomationInputQueue.CausedChainDepth));
         }
-        else if (change.Property.TryGetRegisteredProperty() is { CanContainSubjects: true })
+
+        // Also for a watched property, since paths through it may lead elsewhere now.
+        if (change.Property.TryGetRegisteredProperty() is { CanContainSubjects: true })
         {
             EnqueueOnce(ref _isGraphChangePending, new GraphChangedInput(AutomationInputQueue.CausedChainDepth));
         }

@@ -49,6 +49,13 @@ public partial class TestSensor
     public partial string? RawPayload { get; set; }
 }
 
+/// <summary>A subject that holds a replaceable sensor.</summary>
+[InterceptorSubject]
+public partial class TestSensorHolder
+{
+    public partial TestSensor? Sensor { get; set; }
+}
+
 /// <summary>A parent of rules with a state entry time, standing in for an automation.</summary>
 [InterceptorSubject]
 public partial class TestRuleHost

@@ -180,4 +180,25 @@ public class AutomationPropertyTriggerTests
         Assert.Equal(0, runsAtFifteenMinutes);
         Assert.Equal(1, host.Blinds.CloseCount);
     }
+
+    [Fact]
+    public async Task WhenAWatchedPropertyThatHoldsASubjectIsReplaced_ThenTheTriggerFollowsTheNewSubject()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Holder/Sensor != null and /Holder/Sensor/Gust > 8"), Invoke("/Blinds/Close")))));
+        var holder = new TestSensorHolder { Sensor = new TestSensor { Gust = 3 } };
+        host.Graph.Add("Holder", holder);
+        await host.FlushAsync();
+        var replacement = new TestSensor { Gust = 4 };
+
+        // Act
+        holder.Sensor = replacement;
+        await host.FlushAsync();
+        replacement.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
 }
