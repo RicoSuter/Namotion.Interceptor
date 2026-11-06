@@ -1,4 +1,3 @@
-@implements IDisposable
 @using global::HomeBlaze.Abstractions.Metadata
 @using Namotion.Interceptor.Registry.Abstractions
 
@@ -49,7 +48,7 @@
 
 @code {
     private const string ValueHelperText = "A value, or an expression such as /Weather/WindGust * 2";
-    private const string ValueKey = "value";
+    private const string ValueKey = ActionInputs.ValueKey;
 
     private AutomationAction _value = null!;
     private IReadOnlyList<ArgumentField>? _fields;
@@ -73,17 +72,9 @@
 
     [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
 
-    /// <summary>The draft that cannot be saved while an input of this action has an error.</summary>
-    [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
-
-    /// <summary>The <see cref="DraftItem{T}.Id"/> of the action, which keys the errors of its inputs in the draft.</summary>
-    [Parameter, EditorRequired] public string ItemId { get; set; } = string.Empty;
-
     [Parameter] public EventCallback<int> Moved { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
-
-    private string InputPrefix => PendingRowIds.ForItem(RuleKey, RulesSection.Actions, ItemId);
 
     // The component renders again after each edit, before its parent passes the new action down. A stale value in that
     // render would make a text field reload and lose what was just typed.
@@ -95,47 +86,10 @@
 
     private void Refresh()
     {
-        _fields = _value is InvokeOperationAction invoke ? GetFields(invoke.OperationPath) : null;
-        _targetType = _value is SetPropertyAction write ? ResolveType(write.PropertyPath) : null;
+        _fields = _value is InvokeOperationAction invoke ? ActionInputs.GetFields(Automation, RuleKey, invoke.OperationPath) : null;
+        _targetType = _value is SetPropertyAction write ? ActionInputs.GetTargetType(Automation, RuleKey, write.PropertyPath) : null;
         _isTextTarget = _targetType is not null && (Nullable.GetUnderlyingType(_targetType) ?? _targetType) == typeof(string);
-        Validate();
-    }
-
-    private IReadOnlyList<ArgumentField>? GetFields(string path) =>
-        AutomationPreview.ResolveTarget(Automation, RuleKey, path)?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
-
-    private Type? ResolveType(string path) => AutomationPreview.ResolveTarget(Automation, RuleKey, path)?.Type;
-
-    // The errors are registered in the draft, which cannot be saved meanwhile.
-    private void Validate()
-    {
-        Draft.ClearInputErrors(InputPrefix);
-        _errors = [];
-        switch (_value)
-        {
-            case InvokeOperationAction invoke when _fields is not null:
-                foreach (var field in _fields)
-                {
-                    AddError(field.Key, $"{field.Label}", ArgumentFields.Validate(GetArgument(invoke, field.Key), field.Type, field.IsRequired, Expressions));
-                }
-
-                break;
-            case SetPropertyAction write:
-                AddError(ValueKey, "Value", ArgumentFields.Validate(write.Value, _targetType, !_isTextTarget, Expressions));
-                break;
-        }
-    }
-
-    private void AddError(string key, string label, string? error)
-    {
-        if (error is null)
-        {
-            return;
-        }
-
-        _errors[key] = error;
-        var target = _value is InvokeOperationAction invoke ? invoke.OperationPath : (_value as SetPropertyAction)?.PropertyPath;
-        Draft.SetInputError($"{InputPrefix}{Uri.EscapeDataString(key)}", new AutomationValidationError(RuleKey, $"{target}, {label}: {error}"));
+        _errors = ActionInputs.Check(_value, _fields, _targetType, Expressions).ToDictionary(error => error.Key, error => error.Error);
     }
 
     private string? GetError(string key) => _errors.GetValueOrDefault(key);
@@ -164,7 +118,7 @@
 
                 group = fieldGroup;
                 var label = field.IsRequired ? $"{field.Label} *" : field.Label;
-                var argument = GetArgument(invoke, field.Key);
+                var argument = ActionInputs.GetArgument(invoke, field.Key);
                 var error = GetError(field.Key);
                 if (field.IsTemplate)
                 {
@@ -213,18 +167,10 @@
         return ValueChanged.InvokeAsync(action);
     }
 
-    // Each keystroke of the path is a change, so the arguments are dropped only once the path leads to an operation, and
-    // then only those that its parameters do not have, because the binder rejects such a key.
-    private Task SetOperationAsync(string? path)
-    {
-        if (_value is not InvokeOperationAction invoke)
-        {
-            return Task.CompletedTask;
-        }
-
-        var operationPath = path ?? string.Empty;
-        return SetAsync(invoke with { OperationPath = operationPath, Arguments = ArgumentFields.KeepKnown(GetFields(operationPath), invoke.Arguments) });
-    }
+    // Each keystroke of the path is a change, so the arguments stay as they are; the arguments that the operation does not
+    // take are dropped when the rule is saved.
+    private Task SetOperationAsync(string? path) =>
+        _value is InvokeOperationAction invoke ? SetAsync(invoke with { OperationPath = path ?? string.Empty }) : Task.CompletedTask;
 
     private Task SetPropertyPathAsync(string? path) =>
         _value is SetPropertyAction write ? SetAsync(write with { PropertyPath = path ?? string.Empty }) : Task.CompletedTask;
@@ -256,9 +202,6 @@
         return SetAsync(invoke with { Arguments = arguments });
     }
 
-    private static string? GetArgument(InvokeOperationAction invoke, string key) =>
-        invoke.Arguments.FirstOrDefault(argument => string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
-
     /// <summary>The name of the record parameter that a member field belongs to, or null for a field of a parameter.</summary>
     private static string? GetGroup(string key)
     {
@@ -273,6 +216,4 @@
         property.TryGetMethodMetadata() is null && property.HasPublicSetter && !property.IsConfigurationProperty();
 
     private static string FormatPolicy(ActionErrorPolicy policy) => policy == ActionErrorPolicy.StopRule ? "Stop rule" : "Continue";
-
-    public void Dispose() => Draft.ClearInputErrors(InputPrefix);
 }

@@ -8,6 +8,7 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 public sealed class AutomationDraft
 {
     private readonly Dictionary<string, AutomationValidationError> _inputErrors = new(StringComparer.Ordinal);
+    private Automation? _automation;
 
     public string? Name { get; set; }
 
@@ -22,7 +23,7 @@ public sealed class AutomationDraft
 
     public static AutomationDraft From(Automation automation)
     {
-        var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState };
+        var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, _automation = automation };
         draft.States.AddRange(automation.States);
         draft.Rules.AddRange(automation.GetRuleKeysInOrder().Select(key => RuleDraft.From(key, automation.Rules[key])));
         return draft;
@@ -39,7 +40,7 @@ public sealed class AutomationDraft
         automation.States = [.. States];
         automation.InitialState = States.Count == 0 ? null : InitialState;
         automation.RuleOrder = [.. Rules.Select(rule => rule.Key)];
-        automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule());
+        automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetFields(automation, rule.Key, path)));
     }
 
     /// <summary>The errors of the configuration as the automation and the editor check it, and the errors of inputs that do not parse.</summary>
@@ -50,8 +51,20 @@ public sealed class AutomationDraft
             States.Count == 0 ? null : InitialState,
             Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule()),
             [.. Rules.Select(rule => rule.Key)]),
+        .. CheckActionInputs(),
         .. _inputErrors.Values
     ];
+
+    // The inputs of the actions are checked against the operations and properties they target, wherever the editor is showing.
+    private IEnumerable<AutomationValidationError> CheckActionInputs() =>
+        _automation is not { } automation
+            ? []
+            : Rules.SelectMany(rule =>
+            {
+                var expressions = new RuleExpressions(automation, rule.Key, rule.AllowsEvent);
+                return rule.Actions.SelectMany((item, index) => ActionInputs.Check(item.Value, automation, rule.Key, expressions)
+                    .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
+            });
 
     /// <summary>Sets or clears the error of an input whose text does not parse, such as a duration, so that the draft cannot be saved meanwhile.</summary>
     public void SetInputError(string inputId, AutomationValidationError? error)
@@ -63,15 +76,6 @@ public sealed class AutomationDraft
         else
         {
             _inputErrors[inputId] = error;
-        }
-    }
-
-    /// <summary>Clears the errors of the inputs whose id starts with the prefix, such as the ids of the fields of a removed entry.</summary>
-    public void ClearInputErrors(string idPrefix)
-    {
-        foreach (var inputId in _inputErrors.Keys.Where(inputId => inputId.StartsWith(idPrefix, StringComparison.Ordinal)).ToList())
-        {
-            _inputErrors.Remove(inputId);
         }
     }
 

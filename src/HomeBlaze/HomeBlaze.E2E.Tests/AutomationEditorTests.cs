@@ -445,6 +445,141 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenAnArgumentIsMissingAndAnotherRuleIsSelected_ThenSaveStaysDisabled()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await dialog.GetByTestId("automation-add-call-operation").ClickAsync();
+            var action = dialog.GetByTestId("automation-action").Last;
+            await action.GetByLabel("Call operation", new() { Exact = true }).FillAsync("/Demo/Motor/RunTest");
+            await action.GetByLabel("Speed").FillAsync("50");
+            var save = dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
+            await Assertions.Expect(save).ToBeDisabledAsync();
+
+            // Act
+            await dialog.GetByTestId("automation-rule-item").Filter(new() { HasTextString = "Finished" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByLabel("Rule name")).ToHaveValueAsync("Finished", new() { Timeout = Timeout });
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "General" }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("action 'call-1': DurationSeconds: Required", new() { Timeout = Timeout });
+            await Assertions.Expect(save).ToBeDisabledAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStoredActionLacksARequiredArgument_ThenSaveIsDisabledWithTheReasonListed()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["finished"].Actions =
+            [
+                new InvokeOperationAction
+                {
+                    Id = "call-1",
+                    OperationPath = "/Demo/Motor/RunTest",
+                    Arguments = new Dictionary<string, string> { ["speed"] = "50" }
+                }
+            ];
+        });
+        try
+        {
+            // Act
+            var (_, dialog) = await OpenEditorAsync(name);
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("Rule 'Finished': action 'call-1': DurationSeconds: Required", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeDisabledAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheLastEventTriggerIsRemovedWhileAnArgumentReadsTheEvent_ThenTheErrorIsListedAtOnce()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].Triggers =
+            [
+                new SubjectEventTrigger { SubjectPath = "..", EventType = "AutomationStateChangedEvent" },
+                new PropertyTrigger { Expression = "/Demo/Motor/Temperature > 1000" }
+            ];
+            configured.Rules["started"].Actions =
+            [
+                new SetPropertyAction { Id = "set-1", PropertyPath = "/Demo/Motor/TargetSpeed", Value = "event/Timestamp" }
+            ];
+        });
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-event-trigger")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
+
+            // Act
+            await dialog.GetByTestId("automation-event-trigger").GetByRole(AriaRole.Button, new() { Name = "Remove trigger" }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("action 'set-1': Value", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnOperationActionHasAnArgumentItDoesNotTake_ThenTheSavedFileLacksIt()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].Actions =
+            [
+                new InvokeOperationAction
+                {
+                    Id = "call-1",
+                    OperationPath = "/Demo/Motor/RunTest",
+                    Arguments = new Dictionary<string, string> { ["speed"] = "50", ["durationSeconds"] = "5", ["gone"] = "x" }
+                }
+            ];
+        });
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Washing machine");
+
+            // Act
+            await SaveAsync(page, dialog);
+
+            // Assert
+            var json = await _fixture.ReadFileAsync(filePath);
+            Assert.Contains("\"durationSeconds\": \"5\"", json);
+            Assert.DoesNotContain("gone", json);
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheRulesTabIsOpenedAndRulesAreSelected_ThenTheDialogStaysClean()
     {
         // Arrange

@@ -252,4 +252,46 @@ public class AutomationDraftTests
         Assert.Equal("Done", arguments["notification.Message"]);
         Assert.Equal("Idle", Assert.IsType<ChangeStateAction>(source.Actions[1]).TargetState);
     }
+
+    [Fact]
+    public void WhenAPropertyWriteHasAPathButNoValue_ThenTheDraftNamesTheActionAndWithoutAPathNothingIsRequired()
+    {
+        // Arrange
+        var draft = AutomationDraft.From(CreateWasher());
+        var rule = draft.FindRule("finished")!;
+        rule.AddSetProperty();
+        var item = rule.Actions[^1];
+
+        // Act
+        var withoutPath = draft.Validate();
+        item.Value = new SetPropertyAction { Id = item.Value.Id, PropertyPath = "/Demo/Motor/TargetSpeed" };
+        var withPath = draft.Validate();
+
+        // Assert
+        Assert.DoesNotContain(withoutPath, error => error.Message.Contains("Required"));
+        Assert.Contains(withPath, error => error.RuleKey == rule.Key && error.Message == "action 'set-1': Value: Required");
+    }
+
+    [Fact]
+    public void WhenTheActionsAreSaved_ThenArgumentsThatTheOperationDoesNotTakeAreDropped()
+    {
+        // Arrange
+        var rule = AutomationDraft.From(CreateWasher()).FindRule("finished")!;
+        rule.AddCallOperation();
+        rule.Actions[^1].Value = new InvokeOperationAction
+        {
+            Id = "call-2",
+            OperationPath = "/Demo/Motor/RunTest",
+            Arguments = new Dictionary<string, string> { ["speed"] = "5", ["gone"] = "x" }
+        };
+        IReadOnlyList<ArgumentField> fields = [new("speed", "Speed", typeof(int), true, false, null)];
+
+        // Act
+        var saved = rule.ToRule(path => path == "/Demo/Motor/RunTest" ? fields : null);
+
+        // Assert
+        var kept = saved.Actions.OfType<InvokeOperationAction>().Single(action => action.Id == "call-2");
+        Assert.Equal(["speed"], kept.Arguments.Keys.ToArray());
+        Assert.Equal("/Notify/Send", saved.Actions.OfType<InvokeOperationAction>().Single(action => action.Id == "call-1").OperationPath);
+    }
 }

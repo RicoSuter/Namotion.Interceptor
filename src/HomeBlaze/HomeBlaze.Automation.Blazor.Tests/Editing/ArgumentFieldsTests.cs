@@ -188,4 +188,28 @@ public class ArgumentFieldsTests
         Assert.Null(text);
         Assert.Equal("Required", empty);
     }
+
+    [Fact]
+    public void WhenAnActionIsChecked_ThenEachFieldHasItsOwnErrorAndAnEventNeedsAnEventTrigger()
+    {
+        // Arrange
+        IReadOnlyList<ArgumentField> fields =
+        [
+            new("speed", "Speed", typeof(int), true, false, null),
+            new("duration", "Duration", typeof(int), true, false, null)
+        ];
+        var invoke = new InvokeOperationAction { Arguments = new Dictionary<string, string> { ["speed"] = "event/Value" } };
+        var withoutEvent = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: false);
+        var withEvent = new RuleExpressions(TestAutomations.Create(), "rule", allowsEvent: true);
+
+        // Act
+        var without = ActionInputs.Check(invoke, fields, null, withoutEvent);
+        var with = ActionInputs.Check(invoke, fields, null, withEvent);
+
+        // Assert
+        Assert.Equal(["speed", "duration"], without.Select(error => error.Key).ToArray());
+        Assert.Equal(["duration"], with.Select(error => error.Key).ToArray());
+        Assert.Equal("Duration", with[0].Label);
+        Assert.Equal("Required", with[0].Error);
+    }
 }
