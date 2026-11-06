@@ -247,7 +247,7 @@ public sealed class AuthorizationPolicy
     }
 
     // A deny rule fails closed: when some path of the subject could not be written, it may be the one the rule names,
-    // and it matches the structural spellings of each link, which a property added later cannot shadow.
+    // and it matches the structural spellings of each link whether or not a property shadows them.
     private bool MatchesPaths(PathPattern[]? patterns, bool isDeny, ref MatchContext context)
     {
         if (patterns is null)
@@ -343,11 +343,10 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // Every path of the subject as of one instant of the graph; a root has the single empty path. Incomplete when a path
-    // could not be written, more than MaxPaths exist, the subject has parents but no path was found, the subject or one
-    // on a path is no longer attached, or the graph changed during every attempt, which also lists no path, so an allow
-    // cannot match a path that never existed. In a subject evaluation the reads are only recorded, for the evaluation
-    // to check, and each subject's paths are built once per attempt.
+    // Every path of the subject as of one instant of the graph; a root has the single empty path. When the graph changed
+    // during every attempt, no path is listed, so an allow cannot match a path that never existed. In a subject
+    // evaluation the reads are only recorded, for the evaluation to check, and each subject's paths are built once per
+    // attempt.
     private PathList GetPaths(RegisteredSubject subject, ref MatchContext context)
     {
         if (context.SharedState is { } sharedState)

@@ -21,7 +21,7 @@ internal sealed class PathPattern
         _segments = segments;
     }
 
-    /// <exception cref="AuthorizationException">The pattern is empty, starts with a path separator of another provider, is malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
+    /// <exception cref="AuthorizationException">The pattern is empty, contains a control or format character, starts with a path separator of another provider, is malformed, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it has no segment or its last segment has an index.</exception>
     public static PathPattern Parse(string pattern, PathProviderBase pathProvider, string roleName)
     {
         if (pattern.Length == 0)

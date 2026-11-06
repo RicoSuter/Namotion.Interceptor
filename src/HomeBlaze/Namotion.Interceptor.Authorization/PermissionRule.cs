@@ -15,15 +15,13 @@ public sealed record PermissionRule
 {
     /// <summary>
     /// Gets the path patterns, each matching a member's whole path, the path of its subject followed by the member's
-    /// segment; empty for everywhere. A pattern for a branch ends in <c>**</c>. The syntax is described in
-    /// docs/authorization.md.
+    /// segment; empty for everywhere. Patterns use the syntax of the path provider given to
+    /// <see cref="AuthorizationPolicy.Compile"/>; <c>*</c> alone matches one segment, <c>**</c> zero or more, and
+    /// <c>*</c> inside a segment or index is a glob over its text. A pattern for a branch ends in <c>**</c>.
     /// </summary>
     /// <remarks>
     /// A subject reachable by several paths matches when any of them does. When the paths of a subject cannot all be
-    /// listed (a path cannot be built, the subject has parents but no path to a root, the subject or one on a path
-    /// is no longer attached, as during and after a detach, or it has more than 64 paths or too densely connected
-    /// parents), an allow rule matches only through the paths that were listed, at most the first 64, and every deny
-    /// rule with paths matches.
+    /// listed, an allow rule matches only through the paths that were listed and every deny rule with paths matches.
     /// </remarks>
     public ImmutableArray<string> Paths { get; init => field = value.IsDefault ? [] : value; } = [];
 

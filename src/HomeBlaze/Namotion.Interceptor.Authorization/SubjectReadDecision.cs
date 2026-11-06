@@ -7,7 +7,8 @@ namespace Namotion.Interceptor.Authorization;
 /// otherwise why.
 /// </summary>
 /// <remarks>
-/// When the parents of the subjects on the way changed during each of three attempts, the answer fails closed:
+/// The answer holds for one instant of the graph. When the parents or attachment of a subject the evaluation read,
+/// on the members' paths or on the way to a root, kept changing during every attempt, the answer fails closed:
 /// <c>IsReadable</c> and <c>HasReadableMember</c> are false and <c>DeniedProperty</c> is null, whatever the rules say.
 /// </remarks>
 /// <param name="IsReadable">Whether at least one member is readable and the subject is reachable from the root through readable subject-holding properties.</param>

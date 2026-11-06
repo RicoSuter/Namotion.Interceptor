@@ -27,12 +27,14 @@ internal static class SubjectPaths
     /// root, in the order the parents are listed. Every subject a chain passes above the starting subject must be
     /// attached (<see cref="RegisteredSubject.IsAttached"/>); the starting subject is not checked, the caller checks
     /// it. A path is its links from the root's property down to the property holding the subject, each in every
-    /// spelling the path reader resolves and in its structural spellings (see <see cref="PathLink"/>). A chain passes only properties the path provider effectively includes (see
-    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain through an
-    /// excluded property, or through an attribute of one, has no path. When the chain of first parents ends at a
-    /// subject without parents and has a path, the first path is the one the registry's
+    /// spelling the path reader resolves and in its structural spellings (see <see cref="PathLink"/>). A chain passes
+    /// only properties the path provider effectively includes (see
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), as the registry's paths do, so a chain
+    /// through an excluded property, or through an attribute of one, has no path. When the chain of first parents ends
+    /// at a subject without parents and has a path, the first path is the one the registry's
     /// <see cref="PathExtensions.TryGetPath(RegisteredSubjectProperty, PathProviderBase, IInterceptorSubject?, object?)"/>
-    /// builds for the subject's first parent. A chain that returns to a subject already on it is not a path and is skipped.
+    /// builds for the subject's first parent. A chain that returns to a subject already on it is not a path and is
+    /// skipped.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="pathProvider">The path provider.</param>
@@ -41,12 +43,10 @@ internal static class SubjectPaths
     /// <param name="reads">Records every parents and attachment read, so the caller can check that they held at one instant.</param>
     /// <param name="followedSingleParents">True when every subject above the subject had a single parent, so the result came from following them without a search and without spending the search budget.</param>
     /// <returns>
-    /// True when every chain was built; false when a chain could not be built (it passes a property paths may not
-    /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, an
-    /// [InlinePaths] property without an index has its own segment shadowed by another property's, or
-    /// the chain passes a subject that is no longer attached), more than <paramref name="maxPaths"/> chains exist, or
-    /// the search took more than 64 parent links per allowed path before every chain was found. A subject without
-    /// parents has no paths and returns true.
+    /// True when every chain was built; false when a chain has no path the registry could build or passes a subject
+    /// that is no longer attached, more than <paramref name="maxPaths"/> chains exist, or the search took more than 64
+    /// parent links per allowed path before every chain was found. A subject without parents has no paths and returns
+    /// true.
     /// </returns>
     public static bool TryGetPaths(
         RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, ParentReads reads, out bool followedSingleParents)
