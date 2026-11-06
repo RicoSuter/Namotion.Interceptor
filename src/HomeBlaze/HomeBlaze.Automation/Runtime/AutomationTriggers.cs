@@ -14,7 +14,6 @@ internal sealed class AutomationTriggers
     private readonly AutomationInputQueue _queue;
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
-    private readonly List<CompiledRule> _droppedActivations = [];
 
     public AutomationTriggers(AutomationServices services, AutomationInputQueue queue, ILogger logger)
     {
@@ -27,8 +26,7 @@ internal sealed class AutomationTriggers
 
     /// <summary>
     /// Subscribes the event triggers of the rules that became active, publishes the watched set of all active rules and
-    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input. An
-    /// activation the queue drops is kept for <see cref="Resynchronize"/>.
+    /// queues the activation of the property triggers of the new rules, which evaluates them in a later input.
     /// </summary>
     public void Activate(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules)
     {
@@ -38,28 +36,57 @@ internal sealed class AutomationTriggers
         }
 
         _propertyTriggers.Refresh(rules);
-        if (activated.Count > 0 && !_queue.TryEnqueue(new ActivationInput(activated, AutomationInputQueue.CausedChainDepth)))
+        if (activated.Count > 0)
         {
-            _droppedActivations.AddRange(activated);
+            _queue.TryEnqueue(new ActivationInput(activated, AutomationInputQueue.CausedChainDepth));
         }
     }
 
     /// <summary>
-    /// Evaluates the triggers again after the queue dropped inputs: forgets the observed values, so that a dropped change
-    /// is read from the graph, binds the paths again, evaluates the active property triggers and activates those whose
-    /// activation was dropped. Returns the runs they request in rule order.
+    /// Makes up for the inputs dropped from a feedback chain: binds the paths again after a dropped graph change, observes
+    /// the dropped changes and activates the rules of the dropped activations. Returns the runs they request, which must
+    /// not execute.
     /// </summary>
-    public IReadOnlyList<RunRequest> Resynchronize(IReadOnlyList<CompiledRule> rules)
+    public IReadOnlyList<RunRequest> MakeUpForChain(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped)
     {
-        _propertyTriggers.ForgetValues();
-        var requests = new List<RunRequest>(OnGraphChanged(rules));
-        if (_droppedActivations.Count == 0)
+        if (dropped.HasGraphChange)
+        {
+            Rebind(rules);
+        }
+
+        return MakeUpFor(rules, dropped.Changes.Where(DroppedInputs.IsChainDrop), dropped.Activations.Where(DroppedInputs.IsChainDrop), evaluateAll: false);
+    }
+
+    /// <summary>Makes up for the inputs dropped because the queue was full and evaluates every active trigger again.</summary>
+    public IReadOnlyList<RunRequest> MakeUpForOverload(IReadOnlyList<CompiledRule> rules, DroppedInputs dropped) => MakeUpFor(
+        rules,
+        dropped.Changes.Where(change => !DroppedInputs.IsChainDrop(change)),
+        dropped.Activations.Where(activation => !DroppedInputs.IsChainDrop(activation)),
+        evaluateAll: true);
+
+    /// <summary>
+    /// Makes up for dropped inputs: observes the dropped changes that are newer than the observed values, then evaluates
+    /// every active property trigger after binding the paths again (<paramref name="evaluateAll"/>) or only those that read
+    /// a changed property, and activates the rules of the dropped activations that are still activated. Returns the runs
+    /// they request in rule order.
+    /// </summary>
+    private IReadOnlyList<RunRequest> MakeUpFor(
+        IReadOnlyList<CompiledRule> rules,
+        IEnumerable<PropertyChangedInput> changes,
+        IEnumerable<ActivationInput> activations,
+        bool evaluateAll)
+    {
+        var changed = _propertyTriggers.Apply(changes);
+        var requests = new List<RunRequest>(evaluateAll ? OnGraphChanged(rules) : _propertyTriggers.ObserveReaders(rules, changed));
+        var activated = activations.SelectMany(activation => activation.Rules)
+            .Where(rule => rule.IsActivated && rules.Contains(rule))
+            .Distinct()
+            .ToList();
+        if (activated.Count == 0)
         {
             return requests;
         }
 
-        var activated = _droppedActivations.Where(rule => rule.IsActivated && rules.Contains(rule)).Distinct().ToList();
-        _droppedActivations.Clear();
         requests.AddRange(_propertyTriggers.Activate(activated, rules));
         return [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
     }

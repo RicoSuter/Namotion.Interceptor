@@ -25,6 +25,18 @@ internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices servic
         return summary;
     }
 
+    /// <summary>Records the requests as canceled with the reason, without running them.</summary>
+    public DispatchSummary Cancel(IReadOnlyList<RunRequest> requests, string reason)
+    {
+        var summary = new DispatchSummary();
+        foreach (var request in requests)
+        {
+            Record(request.Rule, RuleRunResult.Canceled(reason), summary);
+        }
+
+        return summary;
+    }
+
     private async Task DispatchOneAsync(
         RunRequest request, Func<CompiledRule, bool> isActive, DispatchSummary summary, CancellationToken cancellationToken)
     {

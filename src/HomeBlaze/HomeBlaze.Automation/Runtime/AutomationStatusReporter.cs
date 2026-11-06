@@ -48,6 +48,22 @@ internal sealed class AutomationStatusReporter(Automation automation, ILogger lo
         }
     }
 
+    /// <summary>Shows the dropped inputs as an error, both kinds when both occurred.</summary>
+    public void ReportFaults(DroppedInputs dropped)
+    {
+        var faults = dropped.Faults;
+        var overloaded = faults.Overloaded > 0
+            ? $"The input queue overflowed: {faults.Overloaded} inputs were dropped and the rules were evaluated again."
+            : null;
+        var feedback = faults.FeedbackChains > 0
+            ? $"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped: {faults.FeedbackChains} inputs were dropped."
+            : null;
+        if (overloaded is not null || feedback is not null)
+        {
+            Fail(string.Join(" ", new[] { overloaded, feedback }.OfType<string>()));
+        }
+    }
+
     /// <summary>Shows the last error of the runs of one input, or clears an earlier one after runs without failure; an invalid configuration stays shown.</summary>
     public void Apply(DispatchSummary summary, bool hasConfigurationError)
     {

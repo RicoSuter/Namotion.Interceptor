@@ -77,6 +77,32 @@ public partial class TestBlinds
     public void Release() => _gate.TrySetResult();
 }
 
+/// <summary>A step whose call number <see cref="BlockOnCall"/> waits until <see cref="Release"/>.</summary>
+[InterceptorSubject]
+public partial class TestGate
+{
+    private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile bool _isWaiting;
+    private int _calls;
+
+    public int BlockOnCall { get; init; }
+
+    public bool IsWaiting => _isWaiting;
+
+    [Operation]
+    public async Task StepAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Increment(ref _calls) == BlockOnCall)
+        {
+            _isWaiting = true;
+            await _gate.Task.WaitAsync(cancellationToken);
+            _isWaiting = false;
+        }
+    }
+
+    public void Release() => _gate.TrySetResult();
+}
+
 /// <summary>A notification channel that keeps what it was sent.</summary>
 [InterceptorSubject]
 public partial class TestNotifier : INotificationPublisher

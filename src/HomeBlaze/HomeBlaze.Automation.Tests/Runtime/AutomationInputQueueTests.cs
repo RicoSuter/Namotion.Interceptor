@@ -151,4 +151,30 @@ public class AutomationInputQueueTests
         Assert.Equal(1, queue.Count);
         Assert.Equal(new QueueFaults(0, 1), queue.TakeFaults());
     }
+
+    [Fact]
+    public async Task WhenAnInputIsDropped_ThenAResynchronizationWithItIsQueuedBehindTheAcceptedInputs()
+    {
+        // Arrange
+        var queue = new AutomationInputQueue();
+        for (var index = 0; index < AutomationInputQueue.Capacity; index++)
+        {
+            queue.TryEnqueue(TickInput.Instance);
+        }
+
+        // Act
+        queue.TryEnqueue(new GraphChangedInput(0));
+        for (var index = 0; index < AutomationInputQueue.Capacity; index++)
+        {
+            await queue.ReadAsync(CancellationToken.None);
+        }
+
+        var last = await queue.ReadAsync(CancellationToken.None);
+
+        // Assert
+        var dropped = queue.TakeDroppedInputs(Assert.IsType<ResynchronizeInput>(last));
+        Assert.True(dropped.HasGraphChange);
+        Assert.Equal(new QueueFaults(1, 0), dropped.Faults);
+        Assert.True(queue.IsEmpty);
+    }
 }

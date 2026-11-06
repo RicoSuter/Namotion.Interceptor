@@ -35,3 +35,9 @@ internal sealed record ConfigurationChangedInput() : AutomationInput(0)
 
 /// <summary>Completes once the queue is empty when it is processed.</summary>
 internal sealed record FlushInput(TaskCompletionSource Completion) : AutomationInput(0);
+
+/// <summary>
+/// Inputs were dropped: the worker reports them and makes up for <see cref="Dropped"/> after the inputs queued before the
+/// drop. Never dropped itself.
+/// </summary>
+internal sealed record ResynchronizeInput(DroppedInputs Dropped) : AutomationInput(0);

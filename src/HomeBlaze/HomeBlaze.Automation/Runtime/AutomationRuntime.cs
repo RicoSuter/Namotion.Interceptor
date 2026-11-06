@@ -31,13 +31,10 @@ internal sealed class AutomationRuntime
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
-    public async Task FlushAsync()
+    public Task FlushAsync()
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (await _queue.EnqueueWhenRoomAsync(new FlushInput(completion)))
-        {
-            await completion.Task;
-        }
+        return _queue.EnqueueFlush(new FlushInput(completion)) ? completion.Task : Task.CompletedTask;
     }
 
     /// <summary>Refuses later inputs and completes the flushes still queued, since nothing is processed anymore.</summary>
@@ -69,8 +66,14 @@ internal sealed class AutomationRuntime
         }
         finally
         {
-            _engine.Stop();
-            Close();
+            try
+            {
+                _engine.Stop();
+            }
+            finally
+            {
+                Close();
+            }
         }
     }
 
@@ -88,13 +91,6 @@ internal sealed class AutomationRuntime
         {
             _engine.ApplyConfigurationIfChanged();
             await RouteAsync(input, cancellationToken);
-
-            // After the input, so that an input dropped while it ran, such as the next step of a feedback chain, is
-            // reported now and not only when another input arrives.
-            if (_queue.TakeFaults() is { HasFaults: true } faults)
-            {
-                await _engine.ReportFaultsAsync(faults, cancellationToken);
-            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -111,12 +107,22 @@ internal sealed class AutomationRuntime
         EventInput subjectEvent => _engine.OnEventAsync(subjectEvent, cancellationToken),
         TickInput => _engine.OnTickAsync(cancellationToken),
         ActivationInput activation => _engine.OnActivationAsync(activation, cancellationToken),
+        ResynchronizeInput resynchronize => ResynchronizeAsync(resynchronize, cancellationToken),
         _ => Task.CompletedTask
     };
 
+    // The runs that make up for inputs the full queue dropped continue the chain of those inputs, so that an overload does
+    // not restart a chain at depth 0.
+    private async Task ResynchronizeAsync(ResynchronizeInput input, CancellationToken cancellationToken)
+    {
+        var dropped = _queue.TakeDroppedInputs(input);
+        using var run = AutomationInputQueue.EnterRun(dropped.OverloadDepth);
+        await _engine.ResynchronizeAsync(dropped, cancellationToken);
+    }
+
     private void CompleteOrRequeue(FlushInput flush)
     {
-        if (_queue.Count > 0 && _queue.TryEnqueue(flush))
+        if (!_queue.IsEmpty && _queue.EnqueueFlush(flush))
         {
             return;
         }

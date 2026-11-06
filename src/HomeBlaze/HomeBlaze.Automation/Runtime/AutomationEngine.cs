@@ -106,29 +106,24 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     /// <summary>
-    /// Reports the dropped inputs and evaluates the triggers against the current values. After a feedback chain was
-    /// stopped, the runs this requests are skipped, because running them would continue the chain.
+    /// Reports the dropped inputs and makes up for them, after the inputs that were queued before the drop. The runs that
+    /// inputs dropped from a feedback chain request are recorded as canceled, because running them would continue the
+    /// chain. After an overload every trigger is evaluated again.
     /// </summary>
-    public Task ReportFaultsAsync(QueueFaults faults, CancellationToken cancellationToken)
+    public async Task ResynchronizeAsync(DroppedInputs dropped, CancellationToken cancellationToken)
     {
-        if (faults.Overloaded > 0)
+        _status.ReportFaults(dropped);
+        var canceled = _triggers.MakeUpForChain(_snapshot.Rules, dropped);
+        if (canceled.Count > 0)
         {
-            _status.Fail($"The input queue overflowed: {faults.Overloaded} inputs were dropped and the rules were evaluated again.");
+            var reason = $"Canceled: a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped";
+            _status.Apply(_dispatcher.Cancel(canceled, reason), _hasConfigurationError);
         }
 
-        if (faults.FeedbackChains == 0)
+        if (dropped.HasOverload)
         {
-            return DispatchAsync(_triggers.Resynchronize(_snapshot.Rules), cancellationToken);
+            await DispatchAsync(_triggers.MakeUpForOverload(_snapshot.Rules, dropped), cancellationToken);
         }
-
-        _status.Fail($"A feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped: {faults.FeedbackChains} inputs were dropped.");
-        var skipped = _triggers.Resynchronize(_snapshot.Rules);
-        if (skipped.Count > 0)
-        {
-            _logger.LogWarning("The automation {Automation} skipped {Count} runs that would have continued a stopped feedback chain.", Name, skipped.Count);
-        }
-
-        return Task.CompletedTask;
     }
 
     public void ReportUnexpectedError(Exception exception)

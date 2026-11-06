@@ -60,8 +60,24 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
         return ObserveWhere(rules, _ => true);
     }
 
-    /// <summary>Forgets the observed values, so that the next evaluations read the properties, such as after changes were dropped.</summary>
-    public void ForgetValues() => _values.Clear();
+    /// <summary>Observes the changes that are newer than the observed values and returns their properties.</summary>
+    public HashSet<PropertyReference> Apply(IEnumerable<PropertyChangedInput> changes)
+    {
+        var changed = new HashSet<PropertyReference>();
+        foreach (var change in changes)
+        {
+            if (_values.TryApply(change.Property, change.Value, change.Revision))
+            {
+                changed.Add(change.Property);
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>Evaluates the active triggers that read one of the properties.</summary>
+    public IReadOnlyList<RunRequest> ObserveReaders(IReadOnlyList<CompiledRule> rules, IReadOnlySet<PropertyReference> properties) =>
+        properties.Count == 0 ? [] : ObserveWhere(rules, trigger => trigger.Dependencies.Any(properties.Contains));
 
     /// <summary>Resolves the properties of the active triggers again and publishes them.</summary>
     public void Refresh(IReadOnlyList<CompiledRule> rules)
