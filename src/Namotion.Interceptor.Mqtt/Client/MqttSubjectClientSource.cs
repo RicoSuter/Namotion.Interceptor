@@ -421,7 +421,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                         continue;
                     }
 
-                    var (topic, mapping) = TryGetTopicForProperty(change.Property, property);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -564,7 +564,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         foreach (var property in properties)
         {
-            var (topic, mapping) = TryGetTopicForProperty(property.Reference, property);
+            var (topic, mapping) = TryGetTopicForProperty(property.Reference);
             if (topic is null) continue;
 
             if (!_ownership.ClaimSource(property.Reference))
@@ -615,7 +615,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", subscribedCount);
     }
 
-    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference)
     {
         var structureVersion = _registry?.StructureVersion ?? 0;
         var mapperVersion = _configuration.Mapper.Version;

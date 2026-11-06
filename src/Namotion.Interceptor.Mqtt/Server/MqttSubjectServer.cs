@@ -104,7 +104,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     /// </summary>
     internal bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { CanContainSubjects: false } property &&
-        TryGetTopicForProperty(property).Topic is not null;
+        TryGetTopicForProperty(property.Reference).Topic is not null;
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -420,7 +420,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                         continue;
                     }
 
-                    var (topic, mapping) = TryGetTopicForProperty(registeredProperty);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -489,9 +489,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     /// Gets the topic, with the configured prefix, and the mapping the current mapper gives the property's current
     /// registration, or a null topic when it has none or the property is no longer registered.
     /// </summary>
-    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference)
     {
-        var propertyReference = property.Reference;
         var structureVersion = _registry?.StructureVersion ?? 0;
         var mapperVersion = _configuration.Mapper.Version;
         if (_propertyToTopic.TryGetValue(propertyReference, out var cached) &&

@@ -37,8 +37,8 @@ public class MqttMappingCacheTests
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
 
         // Act
-        var first = server.TryGetTopicForProperty(property);
-        var second = server.TryGetTopicForProperty(property);
+        var first = server.TryGetTopicForProperty(property.Reference);
+        var second = server.TryGetTopicForProperty(property.Reference);
 
         // Assert
         Assert.Equal("name", first.Topic);
@@ -74,8 +74,8 @@ public class MqttMappingCacheTests
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
 
         // Act
-        var first = client.TryGetTopicForProperty(property.Reference, property);
-        var second = client.TryGetTopicForProperty(property.Reference, property);
+        var first = client.TryGetTopicForProperty(property.Reference);
+        var second = client.TryGetTopicForProperty(property.Reference);
 
         // Assert
         Assert.Equal("name", first.Topic);
@@ -111,9 +111,9 @@ public class MqttMappingCacheTests
         var detachedProperty = DetachChildAndReturnStaleProperty(subject);
 
         // Act
-        client.TryGetTopicForProperty(detachedProperty.Reference, detachedProperty);
+        client.TryGetTopicForProperty(detachedProperty.Reference);
         var retained = client.HasCachedTopic(detachedProperty.Reference);
-        client.TryGetTopicForProperty(detachedProperty.Reference, detachedProperty);
+        client.TryGetTopicForProperty(detachedProperty.Reference);
 
         // Assert
         Assert.False(retained);
@@ -131,9 +131,9 @@ public class MqttMappingCacheTests
         ((IInterceptorSubject)subject).Context.TryGetLifecycleInterceptor()!.DetachSubjectFromContext(subject);
 
         // Act
-        client.TryGetTopicForProperty(property.Reference, property);
+        client.TryGetTopicForProperty(property.Reference);
         var retained = client.HasCachedTopic(property.Reference);
-        client.TryGetTopicForProperty(property.Reference, property);
+        client.TryGetTopicForProperty(property.Reference);
 
         // Assert
         Assert.False(retained);
@@ -150,9 +150,9 @@ public class MqttMappingCacheTests
 
         // Act
         var (property, topicSeenDuringDetach) = DetachChildWhileInserting(
-            subject, p => client.TryGetTopicForProperty(p.Reference, p).Topic);
+            subject, p => client.TryGetTopicForProperty(p.Reference).Topic);
         var retained = client.HasCachedTopic(property.Reference);
-        var after = client.TryGetTopicForProperty(property.Reference, property);
+        var after = client.TryGetTopicForProperty(property.Reference);
 
         // Assert
         Assert.Equal("child/value", topicSeenDuringDetach);
@@ -169,7 +169,7 @@ public class MqttMappingCacheTests
         await using var client = CreateClient(subject, CreateMapper());
         subject.Child = new MqttCacheTestChild();
         var property = subject.Child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        client.TryGetTopicForProperty(property.Reference, property);
+        client.TryGetTopicForProperty(property.Reference);
         await client.TryGetPropertyForTopicAsync("child/value");
         var cachedBeforeDetach = client.HasCachedTopic(property.Reference) && client.HasCachedProperty("child/value");
 
@@ -190,7 +190,7 @@ public class MqttMappingCacheTests
         await using var server = CreateServer(subject, CreateMapper());
         subject.Child = new MqttCacheTestChild();
         var property = subject.Child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        server.TryGetTopicForProperty(property);
+        server.TryGetTopicForProperty(property.Reference);
         await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
         var cachedBeforeDetach = server.HasCachedTopic(property.Reference) && server.HasCachedPath("child/value");
         var lifecycle = ((IInterceptorSubject)subject).Context.TryGetLifecycleInterceptor()!;
@@ -272,7 +272,7 @@ public class MqttMappingCacheTests
 
         // Act
         var (property, topicSeenDuringDetach) = DetachChildWhileInserting(
-            subject, p => server.TryGetTopicForProperty(p).Topic);
+            subject, p => server.TryGetTopicForProperty(p.Reference).Topic);
 
         // Assert
         Assert.Equal("child/value", topicSeenDuringDetach);
@@ -288,7 +288,7 @@ public class MqttMappingCacheTests
         var detachedProperty = DetachChildAndReturnStaleProperty(subject);
 
         // Act
-        server.TryGetTopicForProperty(detachedProperty);
+        server.TryGetTopicForProperty(detachedProperty.Reference);
 
         // Assert
         Assert.False(server.HasCachedTopic(detachedProperty.Reference));
@@ -391,16 +391,16 @@ public class MqttMappingCacheTests
         var pathProvider = new MutablePathProvider();
         await using var server = CreateServer(subject, new MqttPathProviderMapper(pathProvider));
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
-        Assert.Equal("name", server.TryGetTopicForProperty(property).Topic);
+        Assert.Equal("name", server.TryGetTopicForProperty(property.Reference).Topic);
         Assert.True(server.IsPropertyIncluded(property.Reference));
 
         // Act
         pathProvider.Included = false;
         var includedWhileExcluded = server.IsPropertyIncluded(property.Reference);
-        var topicWhileExcluded = server.TryGetTopicForProperty(property).Topic;
+        var topicWhileExcluded = server.TryGetTopicForProperty(property.Reference).Topic;
         pathProvider.Included = true;
         var includedAgain = server.IsPropertyIncluded(property.Reference);
-        var topicAgain = server.TryGetTopicForProperty(property).Topic;
+        var topicAgain = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.False(includedWhileExcluded);
@@ -418,14 +418,14 @@ public class MqttMappingCacheTests
         subject.Child = child;
         await using var server = CreateServer(subject, CreateMapper());
         var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("child/value", server.TryGetTopicForProperty(property).Topic);
+        Assert.Equal("child/value", server.TryGetTopicForProperty(property.Reference).Topic);
         Assert.True(server.IsPropertyIncluded(property.Reference));
 
         // Act
         subject.Hidden = child;
         subject.Child = null;
         var included = server.IsPropertyIncluded(property.Reference);
-        var topic = server.TryGetTopicForProperty(property).Topic;
+        var topic = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.NotNull(child.TryGetRegisteredSubject());
@@ -443,12 +443,12 @@ public class MqttMappingCacheTests
         subject.Other = child;
         await using var server = CreateServer(subject, CreateMapper());
         var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("child/value", server.TryGetTopicForProperty(property).Topic);
+        Assert.Equal("child/value", server.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Child = null;
         var included = server.IsPropertyIncluded(property.Reference);
-        var topic = server.TryGetTopicForProperty(property).Topic;
+        var topic = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.NotNull(child.TryGetRegisteredSubject());
@@ -474,7 +474,7 @@ public class MqttMappingCacheTests
         subject.Child = child;
         var includedAfterAttach = server.IsPropertyIncluded(value.Reference);
         var attachedValue = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        var topicAfterAttach = server.TryGetTopicForProperty(attachedValue).Topic;
+        var topicAfterAttach = server.TryGetTopicForProperty(attachedValue.Reference).Topic;
 
         // Assert
         Assert.True(includedBeforeDetach);
@@ -498,8 +498,8 @@ public class MqttMappingCacheTests
         var current = reference.TryGetRegisteredProperty()!;
 
         // Act
-        var racing = server.TryGetTopicForProperty(captured).Topic;
-        var next = server.TryGetTopicForProperty(current).Topic;
+        var racing = server.TryGetTopicForProperty(captured.Reference).Topic;
+        var next = server.TryGetTopicForProperty(current.Reference).Topic;
         var included = server.IsPropertyIncluded(reference);
 
         // Assert
@@ -524,8 +524,8 @@ public class MqttMappingCacheTests
         var current = reference.TryGetRegisteredProperty()!;
 
         // Act
-        var racing = client.TryGetTopicForProperty(reference, captured).Topic;
-        var next = client.TryGetTopicForProperty(reference, current).Topic;
+        var racing = client.TryGetTopicForProperty(reference).Topic;
+        var next = client.TryGetTopicForProperty(reference).Topic;
 
         // Assert
         Assert.NotSame(captured, current);
@@ -568,7 +568,7 @@ public class MqttMappingCacheTests
         // Act
         await subscribe(CancellationToken.None);
         var current = reference.TryGetRegisteredProperty()!;
-        var topic = client.TryGetTopicForProperty(reference, current).Topic;
+        var topic = client.TryGetTopicForProperty(reference).Topic;
 
         // Assert
         Assert.True(mapper.HasRun);
@@ -630,7 +630,7 @@ public class MqttMappingCacheTests
         // Assert
         Assert.False(includedWhileUnmapped);
         Assert.True(includedWhileMapped);
-        Assert.Equal("child/value", server.TryGetTopicForProperty(value).Topic);
+        Assert.Equal("child/value", server.TryGetTopicForProperty(value.Reference).Topic);
     }
 
     [Fact]
@@ -654,7 +654,7 @@ public class MqttMappingCacheTests
         // Assert
         Assert.False(includedWhileUnmapped);
         Assert.True(includedWhileMapped);
-        Assert.Equal("child/inner/value", server.TryGetTopicForProperty(value).Topic);
+        Assert.Equal("child/inner/value", server.TryGetTopicForProperty(value.Reference).Topic);
     }
 
     [Fact]
@@ -689,12 +689,12 @@ public class MqttMappingCacheTests
         var subject = CreateRootSubject();
         await using var server = CreateServer(subject, mapper);
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
-        server.TryGetTopicForProperty(property);
+        server.TryGetTopicForProperty(property.Reference);
 
         // Act
         subject.Hidden = new MqttCacheTestChild();
-        var afterChange = server.TryGetTopicForProperty(property).Topic;
-        var cached = server.TryGetTopicForProperty(property).Topic;
+        var afterChange = server.TryGetTopicForProperty(property.Reference).Topic;
+        var cached = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("name", afterChange);
@@ -712,11 +712,11 @@ public class MqttMappingCacheTests
         subject.Items = [first, second];
         await using var server = CreateServer(subject, CreateMapper());
         var property = first.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("items[0]/value", server.TryGetTopicForProperty(property).Topic);
+        Assert.Equal("items[0]/value", server.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Items = [second, first];
-        var topic = server.TryGetTopicForProperty(property).Topic;
+        var topic = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("items[1]/value", topic);
@@ -732,11 +732,11 @@ public class MqttMappingCacheTests
         subject.Items = [first, second];
         await using var client = CreateClient(subject, CreateMapper());
         var property = first.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("items[0]/value", client.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.Equal("items[0]/value", client.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Items = [second, first];
-        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topic = client.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("items[1]/value", topic);
@@ -751,11 +751,11 @@ public class MqttMappingCacheTests
         subject.Map = new Dictionary<string, MqttCacheTestChild> { ["a"] = child };
         await using var server = CreateServer(subject, CreateMapper());
         var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("map[a]/value", server.TryGetTopicForProperty(property).Topic);
+        Assert.Equal("map[a]/value", server.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
-        var topic = server.TryGetTopicForProperty(property).Topic;
+        var topic = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("map[b]/value", topic);
@@ -770,11 +770,11 @@ public class MqttMappingCacheTests
         subject.Map = new Dictionary<string, MqttCacheTestChild> { ["a"] = child };
         await using var client = CreateClient(subject, CreateMapper());
         var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("map[a]/value", client.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.Equal("map[a]/value", client.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Map = new Dictionary<string, MqttCacheTestChild> { ["b"] = child };
-        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topic = client.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("map[b]/value", topic);
@@ -797,8 +797,8 @@ public class MqttMappingCacheTests
         };
 
         // Act
-        var racing = server.TryGetTopicForProperty(property).Topic;
-        var next = server.TryGetTopicForProperty(property).Topic;
+        var racing = server.TryGetTopicForProperty(property.Reference).Topic;
+        var next = server.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("child/value", racing);
@@ -891,11 +891,11 @@ public class MqttMappingCacheTests
         subject.Other = child;
         await using var client = CreateClient(subject, CreateMapper());
         var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Equal("child/value", client.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.Equal("child/value", client.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Child = null;
-        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topic = client.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("other/value", topic);
@@ -910,12 +910,12 @@ public class MqttMappingCacheTests
         subject.Hidden = child;
         await using var client = CreateClient(subject, CreateMapper());
         var property = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestChild.Value))!;
-        Assert.Null(client.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.Null(client.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         subject.Child = child;
         subject.Hidden = null;
-        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topic = client.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("child/value", topic);
@@ -929,13 +929,13 @@ public class MqttMappingCacheTests
         var pathProvider = new MutablePathProvider();
         await using var client = CreateClient(subject, new MqttPathProviderMapper(pathProvider));
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(nameof(MqttCacheTestRoot.Name))!;
-        Assert.Equal("name", client.TryGetTopicForProperty(property.Reference, property).Topic);
+        Assert.Equal("name", client.TryGetTopicForProperty(property.Reference).Topic);
 
         // Act
         pathProvider.Included = false;
-        var topicWhileExcluded = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topicWhileExcluded = client.TryGetTopicForProperty(property.Reference).Topic;
         pathProvider.Included = true;
-        var topicAgain = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topicAgain = client.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Null(topicWhileExcluded);
@@ -1026,8 +1026,8 @@ public class MqttMappingCacheTests
         };
 
         // Act
-        var racing = client.TryGetTopicForProperty(property.Reference, property).Topic;
-        var next = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var racing = client.TryGetTopicForProperty(property.Reference).Topic;
+        var next = client.TryGetTopicForProperty(property.Reference).Topic;
 
         // Assert
         Assert.Equal("child/value", racing);
@@ -1069,12 +1069,12 @@ public class MqttMappingCacheTests
         // Warm up: the JIT and the provider's per-type caches are one-time costs.
         for (var warmup = 0; warmup < 100; warmup++)
         {
-            client.TryGetTopicForProperty(property.Reference, property);
+            client.TryGetTopicForProperty(property.Reference);
         }
 
         // Act
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        var topic = client.TryGetTopicForProperty(property.Reference, property).Topic;
+        var topic = client.TryGetTopicForProperty(property.Reference).Topic;
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
         // Assert

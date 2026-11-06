@@ -71,7 +71,7 @@ public class MqttServerTopicBenchmark
 
     [Benchmark]
     public bool PublishedChange()
-        => _server.IsPropertyIncluded(_mapped.Reference) && _server.TryGetTopicForProperty(_mapped).Topic is not null;
+        => _server.IsPropertyIncluded(_mapped.Reference) && _server.TryGetTopicForProperty(_mapped.Reference).Topic is not null;
 
     [Benchmark]
     public bool UnmappedChange() => _server.IsPropertyIncluded(_unmapped);
