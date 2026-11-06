@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using MQTTnet;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Mapping;
@@ -573,6 +574,40 @@ public class MqttMappingCacheTests
         Assert.True(mapper.HasRun);
         Assert.Equal("child/value", topic);
         Assert.Contains("child/value", subscribedTopics);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsDetachedWhileTheClientSubscribes_ThenItKeepsNoTopicEntryClaimOrSubscriptionForIt()
+    {
+        // Arrange: the detach lands while the subscribe loop computes the topic of the child's property, after
+        // the loop's filter mapped it, so the detach clears the caches before the loop inserts its entry.
+        var subject = CreateRootSubject();
+        var child = new MqttCacheTestChild();
+        subject.Child = child;
+        var reference = new PropertyReference(child, nameof(MqttCacheTestChild.Value));
+        var mapper = new HookedMapper(CreateMapper(), reference, lookupNumber: 2, () => subject.Child = null);
+        await using var client = CreateClient(subject, mapper);
+        var subscribedTopics = new List<string>();
+        var mqttClient = new Mock<IMqttClient>();
+        mqttClient
+            .Setup(c => c.SubscribeAsync(It.IsAny<MqttClientSubscribeOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<MqttClientSubscribeOptions, CancellationToken>((options, _) =>
+                subscribedTopics.AddRange(options.TopicFilters.Select(filter => filter.Topic)));
+        typeof(MqttSubjectClientSource)
+            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(client, mqttClient.Object);
+        var subscribe = typeof(MqttSubjectClientSource)
+            .GetMethod("SubscribeToPropertiesAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Func<CancellationToken, Task>>(client);
+
+        // Act
+        await subscribe(CancellationToken.None);
+
+        // Assert
+        Assert.True(mapper.HasRun);
+        Assert.False(client.HasCachedProperty("child/value"));
+        Assert.False(reference.TryGetSource(out _));
+        Assert.DoesNotContain("child/value", subscribedTopics);
     }
 
     [Fact]

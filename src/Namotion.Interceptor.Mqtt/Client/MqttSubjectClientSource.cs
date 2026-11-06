@@ -581,7 +581,17 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 continue;
             }
 
-            _topicToProperty[topic] = (property.Reference, structureVersion, mapperVersion);
+            // Add first, then validate: a detach that cleared the caches before this insert would otherwise leave
+            // the entry and the claim behind.
+            var entry = (property.Reference, structureVersion, mapperVersion);
+            _topicToProperty[topic] = entry;
+            if (!IsRetainable(property.Subject))
+            {
+                _topicToProperty.TryRemove(KeyValuePair.Create(topic, entry));
+                _ownership.ReleaseSource(property.Reference);
+                continue;
+            }
+
             var qos = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService;
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
