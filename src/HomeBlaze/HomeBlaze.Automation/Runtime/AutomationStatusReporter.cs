@@ -5,7 +5,8 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The <see cref="IMonitoredService"/> status of an automation: an error stays until a run that executed actions without
-/// failure or a valid configuration clears it; a rejected run changes nothing. An unknown value is no error.
+/// failure, a valid configuration after an invalid one, or a saved reset of the state clears it; a rejected run changes
+/// nothing. An unknown value is no error.
 /// </summary>
 internal sealed class AutomationStatusReporter(Automation automation, ILogger logger)
 {

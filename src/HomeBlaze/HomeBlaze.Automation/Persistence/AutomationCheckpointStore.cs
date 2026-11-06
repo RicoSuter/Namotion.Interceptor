@@ -70,20 +70,25 @@ internal sealed class AutomationCheckpointStore(string? filePath)
         }
     }
 
-    /// <summary>Deletes the file. Later writes do nothing, so that a worker that is still stopping cannot create it again.</summary>
+    /// <summary>
+    /// Deletes the file; returns whether there was one. Later writes do nothing, so that a worker that is still stopping
+    /// cannot create it again.
+    /// </summary>
     /// <exception cref="IOException">The file cannot be deleted.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be deleted.</exception>
-    public void Delete()
+    public bool Delete()
     {
         if (FilePath is null)
         {
-            return;
+            return false;
         }
 
         lock (_lock)
         {
             _isDeleted = true;
+            var existed = File.Exists(FilePath);
             File.Delete(FilePath);
+            return existed;
         }
     }
 

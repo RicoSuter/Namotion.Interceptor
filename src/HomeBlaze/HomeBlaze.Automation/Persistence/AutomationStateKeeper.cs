@@ -9,16 +9,23 @@ namespace HomeBlaze.Automation.Persistence;
 /// </summary>
 internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
 {
-    public AutomationCheckpointStore Store => store;
+    public AutomationCheckpointStore Store { get; private set; } = store;
 
     public AutomationCheckpoint Persisted { get; private set; } = new();
+
+    /// <summary>Keeps the checkpoint in the store from now on, starting from an empty one, as for a new automation.</summary>
+    public void UseStore(AutomationCheckpointStore newStore)
+    {
+        Store = newStore;
+        Persisted = new AutomationCheckpoint();
+    }
 
     /// <summary>Reads the checkpoint into <see cref="Persisted"/>; null without one, and with the error when it cannot be read.</summary>
     public AutomationCheckpoint? Load(out string? error)
     {
         try
         {
-            var checkpoint = store.Read();
+            var checkpoint = Store.Read();
             if (checkpoint is not null)
             {
                 Persisted = checkpoint;
@@ -39,7 +46,7 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
     {
         try
         {
-            store.Write(next);
+            Store.Write(next);
             Persisted = next;
             return null;
         }
@@ -57,17 +64,32 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
     {
         foreach (var (key, rule) in rules)
         {
-            if (rule.RunCount is not null)
+            if (rule.RunCount is null)
             {
-                continue;
+                Restore(key, rule);
             }
-
-            var run = Persisted.Rules.GetValueOrDefault(key);
-            rule.LastTriggeredAt = run?.LastTriggeredAt;
-            rule.LastRunOutcome = run?.LastRunOutcome;
-            rule.LastRunMessage = run?.LastRunMessage;
-            rule.RunCount = run?.RunCount ?? 0;
         }
+    }
+
+    /// <summary>
+    /// Gives every rule its persisted run properties, or zero runs, also a rule that has some in memory: at a start the
+    /// checkpoint is what the automation has, and one that moved has an empty one.
+    /// </summary>
+    public void RestoreAllRules(IReadOnlyDictionary<string, AutomationRule> rules)
+    {
+        foreach (var (key, rule) in rules)
+        {
+            Restore(key, rule);
+        }
+    }
+
+    private void Restore(string key, AutomationRule rule)
+    {
+        var run = Persisted.Rules.GetValueOrDefault(key);
+        rule.LastTriggeredAt = run?.LastTriggeredAt;
+        rule.LastRunOutcome = run?.LastRunOutcome;
+        rule.LastRunMessage = run?.LastRunMessage;
+        rule.RunCount = run?.RunCount ?? 0;
     }
 
     public static AutomationCheckpoint WithState(AutomationCheckpoint checkpoint, string? state, DateTimeOffset enteredAt) =>

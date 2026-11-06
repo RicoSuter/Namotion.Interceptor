@@ -18,24 +18,25 @@ internal sealed class AutomationRuntime
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1);
 
     private readonly Automation _automation;
+    private readonly ILogger _logger;
+    private readonly AutomationStateKeeper _keeper;
     private readonly AutomationInputQueue _queue = new();
     private readonly AutomationEngine _engine;
     private int _isTickPending;
     private int _isGraphChangePending;
 
-    /// <summary>Creates the worker of the automation at <paramref name="automationPath"/>, whose checkpoint is in <paramref name="store"/>.</summary>
-    public AutomationRuntime(Automation automation, string? automationPath, AutomationCheckpointStore store, ILogger logger)
+    /// <summary>Creates the worker of the automation, whose checkpoint is at <paramref name="location"/>.</summary>
+    public AutomationRuntime(Automation automation, CheckpointLocation location, ILogger logger)
     {
         _automation = automation;
-        AutomationPath = automationPath;
-        Store = store;
-        _engine = new AutomationEngine(automation, _queue, new AutomationStateKeeper(store), logger);
+        _logger = logger;
+        Location = location;
+        _keeper = new AutomationStateKeeper(location.Store);
+        _engine = new AutomationEngine(automation, _queue, _keeper, logger);
     }
 
-    /// <summary>The canonical path of the automation when it started, which names its checkpoint.</summary>
-    public string? AutomationPath { get; }
-
-    public AutomationCheckpointStore Store { get; }
+    /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
+    public CheckpointLocation Location { get; private set; }
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
@@ -118,7 +119,7 @@ internal sealed class AutomationRuntime
     private Task RouteAsync(AutomationInput input, CancellationToken cancellationToken) => input switch
     {
         PropertyChangedInput change => _engine.OnPropertyChangedAsync(change, cancellationToken),
-        GraphChangedInput => _engine.OnGraphChangedAsync(cancellationToken),
+        GraphChangedInput => OnGraphChangedAsync(cancellationToken),
         EventInput subjectEvent => _engine.OnEventAsync(subjectEvent, cancellationToken),
         TickInput => _engine.OnTickAsync(cancellationToken),
         ActivationInput activation => _engine.OnActivationAsync(activation, cancellationToken),
@@ -132,8 +133,39 @@ internal sealed class AutomationRuntime
     private async Task ResynchronizeAsync(ResynchronizeInput input, CancellationToken cancellationToken)
     {
         var dropped = _queue.TakeDroppedInputs(input);
+        if (dropped.HasGraphChange)
+        {
+            FollowPath();
+        }
+
         using var run = AutomationInputQueue.EnterRun(dropped.OverloadDepth);
         await _engine.ResynchronizeAsync(dropped, cancellationToken);
+    }
+
+    private Task OnGraphChangedAsync(CancellationToken cancellationToken)
+    {
+        FollowPath();
+        return _engine.OnGraphChangedAsync(cancellationToken);
+    }
+
+    // The checkpoint belongs to the path, so an automation that moved, such as a file moved to another folder, starts
+    // again as a new automation at the new path, and the file at the old path is deleted. Checked on graph changes, which
+    // are queued after the write that moved it, and not on its own lifecycle changes, which come before that write took
+    // effect. A move adds the automation to its new parent before it removes it from the old one: a check between the two
+    // writes may still see the old path, and a check after the second, which the coalesced graph change guarantees, sees
+    // the new one; once moved, further checks find nothing to do.
+    private void FollowPath()
+    {
+        if (!Location.HasMoved(_automation))
+        {
+            return;
+        }
+
+        var previous = Location;
+        Location = CheckpointLocation.Of(_automation, _logger);
+        _keeper.UseStore(Location.Store);
+        _engine.StartFresh();
+        previous.DeleteIfOrphaned(_automation, _logger);
     }
 
     private void CompleteOrRequeue(FlushInput flush)

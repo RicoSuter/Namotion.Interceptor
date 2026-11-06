@@ -56,13 +56,31 @@ internal sealed class AutomationEngine : IRuleRunHost
             _logger.LogInformation("The automation {Automation} has no checkpoint at {Path} and starts from its initial state.", Name, _keeper.Store.FilePath);
         }
 
-        _automation.CurrentState = checkpoint?.CurrentState;
-        _automation.StateEnteredAt = checkpoint?.StateEnteredAt;
-        ApplyConfigurationIfChanged();
+        Begin(checkpoint);
         if (_automation.Status == ServiceStatus.Starting)
         {
             _status.SetRunning();
         }
+    }
+
+    /// <summary>
+    /// Starts again as a new automation, after the keeper was given the store of the path the automation moved to: the
+    /// initial state, no trigger times, no runs, and no trigger state carried over.
+    /// </summary>
+    public void StartFresh()
+    {
+        Stop();
+        _snapshot = CompiledAutomation.Empty;
+        _appliedConfigurationVersion = -1;
+
+        // Written at once, so that an older file at the new path is not read at the next start.
+        if (_keeper.TryPersist(_keeper.Persisted) is { } error)
+        {
+            _status.Fail($"The checkpoint at the new path could not be written: {error}");
+        }
+
+        _logger.LogInformation("The automation {Automation} moved and starts from its initial state at {Path}.", Name, _keeper.Store.FilePath);
+        Begin(null);
     }
 
     public void ApplyConfigurationIfChanged()
@@ -170,6 +188,14 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
+
+    private void Begin(AutomationCheckpoint? checkpoint)
+    {
+        _automation.CurrentState = checkpoint?.CurrentState;
+        _automation.StateEnteredAt = checkpoint?.StateEnteredAt;
+        _keeper.RestoreAllRules(_automation.Rules);
+        ApplyConfigurationIfChanged();
+    }
 
     // Runs are recorded on the applied instances until now, so the copy made when the rules were set may miss the last
     // ones; this one comes after every run and is the one that counts.

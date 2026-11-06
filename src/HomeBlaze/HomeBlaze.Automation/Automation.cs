@@ -2,11 +2,9 @@ using System.ComponentModel;
 using System.Reactive.Subjects;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Automation.Persistence;
 using HomeBlaze.Automation.Runtime;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -141,9 +139,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     // configuration change or a flush right after the start reaches it.
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        var automationPath = Services.PathResolver.GetPath(this, PathStyle.Canonical);
-        var store = new AutomationCheckpointStore(GetCheckpointPath(automationPath));
-        Volatile.Write(ref _runtime, new AutomationRuntime(this, automationPath, store, _logger));
+        Volatile.Write(ref _runtime, new AutomationRuntime(this, CheckpointLocation.Of(this, _logger), _logger));
         Status = ServiceStatus.Starting;
         return base.StartAsync(cancellationToken);
     }
@@ -192,37 +188,14 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         Status = finalStatus;
     }
 
-    // Deletes the checkpoint of a removed automation only after its worker ended, when the graph no longer holds it, so
-    // that its path resolves to what took its place: another automation at the same path keeps the file.
+    // Runs after the worker ended, so that nothing writes the file anymore, and when the graph no longer holds this
+    // automation at the path it started with, so that the path resolves to what took its place.
     private void OnWorkerEnded(AutomationRuntime runtime)
     {
-        if (!_isDetached || runtime.AutomationPath is not { } automationPath ||
-            Services.PathResolver.ResolveSubject(automationPath, PathStyle.Canonical) is Automation other && !ReferenceEquals(other, this))
+        if (_isDetached || runtime.Location.HasMoved(this))
         {
-            return;
+            runtime.Location.DeleteIfOrphaned(this, _logger);
         }
-
-        try
-        {
-            runtime.Store.Delete();
-            _logger.LogInformation("The automation {Automation} was removed, so its checkpoint {Path} was deleted.", Title, runtime.Store.FilePath);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning(exception, "The checkpoint {Path} of the removed automation {Automation} could not be deleted.", runtime.Store.FilePath, Title);
-        }
-    }
-
-    private string? GetCheckpointPath(string? automationPath)
-    {
-        var dataDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
-        var filePath = AutomationCheckpointStore.GetFilePath(dataDirectory, automationPath);
-        if (filePath is null)
-        {
-            _logger.LogWarning("The automation {Automation} has no data directory or path, so its state is not kept across restarts.", Title);
-        }
-
-        return filePath;
     }
 
     // A configuration file may hold an explicit null, which the runtime never expects.
