@@ -74,8 +74,12 @@ internal sealed class ParentReads
 
     public void Clear()
     {
+        if (_reads.Count > ScannedReads)
+        {
+            _readIndexes.Clear();
+        }
+
         _reads.Clear();
-        _readIndexes.Clear();
     }
 
     private int IndexOf(RegisteredSubject subject)
