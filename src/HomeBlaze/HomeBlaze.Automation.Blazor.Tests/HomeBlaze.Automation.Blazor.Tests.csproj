@@ -27,6 +27,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Automation.Blazor\HomeBlaze.Automation.Blazor.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
     </ItemGroup>
 
 </Project>

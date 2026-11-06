@@ -13,6 +13,8 @@
         <ProjectReference Include="..\HomeBlaze.Automation\HomeBlaze.Automation.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History\HomeBlaze.History.csproj" />
+        <ProjectReference Include="..\HomeBlaze.History.Abstractions\HomeBlaze.History.Abstractions.csproj" />
         <PackageReference Include="MudBlazor" />
         <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
     </ItemGroup>
