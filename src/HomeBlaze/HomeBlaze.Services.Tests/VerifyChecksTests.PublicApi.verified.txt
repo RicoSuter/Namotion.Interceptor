@@ -95,6 +95,7 @@ namespace HomeBlaze.Services
     }
     public static class HomeBlazePaths
     {
+        public const string AutomationsDirectory = "Automations";
         public const string DataProtectionCertificatePasswordKey = "HomeBlaze:DataProtection:CertificatePassword";
         public const string DataProtectionCertificatePathKey = "HomeBlaze:DataProtection:CertificatePath";
         public const string DataProtectionKeysDirectory = "DataProtection-Keys";
