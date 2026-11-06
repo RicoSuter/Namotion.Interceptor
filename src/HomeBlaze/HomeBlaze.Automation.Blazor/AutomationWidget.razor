@@ -51,5 +51,5 @@
     }
 
     private static IEnumerable<(string Name, string? Status)> GetRuleStatuses(Automation automation) =>
-        automation.GetRuleKeysInOrder().Select(key => (automation.Rules[key].Name ?? key, automation.Rules[key].Status));
+        automation.GetRulesInOrder().Select(pair => (pair.Value.Name ?? pair.Key, pair.Value.Status));
 }

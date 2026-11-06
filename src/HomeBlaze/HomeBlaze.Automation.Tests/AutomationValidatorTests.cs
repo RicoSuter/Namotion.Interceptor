@@ -179,9 +179,10 @@ public class AutomationValidatorTests
         };
 
         // Act
-        var keys = automation.GetRuleKeysInOrder();
+        var rules = automation.GetRulesInOrder();
 
         // Assert
-        Assert.Equal(["c", "a", "b"], keys.ToArray());
+        Assert.Equal(["c", "a", "b"], rules.Select(pair => pair.Key).ToArray());
+        Assert.All(rules, pair => Assert.Same(automation.Rules[pair.Key], pair.Value));
     }
 }

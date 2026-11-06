@@ -53,7 +53,7 @@ namespace HomeBlaze.Automation
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
-        public System.Collections.Generic.IReadOnlyList<string> GetRuleKeysInOrder() { }
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, HomeBlaze.Automation.AutomationRule>> GetRulesInOrder() { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Enters the initial state, clears the last trigger times and starts every rule ove" +

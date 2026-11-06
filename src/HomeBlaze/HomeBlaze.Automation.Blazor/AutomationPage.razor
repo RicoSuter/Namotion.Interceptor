@@ -70,9 +70,8 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var key in automation.GetRuleKeysInOrder())
+                            @foreach (var (key, rule) in automation.GetRulesInOrder())
                             {
-                                var rule = automation.Rules[key];
                                 <tr data-testid="automation-rule-row">
                                     <td>
                                         <MudText Typo="Typo.body2" Style="font-weight: 500;">@(rule.Name ?? key)</MudText>
@@ -209,11 +208,10 @@
 
     private IReadOnlyList<RunSource> GetRunSources(Automation automation) =>
     [
-        .. automation.GetRuleKeysInOrder()
-            .Select(key => (Key: key, Rule: automation.Rules[key]))
-            .Select(pair => (pair.Key, pair.Rule, Path: PathResolver.GetPath(pair.Rule, PathStyle.Canonical)))
+        .. automation.GetRulesInOrder()
+            .Select(pair => (pair.Key, pair.Value, Path: PathResolver.GetPath(pair.Value, PathStyle.Canonical)))
             .Where(rule => rule.Path is not null)
-            .Select(rule => new RunSource(rule.Rule.Name ?? rule.Key, rule.Path!))
+            .Select(rule => new RunSource(rule.Value.Name ?? rule.Key, rule.Path!))
     ];
 
     private async Task TestAsync(string key, AutomationRule rule)
@@ -275,7 +273,7 @@
         automation.States,
         automation.InitialState,
         automation.CurrentState,
-        [.. automation.GetRuleKeysInOrder().Select(key => StateDiagramRule.From(key, automation.Rules[key]))]);
+        [.. automation.GetRulesInOrder().Select(pair => StateDiagramRule.From(pair.Key, pair.Value))]);
 
     private static string? DescribeScope(Automation automation, AutomationRule rule)
     {
@@ -292,10 +290,9 @@
 
     private static IReadOnlyList<RunEntry> GetLastRuns(Automation automation) =>
     [
-        .. automation.GetRuleKeysInOrder()
-            .Select(key => (Key: key, Rule: automation.Rules[key]))
-            .Where(pair => pair.Rule.LastRunOutcome is not null)
-            .Select(pair => new RunEntry(null, pair.Rule.Name ?? pair.Key, pair.Rule.LastRunOutcome, pair.Rule.LastRunMessage))
+        .. automation.GetRulesInOrder()
+            .Where(pair => pair.Value.LastRunOutcome is not null)
+            .Select(pair => new RunEntry(null, pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage))
     ];
 
     public void Dispose()

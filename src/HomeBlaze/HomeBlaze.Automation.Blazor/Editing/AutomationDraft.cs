@@ -25,7 +25,7 @@ public sealed class AutomationDraft
     {
         var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, _automation = automation };
         draft.States.AddRange(automation.States);
-        draft.Rules.AddRange(automation.GetRuleKeysInOrder().Select(key => RuleDraft.From(key, automation.Rules[key])));
+        draft.Rules.AddRange(automation.GetRulesInOrder().Select(pair => RuleDraft.From(pair.Key, pair.Value)));
         return draft;
     }
 
