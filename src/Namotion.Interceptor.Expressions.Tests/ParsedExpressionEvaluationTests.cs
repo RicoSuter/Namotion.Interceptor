@@ -334,4 +334,54 @@ public class ParsedExpressionEvaluationTests
         // Assert
         Assert.Equal(0, allocated);
     }
+
+    [Theory]
+    [InlineData("Interval == 90s", true)]
+    [InlineData("Interval == 1m30s", true)]
+    [InlineData("Interval == 0.025h", true)]
+    [InlineData("Interval == 90000ms", true)]
+    [InlineData("Interval > 1m", true)]
+    [InlineData("Interval < 1.5m", false)]
+    [InlineData("Interval != -90s", true)]
+    [InlineData("Interval >= 1d", false)]
+    public void WhenDurationLiteralIsCompared_ThenItComparesAsATimeSpan(string text, bool expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["Interval"] = TimeSpan.FromSeconds(90) };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WhenDurationHasEveryUnit_ThenTheyAddUp()
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse("1d2h3m4s5ms", '/', out var expression, out var error), error);
+        var context = new TestExpressionContext([]);
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Equal(new TimeSpan(1, 2, 3, 4, 5), result.Value);
+    }
+
+    [Theory]
+    [InlineData("Interval == 90")]
+    [InlineData("Interval > Name")]
+    public void WhenDurationIsComparedWithAnotherType_ThenTheComparisonIsUnknown(string text)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["Interval"] = TimeSpan.FromSeconds(90), ["Name"] = "Kitchen" };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Null(result);
+    }
 }

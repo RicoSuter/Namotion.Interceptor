@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Expressions;
 /// <summary>
 /// Compares two values that are not null: a boolean only for equality, an enum
 /// by its name without regard to case and only for equality, a text without regard to case for equality and ordinal for
-/// order, a date against ISO 8601 text, a float as a float, and NaN never. A null result means the pair has no order, so the
+/// order, a date against ISO 8601 text, a duration against a duration, a float as a float, and NaN never. A null result means the pair has no order, so the
 /// comparison is unknown.
 /// </summary>
 internal static class ExpressionComparer
@@ -35,9 +35,7 @@ internal static class ExpressionComparer
         string text => CompareText(text, other, isEquality),
         DateTimeOffset instant => CompareInstant(instant, other, otherInstant),
         DateTime dateTime => CompareDateTime(dateTime, other, otherInstant),
-        // Widening a float to double would make 0.1f differ from the literal 0.1.
-        float single when other is double number => single.CompareTo((float)number),
-        double number when other is float single => ((float)number).CompareTo(single),
+        TimeSpan duration => other is TimeSpan otherDuration ? duration.CompareTo(otherDuration) : null,
         _ => CompareNumber(value, other)
     };
 
@@ -101,6 +99,17 @@ internal static class ExpressionComparer
 
     private static int? CompareNumber(object value, object other)
     {
+        // Widening a float to double would make 0.1f differ from the literal 0.1.
+        if (value is float single && other is double floatNumber)
+        {
+            return single.CompareTo((float)floatNumber);
+        }
+
+        if (value is double number && other is float otherSingle)
+        {
+            return ((float)number).CompareTo(otherSingle);
+        }
+
         if (!IsNumber(value) || !IsNumber(other))
         {
             return null;

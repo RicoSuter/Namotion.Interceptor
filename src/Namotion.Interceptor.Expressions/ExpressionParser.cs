@@ -162,7 +162,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
 
         if (IsNumber(token))
         {
-            return ParseNumber(token, start);
+            return TryParseDuration(token, out var duration) ? new LiteralNode(duration) : ParseNumber(token, start);
         }
 
         if (TryCreateKeywordLiteral(token) is { } literal)
@@ -204,6 +204,90 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
         }
 
         return new LiteralNode(number);
+    }
+
+    // A duration is one or more pairs of a number and a unit, from the largest unit to the smallest and each unit at most
+    // once, with an optional sign before the first pair: 90s, 1h30m, 1.5d, -5m. Such a token was an invalid number before,
+    // so reading it as a duration changes no expression that parsed.
+    private static bool TryParseDuration(string token, out TimeSpan duration)
+    {
+        duration = TimeSpan.Zero;
+        var rest = token.AsSpan();
+        var isNegative = rest[0] == '-';
+        if (rest[0] is '-' or '+')
+        {
+            rest = rest[1..];
+        }
+
+        var ticks = 0d;
+        var previousRank = int.MaxValue;
+        while (rest.Length > 0)
+        {
+            if (!TryReadDurationPart(ref rest, previousRank, out var rank, out var partTicks))
+            {
+                return false;
+            }
+
+            previousRank = rank;
+            ticks += partTicks;
+        }
+
+        if (ticks > TimeSpan.MaxValue.Ticks)
+        {
+            return false;
+        }
+
+        duration = TimeSpan.FromTicks((long)Math.Round(ticks));
+        if (isNegative)
+        {
+            duration = duration.Negate();
+        }
+
+        return true;
+    }
+
+    // Reads one number and its unit from the front of the text, and fails unless the unit is smaller than the previous one.
+    private static bool TryReadDurationPart(ref ReadOnlySpan<char> rest, int previousRank, out int rank, out double ticks)
+    {
+        rank = -1;
+        ticks = 0;
+        var numberLength = 0;
+        while (numberLength < rest.Length && (char.IsAsciiDigit(rest[numberLength]) || rest[numberLength] == '.'))
+        {
+            numberLength++;
+        }
+
+        if (numberLength == 0 ||
+            !double.TryParse(rest[..numberLength], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
+        {
+            return false;
+        }
+
+        var remaining = rest[numberLength..];
+        if (!TryReadUnit(remaining, out rank, out var unitLength, out var ticksPerUnit) || rank >= previousRank)
+        {
+            return false;
+        }
+
+        ticks = amount * ticksPerUnit;
+        rest = remaining[unitLength..];
+        return true;
+    }
+
+    // "ms" before "m", so that milliseconds are not read as minutes.
+    private static bool TryReadUnit(ReadOnlySpan<char> text, out int rank, out int length, out long ticksPerUnit)
+    {
+        (rank, length, ticksPerUnit) = text switch
+        {
+            ['m', 's', ..] => (0, 2, TimeSpan.TicksPerMillisecond),
+            ['s', ..] => (1, 1, TimeSpan.TicksPerSecond),
+            ['m', ..] => (2, 1, TimeSpan.TicksPerMinute),
+            ['h', ..] => (3, 1, TimeSpan.TicksPerHour),
+            ['d', ..] => (4, 1, TimeSpan.TicksPerDay),
+            _ => (-1, 0, 0L)
+        };
+
+        return rank >= 0;
     }
 
     private static LiteralNode? TryCreateKeywordLiteral(string token)

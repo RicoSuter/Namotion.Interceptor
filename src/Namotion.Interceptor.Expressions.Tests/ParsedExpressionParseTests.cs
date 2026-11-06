@@ -227,6 +227,10 @@ public class ParsedExpressionParseTests
     [InlineData("a == and", "expected a value after '==' at position 5")]
     [InlineData("a |", "expected a pipe name after '|' at position 3")]
     [InlineData("a | unit:", "expected an argument after ':' at position 9")]
+    [InlineData("Interval > 30m1h", "invalid number '30m1h' at position 11")]
+    [InlineData("Interval > 1h1h", "invalid number '1h1h' at position 11")]
+    [InlineData("Interval > 5x", "invalid number '5x' at position 11")]
+    [InlineData("Interval > 1e5m", "invalid number '1e5m' at position 11")]
     public void WhenExpressionIsInvalid_ThenErrorHasMessageAndPosition(string text, string expectedError)
     {
         // Act
@@ -366,5 +370,18 @@ public class ParsedExpressionParseTests
         public ExpressionValue ApplyPipe(string name, ImmutableArray<string> arguments, ExpressionValue input) => input;
 
         public string ToText(ExpressionValue result) => string.Empty;
+    }
+
+    [Theory]
+    [InlineData("Interval > 1h30m")]
+    [InlineData("Interval > -5m")]
+    [InlineData("Interval > 1.5d")]
+    public void WhenOperandIsADuration_ThenItIsALiteralAndNoPath(string text)
+    {
+        // Act
+        var expression = Parse(text);
+
+        // Assert
+        Assert.Equal(["Interval"], expression.Paths.ToArray());
     }
 }
