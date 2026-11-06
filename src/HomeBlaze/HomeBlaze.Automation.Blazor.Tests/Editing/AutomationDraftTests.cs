@@ -134,6 +134,35 @@ public class AutomationDraftTests
     }
 
     [Fact]
+    public void WhenTextsMentionAStateAsAWord_ThenTheirRulesAreFound()
+    {
+        // Arrange
+        var automation = TestAutomations.Create(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.Rules = new Dictionary<string, AutomationRule>
+            {
+                ["trigger"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idle" }] },
+                ["rearm"] = new() { Triggers = [new PropertyTrigger { Expression = "/a/B", Rearm = "/a/C == Idle" }] },
+                ["filter"] = new() { Triggers = [new SubjectEventTrigger { Filter = "event/NewState == Idle" }] },
+                ["guard"] = new() { Guard = "../CurrentState != Idle" },
+                ["argument"] = new() { Actions = [new InvokeOperationAction { Arguments = new Dictionary<string, string> { ["Message"] = "Was Idle" } }] },
+                ["value"] = new() { Actions = [new SetPropertyAction { Value = "Idle" }] },
+                ["longer"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idleness" }] },
+                ["none"] = new() { Triggers = [new PropertyTrigger { Expression = "/a/B > 1" }] }
+            };
+        });
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var rules = draft.FindRulesMentioning("Idle");
+
+        // Assert
+        Assert.Equal(["argument", "filter", "guard", "rearm", "trigger", "value"], rules.Select(rule => rule.Key).Order().ToArray());
+    }
+
+    [Fact]
     public void WhenAStateIsUsed_ThenItsUsageNamesTheRulesAndItCannotBeRemoved()
     {
         // Arrange

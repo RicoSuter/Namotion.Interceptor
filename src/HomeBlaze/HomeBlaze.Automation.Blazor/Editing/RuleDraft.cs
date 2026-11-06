@@ -41,6 +41,12 @@ public sealed class RuleDraft
     public IEnumerable<string> TargetStates =>
         Actions.Select(action => action.Value).OfType<ChangeStateAction>().Select(action => action.TargetState);
 
+    /// <summary>The texts the rule evaluates: the expressions of its triggers and guard, the filters, and the arguments and values of its actions.</summary>
+    public IEnumerable<string> Texts => Triggers.Select(trigger => trigger.Value).SelectMany(GetTexts)
+        .Append(Guard)
+        .Concat(Actions.Select(action => action.Value).SelectMany(GetTexts))
+        .OfType<string>();
+
     public static RuleDraft From(string key, AutomationRule rule)
     {
         var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, Guard = rule.Guard };
@@ -94,6 +100,20 @@ public sealed class RuleDraft
 
     private void AddAction(AutomationAction action, string prefix) =>
         Actions.Add(new DraftItem<AutomationAction>(action with { Id = DraftKeys.NewActionId(prefix, Actions.Select(existing => existing.Value.Id)) }));
+
+    private static IEnumerable<string?> GetTexts(AutomationTrigger trigger) => trigger switch
+    {
+        PropertyTrigger property => [property.Expression, property.Rearm],
+        SubjectEventTrigger subjectEvent => [subjectEvent.Filter],
+        _ => []
+    };
+
+    private static IEnumerable<string?> GetTexts(AutomationAction action) => action switch
+    {
+        InvokeOperationAction invoke => invoke.Arguments.Values,
+        SetPropertyAction set => [set.Value],
+        _ => []
+    };
 
     private static AutomationTrigger Normalize(AutomationTrigger trigger) => trigger switch
     {

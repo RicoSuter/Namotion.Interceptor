@@ -43,6 +43,12 @@
                     This is the current state. After a rename the automation stops with an error until it is reset.
                 </MudAlert>
             }
+            @if (_renamedFrom is { } oldName && Draft.FindRulesMentioning(oldName) is { Count: > 0 } mentioning)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="my-2" data-testid="automation-renamed-state-warning">
+                    A rename does not change texts that compare with the old name. '@oldName' is still in: @string.Join(", ", mentioning.Select(rule => rule.DisplayName)).
+                </MudAlert>
+            }
             <MudCheckBox T="bool" Value="@(Draft.InitialState == state)" ValueChanged="@(_ => SetInitialAsync(state))"
                          Disabled="@(Draft.InitialState == state)" Label="Initial state" />
             @RenderRules("Entered by", usage.EnteredBy)
@@ -64,6 +70,7 @@
     private string? _selectedState;
     private string? _name;
     private string? _renameError;
+    private string? _renamedFrom;
     private readonly string _inputId = Guid.NewGuid().ToString("N");
 
     [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
@@ -84,6 +91,7 @@
     {
         _selectedState = state;
         _name = state;
+        _renamedFrom = null;
         SetRenameError(null);
     }
 
@@ -123,6 +131,7 @@
         }
 
         SelectState(newName!.Trim());
+        _renamedFrom = state;
         await Changed.InvokeAsync();
     }
 
