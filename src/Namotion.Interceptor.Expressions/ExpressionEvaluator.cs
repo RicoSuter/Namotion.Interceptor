@@ -19,9 +19,30 @@ internal static class ExpressionEvaluator
                     ? context.ResolveVariable(variable, path.MemberPath)
                     : context.ResolvePath(path.Path);
 
+            case ArithmeticNode arithmetic:
+                return EvaluateArithmetic(arithmetic, ref context);
+
             default:
                 return ExpressionValue.FromBoolean(EvaluateTruth(node, ref context));
         }
+    }
+
+    private static ExpressionValue EvaluateArithmetic<TContext>(ArithmeticNode node, ref TContext context)
+        where TContext : struct, IExpressionContext
+    {
+        var left = Evaluate(node.Left, ref context).Value;
+        if (left is null)
+        {
+            return ExpressionValue.Missing;
+        }
+
+        var right = Evaluate(node.Right, ref context).Value;
+        if (right is null)
+        {
+            return ExpressionValue.Missing;
+        }
+
+        return ExpressionValue.FromValue(ExpressionArithmetic.Apply(node.Operator, left, right));
     }
 
     /// <summary>Evaluates a node as a condition: true, false, or null for unknown.</summary>

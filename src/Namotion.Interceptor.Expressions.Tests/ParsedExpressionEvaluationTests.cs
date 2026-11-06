@@ -384,4 +384,68 @@ public class ParsedExpressionEvaluationTests
         // Assert
         Assert.Null(result);
     }
+
+    [Theory]
+    [InlineData("Power - 1000 > 6000", true)]
+    [InlineData("Power + Offset == 7500", true)]
+    [InlineData("Power * 2 == 14800", true)]
+    [InlineData("Power / 2 == 3700", true)]
+    [InlineData("Power - Offset * 2 == 7200", true)]
+    [InlineData("(Power - Offset) * 2 == 14600", true)]
+    [InlineData("Power - Offset - 100 == 7200", true)]
+    [InlineData("Power / 2 / 2 == 1850", true)]
+    [InlineData("Power - -100 == 7500", true)]
+    [InlineData("Total > Phase1 + Phase2", true)]
+    [InlineData("Total < Phase1 + Phase2", false)]
+    public void WhenOperandsAreNumbers_ThenArithmeticComputes(string text, bool expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["Power"] = 7400m,
+            ["Offset"] = 100,
+            ["Total"] = 10,
+            ["Phase1"] = 3.0,
+            ["Phase2"] = 4L
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("Missing + 1 > 0")]
+    [InlineData("1 + Missing > 0")]
+    [InlineData("Power / 0 > 0")]
+    [InlineData("Name + 1 > 0")]
+    [InlineData("IsOn * 2 > 0")]
+    public void WhenArithmeticHasNoNumber_ThenTheComparisonIsUnknown(string text)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["Power"] = 7400m, ["Name"] = "Kitchen", ["IsOn"] = true };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenArithmeticIsEvaluatedAsValue_ThenItIsADouble()
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse("Power - Offset", '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m, ["Offset"] = 100 });
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Equal(7300d, result.Value);
+        Assert.Null(result.Property);
+    }
 }
