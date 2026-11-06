@@ -5,4 +5,5 @@ internal static class RulesSection
 {
     public const string Triggers = "trigger";
     public const string Guard = "guard";
+    public const string Actions = "action";
 }

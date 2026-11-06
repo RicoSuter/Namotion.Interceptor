@@ -1,0 +1,104 @@
+@using Namotion.Interceptor.Expressions
+
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-event-trigger">
+    <div class="d-flex align-center">
+        <MudText Typo="Typo.overline">Event</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove trigger" OnClick="@(() => Removed.InvokeAsync())" />
+    </div>
+    <div class="d-flex flex-wrap align-center gap-2">
+        <div style="flex: 2 1 260px; min-width: 0;">
+            <SubjectPathField Label="From" Value="@_trigger.SubjectPath" ValueChanged="SetSourceAsync" CanSelectSubject="@HasEvents" />
+        </div>
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SetSourceAsync(AutomationEvents.OwnAutomationPath))"
+                   data-testid="automation-event-own">This automation</MudButton>
+        <div style="flex: 1 1 200px;">
+            <MudSelect T="string" Label="Event" Value="@_trigger.EventType" ValueChanged="SetEventTypeAsync" data-testid="automation-event-type">
+                @foreach (var eventName in _eventNames)
+                {
+                    <MudSelectItem Value="@eventName">@eventName</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+    </div>
+    @if (_trigger.SubjectPath == AutomationEvents.OwnAutomationPath)
+    {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            The state changes of this automation, with event/PreviousState, event/NewState and event/Timestamp. Restoring the state after a restart raises no event.
+        </MudText>
+    }
+    <div class="mt-2">
+        <ConditionField @key="@FilterFieldId" FieldId="@FilterFieldId" Label="Only events where" Lead="When" Value="@_trigger.Filter" ValueChanged="SetFilterAsync"
+                        Fields="_fields" Validate="@RuleExpressions.ValidateFilter" TestId="automation-event-filter" />
+    </div>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+        Every matching event counts, also two identical ones in a row. Events from before the rule became active are never replayed.
+    </MudText>
+</MudPaper>
+
+@code {
+    private SubjectEventTrigger _trigger = null!;
+    private IReadOnlyList<string> _eventNames = [];
+    private IReadOnlyList<string> _fields = [];
+
+    [Parameter, EditorRequired] public SubjectEventTrigger Trigger { get; set; } = null!;
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    /// <summary>The <see cref="DraftItem{T}.Id"/> of the trigger, which keys its filter in the pending rows of the editor.</summary>
+    [Parameter, EditorRequired] public string ItemId { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
+
+    [Parameter] public EventCallback Removed { get; set; }
+
+    private string FilterFieldId => PendingRowIds.For(RuleKey, RulesSection.Triggers, ItemId, "filter");
+
+    // The component renders again after each edit, before its parent passes the new trigger down. A stale value in that
+    // render would make the filter field reload its text and lose a row that is not finished.
+    protected override void OnParametersSet()
+    {
+        _trigger = Trigger;
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        var eventTypes = GetEventTypes(_trigger.SubjectPath);
+        _eventNames = [.. eventTypes.Select(type => type.Name)];
+        var eventType = eventTypes.FirstOrDefault(type => type.Name == _trigger.EventType);
+        _fields = eventType is null
+            ? []
+            : [.. AutomationEvents.GetPayloadFields(eventType).Select(field => $"{ExpressionVariables.Event}/{field.Name}")];
+    }
+
+    private Task UpdateAsync(SubjectEventTrigger trigger)
+    {
+        _trigger = trigger;
+        Refresh();
+        return TriggerChanged.InvokeAsync(trigger);
+    }
+
+    // A new source keeps the event type when it publishes it too, and otherwise takes its first event type.
+    private Task SetSourceAsync(string? path)
+    {
+        var eventTypes = GetEventTypes(path);
+        var eventType = eventTypes.Any(type => type.Name == _trigger.EventType)
+            ? _trigger.EventType
+            : eventTypes.FirstOrDefault()?.Name ?? string.Empty;
+        return UpdateAsync(_trigger with { SubjectPath = path ?? string.Empty, EventType = eventType });
+    }
+
+    private Task SetEventTypeAsync(string? eventType) => UpdateAsync(_trigger with { EventType = eventType ?? string.Empty });
+
+    private Task SetFilterAsync(string? filter) => UpdateAsync(_trigger with { Filter = filter });
+
+    private IReadOnlyList<Type> GetEventTypes(string? path) =>
+        AutomationEvents.ResolveSource(Automation, RuleKey, path) is { } source ? AutomationEvents.GetEventTypes(source.GetType()) : [];
+
+    private static bool HasEvents(IInterceptorSubject subject) => AutomationEvents.GetEventTypes(subject.GetType()).Count > 0;
+}

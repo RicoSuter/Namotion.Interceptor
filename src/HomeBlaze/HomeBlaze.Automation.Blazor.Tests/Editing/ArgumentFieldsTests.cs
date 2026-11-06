@@ -104,4 +104,33 @@ public class ArgumentFieldsTests
         // Assert
         Assert.Empty(fields);
     }
+
+    [Fact]
+    public void WhenArgumentsAreKeptForAnotherOperation_ThenOnlyTheKeysOfItsFieldsRemain()
+    {
+        // Arrange
+        var method = new MethodMetadata(_ => null)
+        {
+            Parameters =
+            [
+                new MethodParameter { Name = "position", Type = typeof(int) },
+                new MethodParameter { Name = "notification", Type = typeof(Notification) }
+            ]
+        };
+        var fields = ArgumentFields.Create(method);
+        var arguments = new Dictionary<string, string>
+        {
+            ["Position"] = "5",
+            ["notification.Message"] = "Hi",
+            ["notification.Gone"] = "x",
+            ["speed"] = "3"
+        };
+
+        // Act
+        var kept = ArgumentFields.KeepKnown(fields, arguments);
+
+        // Assert
+        Assert.Equal(["Position", "notification.Message"], kept.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Empty(ArgumentFields.KeepKnown([], arguments));
+    }
 }

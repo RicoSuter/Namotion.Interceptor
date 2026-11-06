@@ -1,0 +1,195 @@
+@using global::HomeBlaze.Abstractions.Metadata
+@using Namotion.Interceptor.Registry.Abstractions
+
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-action">
+    <div class="d-flex flex-wrap align-center gap-2">
+        <MudText Typo="Typo.body2" Style="font-weight: 500; width: 20px;">@(Index + 1)</MudText>
+        <div style="flex: 2 1 260px; min-width: 0;">
+            @switch (_value)
+            {
+                case InvokeOperationAction invoke:
+                    <SubjectPathField Label="Call operation" Value="@invoke.OperationPath" CanSelectProperty="@IsOperation"
+                                      ValueChanged="@(path => SetOperationAsync(invoke, path))" />
+                    break;
+                case SetPropertyAction write:
+                    <SubjectPathField Label="Set property" Value="@write.PropertyPath" CanSelectProperty="@IsWritable"
+                                      ValueChanged="@(path => SetAsync(write with { PropertyPath = path ?? string.Empty }))" />
+                    break;
+                case ChangeStateAction change:
+                    <MudSelect T="string" Label="Change state to" Value="@change.TargetState" data-testid="automation-change-state-target"
+                               ValueChanged="@(state => SetAsync(change with { TargetState = state ?? string.Empty }))">
+                        @foreach (var state in States)
+                        {
+                            <MudSelectItem Value="@state">@state</MudSelectItem>
+                        }
+                    </MudSelect>
+                    break;
+            }
+        </div>
+        <div style="width: 150px;">
+            <MudSelect T="ActionErrorPolicy" Label="On error" Value="@_value.OnError" ToStringFunc="@FormatPolicy"
+                       ValueChanged="@(policy => SetAsync(_value with { OnError = policy }))">
+                <MudSelectItem Value="ActionErrorPolicy.Continue">@FormatPolicy(ActionErrorPolicy.Continue)</MudSelectItem>
+                <MudSelectItem Value="ActionErrorPolicy.StopRule">@FormatPolicy(ActionErrorPolicy.StopRule)</MudSelectItem>
+            </MudSelect>
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@(Index == 0)" aria-label="Move action up"
+                       OnClick="@(() => Moved.InvokeAsync(-1))" />
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@(Index == Count - 1)" aria-label="Move action down"
+                       OnClick="@(() => Moved.InvokeAsync(1))" />
+        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="Remove action" OnClick="@(() => Removed.InvokeAsync())" />
+    </div>
+    @if (_value is InvokeOperationAction operation)
+    {
+        @RenderArguments(operation)
+    }
+    else if (_value is SetPropertyAction property)
+    {
+        @RenderValue(property)
+    }
+</MudPaper>
+
+@code {
+    private const string ValueHelperText = "A value, or an expression such as /Weather/WindGust * 2";
+
+    private AutomationAction _value = null!;
+    private IReadOnlyList<ArgumentField>? _fields;
+    private bool _isTextTarget;
+
+    [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
+
+    [Parameter] public EventCallback<AutomationAction> ValueChanged { get; set; }
+
+    [Parameter] public int Index { get; set; }
+
+    [Parameter] public int Count { get; set; }
+
+    [Parameter] public IReadOnlyList<string> States { get; set; } = [];
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    [Parameter] public EventCallback<int> Moved { get; set; }
+
+    [Parameter] public EventCallback Removed { get; set; }
+
+    // The component renders again after each edit, before its parent passes the new action down. A stale value in that
+    // render would make a text field reload and lose what was just typed.
+    protected override void OnParametersSet()
+    {
+        _value = Value;
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        _fields = _value is InvokeOperationAction invoke ? GetFields(invoke.OperationPath) : null;
+        _isTextTarget = _value is SetPropertyAction write &&
+            AutomationPreview.ResolveTarget(Automation, RuleKey, write.PropertyPath) is { } target &&
+            (Nullable.GetUnderlyingType(target.Type) ?? target.Type) == typeof(string);
+    }
+
+    private IReadOnlyList<ArgumentField>? GetFields(string path) =>
+        AutomationPreview.ResolveTarget(Automation, RuleKey, path)?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
+
+    private RenderFragment RenderArguments(InvokeOperationAction invoke) => __builder =>
+    {
+        if (_fields is null)
+        {
+            if (!string.IsNullOrWhiteSpace(invoke.OperationPath))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">No operation at this path.</MudText>
+            }
+
+            return;
+        }
+
+        <MudStack Spacing="2" Class="mt-2 ml-6" data-testid="automation-action-arguments">
+            @foreach (var field in _fields)
+            {
+                var label = field.IsRequired ? $"{field.Label} *" : field.Label;
+                var argument = GetArgument(invoke, field.Key);
+                if (field.IsTemplate)
+                {
+                    <TemplateField @key="@field.Key" Label="@label" Value="@argument" Expressions="Expressions"
+                                   ValueChanged="@(value => SetArgumentAsync(invoke, field.Key, value))" />
+                }
+                else if (field.Choices is { } choices)
+                {
+                    <MudSelect @key="@field.Key" T="string" Label="@label" Value="@argument" Clearable="true"
+                               ValueChanged="@(value => SetArgumentAsync(invoke, field.Key, value))">
+                        @foreach (var choice in choices)
+                        {
+                            <MudSelectItem Value="@choice">@choice</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                else
+                {
+                    <MudTextField @key="@field.Key" T="string" Label="@label" Value="@argument" Immediate="true" HelperText="@ValueHelperText"
+                                  ValueChanged="@(value => SetArgumentAsync(invoke, field.Key, value))" />
+                }
+            }
+        </MudStack>
+    };
+
+    private RenderFragment RenderValue(SetPropertyAction write) => __builder =>
+    {
+        <div class="mt-2 ml-6">
+            @if (_isTextTarget)
+            {
+                <TemplateField Label="Value" Value="@write.Value" Expressions="Expressions"
+                               ValueChanged="@(value => SetAsync(write with { Value = value ?? string.Empty }))" />
+            }
+            else
+            {
+                <MudTextField T="string" Label="Value" Value="@write.Value" Immediate="true" HelperText="@ValueHelperText"
+                              ValueChanged="@(value => SetAsync(write with { Value = value ?? string.Empty }))" />
+            }
+        </div>
+    };
+
+    private Task SetAsync(AutomationAction action)
+    {
+        _value = action;
+        Refresh();
+        return ValueChanged.InvokeAsync(action);
+    }
+
+    // The arguments of another operation are dropped when they do not fit the new one, because the binder rejects a key
+    // that is no parameter or member of the operation.
+    private Task SetOperationAsync(InvokeOperationAction invoke, string? path)
+    {
+        var operationPath = path ?? string.Empty;
+        var fields = GetFields(operationPath) ?? [];
+        return SetAsync(invoke with { OperationPath = operationPath, Arguments = ArgumentFields.KeepKnown(fields, invoke.Arguments) });
+    }
+
+    // The binder matches keys without regard to case, so another spelling of the same key is replaced.
+    private Task SetArgumentAsync(InvokeOperationAction invoke, string key, string? value)
+    {
+        var arguments = invoke.Arguments
+            .Where(argument => !string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(argument => argument.Key, argument => argument.Value);
+        if (!string.IsNullOrEmpty(value))
+        {
+            arguments[key] = value;
+        }
+
+        return SetAsync(invoke with { Arguments = arguments });
+    }
+
+    private static string? GetArgument(InvokeOperationAction invoke, string key) =>
+        invoke.Arguments.FirstOrDefault(argument => string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+
+    private static bool IsOperation(RegisteredSubjectProperty property) =>
+        property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, RequiresConfirmation: false };
+
+    private static bool IsWritable(RegisteredSubjectProperty property) =>
+        property.TryGetMethodMetadata() is null && property.HasPublicSetter && !property.IsConfigurationProperty();
+
+    private static string FormatPolicy(ActionErrorPolicy policy) => policy == ActionErrorPolicy.StopRule ? "Stop rule" : "Continue";
+}
