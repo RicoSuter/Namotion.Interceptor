@@ -434,15 +434,13 @@ public sealed class AuthorizationPolicy
                 (pending ??= []).Add(cursor with { Next = cursor.Next + 1 });
             }
 
-            SetLink(ref context, parent.Property, cursor, cursorPaths);
-            if (!IsAllowed(PolicyCompiler.ReadBit, ref context))
+            if (!IsLinkReadable(ref context, parent.Property, cursor, ref cursorPaths))
             {
                 deniedProperty ??= parent.Property;
                 hasCursor = false;
                 continue;
             }
 
-            cursorPaths = context.HasPaths ? context.Paths : default;
             hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, state, ref visited, out cursor, out isRoot);
         }
 
@@ -478,14 +476,26 @@ public sealed class AuthorizationPolicy
         return true;
     }
 
-    // Prepares the check of a link to the cursor's next parent, whose owner is another subject than the last link's.
-    // Every path of a subject with one parent runs through it, so the owner's paths are the subject's without their
-    // last link, and a deep chain is not enumerated once per link.
-    private static void SetLink(ref MatchContext context, RegisteredSubjectProperty link, in ParentCursor cursor, in PathList cursorPaths)
+    // Checks the link to the cursor's next parent and replaces cursorPaths by the owner's single chain, if it has one.
+    // The owner of a single chain's last link has that chain without the link, exactly what its own enumeration builds,
+    // so a deep chain is not enumerated once per link. Any other paths could differ from the owner's, if only in
+    // whether the search budget lasted, so the owner's are built and released after the check.
+    private bool IsLinkReadable(ref MatchContext context, RegisteredSubjectProperty link, in ParentCursor cursor, ref PathList cursorPaths)
     {
         context.SetMember(link);
-        context.HasPaths = cursor.Parents.Length == 1 && cursorPaths.Count > 0;
+        context.HasPaths = cursor.Parents.Length == 1 && cursorPaths.IsSingleChain;
         context.Paths = context.HasPaths ? cursorPaths.WithoutLastLink() : default;
+
+        var state = context.SharedState!;
+        var pathCount = state.Paths.Count;
+        var isReadable = IsAllowed(PolicyCompiler.ReadBit, ref context);
+        cursorPaths = context.HasPaths && context.Paths.IsSingleChain ? context.Paths : default;
+        if (context.HasPaths && !cursorPaths.IsSingleChain)
+        {
+            state.ReleasePaths(pathCount);
+        }
+
+        return isReadable;
     }
 
     private readonly record struct ParentCursor(ImmutableArray<SubjectPropertyParent> Parents, int Next, int Depth);

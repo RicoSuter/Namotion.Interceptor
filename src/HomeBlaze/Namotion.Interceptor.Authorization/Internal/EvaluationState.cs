@@ -47,13 +47,20 @@ internal sealed class EvaluationState
         _cached = state;
     }
 
-    /// <summary>The paths of the subject as <see cref="BuildPaths"/> builds them, built once per attempt.</summary>
+    /// <summary>
+    /// The paths of the subject as <see cref="BuildPaths"/> builds them. A single chain is kept for the rest of the
+    /// attempt, other paths are built again when asked again, so the caller may release them with
+    /// <see cref="ReleasePaths"/> once it no longer needs them.
+    /// </summary>
     public PathList GetPaths(RegisteredSubject subject, PathProviderBase pathProvider, int maxPaths)
     {
         if (!_builtPaths.TryGetValue(subject, out var paths))
         {
             paths = BuildPaths(subject, pathProvider, maxPaths);
-            _builtPaths.Add(subject, paths);
+            if (paths.IsSingleChain)
+            {
+                _builtPaths.Add(subject, paths);
+            }
         }
 
         return paths;
@@ -73,10 +80,13 @@ internal sealed class EvaluationState
         }
 
         var first = Paths.Count;
-        var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, Paths, maxPaths, Reads);
+        var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, Paths, maxPaths, Reads, out var followedSingleParents) && Paths.Count > first;
         var count = Paths.Count - first;
-        return new PathList(Paths, first, count, droppedLinks: 0, isComplete && count > 0);
+        return new PathList(Paths, first, count, droppedLinks: 0, isComplete, isSingleChain: isComplete && followedSingleParents && count == 1);
     }
+
+    /// <summary>Releases the paths built after the first <paramref name="count"/>; they must not be used afterwards.</summary>
+    public void ReleasePaths(int count) => Paths.TruncateTo(count);
 
     public void Clear()
     {

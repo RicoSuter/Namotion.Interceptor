@@ -462,7 +462,7 @@ public class SubjectPathsTests
     private static bool TryGetPaths(RegisteredSubject subject, PathProviderBase pathProvider, int maxPaths, out List<PathLink[]> paths)
     {
         var store = new PathStore();
-        var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, store, maxPaths, new ParentReads());
+        var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, store, maxPaths, new ParentReads(), out _);
         paths = Enumerable.Range(0, store.Count).Select(index => store[index].ToArray()).ToList();
         return isComplete;
     }

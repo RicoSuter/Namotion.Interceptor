@@ -41,6 +41,16 @@ internal sealed class PathStore
 
     public void DropPath(int start) => _links.RemoveRange(start, _links.Count - start);
 
+    /// <summary>Removes the paths from <paramref name="count"/> on, which no one may use afterwards.</summary>
+    public void TruncateTo(int count)
+    {
+        if (count < _paths.Count)
+        {
+            DropPath(_paths[count].Start);
+            _paths.RemoveRange(count, _paths.Count - count);
+        }
+    }
+
     public void Clear()
     {
         _links.Clear();

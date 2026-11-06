@@ -39,6 +39,7 @@ internal static class SubjectPaths
     /// <param name="paths">Receives the paths that could be built, each as its links in root-to-subject order, after the paths it already holds.</param>
     /// <param name="maxPaths">The most paths to build; positive.</param>
     /// <param name="reads">Records every parents and attachment read, so the caller can check that they held at one instant.</param>
+    /// <param name="followedSingleParents">True when every subject above the subject had a single parent, so the result came from following them without a search and without spending the search budget.</param>
     /// <returns>
     /// True when every chain was built; false when a chain could not be built (it passes a property paths may not
     /// pass, an [InlinePaths] key resolves neither bare nor in the explicit form, because another segment shadows it, an
@@ -48,10 +49,11 @@ internal static class SubjectPaths
     /// parents has no paths and returns true.
     /// </returns>
     public static bool TryGetPaths(
-        RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, ParentReads reads)
+        RegisteredSubject subject, PathProviderBase pathProvider, PathStore paths, int maxPaths, ParentReads reads, out bool followedSingleParents)
     {
         Debug.Assert(maxPaths > 0, "maxPaths must be positive.");
 
+        followedSingleParents = true;
         var parents = reads.GetParents(subject, out _);
         if (parents.Length == 0)
         {
@@ -63,6 +65,7 @@ internal static class SubjectPaths
         frames.Clear();
         if (!TryBuildSingleParentChain(subject, parents, frames, reads, ref builder))
         {
+            followedSingleParents = false;
             frames.Clear();
             BuildChains(subject, parents, (long)maxPaths * ParentLinksPerPath, frames, reads, ref builder);
         }

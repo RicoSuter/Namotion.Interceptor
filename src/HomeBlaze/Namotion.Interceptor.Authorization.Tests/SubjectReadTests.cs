@@ -9,7 +9,8 @@ public class SubjectReadTests
 {
     private static readonly PermissionAction[] Read = [PermissionAction.Read];
 
-    public static TheoryData<string> BranchingGraphs => ["SecondParent", "NeighborCycle", "Diamond", "DiamondAboveDeepChain", "DeepChainAboveDiamond", "Cycle"];
+    public static TheoryData<string> BranchingGraphs =>
+        ["SecondParent", "NeighborCycle", "Diamond", "DiamondAboveDeepChain", "DeepChainAboveDiamond", "Cycle", "BudgetSpentAboveTheOwner", "BudgetSpentAboveTheSubject"];
 
     [Fact]
     public void WhenNoMemberIsReadable_ThenSubjectIsNotReadable()
@@ -203,7 +204,43 @@ public class SubjectReadTests
     }
 
     [Fact]
-    public void WhenTheSubjectIsTenThousandLevelsDeepUnderAPathDeny_ThenItsVisibilityIsAnsweredInLinearMemory()
+    public void WhenTheOwnersPathSearchRunsOutOfBudgetButTheSubjectsDoesNot_ThenALinkDenyWithPathsStillFailsClosed()
+    {
+        // Arrange: the owner's search re-enters the subject through every filler, so it costs about 4,500 parent links
+        // while the subject's costs about 3,000; the owner's paths are incomplete although the subject's are complete
+        var root = CreateBranchingGraph("BudgetSpentAboveTheOwner", out _);
+        var owner = root.Father!;
+        var subject = owner.Father!;
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Mother/**"])]));
+
+        // Act
+        var decision = policy.Explain(Registered(subject));
+
+        // Assert
+        Assert.False(policy.CanRead(Member(owner, nameof(Person.Father))));
+        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(owner, nameof(Person.Father))), decision);
+    }
+
+    [Fact]
+    public void WhenTheSubjectsPathSearchRunsOutOfBudgetButTheOwnersDoesNot_ThenTheOwnersCompletePathsDecideTheLink()
+    {
+        // Arrange: the subject's search costs one parent link more than its owner's, 4,097 against 4,096, so only the
+        // subject's paths are incomplete
+        var root = CreateBranchingGraph("BudgetSpentAboveTheSubject", out _);
+        var owner = root.Father!.Father!;
+        var subject = owner.Father!;
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Father"], paths: ["/Nope/**"])]));
+
+        // Act
+        var decision = policy.Explain(Registered(subject));
+
+        // Assert
+        Assert.True(policy.CanRead(Member(owner, nameof(Person.Father))));
+        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
+    }
+
+    [Fact]
+    public void WhenTheSubjectIsTenThousandLevelsDeepUnderAPathDeny_ThenItsVisibilityIsAnsweredWithinSixtyFourMegabytes()
     {
         // Arrange: a deny with paths that no link of the chain matches, so every link check needs the paths of its owner
         var root = new Person(CreateContext());
@@ -221,16 +258,25 @@ public class SubjectReadTests
         // Act: on a small stack, as a deep walk must not recurse; rebuilding the paths per link allocates gigabytes here
         var canRead = false;
         var allocated = 0L;
+        Exception? error = null;
         var thread = new Thread(() =>
         {
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            canRead = policy.CanRead(bottom);
-            allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            try
+            {
+                var before = GC.GetAllocatedBytesForCurrentThread();
+                canRead = policy.CanRead(bottom);
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            }
+            catch (Exception exception)
+            {
+                error = exception;
+            }
         }, maxStackSize: 256 * 1024);
         thread.Start();
         thread.Join();
 
         // Assert
+        Assert.Null(error);
         Assert.True(canRead);
         Assert.InRange(allocated, 0, 64L * 1024 * 1024);
     }
@@ -240,8 +286,8 @@ public class SubjectReadTests
     public void WhenRulesHavePaths_ThenTheVisibilityOfEverySubjectAgreesWithItsMemberAndLinkChecks(string graph)
     {
         // Arrange
-        var root = CreateBranchingGraph(graph);
-        var subjects = GetSubjects(Registered(root));
+        var root = CreateBranchingGraph(graph, out var filler);
+        var subjects = GetSubjects(Registered(root)).Except(filler.Select(Registered)).ToList();
         var policies = new[]
         {
             Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Father/Mother/**"])])),
@@ -264,12 +310,14 @@ public class SubjectReadTests
         Assert.Contains(decisions, decision => decision.DeniedProperty is not null);
     }
 
-    // Graphs of Persons with several parents, diamonds and cycles, attached under one root.
-    private static Person CreateBranchingGraph(string graph)
+    // Graphs of Persons with several parents, diamonds and cycles, attached under one root. The filler only spends the
+    // budget of the path search and is left out of the comparison, which would otherwise take minutes.
+    private static Person CreateBranchingGraph(string graph, out Person[] filler)
     {
         var root = new Person(CreateContext());
         var father = new Person();
         var mother = new Person();
+        filler = [];
         switch (graph)
         {
             case "SecondParent":
@@ -317,12 +365,33 @@ public class SubjectReadTests
                 root.Father = father;
                 root.Mother = second;
                 break;
+            case "BudgetSpentAboveTheOwner":
+                // Root.Father is the owner, owner.Father the subject; each filler is a child of the subject whose Father
+                // is the owner, so every filler costs the owner's search three links and the subject's two.
+                root.Father = father;
+                father.Father = mother;
+                filler = CreateFiller(1_500, father);
+                mother.Children = filler;
+                break;
+            case "BudgetSpentAboveTheSubject":
+                // Root.Father.Father is the owner, owner.Father the subject; each filler is a child of Root.Father whose
+                // Father is Root.Father, so every filler costs both searches two links, which leaves the subject's
+                // search 4,097 links and the owner's 4,096 of the budget of 4,096.
+                root.Father = father;
+                father.Father = mother;
+                mother.Father = new Person();
+                filler = CreateFiller(2_047, father);
+                father.Children = filler;
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(graph), graph, null);
         }
 
         return root;
     }
+
+    private static Person[] CreateFiller(int count, Person father)
+        => Enumerable.Range(0, count).Select(_ => new Person { Father = father }).ToArray();
 
     private static Person CreateFatherChain(int length)
     {
