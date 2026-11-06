@@ -1,0 +1,108 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Automation))]
+@implements ISubjectEditComponent
+
+@if (Automation is not null && _draft is { } draft)
+{
+    <MudStack Spacing="2" data-testid="automation-editor">
+        @if (_pendingRows.Any)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-pending">
+                A condition is not finished. Complete or remove it before saving.
+            </MudAlert>
+        }
+        <MudTabs Elevation="0" Border="true" @bind-ActivePanelIndex="_tabIndex" TabPanelsClass="pt-3">
+            <MudTabPanel Text="General">
+                <GeneralTab Draft="draft" Errors="_errors" Changed="OnChanged" />
+            </MudTabPanel>
+        </MudTabs>
+    </MudStack>
+}
+
+@code {
+    private readonly PendingRows _pendingRows = new();
+    private AutomationDraft? _draft;
+    private IReadOnlyList<AutomationValidationError> _errors = [];
+    private int _tabIndex;
+    private bool _isDirty;
+    private bool _wasValid = true;
+
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter] public bool IsCreating { get; set; }
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    public string PreferredDialogSize => "Large";
+
+    public bool IsDirty => _isDirty;
+
+    // Validated on every read, because an input that is removed while it shows an error clears the error only when it is
+    // disposed, after the change that removed it.
+    public bool IsValid => _draft is not null && !_pendingRows.Any && _draft.Validate().Count == 0;
+
+    private Automation? Automation => Subject as Automation;
+
+    protected override void OnInitialized()
+    {
+        if (Automation is { } automation)
+        {
+            _draft = AutomationDraft.From(automation);
+            _errors = _draft.Validate();
+        }
+
+        _wasValid = IsValid;
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Automation is { } automation && _draft is { } draft && IsValid)
+        {
+            draft.ApplyTo(automation);
+            SetDirty(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Registers whether an expression field has a row with an unapplied invalid edit; the tabs with such fields pass
+    /// their field ids here, so that the save stays blocked and the editor says why.
+    /// </summary>
+    internal void OnPendingRowChanged(string fieldId, bool hasPendingRow)
+    {
+        if (_pendingRows.Set(fieldId, hasPendingRow))
+        {
+            ReportValidity();
+            StateHasChanged();
+        }
+    }
+
+    private void OnChanged()
+    {
+        _errors = _draft?.Validate() ?? [];
+        SetDirty(true);
+        ReportValidity();
+    }
+
+    // Raised on transitions only, because the host renders its save button again on each event.
+    private void ReportValidity()
+    {
+        var isValid = IsValid;
+        if (isValid != _wasValid)
+        {
+            _wasValid = isValid;
+            IsValidChanged?.Invoke(isValid);
+        }
+    }
+
+    private void SetDirty(bool isDirty)
+    {
+        if (_isDirty != isDirty)
+        {
+            _isDirty = isDirty;
+            IsDirtyChanged?.Invoke(isDirty);
+        }
+    }
+}
