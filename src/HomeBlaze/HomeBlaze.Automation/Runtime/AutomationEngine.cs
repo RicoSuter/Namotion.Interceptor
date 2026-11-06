@@ -106,6 +106,27 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     /// <summary>
+    /// Enters the initial state and clears the trigger times. A saved reset clears the error shown unless the configuration
+    /// is invalid, since a reset is how an automation leaves a saved state that its configuration no longer has.
+    /// </summary>
+    public Task ResetStateAsync()
+    {
+        if (_states.Reset(_snapshot, _automation.Rules.Values) is { } error)
+        {
+            _status.Fail(error);
+            return Task.CompletedTask;
+        }
+
+        if (!_hasConfigurationError)
+        {
+            _status.SetRunning();
+        }
+
+        ApplyScopeChange();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Reports the dropped inputs and makes up for them, after the inputs that were queued before the drop. The runs that
     /// inputs dropped from a feedback chain request are recorded as canceled, because running them would continue the
     /// chain. After an overload every trigger is evaluated again.

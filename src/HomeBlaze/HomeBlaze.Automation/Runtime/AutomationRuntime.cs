@@ -23,18 +23,33 @@ internal sealed class AutomationRuntime
     private int _isTickPending;
     private int _isGraphChangePending;
 
-    public AutomationRuntime(Automation automation, AutomationCheckpointStore store, ILogger logger)
+    /// <summary>Creates the worker of the automation at <paramref name="automationPath"/>, whose checkpoint is in <paramref name="store"/>.</summary>
+    public AutomationRuntime(Automation automation, string? automationPath, AutomationCheckpointStore store, ILogger logger)
     {
         _automation = automation;
+        AutomationPath = automationPath;
+        Store = store;
         _engine = new AutomationEngine(automation, _queue, new AutomationStateKeeper(store), logger);
     }
 
+    /// <summary>The canonical path of the automation when it started, which names its checkpoint.</summary>
+    public string? AutomationPath { get; }
+
+    public AutomationCheckpointStore Store { get; }
+
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
+
+    /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>
+    public bool RequestReset()
+    {
+        var chainDepth = AutomationInputQueue.CausedChainDepth;
+        return _queue.TryEnqueue(chainDepth == 0 ? ResetStateInput.Instance : new ResetStateInput(chainDepth));
+    }
 
     public Task FlushAsync()
     {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        return _queue.EnqueueFlush(new FlushInput(completion)) ? completion.Task : Task.CompletedTask;
+        var flush = FlushInput.Create();
+        return _queue.EnqueueFlush(flush) ? flush.Completion.Task : Task.CompletedTask;
     }
 
     /// <summary>Refuses later inputs and completes the flushes still queued, since nothing is processed anymore.</summary>
@@ -108,6 +123,7 @@ internal sealed class AutomationRuntime
         TickInput => _engine.OnTickAsync(cancellationToken),
         ActivationInput activation => _engine.OnActivationAsync(activation, cancellationToken),
         ResynchronizeInput resynchronize => ResynchronizeAsync(resynchronize, cancellationToken),
+        ResetStateInput => _engine.ResetStateAsync(),
         _ => Task.CompletedTask
     };
 

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Automation;
 
@@ -22,12 +23,13 @@ namespace HomeBlaze.Automation;
 [SubjectIcon("AutoMode")]
 [InterceptorSubject]
 public partial class Automation : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider,
-    IObservable<AutomationStateChangedEvent>
+    IObservable<AutomationStateChangedEvent>, ILifecycleHandler
 {
     private readonly ILogger<Automation> _logger;
     private readonly Subject<AutomationStateChangedEvent> _stateChanged = new();
     private AutomationRuntime? _runtime;
     private int _configurationVersion;
+    private volatile bool _isDetached;
 
     public Automation(AutomationServices services, ILogger<Automation> logger)
     {
@@ -101,6 +103,35 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
 
     public IDisposable Subscribe(IObserver<AutomationStateChangedEvent> observer) => _stateChanged.Subscribe(observer);
 
+    /// <summary>Enters the initial state and clears the last trigger times of the rules, publishing a state change like any real one.</summary>
+    /// <exception cref="InvalidOperationException">The automation is not running, or the reset could not be queued.</exception>
+    [Operation(Title = "Reset State", Description = "Enters the initial state and clears the last trigger times of the rules.", Icon = "RestartAlt", Position = 1)]
+    public void ResetState()
+    {
+        var runtime = Volatile.Read(ref _runtime) ?? throw new InvalidOperationException("The automation is not running.");
+        if (!runtime.RequestReset())
+        {
+            throw new InvalidOperationException("The reset was not queued, because the input queue is full, a feedback chain was stopped or the automation is stopping.");
+        }
+    }
+
+    void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
+    {
+        if (!ReferenceEquals(change.Subject, this))
+        {
+            return;
+        }
+
+        if (change.IsContextAttach)
+        {
+            _isDetached = false;
+        }
+        else if (change.IsContextDetach)
+        {
+            _isDetached = true;
+        }
+    }
+
     /// <summary>Completes once every input queued so far, and every input those caused, was processed, or the worker stopped.</summary>
     internal Task FlushAsync() => Volatile.Read(ref _runtime)?.FlushAsync() ?? Task.CompletedTask;
 
@@ -110,7 +141,9 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     // configuration change or a flush right after the start reaches it.
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        Volatile.Write(ref _runtime, new AutomationRuntime(this, new AutomationCheckpointStore(GetCheckpointPath()), _logger));
+        var automationPath = Services.PathResolver.GetPath(this, PathStyle.Canonical);
+        var store = new AutomationCheckpointStore(GetCheckpointPath(automationPath));
+        Volatile.Write(ref _runtime, new AutomationRuntime(this, automationPath, store, _logger));
         Status = ServiceStatus.Starting;
         return base.StartAsync(cancellationToken);
     }
@@ -123,6 +156,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         if (Interlocked.Exchange(ref _runtime, null) is { } runtime)
         {
             runtime.Close();
+            OnWorkerEnded(runtime);
             Status = ServiceStatus.Stopped;
         }
     }
@@ -152,15 +186,37 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         finally
         {
             Interlocked.CompareExchange(ref _runtime, null, runtime);
+            OnWorkerEnded(runtime);
         }
 
         Status = finalStatus;
     }
 
-    private string? GetCheckpointPath()
+    // Deletes the checkpoint of a removed automation only after its worker ended, when the graph no longer holds it, so
+    // that its path resolves to what took its place: another automation at the same path keeps the file.
+    private void OnWorkerEnded(AutomationRuntime runtime)
+    {
+        if (!_isDetached || runtime.AutomationPath is not { } automationPath ||
+            Services.PathResolver.ResolveSubject(automationPath, PathStyle.Canonical) is Automation other && !ReferenceEquals(other, this))
+        {
+            return;
+        }
+
+        try
+        {
+            runtime.Store.Delete();
+            _logger.LogInformation("The automation {Automation} was removed, so its checkpoint {Path} was deleted.", Title, runtime.Store.FilePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "The checkpoint {Path} of the removed automation {Automation} could not be deleted.", runtime.Store.FilePath, Title);
+        }
+    }
+
+    private string? GetCheckpointPath(string? automationPath)
     {
         var dataDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
-        var filePath = AutomationCheckpointStore.GetFilePath(dataDirectory, Services.PathResolver.GetPath(this, PathStyle.Canonical));
+        var filePath = AutomationCheckpointStore.GetFilePath(dataDirectory, automationPath);
         if (filePath is null)
         {
             _logger.LogWarning("The automation {Automation} has no data directory or path, so its state is not kept across restarts.", Title);

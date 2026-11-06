@@ -53,6 +53,36 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         return null;
     }
 
+    /// <summary>
+    /// Enters the initial state with a new entry time and clears the trigger times of the rules, after the checkpoint with
+    /// both was written; publishes the state-change event when the state changed. Returns why nothing changed, or null.
+    /// </summary>
+    public string? Reset(CompiledAutomation snapshot, IEnumerable<AutomationRule> rules)
+    {
+        var previous = automation.CurrentState;
+        var initialState = snapshot.States.Count > 0 ? snapshot.InitialState : null;
+        var now = timeProvider.GetUtcNow();
+        var next = AutomationStateKeeper.WithoutTriggerTimes(AutomationStateKeeper.WithState(keeper.Persisted, initialState, now));
+        if (keeper.TryPersist(next) is { } error)
+        {
+            return $"The reset was not saved, so nothing changed: {error}";
+        }
+
+        foreach (var rule in rules)
+        {
+            rule.LastTriggeredAt = null;
+        }
+
+        logger.LogInformation("The automation {Automation} was reset to its initial state {State}.", automation.Title, initialState);
+        Enter(initialState, now);
+        if (initialState is not null && !string.Equals(previous, initialState, StringComparison.Ordinal))
+        {
+            Publish(previous, initialState, now);
+        }
+
+        return null;
+    }
+
     /// <summary>Gets why the current state is not valid, such as a saved state that the configuration no longer has, or null.</summary>
     public static string? CheckState(CompiledAutomation snapshot, string? currentState) =>
         snapshot.States.Count == 0 || currentState is null || snapshot.HasState(currentState)
