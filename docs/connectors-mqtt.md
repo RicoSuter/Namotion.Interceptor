@@ -351,7 +351,7 @@ Both built-in MQTT connectors implement liveness monitoring and report through t
 
 **`IsOperational` for the client means the connection to the broker is up.** It is set as soon as the connect returns, before the property subscriptions are established, so on the first connect it leads them by the duration of the subscribe. After a reconnect it is raised only once resubscription and the initial-state reload have both succeeded, because a client that reconnected but could not resubscribe is not serving anything. It drops on every disconnect, including one the connection monitor is about to recover from, and on teardown.
 
-**`IsOperational` for the server means the broker is listening.**
+**`IsOperational` for the server means the broker is listening.** It is false while the server restarts the broker after a failure, which first waits up to 5 seconds for the old connections to close, because MQTTnet can keep the session of a connection still closing referenced for good when the broker starts again. A wait that runs out logs a warning with the number of connections still open.
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
@@ -382,9 +382,9 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 
 ### Automatic Cleanup on Subject Detach
 
-The client and the server cache the topic of each property and the property of each topic. Every entry carries the registry's `StructureVersion` and the mapper's `Version` from before it was computed and is used only while both are current. A lookup after a structural change (attach, detach, another parent, a new position or key, a property added at run time) or after a mapper change computes the entry again, so a change is published under the topic its property has at that moment and an inbound topic that no longer maps to a property is not applied. The structure version follows the structure the registry tracks (assigned subject references, collections and dictionaries, dynamic properties). A subject reached through a derived (non-intercepted) property, or a collection mutated in place without assigning it again, changes no structure version, so a cached topic does not follow it (in-place mutation is unsupported, see [Child Index Changes](tracking.md#child-index-changes)). The server's change filter and its publish share one cache, so they always agree.
+The client and the server cache the topic of each property and the property of each topic. Every entry carries the registry's [`StructureVersion`](registry.md#structure-version) and the mapper's `Version`, both read before the entry was computed, and is used only while both are current. A lookup after a structural change (attach, detach, another parent, a new position or key, a property added at run time) or after a mapper change computes the entry again, so a change is published under the topic its property has at that moment and an inbound topic that no longer maps to a property is not applied. A derived property that returns another subject, or a collection or dictionary mutated in place, also when the same instance is assigned again afterwards, changes no structure version, so a cached topic does not follow it (see [Structure version](registry.md#structure-version)). The server's change filter and its publish share one cache, so they always agree.
 
-- The caches are cleared on every detach, since every detach makes all entries stale, and an entry for a subject that is detached or detaching (no references left) is dropped right after it is added, so the caches hold no detached subject.
+- The caches are cleared on every detach, since every detach makes all entries stale, and an entry for a subject that is detached or detaching (no references left) is dropped right after it is added, and the client's subscribe step then also releases the claim it took on the property, so the caches hold no detached subject.
 - A value change or an inbound message concurrent with a structural change may be handled as if it came just before it.
 
 ## Known Limitations

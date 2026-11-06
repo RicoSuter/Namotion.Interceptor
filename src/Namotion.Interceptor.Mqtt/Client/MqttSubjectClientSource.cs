@@ -543,7 +543,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             return;
         }
 
-        // Read before the topics are computed, so that an entry computed during a change carries the versions from before it.
+        // Read before the topics are computed, so that an entry computed during a change carries versions from before
+        // the change ended, which no lookup after it matches.
         var structureVersion = _registry?.StructureVersion ?? 0;
         var mapperVersion = _configuration.Mapper.Version;
 

@@ -227,8 +227,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     }
 
     // A cache entry carries the registry's version read before it was computed and is served only while that version is
-    // current, so an entry computed before a change can never be served after it, whenever it was added, also when this
-    // resolver is not registered as a lifecycle handler.
+    // current, so an entry computed before or during a change carries a version from before the change ended and is
+    // never served after it, whenever it was added, also when this resolver is not registered as a lifecycle handler.
     private static long GetStructureVersion(IInterceptorSubject subject)
         => subject.Context.TryGetService<ISubjectRegistry>()?.StructureVersion ?? 0;
 
