@@ -132,4 +132,44 @@ public class RunHistoryTests
         // Assert
         Assert.Empty(runs);
     }
+
+    [Theory]
+    [InlineData(1, 2, true)]
+    [InlineData(2, 2, false)]
+    [InlineData(3, 2, false)]
+    [InlineData(null, 2, true)]
+    [InlineData(null, 0, false)]
+    [InlineData(null, null, false)]
+    [InlineData(1, null, false)]
+    public async Task WhenTheLiveCountIsAheadOfTheStoredCount_ThenTheHistoryIsBehind(int? stored, int? live, bool expectedIsBehind)
+    {
+        // Arrange
+        var store = CreateStore();
+        if (stored is { } number)
+        {
+            store.Add(Finished + "/RunCount", Start.AddMinutes(1), number);
+        }
+
+        // Act
+        var isBehind = await RunHistory.IsBehindAsync([store], [new RunSource("Finished", Finished, live)], Start.AddMinutes(10), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedIsBehind, isBehind);
+    }
+
+    [Fact]
+    public async Task WhenOneOfSeveralRulesIsBehind_ThenTheHistoryIsBehind()
+    {
+        // Arrange
+        var store = CreateStore()
+            .Add(Finished + "/RunCount", Start.AddMinutes(1), 2)
+            .Add(Started + "/RunCount", Start.AddMinutes(1), 1);
+
+        // Act
+        var isBehind = await RunHistory.IsBehindAsync(
+            [store], [new RunSource("Finished", Finished, 2), new RunSource("Started", Started, 2)], Start.AddMinutes(10), CancellationToken.None);
+
+        // Assert
+        Assert.True(isBehind);
+    }
 }

@@ -83,7 +83,7 @@
                                     <td>@(rule.RunCount ?? 0)</td>
                                     <td>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Science"
-                                                   OnClick="@(() => TestAsync(key, rule))">Test now</MudButton>
+                                                   OnClick="@(() => TestAsync(key, rule))" data-testid="automation-test-now">Test now</MudButton>
                                     </td>
                                 </tr>
                             }
@@ -130,6 +130,7 @@
 @code {
     private const int MaxRuns = 20;
     private static readonly TimeSpan RunWindow = TimeSpan.FromDays(7);
+    private static readonly TimeSpan HistoryRetryDelay = TimeSpan.FromSeconds(1);
 
     private IReadOnlyList<RunEntry> _runs = [];
     private bool _hasHistory;
@@ -157,23 +158,56 @@
         }
 
         _loadedRunsKey = runsKey;
+
+        // Every load disposes its own source when it ends, so a superseded load that is still running keeps a usable token.
         if (_loadCancellation is { } previous)
         {
             await previous.CancelAsync();
-            previous.Dispose();
         }
 
-        var cancellation = _loadCancellation = new CancellationTokenSource();
+        using var cancellation = new CancellationTokenSource();
+        _loadCancellation = cancellation;
         var version = ++_loadVersion;
-        await LoadRunsAsync(automation, version, cancellation.Token);
+        var cancellationToken = cancellation.Token;
+        try
+        {
+            var isBehind = await LoadRunsAsync(automation, version, cancellationToken);
+            Refresh(version);
+            if (isBehind)
+            {
+                // History stores buffer their writes, so the run that changed the count may not be stored yet.
+                await Task.Delay(HistoryRetryDelay, TimeProvider, cancellationToken);
+                await LoadRunsAsync(automation, version, cancellationToken);
+                Refresh(version);
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException && IsStale(version, cancellationToken))
+        {
+            // Superseded by a newer load or disposed: the newer load or nobody shows the runs.
+        }
+        finally
+        {
+            if (ReferenceEquals(_loadCancellation, cancellation))
+            {
+                _loadCancellation = null;
+            }
+        }
+    }
+
+    private void Refresh(int version)
+    {
         if (!_isDisposed && version == _loadVersion)
         {
             StateHasChanged();
         }
     }
 
-    // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs.
-    private async Task LoadRunsAsync(Automation automation, int version, CancellationToken cancellationToken)
+    private bool IsStale(int version, CancellationToken cancellationToken) =>
+        _isDisposed || version != _loadVersion || cancellationToken.IsCancellationRequested;
+
+    // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs. Returns
+    // whether the history lags behind the live run counts.
+    private async Task<bool> LoadRunsAsync(Automation automation, int version, CancellationToken cancellationToken)
     {
         IHistoryStore[] stores = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
         if (stores.Length == 0)
@@ -181,28 +215,29 @@
             _hasHistory = false;
             _runsError = null;
             _runs = GetLastRuns(automation);
-            return;
+            return false;
         }
 
         try
         {
             var now = TimeProvider.GetUtcNow();
-            var runs = await RunHistory.LoadAsync(stores, GetRunSources(automation), now - RunWindow, now, MaxRuns, cancellationToken);
-            if (version == _loadVersion)
+            var sources = GetRunSources(automation);
+            var runs = await RunHistory.LoadAsync(stores, sources, now - RunWindow, now, MaxRuns, cancellationToken);
+            var isBehind = await RunHistory.IsBehindAsync(stores, sources, now, cancellationToken);
+            if (!IsStale(version, cancellationToken))
             {
                 _hasHistory = true;
                 _runs = runs;
                 _runsError = null;
             }
+
+            return isBehind;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Superseded by a newer load or disposed: the newer load or nobody shows the runs.
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException && version == _loadVersion)
+        catch (Exception exception) when (exception is not OutOfMemoryException && !IsStale(version, cancellationToken))
         {
             _hasHistory = true;
             _runsError = $"The runs could not be read from history: {exception.Message}";
+            return false;
         }
     }
 
@@ -211,7 +246,7 @@
         .. automation.GetRulesInOrder()
             .Select(pair => (pair.Key, pair.Value, Path: PathResolver.GetPath(pair.Value, PathStyle.Canonical)))
             .Where(rule => rule.Path is not null)
-            .Select(rule => new RunSource(rule.Value.Name ?? rule.Key, rule.Path!))
+            .Select(rule => new RunSource(rule.Value.Name ?? rule.Key, rule.Path!, rule.Value.RunCount))
     ];
 
     private async Task TestAsync(string key, AutomationRule rule)
@@ -245,7 +280,7 @@
     {
         var isConfirmed = await DialogService.ShowMessageBoxAsync(
             "Reset state",
-            "Enter the initial state and clear the last trigger times of the rules?",
+            "Enter the initial state, clear the last trigger times and start every rule over?",
             yesText: "Reset",
             cancelText: "Cancel");
         if (isConfirmed != true)
@@ -299,6 +334,5 @@
     {
         _isDisposed = true;
         _loadCancellation?.Cancel();
-        _loadCancellation?.Dispose();
     }
 }

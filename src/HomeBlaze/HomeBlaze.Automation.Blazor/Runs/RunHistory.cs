@@ -37,6 +37,28 @@ public static class RunHistory
         return [.. runs.OrderByDescending(run => run.At).Take(maxRuns)];
     }
 
+    /// <summary>
+    /// Gets whether the history lags behind the rules: a rule whose current run count is above the newest count stored at the instant.
+    /// History stores buffer their writes, so a run that has just happened is not stored yet.
+    /// </summary>
+    public static async Task<bool> IsBehindAsync(
+        IReadOnlyCollection<IHistoryStore> stores, IReadOnlyList<RunSource> rules, DateTimeOffset at, CancellationToken cancellationToken)
+    {
+        foreach (var rule in rules)
+        {
+            if (rule.RunCount is > 0)
+            {
+                var stored = await stores.GetValueAtAsync(rule.RulePath + Separator + nameof(AutomationRule.RunCount), at, cancellationToken);
+                if (rule.RunCount > (stored?.Number ?? 0))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static async Task<IReadOnlyList<RunEntry>> LoadRuleAsync(
         IReadOnlyCollection<IHistoryStore> stores, RunSource rule, DateTimeOffset from, DateTimeOffset to, int maxRuns, CancellationToken cancellationToken)
     {
