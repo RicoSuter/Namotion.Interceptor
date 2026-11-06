@@ -223,7 +223,7 @@ With the pipe `map` a condition shows the text of a case instead, such as `{{ /D
 - **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
-- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
+- **Arithmetic**: `+`, `-`, `*` and `/` compute with numbers, dates and durations, with a space after the operator: `{{ /Demo/Meter/Import - /Demo/Meter/Export }}`. A duration is written like `90s`, `15m` or `1h30m`, and a date minus a date is a duration. A computed value is shown without the unit of a property.
 - **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
@@ -248,7 +248,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Expression Limits
 
 - **Length and depth**: An expression is at most 1000 characters long and nests at most 32 levels. Each parenthesis counts as a level, and so does each `not` or `!`, so a chain of them reaches the limit. A longer or deeper expression shows an error in place of the value.
-- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit, another number of decimals and arithmetic are not supported.
+- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit and another number of decimals are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
@@ -1044,7 +1044,7 @@ Known limits:
 
 ## Not Supported
 
-- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals, and arithmetic in expressions.
+- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals.
 - Expressions in arguments. The value of an argument is fixed text, except the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions).
 - Short names for types. A block always has the full type name.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.
