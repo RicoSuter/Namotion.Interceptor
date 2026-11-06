@@ -228,7 +228,7 @@ Each trigger of a rule keeps its own arming state and hold. Two triggers firing 
 | `OnActivation` | Initial behavior |
 |---|---|
 | `EvaluateImmediately` | If the expression is currently true, start the hold and request a run when it elapses. The hold begins at activation rather than assuming earlier continuity. This is the default. |
-| `WaitForFalseToTrue` | Establish the expression's current value as a baseline. If it is already true, wait until it becomes false and true again, then apply the hold. |
+| `WaitForFalseToTrue` | Establish the expression's current value as a baseline. If it is already true, wait until it rearms as after a run (known false, or with `Rearm` the rearm expression known true) and becomes true again, then apply the hold. |
 
 Activation occurs on startup, switching the rule's mode away from `Off`, a configuration change that replaces the trigger, source rebinding, or entry into the rule's applicable state. A rule with no state restriction stays active across state changes. Reentry creates fresh holds. Holds are not persisted across restart, because their continuity during downtime is unknown.
 
