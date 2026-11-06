@@ -18,6 +18,9 @@ internal sealed class EvaluationState
 
     private readonly Dictionary<RegisteredSubject, PathList> _builtPaths = new(ReferenceEqualityComparer.Instance);
 
+    // Whether paths were built since the last clear; most evaluations build none, so they skip clearing and checking them.
+    private bool _hasBuiltPaths;
+
     public ParentReads Reads { get; } = new();
 
     public PathStore Paths { get; } = new();
@@ -37,8 +40,7 @@ internal sealed class EvaluationState
     public static void Return(EvaluationState state)
     {
         if (state.Reads.Capacity > MaxCachedCapacity ||
-            state.Paths.IsLargerThan(MaxCachedCapacity, MaxCachedLinks) ||
-            state._builtPaths.EnsureCapacity(0) > MaxCachedCapacity)
+            (state._hasBuiltPaths && (state.Paths.IsLargerThan(MaxCachedCapacity, MaxCachedLinks) || state._builtPaths.EnsureCapacity(0) > MaxCachedCapacity)))
         {
             return;
         }
@@ -50,17 +52,26 @@ internal sealed class EvaluationState
     /// <summary>
     /// The paths of the subject as <see cref="BuildPaths"/> builds them. A single chain is kept for the rest of the
     /// attempt, other paths are built again when asked again, so the caller may release them with
-    /// <see cref="ReleasePaths"/> once it no longer needs them.
+    /// <see cref="ReleasePaths"/> from <paramref name="releasableStart"/> once it no longer needs them; -1 when
+    /// nothing was built that may be released.
     /// </summary>
-    public PathList GetPaths(RegisteredSubject subject, PathProviderBase pathProvider, int maxPaths)
+    public PathList GetPaths(RegisteredSubject subject, PathProviderBase pathProvider, int maxPaths, out int releasableStart)
     {
-        if (!_builtPaths.TryGetValue(subject, out var paths))
+        releasableStart = -1;
+        if (_hasBuiltPaths && _builtPaths.TryGetValue(subject, out var paths))
         {
-            paths = BuildPaths(subject, pathProvider, maxPaths);
-            if (paths.IsSingleChain)
-            {
-                _builtPaths.Add(subject, paths);
-            }
+            return paths;
+        }
+
+        var start = Paths.Count;
+        paths = BuildPaths(subject, pathProvider, maxPaths);
+        if (paths.IsSingleChain)
+        {
+            _builtPaths.Add(subject, paths);
+        }
+        else
+        {
+            releasableStart = start;
         }
 
         return paths;
@@ -79,6 +90,7 @@ internal sealed class EvaluationState
             return isAttached ? PathList.Root : PathList.Unknown;
         }
 
+        _hasBuiltPaths = true;
         var first = Paths.Count;
         var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, Paths, maxPaths, Reads, out var followedSingleParents) && Paths.Count > first;
         var count = Paths.Count - first;
@@ -91,7 +103,11 @@ internal sealed class EvaluationState
     public void Clear()
     {
         Reads.Clear();
-        Paths.Clear();
-        _builtPaths.Clear();
+        if (_hasBuiltPaths)
+        {
+            Paths.Clear();
+            _builtPaths.Clear();
+            _hasBuiltPaths = false;
+        }
     }
 }

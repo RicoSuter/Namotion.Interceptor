@@ -352,7 +352,7 @@ public sealed class AuthorizationPolicy
     {
         if (context.SharedState is { } sharedState)
         {
-            return sharedState.GetPaths(subject, _pathProvider!, MaxPaths);
+            return sharedState.GetPaths(subject, _pathProvider!, MaxPaths, out context.ReleasablePathsStart);
         }
 
         // The answer for a root or a detached subject rests on one subject's parents and attachment, which hold together
@@ -485,14 +485,24 @@ public sealed class AuthorizationPolicy
         context.SetMember(link);
         context.HasPaths = cursor.Parents.Length == 1 && cursorPaths.IsSingleChain;
         context.Paths = context.HasPaths ? cursorPaths.WithoutLastLink() : default;
+        context.ReleasablePathsStart = -1;
 
-        var state = context.SharedState!;
-        var pathCount = state.Paths.Count;
         var isReadable = IsAllowed(PolicyCompiler.ReadBit, ref context);
-        cursorPaths = context.HasPaths && context.Paths.IsSingleChain ? context.Paths : default;
-        if (context.HasPaths && !cursorPaths.IsSingleChain)
+        if (!context.HasPaths)
         {
-            state.ReleasePaths(pathCount);
+            cursorPaths = default;
+        }
+        else if (context.Paths.IsSingleChain)
+        {
+            cursorPaths = context.Paths;
+        }
+        else
+        {
+            cursorPaths = default;
+            if (context.ReleasablePathsStart >= 0)
+            {
+                context.SharedState!.ReleasePaths(context.ReleasablePathsStart);
+            }
         }
 
         return isReadable;
@@ -510,6 +520,9 @@ public sealed class AuthorizationPolicy
         public string? MemberSegment;
         public PathList Paths;
         public bool HasPaths;
+
+        // Where the paths this question built start in the shared state, when no later question uses them; -1 otherwise.
+        public int ReleasablePathsStart;
 
         // When set, the question is part of a subject evaluation: the paths' parent reads are recorded here for the
         // evaluation to check, instead of being checked per enumeration.

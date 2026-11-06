@@ -255,7 +255,7 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Mother/**"])]));
         var bottom = Registered(current);
 
-        // Act: on a small stack, as a deep walk must not recurse; rebuilding the paths per link allocates gigabytes here
+        // Act: on a small stack, as a deep walk must not recurse; without reusing the paths along the chain, building them per link allocates gigabytes here
         var canRead = false;
         var allocated = 0L;
         Exception? error = null;
