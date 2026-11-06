@@ -87,7 +87,7 @@ classDiagram
 
 - **Rules** process each input in the order of the Rules tab, and several rules can run for one input. Each rule has a key such as `k3f9` that never changes, so that its path, such as `/Automations/Storm/Rules[k3f9]/LastTriggeredAt`, stays the same when the rule is renamed or moved in the list.
 - **States** are optional names, such as `Idle` and `Running`. A rule can be **Active in state**: it observes its triggers only while the automation is in that state, and it starts again with fresh holds each time the automation enters it. A rule without a state is active in every state, also in an automation without states.
-- **The initial state** is the state of a new automation and the state that **Reset state** on the page enters. Reset state also clears the last trigger times of the rules.
+- **The initial state** is the state of a new automation and the state that **Reset state** on the page enters. Reset state enters the initial state, clears the last trigger times and then starts every rule that is active in the initial state over, as if it had just entered its state, also when the state did not change: holds start fresh, **Run if already true** fires again when the condition is still true, **Wait for a change** takes a new baseline, and event triggers subscribe again without replaying earlier events.
 - **A state changes** only through a **Change state** action of a rule of the same automation. Once a rule changed the state, it finishes its own actions and the rules after it skip that input; the rules after it that would have run for that input are recorded as **Canceled** runs, and the rules of the new state see the inputs that follow. The outcome Canceled is also recorded when a feedback chain overflows or the automation stops. What should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, see [Events](#events).
 
 ---
@@ -161,7 +161,7 @@ Conditions, filters and the arguments of actions are expressions with the syntax
 - **Variables**: `now` is the current instant, `time` the local time of day of the host, `event` the captured event and `subject` its publisher. `event` and `subject` are available in event filters and in the arguments of a rule with an event trigger only; in a rule with both kinds of trigger, they read as missing on a run that a property trigger started.
 - **Arithmetic**: numbers add, subtract, multiply and divide; an instant minus an instant is a duration; an instant plus or minus a duration is an instant. An operator stands between spaces, as in `now - ../StateEnteredAt > 10m`. A division by zero, or any missing operand, is missing.
 - **Pipes**: conditions, filters and value expressions take no pipes. Only the `{{ }}` of a text template takes the pipes `display` and `raw`, without arguments, as in `{{ ../StateEnteredAt | raw }}`.
-- **Durations** are written with their units from the largest to the smallest: `30s`, `15m`, `2h`, `8h30m`, `1.5d`. `time >= 8h30m and time < 21h30m` is true during the day.
+- **Durations** are written with their units from the largest to the smallest: `30s`, `15m`, `2h`, `8h30m`, `1.5d`. Expressions accept decimals, but the duration fields of the editor take whole units, such as `36h` and not `1.5d`. `time >= 8h30m and time < 21h30m` is true during the day.
 - **Secrets**: secret configuration values and properties marked `[ExcludeFromExpressions]` are missing in automations, so that a notification cannot send them.
 - **Bare words are text**: a word without `/` right of a comparison is a text, so `/Living/Heating/Mode == Away` compares with the text `Away`, which suits an enum. `/Door/OpenedAt > Now` compares with the text "Now", not with the time; the variable is `now` in lowercase. The editor warns about such a word when it differs from a variable only in case, or when it is compared with a number, a date, a duration or a boolean.
 
@@ -227,8 +227,8 @@ The widget of an automation, placed on a page, shows its title with a link to it
 **Edit** opens a dialog with three tabs:
 
 - **General**: the name and whether the automation is enabled.
-- **Rules**: the rules in run order, with buttons to move them, and the selected rule with its name, mode, **Active in state** (shown once there are states), **Runs when any of these happens**, **Only if**, and **Then, in this order**.
-- **States**: the state diagram, a button to add a state, and the selected state with its name, whether it is the initial state, the rules that enter, are active in and leave it, and a delete button that is disabled while rules use the state. Renaming a state renames it in every rule. A click on an edge opens its rule.
+- **Rules**: the rules in run order, each with its mode, the state it is active in (or "any state"; omitted while there are no states) and its number of triggers, with buttons to move them, and the selected rule with its name, mode, **Active in state** (shown once there are states), **Runs when any of these happens**, **Only if**, and **Then, in this order**.
+- **States**: the state diagram, a button to add a state, and the selected state with its name, whether it is the initial state, the rules that enter, are active in and leave it, and a delete button that is disabled while rules use the state. Renaming a state renames it in every rule's state scope, in its Change state actions and as the initial state, but not in expressions, filters or argument texts that compare with the name, such as `event/NewState == Running` or `../CurrentState == Idle`: the editor lists the rules that still contain the old name as a word, and you change those texts yourself. A click on an edge opens its rule.
 
 An edge of the diagram is a rule that is active in a state, or in any state, and changes to another state with exactly one Change state action. Rules that change no state, or change it in a way the diagram cannot show, are listed below it and stay in the Rules tab. The layout is computed; positions are not stored.
 
@@ -242,7 +242,7 @@ Values typed into a simple row follow these rules. A value that is one token, su
 
 ## Status and errors
 
-`Status` of an automation is `Starting`, `Running`, `Error` or `Stopped`, and `StatusMessage` holds the latest failure, such as a failed action or an invalid configuration, which keeps the previous configuration running. A later run that executes actions and completes all of them clears the error; a rejected run does not. A disabled automation keeps its state and its last error.
+`Status` of an automation is `Starting`, `Running`, `Error` or `Stopped`, and `StatusMessage` holds the latest failure, such as a failed action or an invalid configuration, which keeps the previous configuration running. A later run that executes actions and completes all of them clears the error; a rejected run does not. A disabled automation keeps its state and its last error. The times in a rule status are in the time zone of the host, while the page shows its own times in your time zone.
 
 The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that is off shows only `Off`), and the examples below show an `On` rule:
 
