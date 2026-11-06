@@ -3,6 +3,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
+using HomeBlaze.Components.Abstractions.TimeZones;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
@@ -72,5 +73,26 @@ public class RuleExpressionsTests
         Assert.NotNull(preview);
         Assert.True(preview.Result);
         Assert.Equal("Rule", expressions.RenderTemplate("{{ ./Name }}"));
+    }
+
+    [Fact]
+    public void WhenAnInstantIsPreviewedWithAViewerZone_ThenTheTextUsesTheZone()
+    {
+        // Arrange
+        var viewerZone = new TimeZoneDisplayService();
+        viewerZone.SetResolved(TimeZonePreference.Automatic, TimeZoneInfo.CreateCustomTimeZone("plus5", TimeSpan.FromHours(5), "plus5", "plus5"));
+        var automation = TestAutomations.Create();
+        var withViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false, viewerZone);
+        var withoutViewerZone = new RuleExpressions(automation, "rule", allowsEvent: false);
+
+        // Act
+        var viewer = withViewerZone.Preview("now");
+        var server = withoutViewerZone.Preview("now");
+
+        // Assert
+        Assert.NotNull(viewer);
+        Assert.NotNull(server);
+        Assert.Contains("+05:00", viewer.Text);
+        Assert.NotEqual(viewer.Text, server.Text);
     }
 }

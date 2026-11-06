@@ -1,3 +1,5 @@
+@inject ITimeZoneDisplay TimeZone
+
 <MudStack Spacing="3" data-testid="automation-rule-editor">
     <div class="d-flex flex-wrap align-center gap-3">
         <div style="flex: 1 1 220px;">
@@ -112,7 +114,7 @@
 
     private AutomationRule? SavedRule => Automation.Rules.GetValueOrDefault(Rule.Key);
 
-    protected override void OnParametersSet() => _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent);
+    protected override void OnParametersSet() => _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone);
 
     private Task SetNameAsync(string? name)
     {
