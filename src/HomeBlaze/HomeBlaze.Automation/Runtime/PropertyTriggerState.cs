@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
@@ -23,7 +25,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     /// <summary>Activates the trigger with fresh state and returns whether it fires at once.</summary>
     public bool Activate(TriggerActivation policy, TriggerObservation observation, DateTimeOffset now)
     {
-        HoldStartedAt = null;
+        Deactivate();
         UpdateUnknown(observation, now);
         if (policy == TriggerActivation.WaitForFalseToTrue)
         {
@@ -50,7 +52,8 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             TriggerPhase.Armed => ObserveArmed(observation.Value, now),
             TriggerPhase.Holding => ObserveHolding(observation.Value, now),
             TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation, now),
-            _ => ObserveWaitingForFalse(observation.Value)
+            TriggerPhase.WaitingForFalse => ObserveWaitingForFalse(observation.Value),
+            _ => throw new UnreachableException()
         };
     }
 
@@ -101,7 +104,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             return false;
         }
 
-        if (now - (HoldStartedAt ?? now) < hold.GetValueOrDefault())
+        if (now - HoldStartedAt!.Value < hold.GetValueOrDefault())
         {
             return false;
         }
@@ -140,7 +143,8 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 
     private void UpdateUnknown(TriggerObservation observation, DateTimeOffset now)
     {
-        if (observation.Value is null)
+        var isRearmUnknown = Phase == TriggerPhase.WaitingToRearm && hasRearm && observation.Rearm is null;
+        if (observation.Value is null || isRearmUnknown)
         {
             UnknownSince ??= now;
             MissingPaths = observation.MissingPaths;

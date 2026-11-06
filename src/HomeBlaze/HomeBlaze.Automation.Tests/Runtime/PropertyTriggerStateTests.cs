@@ -55,7 +55,7 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
-    public void WhenTheExpressionIsFalseOrUnknownDuringTheHold_ThenTheHoldStartsAgain()
+    public void WhenTheExpressionIsFalseDuringTheHold_ThenTheHoldStartsAgain()
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: false);
@@ -64,12 +64,32 @@ public class PropertyTriggerStateTests
         // Act
         state.Observe(FalseValue, Start.AddSeconds(10));
         state.Observe(TrueValue, Start.AddSeconds(15));
-        state.Observe(Unknown("/Weather/Gust"), Start.AddSeconds(16));
-        state.Observe(TrueValue, Start.AddSeconds(30));
-        var beforeHold = state.Observe(TrueValue, Start.AddSeconds(49));
-        var afterHold = state.Observe(TrueValue, Start.AddSeconds(50));
+        var atOriginalHoldEnd = state.Observe(TrueValue, Start.AddSeconds(20));
+        var beforeHold = state.Observe(TrueValue, Start.AddSeconds(34));
+        var afterHold = state.Observe(TrueValue, Start.AddSeconds(35));
 
         // Assert
+        Assert.False(atOriginalHoldEnd);
+        Assert.False(beforeHold);
+        Assert.True(afterHold);
+    }
+
+    [Fact]
+    public void WhenTheExpressionIsUnknownDuringTheHold_ThenTheHoldStartsAgain()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(Hold, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
+
+        // Act
+        state.Observe(Unknown("/Weather/Gust"), Start.AddSeconds(10));
+        state.Observe(TrueValue, Start.AddSeconds(15));
+        var atOriginalHoldEnd = state.Observe(TrueValue, Start.AddSeconds(20));
+        var beforeHold = state.Observe(TrueValue, Start.AddSeconds(34));
+        var afterHold = state.Observe(TrueValue, Start.AddSeconds(35));
+
+        // Assert
+        Assert.False(atOriginalHoldEnd);
         Assert.False(beforeHold);
         Assert.True(afterHold);
     }
@@ -107,7 +127,7 @@ public class PropertyTriggerStateTests
         var unknownSince = state.UnknownSince;
         var missingPaths = state.MissingPaths.ToArray();
         var fired = state.Observe(TrueValue, Start.AddSeconds(6));
-        var knownAgain = state.IsUnknown;
+        var isUnknownAfterTrue = state.IsUnknown;
         state.Observe(Unknown("/Weather/Gust"), Start.AddSeconds(7));
 
         // Assert
@@ -115,7 +135,7 @@ public class PropertyTriggerStateTests
         Assert.Equal(Start, unknownSince);
         Assert.Equal(["/Weather/Gust"], missingPaths);
         Assert.True(fired);
-        Assert.False(knownAgain);
+        Assert.False(isUnknownAfterTrue);
         Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
     }
 
@@ -183,5 +203,135 @@ public class PropertyTriggerStateTests
         // Assert
         Assert.False(fired);
         Assert.Equal(TriggerPhase.Inactive, state.Phase);
+    }
+
+    [Fact]
+    public void WhenTheRearmExpressionIsUnknownWhileWaitingToRearm_ThenTheTriggerIsUnknownAndDoesNotRearm()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Observe(WithRearm(true, null), Start);
+
+        // Act
+        var whileUnknown = state.Observe(new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(1));
+        var isUnknown = state.IsUnknown;
+        var missingPaths = state.MissingPaths.ToArray();
+        var phaseWhileUnknown = state.Phase;
+        var unknownSince = state.UnknownSince;
+        var rearmFired = state.Observe(WithRearm(true, true), Start.AddSeconds(2));
+
+        // Assert
+        Assert.False(whileUnknown);
+        Assert.True(isUnknown);
+        Assert.Equal(["/Weather/Threshold"], missingPaths);
+        Assert.Equal(TriggerPhase.WaitingToRearm, phaseWhileUnknown);
+        Assert.Equal(Start.AddSeconds(1), unknownSince);
+        Assert.True(rearmFired);
+        Assert.False(state.IsUnknown);
+        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+    }
+
+    [Fact]
+    public void WhenTheRearmExpressionIsKnownTrueAfterUnknown_ThenTheTriggerRearms()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Observe(WithRearm(true, null), Start);
+        state.Observe(new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(1));
+
+        // Act
+        var firedOnRearm = state.Observe(WithRearm(false, true), Start.AddSeconds(2));
+        var fired = state.Observe(WithRearm(true, false), Start.AddSeconds(3));
+
+        // Assert
+        Assert.False(firedOnRearm);
+        Assert.False(state.IsUnknown);
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void WhenTheTriggerIsActivatedAgainWithoutDeactivation_ThenTheStateIsFresh()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(Hold, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Gust"), Start);
+
+        // Act
+        state.Activate(TriggerActivation.EvaluateImmediately, Unknown("/Weather/Rain"), Start.AddSeconds(5));
+
+        // Assert
+        Assert.Equal(Start.AddSeconds(5), state.UnknownSince);
+        Assert.Equal(["/Weather/Rain"], state.MissingPaths);
+        Assert.Equal(TriggerPhase.Armed, state.Phase);
+    }
+
+    [Fact]
+    public void WhenTheTriggerIsActivatedAfterDeactivation_ThenItFiresAgain()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+        state.Observe(TrueValue, Start.AddSeconds(1));
+        state.Deactivate();
+
+        // Act
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start.AddSeconds(2));
+        var fired = state.Observe(TrueValue, Start.AddSeconds(3));
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void WhenTheHoldIsZero_ThenTheTriggerFiresImmediately()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(TimeSpan.Zero, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, FalseValue, Start);
+
+        // Act
+        var fired = state.Observe(TrueValue, Start.AddSeconds(1));
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void WhenTheTriggerWaitsForFalseAndTheValueIsUnknown_ThenItStaysWaitingAndIsUnknown()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: false);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, TrueValue, Start);
+
+        // Act
+        var fired = state.Observe(Unknown("/Weather/Gust"), Start.AddSeconds(1));
+        var firedOnTrue = state.Observe(TrueValue, Start.AddSeconds(2));
+
+        // Assert
+        Assert.False(fired);
+        Assert.False(firedOnTrue);
+        Assert.Equal(TriggerPhase.WaitingForFalse, state.Phase);
+        Assert.False(state.IsUnknown);
+    }
+
+    [Fact]
+    public void WhenAStatusIsCreatedFromAPropertyTrigger_ThenItCopiesTheState()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(Hold, hasRearm: false);
+        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
+
+        // Act
+        var status = TriggerStatus.FromProperty(state, Hold);
+
+        // Assert
+        Assert.Equal(TriggerPhase.Holding, status.Phase);
+        Assert.Equal(Start, status.HoldStartedAt);
+        Assert.Equal(Hold, status.Hold);
+        Assert.Null(status.UnknownSince);
+        Assert.Empty(status.MissingPaths);
+        Assert.Null(status.Problem);
     }
 }

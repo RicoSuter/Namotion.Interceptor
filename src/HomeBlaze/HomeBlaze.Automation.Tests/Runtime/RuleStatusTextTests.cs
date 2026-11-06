@@ -56,6 +56,22 @@ public class RuleStatusTextTests
     }
 
     [Fact]
+    public void WhenTheRearmExpressionIsUnknownWhileWaitingToRearm_ThenTheStatusNamesTheMissingPaths()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.EvaluateImmediately, new TriggerObservation(false, null, []), Start);
+        state.Observe(new TriggerObservation(true, null, []), Start);
+        state.Observe(new TriggerObservation(true, null, ["/Weather/Threshold"]), Start.AddSeconds(5));
+
+        // Act
+        var text = RuleStatusText.Format(AutomationRuleMode.On, null, [TriggerStatus.FromProperty(state, null)], TimeZoneInfo.Utc);
+
+        // Assert
+        Assert.Equal("On: Unknown since 12:00:05, missing /Weather/Threshold", text);
+    }
+
+    [Fact]
     public void WhenAnEventTriggerHasAProblem_ThenTheStatusShowsIt()
     {
         // Act
