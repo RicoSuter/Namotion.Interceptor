@@ -28,6 +28,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     // asynchronously. The server may still be serializing packets after this method returns,
     // which would cause a race condition if we returned the lists to a pool.
 
+    private const int BrokerDrainTimeoutMilliseconds = 5000;
+
     private readonly string _serverClientId;
     private readonly IInterceptorSubject _subject;
     private readonly IInterceptorSubjectContext _context;
@@ -211,20 +213,21 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                                 // restarting the same server before that keeps the session referenced forever.
                                 // The delay takes no token so cancellation cannot skip the rest of this finally;
                                 // the loop condition ends the wait on a stop instead.
-                                var drainDeadline = Environment.TickCount64 + 5000;
-                                while (connectedClients.Count > 0 &&
+                                var drainDeadline = Environment.TickCount64 + BrokerDrainTimeoutMilliseconds;
+                                int remainingClientCount;
+                                while ((remainingClientCount = connectedClients.Count) > 0 &&
                                        !stoppingToken.IsCancellationRequested &&
                                        Environment.TickCount64 < drainDeadline)
                                 {
                                     await Task.Delay(10).ConfigureAwait(false);
                                 }
 
-                                var remainingClientCount = connectedClients.Count;
+                                // The loop's last count is above 0 only when it stopped on the deadline or a stop.
                                 if (remainingClientCount > 0 && !stoppingToken.IsCancellationRequested)
                                 {
                                     _logger.LogWarning(
-                                        "MQTT server restarts with {Count} client session(s) still open after waiting 5 seconds for them to close; they may stay referenced by the broker.",
-                                        remainingClientCount);
+                                        "MQTT server restarts with {Count} client session(s) still open after waiting {Timeout} ms for them to close; they may stay referenced by the broker.",
+                                        remainingClientCount, BrokerDrainTimeoutMilliseconds);
                                 }
                             }
 
