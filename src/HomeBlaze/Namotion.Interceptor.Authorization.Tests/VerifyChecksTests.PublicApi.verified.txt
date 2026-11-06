@@ -3,6 +3,11 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Authorization
 {
+    public sealed class AuthorizationDefinition
+    {
+        public Namotion.Interceptor.Authorization.AuthorizationPolicy Compile(System.Collections.Generic.IReadOnlyCollection<string> roleNames) { }
+        public static Namotion.Interceptor.Authorization.AuthorizationDefinition Create(System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.AuthorizationRole> roles, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.PermissionRule> systemDenyRules, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.PermissionAction> knownActions, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Authorization.IMemberTagProvider? tagProvider = null) { }
+    }
     public sealed class AuthorizationException : System.Exception
     {
         public AuthorizationException() { }
@@ -14,13 +19,12 @@ namespace Namotion.Interceptor.Authorization
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.AuthorizationRole> Roles { get; }
         public static Namotion.Interceptor.Authorization.AuthorizationPolicy DenyAll { get; }
         public static string SystemRoleName { get; }
-        public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public bool CanRead(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
         public bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member) { }
-        public Namotion.Interceptor.Authorization.SubjectReadDecision Explain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public Namotion.Interceptor.Authorization.PermissionDecision Explain(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, Namotion.Interceptor.Authorization.PermissionAction action) { }
+        public Namotion.Interceptor.Authorization.VisibilityDecision ExplainVisibility(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
         public bool IsAllowed(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, Namotion.Interceptor.Authorization.PermissionAction action) { }
-        public static Namotion.Interceptor.Authorization.AuthorizationPolicy Compile(System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.AuthorizationRole> roles, System.Collections.Generic.IReadOnlyCollection<string> roleNames, System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Authorization.PermissionRule> systemDenyRules, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.Authorization.PermissionAction> knownActions, Namotion.Interceptor.Authorization.IMemberTagProvider tagProvider, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider) { }
+        public bool IsVisible(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }
     }
     [System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
     public sealed class AuthorizationRole : System.IEquatable<Namotion.Interceptor.Authorization.AuthorizationRole>
@@ -56,12 +60,11 @@ namespace Namotion.Interceptor.Authorization
     }
     public readonly struct PermissionDecision : System.IEquatable<Namotion.Interceptor.Authorization.PermissionDecision>
     {
-        public PermissionDecision(bool IsAllowed, Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy, Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule, Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy, Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule) { }
-        public Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy { get; init; }
-        public Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule { get; init; }
-        public Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy { get; init; }
-        public Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule { get; init; }
-        public bool IsAllowed { get; init; }
+        public Namotion.Interceptor.Authorization.AuthorizationRole? AllowedBy { get; }
+        public Namotion.Interceptor.Authorization.PermissionRule? AllowedByRule { get; }
+        public Namotion.Interceptor.Authorization.AuthorizationRole? DeniedBy { get; }
+        public Namotion.Interceptor.Authorization.PermissionRule? DeniedByRule { get; }
+        public bool IsAllowed { get; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(Namotion.Interceptor.Authorization.PermissionRuleJsonConverter))]
     public sealed class PermissionRule : System.IEquatable<Namotion.Interceptor.Authorization.PermissionRule>
@@ -81,11 +84,10 @@ namespace Namotion.Interceptor.Authorization
         public override Namotion.Interceptor.Authorization.PermissionRule Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options) { }
         public override void Write(System.Text.Json.Utf8JsonWriter writer, Namotion.Interceptor.Authorization.PermissionRule value, System.Text.Json.JsonSerializerOptions options) { }
     }
-    public readonly struct SubjectReadDecision : System.IEquatable<Namotion.Interceptor.Authorization.SubjectReadDecision>
+    public readonly struct VisibilityDecision : System.IEquatable<Namotion.Interceptor.Authorization.VisibilityDecision>
     {
-        public SubjectReadDecision(bool IsReadable, bool HasReadableMember, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? DeniedProperty) { }
-        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? DeniedProperty { get; init; }
-        public bool HasReadableMember { get; init; }
-        public bool IsReadable { get; init; }
+        public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? DeniedProperty { get; }
+        public bool HasReadableMember { get; }
+        public bool IsVisible { get; }
     }
 }

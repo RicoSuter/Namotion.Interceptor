@@ -20,10 +20,10 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read, tags: ["subjects"])]));
 
         // Act
-        var decision = policy.Explain(Registered(home.Wifi!));
+        var decision = policy.ExplainVisibility(Registered(home.Wifi!));
 
         // Assert
-        Assert.False(decision.IsReadable);
+        Assert.False(decision.IsVisible);
         Assert.False(decision.HasReadableMember);
         Assert.Null(decision.DeniedProperty);
     }
@@ -36,8 +36,8 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read, tags: ["state"]), Rule(Read, tags: ["subjects"])]));
 
         // Act
-        var canReadKitchenCeilingSubject = policy.CanRead(Registered(home.Rooms["Kitchen"].Lights["Ceiling"]));
-        var canReadSubject = policy.CanRead(Registered(home));
+        var canReadKitchenCeilingSubject = policy.IsVisible(Registered(home.Rooms["Kitchen"].Lights["Ceiling"]));
+        var canReadSubject = policy.IsVisible(Registered(home));
 
         // Assert
         Assert.True(canReadKitchenCeilingSubject);
@@ -55,10 +55,10 @@ public class SubjectReadTests
         var policy = Compile(role);
 
         // Act
-        var decision = policy.Explain(Registered(home.Rooms["Kitchen"].Lights["Ceiling"]));
+        var decision = policy.ExplainVisibility(Registered(home.Rooms["Kitchen"].Lights["Ceiling"]));
 
         // Assert
-        Assert.False(decision.IsReadable);
+        Assert.False(decision.IsVisible);
         Assert.True(decision.HasReadableMember);
         Assert.Same(Member(home, nameof(Home.Rooms)), decision.DeniedProperty);
     }
@@ -76,13 +76,13 @@ public class SubjectReadTests
         var policy = Compile(role);
 
         // Act
-        var canReadCeiling = policy.CanRead(Registered(ceiling));
-        var decision = policy.Explain(Registered(ceiling));
-        var canReadCounter = policy.CanRead(Registered(home.Rooms["Kitchen"].Lights["Counter"]));
+        var canReadCeiling = policy.IsVisible(Registered(ceiling));
+        var decision = policy.ExplainVisibility(Registered(ceiling));
+        var canReadCounter = policy.IsVisible(Registered(home.Rooms["Kitchen"].Lights["Counter"]));
 
         // Assert
         Assert.True(canReadCeiling);
-        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: true, hasReadableMember: true, deniedProperty: null), decision);
         Assert.False(canReadCounter);
     }
 
@@ -99,10 +99,10 @@ public class SubjectReadTests
         var policy = Compile(role);
 
         // Act
-        var decision = policy.Explain(Registered(home.Rooms["Kitchen"]));
+        var decision = policy.ExplainVisibility(Registered(home.Rooms["Kitchen"]));
 
         // Assert
-        Assert.False(decision.IsReadable);
+        Assert.False(decision.IsVisible);
         Assert.Same(Member(home, nameof(Home.Rooms)), decision.DeniedProperty);
     }
 
@@ -121,10 +121,10 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)]));
 
         // Act
-        var decision = policy.Explain(Registered(ring[20]));
+        var decision = policy.ExplainVisibility(Registered(ring[20]));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, deniedProperty: null), decision);
     }
 
     [Fact]
@@ -145,10 +145,10 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Mother"])]));
 
         // Act
-        var decision = policy.Explain(Registered(subject));
+        var decision = policy.ExplainVisibility(Registered(subject));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: true, hasReadableMember: true, deniedProperty: null), decision);
     }
 
     [Fact]
@@ -169,10 +169,10 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Mother"])]));
 
         // Act
-        var decision = policy.Explain(Registered(subject));
+        var decision = policy.ExplainVisibility(Registered(subject));
 
         // Assert
-        Assert.False(decision.IsReadable);
+        Assert.False(decision.IsVisible);
         Assert.True(decision.HasReadableMember);
         Assert.Equal(nameof(Person.Mother), decision.DeniedProperty?.Name);
     }
@@ -188,9 +188,9 @@ public class SubjectReadTests
         var policy = Compile(role);
 
         // Act
-        var canReadBedroomSubject = policy.CanRead(Registered(home.Rooms["Bedroom"]));
-        var canReadBedroomLampSubject = policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"]));
-        var canReadKitchenSubject = policy.CanRead(Registered(home.Rooms["Kitchen"]));
+        var canReadBedroomSubject = policy.IsVisible(Registered(home.Rooms["Bedroom"]));
+        var canReadBedroomLampSubject = policy.IsVisible(Registered(home.Rooms["Bedroom"].Lights["Lamp"]));
+        var canReadKitchenSubject = policy.IsVisible(Registered(home.Rooms["Kitchen"]));
 
         // Assert
         Assert.False(canReadBedroomSubject);
@@ -207,12 +207,12 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor"])]));
 
         // Act
-        var decision = policy.Explain(Registered(kitchen.Sensor!));
+        var decision = policy.ExplainVisibility(Registered(kitchen.Sensor!));
         var canReadKitchenTemperature = policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature)));
-        var canReadKitchenSubject = policy.CanRead(Registered(kitchen));
+        var canReadKitchenSubject = policy.IsVisible(Registered(kitchen));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(kitchen, nameof(Room.Sensor))), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Member(kitchen, nameof(Room.Sensor))), decision);
         Assert.True(canReadKitchenTemperature);
         Assert.True(canReadKitchenSubject);
     }
@@ -229,13 +229,13 @@ public class SubjectReadTests
         var hidden = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe"])]));
 
         // Act
-        var decision = hidden.Explain(Registered(probe));
-        var openCanReadProbeSubject = open.CanRead(Registered(probe));
+        var decision = hidden.ExplainVisibility(Registered(probe));
+        var openCanReadProbeSubject = open.IsVisible(Registered(probe));
         var hiddenCanReadProbeIsOn = hidden.CanRead(Member(probe, nameof(Light.IsOn)));
 
         // Assert
         Assert.True(openCanReadProbeSubject);
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Attribute(sensor, nameof(Sensor.Temperature), "Probe")), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Attribute(sensor, nameof(Sensor.Temperature), "Probe")), decision);
         Assert.True(hiddenCanReadProbeIsOn);
     }
 
@@ -257,7 +257,7 @@ public class SubjectReadTests
 
         // Act: on a small stack, so a walk that recurses per ancestor crashes the test host
         var canRead = false;
-        var thread = new Thread(() => canRead = policy.CanRead(bottom), maxStackSize: 256 * 1024);
+        var thread = new Thread(() => canRead = policy.IsVisible(bottom), maxStackSize: 256 * 1024);
         thread.Start();
         thread.Join();
 
@@ -285,10 +285,10 @@ public class SubjectReadTests
             deny: [Rule(Read, paths: ["/Father/Father"]), Rule(Read, paths: ["/Mother/Father"])]));
 
         // Act
-        var decision = policy.Explain(Registered(subject));
+        var decision = policy.ExplainVisibility(Registered(subject));
 
         // Assert
-        Assert.False(decision.IsReadable);
+        Assert.False(decision.IsVisible);
         Assert.Same(Member(grandfather, nameof(Person.Father)), decision.DeniedProperty);
     }
 
@@ -303,12 +303,12 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Mother/**"])]));
 
         // Act
-        var decision = policy.Explain(Registered(subject));
+        var decision = policy.ExplainVisibility(Registered(subject));
         var canReadOwnerFather = policy.CanRead(Member(owner, nameof(Person.Father)));
 
         // Assert
         Assert.False(canReadOwnerFather);
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(owner, nameof(Person.Father))), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Member(owner, nameof(Person.Father))), decision);
     }
 
     [Fact]
@@ -342,12 +342,12 @@ public class SubjectReadTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Father"], paths: ["/Nope/**"])]));
 
         // Act
-        var decision = policy.Explain(Registered(subject));
+        var decision = policy.ExplainVisibility(Registered(subject));
         var canReadOwnerFather = policy.CanRead(Member(owner, nameof(Person.Father)));
 
         // Assert
         Assert.True(canReadOwnerFather);
-        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: true, hasReadableMember: true, deniedProperty: null), decision);
     }
 
     [Fact]
@@ -375,7 +375,7 @@ public class SubjectReadTests
             try
             {
                 var before = GC.GetAllocatedBytesForCurrentThread();
-                canRead = policy.CanRead(bottom);
+                canRead = policy.IsVisible(bottom);
                 allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             }
             catch (Exception exception)
@@ -412,12 +412,12 @@ public class SubjectReadTests
         };
 
         // Act
-        var decisions = policies.SelectMany(policy => subjects.Select(subject => policy.Explain(subject))).ToList();
+        var decisions = policies.SelectMany(policy => subjects.Select(subject => policy.ExplainVisibility(subject))).ToList();
 
         // Assert
         var expected = policies.SelectMany(policy => subjects.Select(subject => ExplainFromMembers(policy, subject))).ToList();
         Assert.Equal(expected, decisions);
-        Assert.Contains(decisions, decision => decision.IsReadable);
+        Assert.Contains(decisions, decision => decision.IsVisible);
         Assert.Contains(decisions, decision => decision.DeniedProperty is not null);
     }
 
@@ -542,16 +542,16 @@ public class SubjectReadTests
 
     // The visibility from its definition, through member checks that each find the paths on their own: a readable
     // member and a chain of readable links to the root, the first unreadable link in depth-first order otherwise.
-    private static SubjectReadDecision ExplainFromMembers(AuthorizationPolicy policy, RegisteredSubject subject)
+    private static VisibilityDecision ExplainFromMembers(AuthorizationPolicy policy, RegisteredSubject subject)
     {
         if (!subject.Properties.Any(policy.CanRead))
         {
-            return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
+            return new VisibilityDecision(isVisible: false, hasReadableMember: false, deniedProperty: null);
         }
 
         RegisteredSubjectProperty? deniedProperty = null;
         var isReachable = IsReachableFromMembers(policy, subject, [], ref deniedProperty);
-        return new SubjectReadDecision(isReachable, HasReadableMember: true, isReachable ? null : deniedProperty);
+        return new VisibilityDecision(isReachable, hasReadableMember: true, isReachable ? null : deniedProperty);
     }
 
     private static bool IsReachableFromMembers(

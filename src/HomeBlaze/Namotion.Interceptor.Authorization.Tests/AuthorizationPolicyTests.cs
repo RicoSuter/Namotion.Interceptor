@@ -277,7 +277,7 @@ public class AuthorizationPolicyTests
         var role = Role("Reader", allow: [Rule(Read)]);
 
         // Act
-        var policy = AuthorizationPolicy.Compile([role], ["Reader"], [], [Execute], TestTags.Default, Policies.SlashPaths);
+        var policy = AuthorizationDefinition.Create([role], [], [Execute], Policies.SlashPaths, TestTags.Default).Compile(["Reader"]);
         var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
 
         // Assert
@@ -292,7 +292,7 @@ public class AuthorizationPolicyTests
 
         // Act & Assert
         var exception = Assert.Throws<AuthorizationException>(
-            () => AuthorizationPolicy.Compile([], [], [], actions, TestTags.Default, Policies.SlashPaths));
+            () => AuthorizationDefinition.Create([], [], actions, Policies.SlashPaths, TestTags.Default));
         Assert.Equal("At most 64 actions are supported.", exception.Message);
     }
 
@@ -319,7 +319,7 @@ public class AuthorizationPolicyTests
         // Act
         var canReadMember = AuthorizationPolicy.DenyAll.CanRead(member);
         var isAnythingAllowed = AuthorizationPolicy.DenyAll.IsAllowed(member, new PermissionAction("anything"));
-        var canReadSubject = AuthorizationPolicy.DenyAll.CanRead(Registered(home));
+        var canReadSubject = AuthorizationPolicy.DenyAll.IsVisible(Registered(home));
         var roles = AuthorizationPolicy.DenyAll.Roles;
 
         // Assert

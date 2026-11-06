@@ -7,14 +7,34 @@ namespace Namotion.Interceptor.Authorization;
 /// whether the action is allowed and which rules decided it. A system deny rule reports a role named
 /// <see cref="AuthorizationPolicy.SystemRoleName"/>.
 /// </summary>
-/// <param name="IsAllowed">Whether the action is allowed.</param>
-/// <param name="AllowedBy">The role whose allow rule matched first, or null when none matched.</param>
-/// <param name="AllowedByRule">The allow rule that matched first, or null.</param>
-/// <param name="DeniedBy">The role whose deny rule matched first, or null when none matched.</param>
-/// <param name="DeniedByRule">The deny rule that matched first, or null.</param>
-public readonly record struct PermissionDecision(
-    bool IsAllowed,
-    AuthorizationRole? AllowedBy,
-    PermissionRule? AllowedByRule,
-    AuthorizationRole? DeniedBy,
-    PermissionRule? DeniedByRule);
+public readonly record struct PermissionDecision
+{
+    internal PermissionDecision(
+        bool isAllowed,
+        AuthorizationRole? allowedBy,
+        PermissionRule? allowedByRule,
+        AuthorizationRole? deniedBy,
+        PermissionRule? deniedByRule)
+    {
+        IsAllowed = isAllowed;
+        AllowedBy = allowedBy;
+        AllowedByRule = allowedByRule;
+        DeniedBy = deniedBy;
+        DeniedByRule = deniedByRule;
+    }
+
+    /// <summary>Gets whether the action is allowed.</summary>
+    public bool IsAllowed { get; }
+
+    /// <summary>Gets the role whose allow rule matched first, or null when none matched.</summary>
+    public AuthorizationRole? AllowedBy { get; }
+
+    /// <summary>Gets the allow rule that matched first, or null.</summary>
+    public PermissionRule? AllowedByRule { get; }
+
+    /// <summary>Gets the role whose deny rule matched first, or null when none matched.</summary>
+    public AuthorizationRole? DeniedBy { get; }
+
+    /// <summary>Gets the deny rule that matched first, or null.</summary>
+    public PermissionRule? DeniedByRule { get; }
+}

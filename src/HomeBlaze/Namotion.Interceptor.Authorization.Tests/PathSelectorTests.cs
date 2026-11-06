@@ -443,12 +443,12 @@ public class PathSelectorTests
         var light = new Light();
         _ = new TestShadowedInlineReference(CreateContext()) { Label = "label", Child = light };
         var pathProvider = new AttributeBasedPathProvider("test");
-        var deny = AuthorizationPolicy.Compile(
-            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["Other.**"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, pathProvider);
-        var allow = AuthorizationPolicy.Compile(
-            [Role("Reader", allow: [Rule(Read, paths: ["Child.**"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, pathProvider);
+        var deny = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["Other.**"])])], [],
+            KnownActions, pathProvider, TestTags.Default).Compile(["Reader"]);
+        var allow = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read, paths: ["Child.**"])])], [],
+            KnownActions, pathProvider, TestTags.Default).Compile(["Reader"]);
 
         // Act
         var denyPolicyAllows = deny.CanRead(Member(light, nameof(Light.IsOn)));
@@ -464,9 +464,9 @@ public class PathSelectorTests
     {
         // Arrange
         var home = Create();
-        var policy = AuthorizationPolicy.Compile(
-            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Spare"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, new SpareExcludingPathProvider());
+        var policy = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Spare"])])], [],
+            KnownActions, new SpareExcludingPathProvider(), TestTags.Default).Compile(["Reader"]);
 
         // Act
         var canReadSpare = policy.CanRead(Member(home, nameof(Home.Spare)));
@@ -483,9 +483,9 @@ public class PathSelectorTests
         // Arrange
         var home = Create();
         var sensor = home.Rooms["Kitchen"].Sensor!;
-        var policy = AuthorizationPolicy.Compile(
-            [Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/temp*"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, new TemperatureRenamingPathProvider());
+        var policy = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/temp*"])])], [],
+            KnownActions, new TemperatureRenamingPathProvider(), TestTags.Default).Compile(["Reader"]);
 
         // Act
         var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));

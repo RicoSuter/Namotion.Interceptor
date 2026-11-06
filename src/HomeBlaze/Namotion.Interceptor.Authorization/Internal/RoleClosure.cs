@@ -3,7 +3,8 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>Resolves role names to the roles they name and every role those include, each once, included roles first.</summary>
 internal static class RoleClosure
 {
-    public static List<AuthorizationRole> Resolve(IReadOnlyCollection<AuthorizationRole> roles, IReadOnlyCollection<string> roleNames)
+    /// <summary>Indexes the roles by name ignoring case, after checking that every role has a valid, unique and unreserved name.</summary>
+    public static Dictionary<string, AuthorizationRole> Index(IReadOnlyCollection<AuthorizationRole> roles)
     {
         var rolesByName = new Dictionary<string, AuthorizationRole>(StringComparer.OrdinalIgnoreCase);
         foreach (var role in roles)
@@ -34,6 +35,11 @@ internal static class RoleClosure
             }
         }
 
+        return rolesByName;
+    }
+
+    public static List<AuthorizationRole> Resolve(IReadOnlyDictionary<string, AuthorizationRole> rolesByName, IReadOnlyCollection<string> roleNames)
+    {
         var result = new List<AuthorizationRole>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var path = new List<string>();
@@ -45,7 +51,7 @@ internal static class RoleClosure
         return result;
     }
 
-    private static AuthorizationRole Lookup(string? name, Dictionary<string, AuthorizationRole> rolesByName, List<string> path)
+    private static AuthorizationRole Lookup(string? name, IReadOnlyDictionary<string, AuthorizationRole> rolesByName, List<string> path)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -73,7 +79,7 @@ internal static class RoleClosure
 
     private static void Visit(
         string? name,
-        Dictionary<string, AuthorizationRole> rolesByName,
+        IReadOnlyDictionary<string, AuthorizationRole> rolesByName,
         List<AuthorizationRole> result,
         HashSet<string> visited,
         List<string> path)

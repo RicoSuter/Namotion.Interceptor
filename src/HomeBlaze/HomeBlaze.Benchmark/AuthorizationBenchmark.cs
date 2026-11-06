@@ -69,11 +69,11 @@ public class AuthorizationBenchmark
         deny.Add(new PermissionRule { Tags = ["secret"], Actions = [PermissionAction.Read, PermissionAction.Write] });
 
         var role = new AuthorizationRole { Name = "Operator", Allow = [.. allow], Deny = [.. deny] };
-        _policy = AuthorizationPolicy.Compile([role], ["Operator"], [], [PermissionAction.Read, PermissionAction.Write, Execute], new TagProvider(), DefaultPathProvider.Instance);
+        _policy = AuthorizationDefinition.Create([role], [], [PermissionAction.Read, PermissionAction.Write, Execute], DefaultPathProvider.Instance, new TagProvider()).Compile(["Operator"]);
 
         deny.Add(new PermissionRule { Paths = ["Floors[Floor49].**"], Actions = [PermissionAction.Read] });
         var readPathDenyRole = new AuthorizationRole { Name = "Operator", Allow = [.. allow], Deny = [.. deny] };
-        _readPathDenyPolicy = AuthorizationPolicy.Compile([readPathDenyRole], ["Operator"], [], [PermissionAction.Read, PermissionAction.Write, Execute], new TagProvider(), DefaultPathProvider.Instance);
+        _readPathDenyPolicy = AuthorizationDefinition.Create([readPathDenyRole], [], [PermissionAction.Read, PermissionAction.Write, Execute], DefaultPathProvider.Instance, new TagProvider()).Compile(["Operator"]);
 
         _lampBrightness = Member(_building.Floors["Floor5"].Lamps["Lamp3"], nameof(Lamp.Brightness));
         _restrictedLampBrightness = Member(_building.Floors["Floor45"].Lamps["Lamp3"], nameof(Lamp.Brightness));
@@ -104,14 +104,14 @@ public class AuthorizationBenchmark
 
     /// <summary>Reachability through readable links; no path rule applies to read, so nothing is enumerated.</summary>
     [Benchmark]
-    public bool CanReadSubject() => _policy.CanRead(_lampBrightness.Parent);
+    public bool CanReadSubject() => _policy.IsVisible(_lampBrightness.Parent);
 
     [Benchmark]
     public int BrowseShapedEvaluation() => Browse(_policy);
 
     /// <summary>A read deny with paths, so the subject's paths are needed for its members and for every link to the root.</summary>
     [Benchmark]
-    public bool CanReadSubjectUnderReadPathDeny() => _readPathDenyPolicy.CanRead(_lampBrightness.Parent);
+    public bool CanReadSubjectUnderReadPathDeny() => _readPathDenyPolicy.IsVisible(_lampBrightness.Parent);
 
     [Benchmark]
     public int BrowseShapedEvaluationUnderReadPathDeny() => Browse(_readPathDenyPolicy);
@@ -121,7 +121,7 @@ public class AuthorizationBenchmark
         var readable = 0;
         foreach (var subject in _subjects)
         {
-            if (!policy.CanRead(subject))
+            if (!policy.IsVisible(subject))
             {
                 continue;
             }

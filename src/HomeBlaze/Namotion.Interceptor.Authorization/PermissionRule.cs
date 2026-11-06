@@ -16,7 +16,7 @@ public sealed record PermissionRule
     /// <summary>
     /// Gets the path patterns, each matching a member's whole path, the path of its subject followed by the member's
     /// segment; empty for everywhere. Patterns use the syntax of the path provider given to
-    /// <see cref="AuthorizationPolicy.Compile"/>; <c>*</c> alone matches one segment, <c>**</c> zero or more, and
+    /// <see cref="AuthorizationDefinition.Create"/>; <c>*</c> alone matches one segment, <c>**</c> zero or more, and
     /// <c>*</c> inside a segment or index is a glob over its text. A pattern for a branch ends in <c>**</c>.
     /// </summary>
     /// <remarks>

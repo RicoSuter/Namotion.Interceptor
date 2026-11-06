@@ -122,7 +122,7 @@ public class WorkedExampleTests
 
         // Act
         var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
-        var canReadSubject = policy.CanRead(Registered(home.Wifi!));
+        var canReadSubject = policy.IsVisible(Registered(home.Wifi!));
 
         // Assert
         Assert.False(canReadSsid);
@@ -138,12 +138,12 @@ public class WorkedExampleTests
         var sensor = home.Rooms["Kitchen"].Sensor!;
 
         // Act
-        var canReadHomeSubject = policy.CanRead(Registered(home));
-        var canReadKitchenSubject = policy.CanRead(Registered(home.Rooms["Kitchen"]));
-        var canReadSensorSubject = policy.CanRead(Registered(sensor));
+        var canReadHomeSubject = policy.IsVisible(Registered(home));
+        var canReadKitchenSubject = policy.IsVisible(Registered(home.Rooms["Kitchen"]));
+        var canReadSensorSubject = policy.IsVisible(Registered(sensor));
         var canReadSensorTemperatureUnit = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit"));
-        var canReadBedroomLampSubject = policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"]));
-        var canReadWifiSubject = policy.CanRead(Registered(home.Wifi!));
+        var canReadBedroomLampSubject = policy.IsVisible(Registered(home.Rooms["Bedroom"].Lights["Lamp"]));
+        var canReadWifiSubject = policy.IsVisible(Registered(home.Wifi!));
 
         // Assert
         Assert.True(canReadHomeSubject);

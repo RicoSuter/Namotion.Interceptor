@@ -181,9 +181,9 @@ public class PathPatternTests
         var home = TestGraph.Create();
         var brightness = TestGraph.Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Models.Light.Brightness));
         var path = brightness.TryGetPath(DefaultPathProvider.Instance, null)!;
-        var policy = AuthorizationPolicy.Compile(
-            [Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [path])])], ["Reader"], [],
-            Policies.KnownActions, TestTags.Default, DefaultPathProvider.Instance);
+        var policy = AuthorizationDefinition.Create(
+            [Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [path])])], [],
+            Policies.KnownActions, DefaultPathProvider.Instance, TestTags.Default).Compile(["Reader"]);
 
         // Act
         var result = policy.CanRead(brightness);

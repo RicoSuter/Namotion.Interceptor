@@ -8,9 +8,9 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Authorization;
 
 /// <summary>
-/// The compiled permissions of one principal. An action on a member is allowed when any allow rule of the
-/// principal's roles matches it and no deny rule of the roles or of the system rules does. Immutable and safe to
-/// share across threads.
+/// The compiled permissions of one principal, built by <see cref="AuthorizationDefinition.Compile"/>. An action on a
+/// member is allowed when any allow rule of the principal's roles matches it and no deny rule of the roles or of the
+/// system rules does. Immutable and safe to share across threads.
 /// </summary>
 public sealed class AuthorizationPolicy
 {
@@ -49,42 +49,6 @@ public sealed class AuthorizationPolicy
     /// <summary>Gets the roles of the principal and every role they include, included roles first.</summary>
     public ImmutableArray<AuthorizationRole> Roles { get; }
 
-    /// <summary>
-    /// Compiles the policy of a principal holding <paramref name="roleNames"/>.
-    /// </summary>
-    /// <param name="roles">All defined roles, by which names are resolved.</param>
-    /// <param name="roleNames">The roles of the principal.</param>
-    /// <param name="systemDenyRules">Deny rules of the application that no role can override.</param>
-    /// <param name="knownActions">Every action a rule may name; <see cref="PermissionAction.Read"/> and <see cref="PermissionAction.Write"/> are always known. At most 64.</param>
-    /// <param name="tagProvider">Supplies the tags of members.</param>
-    /// <param name="pathProvider">Defines path syntax and builds the paths that patterns are matched against.</param>
-    /// <exception cref="AuthorizationException">
-    /// A role is null, has no name, is defined more than once or uses <see cref="SystemRoleName"/>.
-    /// A role or include name is unknown or empty, has leading or trailing whitespace or a control or format character, includes form a cycle, or includes are nested more than 64 levels deep.
-    /// A rule is null, has no actions, names an unknown action, or has a member, type or tag value that is empty, has leading or trailing whitespace or contains a control or format character.
-    /// A path pattern starts with '/' or '\' that is not the provider's separator, is malformed, has an empty segment
-    /// (a doubled or trailing separator), has a segment with leading or trailing whitespace, contains a control or format character, or matches no member
-    /// because it is the separator alone or its last segment has an index.
-    /// A known action has no name, or there are more than 64 known actions.
-    /// </exception>
-    public static AuthorizationPolicy Compile(
-        IReadOnlyCollection<AuthorizationRole> roles,
-        IReadOnlyCollection<string> roleNames,
-        ImmutableArray<PermissionRule> systemDenyRules,
-        IReadOnlyCollection<PermissionAction> knownActions,
-        IMemberTagProvider tagProvider,
-        PathProviderBase pathProvider)
-    {
-        ArgumentNullException.ThrowIfNull(roles);
-        ArgumentNullException.ThrowIfNull(roleNames);
-        ArgumentNullException.ThrowIfNull(knownActions);
-        ArgumentNullException.ThrowIfNull(tagProvider);
-        ArgumentNullException.ThrowIfNull(pathProvider);
-
-        var compiled = PolicyCompiler.Compile(roles, roleNames, systemDenyRules, knownActions, pathProvider);
-        return new AuthorizationPolicy(compiled.Roles, compiled.Allow, compiled.Deny, compiled.ActionBits, tagProvider, pathProvider);
-    }
-
     /// <summary>Whether the action is allowed on the member.</summary>
     /// <exception cref="ArgumentException">The action is not a known action of this policy; <see cref="DenyAll"/> answers no to any action instead.</exception>
     public bool IsAllowed(RegisteredSubjectProperty member, PermissionAction action)
@@ -100,8 +64,8 @@ public sealed class AuthorizationPolicy
         return IsAllowed(member, PolicyCompiler.ReadBit);
     }
 
-    /// <summary>Whether at least one member of the subject is readable and the subject is reachable from the root through readable subject-holding properties.</summary>
-    public bool CanRead(RegisteredSubject subject) => Explain(subject).IsReadable;
+    /// <summary>Whether at least one member of the subject is readable and the subject is reachable from a root through readable subject-holding properties.</summary>
+    public bool IsVisible(RegisteredSubject subject) => ExplainVisibility(subject).IsVisible;
 
     /// <summary>Whether the member may be written.</summary>
     public bool CanWrite(RegisteredSubjectProperty member)
@@ -124,8 +88,8 @@ public sealed class AuthorizationPolicy
         return new PermissionDecision(allowed is not null && denied is null, allowed?.Role, allowed?.Rule, denied?.Role, denied?.Rule);
     }
 
-    /// <summary>Answers <see cref="CanRead(RegisteredSubject)"/> and, when the subject is hidden, says why.</summary>
-    public SubjectReadDecision Explain(RegisteredSubject subject)
+    /// <summary>Answers <see cref="IsVisible(RegisteredSubject)"/> and, when the subject is hidden, says why.</summary>
+    public VisibilityDecision ExplainVisibility(RegisteredSubject subject)
     {
         ArgumentNullException.ThrowIfNull(subject);
 
@@ -147,7 +111,7 @@ public sealed class AuthorizationPolicy
                 }
             }
 
-            return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
+            return new VisibilityDecision(isVisible: false, hasReadableMember: false, deniedProperty: null);
         }
         finally
         {
@@ -155,16 +119,16 @@ public sealed class AuthorizationPolicy
         }
     }
 
-    private SubjectReadDecision ExplainOnce(RegisteredSubject subject, EvaluationState state)
+    private VisibilityDecision ExplainOnce(RegisteredSubject subject, EvaluationState state)
     {
         if (!HasReadableMember(subject, state, out var subjectPaths))
         {
-            return new SubjectReadDecision(IsReadable: false, HasReadableMember: false, DeniedProperty: null);
+            return new VisibilityDecision(isVisible: false, hasReadableMember: false, deniedProperty: null);
         }
 
         RegisteredSubjectProperty? deniedProperty = null;
         var isReachable = IsReachable(subject, state, subjectPaths, ref deniedProperty);
-        return new SubjectReadDecision(isReachable, HasReadableMember: true, isReachable ? null : deniedProperty);
+        return new VisibilityDecision(isReachable, hasReadableMember: true, isReachable ? null : deniedProperty);
     }
 
     private ulong GetBit(PermissionAction action)

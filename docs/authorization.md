@@ -19,7 +19,7 @@ A **member** is any registered property of a subject: a property, a method an ap
 
 A **role** has a name, the names of roles it includes, `Allow` rules and `Deny` rules. Its effective rules are its own and those of every included role, transitively.
 
-An **action** is a name. `PermissionAction.Read` and `PermissionAction.Write` are built in; an application defines others, such as `execute` or `history`, and passes every action a rule may name as the known actions of `Compile`. A rule naming an unknown action fails compilation. At most 64 actions are supported, `read` and `write` included.
+An **action** is a name. `PermissionAction.Read` and `PermissionAction.Write` are built in; an application defines others, such as `execute` or `history`, and passes every action a rule may name as the known actions of `AuthorizationDefinition.Create`. A rule naming an unknown action fails compilation. At most 64 actions are supported, `read` and `write` included.
 
 Action names, role names and tags compare ignoring case. Type names, member globs and path patterns compare exactly.
 
@@ -37,11 +37,11 @@ What is left is allowed. `IsAllowed` computes `any allow matches && no deny matc
 - Naming several roles for a principal is the same as one role that includes them all.
 - No matching allow means denied.
 
-A **subject** is readable (`CanRead(RegisteredSubject)`) when at least one of its members is readable and some chain of parents leads from it to a root (see [Subjects with several paths](#subjects-with-several-paths)) on which every subject-holding property is readable. A deny with `read` on a subject-holding property, such as `Home.Cameras`, therefore hides the subjects it holds and every branch beneath them from browsing, while their members stay readable when asked for directly; `Home.Cameras.**` denies the members as well. The link is the property itself: a pattern naming one entry of a collection or dictionary, such as `Home.Rooms[Kitchen]`, names no member and fails compilation (see [Path patterns](#path-patterns)), so hiding one entry takes `Home.Rooms[Kitchen].**`, which denies the entry's members and hides the entry with them.
+A **subject** is visible (`IsVisible(RegisteredSubject)`) when at least one of its members is readable and some chain of parents leads from it to a root (see [Subjects with several paths](#subjects-with-several-paths)) on which every subject-holding property is readable. A deny with `read` on a subject-holding property, such as `Home.Cameras`, therefore hides the subjects it holds and every branch beneath them from browsing, while their members stay readable when asked for directly; `Home.Cameras.**` denies the members as well. The link is the property itself: a pattern naming one entry of a collection or dictionary, such as `Home.Rooms[Kitchen]`, names no member and fails compilation (see [Path patterns](#path-patterns)), so hiding one entry takes `Home.Rooms[Kitchen].**`, which denies the entry's members and hides the entry with them.
 
 ## Path patterns
 
-Patterns are parsed with the registry's path parser of the `PathProviderBase` given to `Compile`, so a segment means what it means to that provider, quoted keys included. The examples use the registry's default provider, whose separator is `.`; a provider with another separator, such as `/`, works the same way with its own separator. Only `*` and `**` are wildcards.
+Patterns are parsed with the registry's path parser of the `PathProviderBase` given to `AuthorizationDefinition.Create`, so a segment means what it means to that provider, quoted keys included. The examples use the registry's default provider, whose separator is `.`; a provider with another separator, such as `/`, works the same way with its own separator. Only `*` and `**` are wildcards.
 
 A pattern names paths from the root and may start with the separator or not: `Home.Kitchen.Temperature` and `.Home.Kitchen.Temperature` are the same pattern, so the path of a member that the registry's `TryGetPath` writes usually compiles as a pattern for that member. Exceptions include a segment or key with leading or trailing whitespace or a control or format character, which fails compilation, a key containing `*`, which is read as a glob, and a path that opens with a bare `[InlinePaths]` key starting with `/` or `\`, which fails as described below. The path of a subject held by a collection or dictionary ends in an index, names no member and fails compilation too.
 
@@ -120,34 +120,40 @@ var roles = new[]
     }
 };
 
-var systemDeny = ImmutableArray.Create(new PermissionRule { Tags = ["secret"], Actions = [PermissionAction.Read, PermissionAction.Write] });
+PermissionRule[] systemDeny = [new() { Tags = ["secret"], Actions = [PermissionAction.Read, PermissionAction.Write] }];
 
-var policy = AuthorizationPolicy.Compile(
-    roles, roleNames: ["LightOperator"], systemDeny,
+// Once, and again whenever the roles change.
+var definition = AuthorizationDefinition.Create(
+    roles, systemDeny,
     knownActions: [PermissionAction.Read, PermissionAction.Write, execute],
-    tagProvider, pathProvider);
+    pathProvider, tagProvider);
 
-policy.CanRead(member);              // read
-policy.IsAllowed(member, execute);   // any known action
-policy.CanRead(registeredSubject);   // visible at all
+// Once per distinct set of role names.
+var policy = definition.Compile(["LightOperator"]);
+
+policy.CanRead(member);                // read
+policy.IsAllowed(member, execute);     // any known action
+policy.IsVisible(registeredSubject);   // visible at all
 ```
 
-`IsAllowed` and `Explain(member, action)` throw `ArgumentException` for an action that was not among the known actions of `Compile`.
+The tag provider may be left out when no rule selects tags.
 
-`Compile` throws `AuthorizationException` when the roles cannot be compiled; the message names the role wherever there is one:
+`IsAllowed` and `Explain(member, action)` throw `ArgumentException` for an action that was not among the known actions of the definition.
 
-- Over all roles given: a role that is null, has no name, has a name with leading or trailing whitespace or a control or format character, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
-- For the principal's roles and every role they include: an unknown or empty role name or one with leading or trailing whitespace or a control or format character (an include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
-- For the rules of those roles and the system deny rules: a rule that is null, has no actions, names an unknown action or has a selector value that is empty, has leading or trailing whitespace or contains a control or format character, or a path pattern that is malformed, starts with `/` or `\` that is not the provider's separator, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
-- For the known actions: one without a name, or more than 64 in total.
+`AuthorizationDefinition.Create` throws `AuthorizationException` for what concerns every principal, and `Compile` for what concerns the roles of one principal; the message names the role wherever there is one:
 
-Give a principal whose roles fail to compile `AuthorizationPolicy.DenyAll`, which denies every action, known or not; a policy must never partially apply. `policy.Roles` lists the principal's roles and every role they include, included roles first.
+- `Create`, for the names of all roles: a role that is null, has no name, has a name with leading or trailing whitespace or a control or format character, has a name defined more than once, or uses the reserved name `System` (`AuthorizationPolicy.SystemRoleName`).
+- `Create`, for the known actions: one without a name, or more than 64 in total.
+- `Create`, for the system deny rules, and `Compile`, for the rules of the principal's roles and every role they include: a rule that is null, has no actions, names an unknown action, selects tags while no tag provider is given, or has a selector value that is empty, has leading or trailing whitespace or contains a control or format character, or a path pattern that is malformed, starts with `/` or `\` that is not the provider's separator, has an empty segment, has a segment with leading or trailing whitespace, or matches no member because it is the separator alone or its last segment has an index.
+- `Compile`, for the principal's role names and the includes of their roles: an unknown or empty name or one with leading or trailing whitespace or a control or format character (an include is reported with the including role), a cycle of includes, or includes nested more than 64 levels deep.
 
-`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last, a system rule as the role `System`. `Explain(subject)` returns a `SubjectReadDecision`: whether the subject has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is readable and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths. They return whole roles and rules and the live subject-holding property, so show them only to principals who may see the policy and the graph.
+Give a principal `AuthorizationPolicy.DenyAll` when the definition cannot be created or its policy cannot be compiled, which denies every action, known or not; a policy must never partially apply. A role with an invalid rule or include fails only the principals that hold or include it; the others compile from the same definition. `policy.Roles` lists the principal's roles and every role they include, included roles first.
+
+`Explain(member, action)` returns a `PermissionDecision` naming the first allowing and the first denying role and rule, in the order of `Roles` with the system deny rules last, a system rule as the role `System`. `ExplainVisibility(subject)` returns a `VisibilityDecision`: whether the subject is visible, whether it has a readable member and, when it is hidden although it has one, the unreadable subject-holding property on the way in `DeniedProperty`. `DeniedProperty` is null when the subject is visible and also when the walk meets no unreadable link, as for subjects that only hold each other in a cycle without a root. Both are for user interfaces and tests, not hot paths. They return whole roles and rules and the live subject-holding property, so show them only to principals who may see the policy and the graph.
 
 ## Performance and threading
 
-A compiled policy is immutable and safe to share across threads. Every answer rests on the parents and attachment of one instant of the graph, also while subjects move, and an answer whose parents kept changing fails closed. Tags, member segments and which `[InlinePaths]` spellings resolve are read live rather than as of that instant, the one exception described under [Threading](design/authorization.md#threading). The common questions allocate nothing, path rules over a chain of single parents included; the exceptions and the measured allocations are in the [design](design/authorization.md#performance). Path rules are the expensive selector: a deny rule with only `Paths` makes every member an allow matched enumerate its subject's paths to prove the deny does not apply. Give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules into the roles that need them rather than into a reusable base role. Callers that evaluate many members of one subject, such as a tree browser, should keep their own per-call memo of `CanRead(subject)`. `IMemberTagProvider.GetTags` is called on every evaluation of a rule with tags, possibly concurrently, so it should return cached arrays; it must never return a default array, for which evaluation throws `InvalidOperationException` naming the provider.
+A definition and a compiled policy are immutable and safe to share across threads. Every answer rests on the parents and attachment of one instant of the graph, also while subjects move, and an answer whose parents kept changing fails closed. Tags, member segments and which `[InlinePaths]` spellings resolve are read live rather than as of that instant, the one exception described under [Threading](design/authorization.md#threading). The common questions allocate nothing, path rules over a chain of single parents included; the exceptions and the measured allocations are in the [design](design/authorization.md#performance). Path rules are the expensive selector: a deny rule with only `Paths` makes every member an allow matched enumerate its subject's paths to prove the deny does not apply. Give a path deny rule another selector (a type, a member glob or a tag) when you can, and put path rules into the roles that need them rather than into a reusable base role. Callers that evaluate many members of one subject, such as a tree browser, should keep their own per-call memo of `IsVisible(subject)`. `IMemberTagProvider.GetTags` is called on every evaluation of a rule with tags, possibly concurrently, so it should return cached arrays; it must never return a default array, for which evaluation throws `InvalidOperationException` naming the provider.
 
 ## JSON
 

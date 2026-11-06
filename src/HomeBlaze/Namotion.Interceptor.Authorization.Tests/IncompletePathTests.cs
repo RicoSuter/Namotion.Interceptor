@@ -105,7 +105,7 @@ public class IncompletePathTests
         var allowCanReadBefore = allow.CanRead(password);
         home.Wifi = null;
         var denyCanReadAfter = deny.CanRead(password);
-        var denyCanReadParentAfter = deny.CanRead(password.Parent);
+        var denyCanReadParentAfter = deny.IsVisible(password.Parent);
         var allowCanReadAfter = allow.CanRead(password);
 
         // Assert
@@ -170,14 +170,14 @@ public class IncompletePathTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Rooms"])]));
 
         // Act
-        var canReadBefore = policy.CanRead(kitchen);
+        var canReadBefore = policy.IsVisible(kitchen);
         home.Rooms = [];
-        var decisionAfter = policy.Explain(kitchen);
+        var decisionAfter = policy.ExplainVisibility(kitchen);
 
         // Assert
         Assert.False(canReadBefore);
         Assert.Empty(kitchen.Parents);
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), decisionAfter);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, deniedProperty: null), decisionAfter);
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public class IncompletePathTests
         var denyCanReadUnattachedSsid = deny.CanRead(Member(unattached, nameof(Wifi.Ssid)));
         var allowCanReadRooms = allow.CanRead(Member(home, nameof(Home.Rooms)));
         var allowCanReadUnattachedSsid = allow.CanRead(Member(unattached, nameof(Wifi.Ssid)));
-        var denyCanReadUnattachedSubject = deny.CanRead(Registered(unattached));
+        var denyCanReadUnattachedSubject = deny.IsVisible(Registered(unattached));
 
         // Assert
         Assert.True(denyCanReadRooms);
@@ -214,7 +214,7 @@ public class IncompletePathTests
         var role = Role("Operator", allow: [Rule([actions[61]])]);
 
         // Act
-        var policy = AuthorizationPolicy.Compile([role], ["Operator"], [], actions, TestTags.Default, Policies.SlashPaths);
+        var policy = AuthorizationDefinition.Create([role], [], actions, Policies.SlashPaths, TestTags.Default).Compile(["Operator"]);
         var isAllowedAction61 = policy.IsAllowed(member, actions[61]);
         var isAllowedAction60 = policy.IsAllowed(member, actions[60]);
 
@@ -234,10 +234,10 @@ public class IncompletePathTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)]));
 
         // Act
-        var decision = policy.Explain(Registered(first));
+        var decision = policy.ExplainVisibility(Registered(first));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, deniedProperty: null), decision);
     }
 
     [Fact]
@@ -275,10 +275,10 @@ public class IncompletePathTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Rooms"])]));
 
         // Act
-        var decision = policy.Explain(Registered(kitchen));
+        var decision = policy.ExplainVisibility(Registered(kitchen));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
     }
 
     [Fact]
@@ -299,10 +299,10 @@ public class IncompletePathTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Rooms"])]));
 
         // Act
-        var decision = policy.Explain(Registered(kitchen));
+        var decision = policy.ExplainVisibility(Registered(kitchen));
 
         // Assert
-        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
+        Assert.Equal(new VisibilityDecision(isVisible: false, hasReadableMember: true, Member(home, nameof(Home.Rooms))), decision);
     }
 
     /// <summary>
@@ -323,5 +323,5 @@ public class IncompletePathTests
     }
 
     private static AuthorizationPolicy CompileExcludingSpare(AuthorizationRole role)
-        => AuthorizationPolicy.Compile([role], [role.Name], [], KnownActions, TestTags.Default, new ExcludingPathProvider(nameof(Home.Spare), '/'));
+        => AuthorizationDefinition.Create([role], [], KnownActions, new ExcludingPathProvider(nameof(Home.Spare), '/'), TestTags.Default).Compile([role.Name]);
 }
