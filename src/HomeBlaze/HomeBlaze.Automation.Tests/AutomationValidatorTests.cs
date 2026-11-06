@@ -51,6 +51,37 @@ public class AutomationValidatorTests
     }
 
     [Fact]
+    public void WhenARuleIsNull_ThenItsKeyReportsAnEmptyRule()
+    {
+        // Arrange
+        var rules = new Dictionary<string, AutomationRule> { ["a"] = null! };
+
+        // Act
+        var errors = AutomationValidator.Validate(null!, null, rules, null!);
+
+        // Assert
+        Assert.Equal(["it has no trigger", "it has no action"], errors.Select(error => error.Message).ToArray());
+        Assert.All(errors, error => Assert.Equal("a", error.RuleKey));
+    }
+
+    [Fact]
+    public void WhenRulesHaveErrors_ThenTheErrorsFollowTheRuleOrderAndNotTheDictionaryOrder()
+    {
+        // Arrange
+        var rules = new Dictionary<string, AutomationRule>
+        {
+            ["a"] = Rule(actions: []),
+            ["b"] = Rule("Rain", actions: [])
+        };
+
+        // Act
+        var errors = AutomationValidator.Validate([], null, rules, ["b", "a"]);
+
+        // Assert
+        Assert.Equal(["b", "a"], errors.Select(error => error.RuleKey!).ToArray());
+    }
+
+    [Fact]
     public void WhenAStateIsDefinedTwice_ThenTheErrorBelongsToTheAutomation()
     {
         // Act

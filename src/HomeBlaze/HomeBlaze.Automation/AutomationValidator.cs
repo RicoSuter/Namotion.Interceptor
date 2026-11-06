@@ -18,6 +18,8 @@ public static class AutomationValidator
         IReadOnlyDictionary<string, AutomationRule> rules,
         IReadOnlyList<string> ruleOrder)
     {
+        states ??= [];
+        ruleOrder ??= [];
         var errors = AutomationCompiler.CheckStates(states, initialState)
             .Select(message => new AutomationValidationError(null, message))
             .Concat(CheckStateNames(states))
@@ -25,7 +27,7 @@ public static class AutomationValidator
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in AutomationCompiler.OrderKeys(rules.Keys, ruleOrder))
         {
-            var rule = rules[key];
+            var rule = rules[key] ?? new AutomationRule();
             errors.AddRange(AutomationCompiler.GetRuleErrors(key, rule, states)
                 .Concat(CheckActionIds(rule.Actions))
                 .Select(message => new AutomationValidationError(key, message)));
