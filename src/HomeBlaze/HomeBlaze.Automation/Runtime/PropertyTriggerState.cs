@@ -4,8 +4,9 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The arming, hold and unknown state of one property trigger. A trigger fires on a change to true that held for the
-/// hold, once, and rearms when its expression is known false or, with a rearm expression, when that is known true.
-/// Unknown never fires and never rearms, and resets a running hold. Used by the worker only.
+/// hold, once, and rearms when its expression is known false or, with a rearm expression, when that is known true. A
+/// trigger that starts true waits for the same rearm. Unknown never fires and never rearms, and resets a running hold.
+/// Used by the worker only.
 /// </summary>
 internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 {
@@ -26,14 +27,15 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     public bool Activate(TriggerActivation policy, TriggerObservation observation, DateTimeOffset now)
     {
         Deactivate();
-        UpdateUnknown(observation, now);
         if (policy == TriggerActivation.WaitForFalseToTrue)
         {
             Phase = GetBaselinePhase(observation.Value);
+            UpdateUnknown(observation, now);
             return false;
         }
 
         Phase = TriggerPhase.Armed;
+        UpdateUnknown(observation, now);
         return ObserveArmed(observation.Value, now);
     }
 
@@ -48,7 +50,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         UpdateUnknown(observation, now);
         return Phase switch
         {
-            TriggerPhase.AwaitingBaseline => SetBaseline(observation.Value),
+            TriggerPhase.AwaitingBaseline => SetBaseline(observation, now),
             TriggerPhase.Armed => ObserveArmed(observation.Value, now),
             TriggerPhase.Holding => ObserveHolding(observation.Value, now),
             TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation, now),
@@ -65,16 +67,17 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         MissingPaths = [];
     }
 
-    private static TriggerPhase GetBaselinePhase(bool? value) => value switch
+    private TriggerPhase GetBaselinePhase(bool? value) => value switch
     {
-        true => TriggerPhase.WaitingForFalse,
+        true => hasRearm ? TriggerPhase.WaitingToRearm : TriggerPhase.WaitingForFalse,
         false => TriggerPhase.Armed,
         null => TriggerPhase.AwaitingBaseline
     };
 
-    private bool SetBaseline(bool? value)
+    private bool SetBaseline(TriggerObservation observation, DateTimeOffset now)
     {
-        Phase = GetBaselinePhase(value);
+        Phase = GetBaselinePhase(observation.Value);
+        UpdateUnknown(observation, now);
         return false;
     }
 

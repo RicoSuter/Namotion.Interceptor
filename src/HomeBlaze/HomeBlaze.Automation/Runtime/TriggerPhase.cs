@@ -15,7 +15,7 @@ internal enum TriggerPhase
     /// <summary>The expression is true and the hold has not elapsed.</summary>
     Holding,
 
-    /// <summary>Fired; waits until the expression is false, or the rearm expression is true.</summary>
+    /// <summary>Fired, or started true with a rearm expression; waits until the expression is false, or the rearm expression is true.</summary>
     WaitingToRearm,
 
     /// <summary>The activation found the expression true; waits until it is false.</summary>

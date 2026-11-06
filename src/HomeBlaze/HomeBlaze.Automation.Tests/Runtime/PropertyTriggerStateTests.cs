@@ -190,6 +190,77 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
+    public void WhenActivationWaitsForFalseToTrueWithRearm_ThenATrueBaselineWaitsForTheRearmExpression()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), Start);
+
+        // Act
+        var movedBetween = state.Observe(WithRearm(true, false), Start.AddSeconds(1));
+        var falseButNotRearmed = state.Observe(WithRearm(false, false), Start.AddSeconds(2));
+        var trueAgain = state.Observe(WithRearm(true, false), Start.AddSeconds(3));
+
+        // Assert
+        Assert.False(movedBetween);
+        Assert.False(falseButNotRearmed);
+        Assert.False(trueAgain);
+        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+    }
+
+    [Fact]
+    public void WhenATrueBaselineWithRearmIsRearmed_ThenTheNextTrueValueFires()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, WithRearm(true, null), Start);
+        state.Observe(WithRearm(false, true), Start.AddSeconds(1));
+
+        // Act
+        var fired = state.Observe(WithRearm(true, false), Start.AddSeconds(2));
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void WhenATrueBaselineWithRearmHasAnUnknownRearm_ThenItIsUnknownAndDoesNotRearm()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, new TriggerObservation(true, null, ["/Weather/Gust"]), Start);
+
+        // Act
+        var fired = state.Observe(new TriggerObservation(true, null, ["/Weather/Gust"]), Start.AddSeconds(1));
+
+        // Assert
+        Assert.False(fired);
+        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+        Assert.True(state.IsUnknown);
+        Assert.Equal(Start, state.UnknownSince);
+        Assert.Equal(["/Weather/Gust"], state.MissingPaths);
+    }
+
+    [Fact]
+    public void WhenTheBaselineIsUnknownAndBecomesTrueWithRearm_ThenItWaitsForTheRearmExpression()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.WaitForFalseToTrue, Unknown("/Weather/Gust"), Start);
+
+        // Act
+        var firstKnown = state.Observe(WithRearm(true, false), Start.AddSeconds(1));
+        var falseButNotRearmed = state.Observe(WithRearm(false, false), Start.AddSeconds(2));
+        var trueAgain = state.Observe(WithRearm(true, false), Start.AddSeconds(3));
+
+        // Assert
+        Assert.False(firstKnown);
+        Assert.False(falseButNotRearmed);
+        Assert.False(trueAgain);
+        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+    }
+
+    [Fact]
     public void WhenTheTriggerIsDeactivated_ThenObservationsAreIgnored()
     {
         // Arrange

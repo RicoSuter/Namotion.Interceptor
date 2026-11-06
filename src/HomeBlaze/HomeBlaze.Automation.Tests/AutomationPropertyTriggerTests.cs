@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Tests.Testing;
+using Microsoft.Extensions.Hosting;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -68,6 +69,42 @@ public class AutomationPropertyTriggerTests
         Assert.Equal(1L, runsAroundTheThreshold);
         Assert.Equal(2L, rule.RunCount);
         Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenTheTriggerStartsTrueWithRearm_ThenOnlyTheRearmExpressionAllowsTheFirstRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.Rules = Keyed(
+                ("retract", Create(
+                    "Retract blinds",
+                    AutomationRuleMode.On,
+                    [When("/Weather/Gust > 8", rearm: "/Weather/Gust < 6", activation: TriggerActivation.WaitForFalseToTrue)],
+                    [Invoke("/Blinds/Close")])));
+        });
+        var rule = host.Rule("retract");
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        await host.StopAsync();
+        await ((IHostedService)host.Automation).StartAsync(CancellationToken.None);
+        await host.FlushAsync();
+
+        // Act
+        host.Weather.Gust = 7;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var runsWithoutRearm = rule.RunCount;
+        host.Weather.Gust = 5;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(0L, runsWithoutRearm);
+        Assert.Equal(1L, rule.RunCount);
     }
 
     [Fact]

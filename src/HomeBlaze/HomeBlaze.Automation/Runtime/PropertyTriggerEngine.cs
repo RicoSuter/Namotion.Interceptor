@@ -133,7 +133,7 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
         var evaluation = new AutomationEvaluation(resolver, trigger.Rule.Rule, now, timeProvider.LocalTimeZone, capturedEvent: null, _values);
         var value = evaluation.EvaluateCondition(trigger.Expression);
         IReadOnlyList<string> missingPaths = value is null ? [.. evaluation.MissingPaths] : [];
-        if (trigger.Rearm is not { } rearmExpression || trigger.State.Phase != TriggerPhase.WaitingToRearm)
+        if (trigger.Rearm is not { } rearmExpression || !ReadsRearm(trigger.State.Phase, value))
         {
             return new TriggerObservation(value, null, missingPaths);
         }
@@ -146,6 +146,10 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
 
         return new TriggerObservation(value, rearm, missingPaths);
     }
+
+    // A trigger that is activated or finds its baseline while true enters the rearm wait, so it needs the rearm value at once.
+    private static bool ReadsRearm(TriggerPhase phase, bool? value) =>
+        phase == TriggerPhase.WaitingToRearm || (phase is TriggerPhase.Inactive or TriggerPhase.AwaitingBaseline && value == true);
 
     private void ResolveDependencies(CompiledPropertyTrigger trigger)
     {
