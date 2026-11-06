@@ -17,14 +17,32 @@ internal static class ArgumentFields
         [.. method.Parameters.Where(parameter => parameter.RequiresInput).SelectMany(CreateFields)];
 
     /// <summary>
-    /// The arguments to keep when the operation changes: those whose key belongs to one of the fields, which the binder matches
-    /// without regard to case, because it rejects any other key. All of them while the new operation is not resolved (null),
-    /// such as while its path is being typed.
+    /// The arguments to keep for the operation: those the binder accepts, which is a key equal to a parameter that needs input
+    /// or <c>parameter.Member</c> for a parameter of a record type with that member, matched without regard to case, even
+    /// when the editor shows the parameter as one field. The binder rejects any other key. All of them while the operation is
+    /// not resolved (null).
     /// </summary>
-    public static Dictionary<string, string> KeepKnown(IReadOnlyList<ArgumentField>? fields, IReadOnlyDictionary<string, string> arguments) =>
+    public static Dictionary<string, string> KeepKnown(MethodMetadata? method, IReadOnlyDictionary<string, string> arguments) =>
         arguments
-            .Where(argument => fields is null || fields.Any(field => string.Equals(field.Key, argument.Key, StringComparison.OrdinalIgnoreCase)))
+            .Where(argument => method is null || IsAccepted(method, argument.Key))
             .ToDictionary(argument => argument.Key, argument => argument.Value);
+
+    // Mirrors the key check of the argument binder of the runtime.
+    private static bool IsAccepted(MethodMetadata method, string key)
+    {
+        var inputs = method.Parameters.Where(parameter => parameter.RequiresInput).ToList();
+        if (inputs.Exists(parameter => IsSame(parameter.Name, key)))
+        {
+            return true;
+        }
+
+        var separator = key.IndexOf('.');
+        var owner = separator < 0 ? null : inputs.Find(parameter => IsSame(parameter.Name, key[..separator]));
+        return owner is not null && ParameterConverter.IsSupportedObject(owner.Type) &&
+            ParameterConverter.GetObjectMembers(owner.Type).Any(member => IsSame(member.Name, key[(separator + 1)..]));
+    }
+
+    private static bool IsSame(string left, string right) => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The error of the text of an argument or value, or null. The text of a string is a template, any other text is a constant

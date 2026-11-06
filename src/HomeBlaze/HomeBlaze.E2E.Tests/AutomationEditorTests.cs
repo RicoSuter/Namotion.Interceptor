@@ -544,34 +544,37 @@ public class AutomationEditorTests
     }
 
     [Fact]
-    public async Task WhenAnOperationActionHasAnArgumentItDoesNotTake_ThenTheSavedFileLacksIt()
+    public async Task WhenOnlyTheOperationOfOneActionIsChanged_ThenOnlyThatActionLosesArgumentsTheNewOperationDoesNotTake()
     {
         // Arrange
+        var arguments = new Dictionary<string, string> { ["speed"] = "50", ["durationSeconds"] = "5", ["gone"] = "x" };
         var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
         {
             WasherAutomation.Configure(configured);
             configured.Rules["started"].Actions =
             [
-                new InvokeOperationAction
-                {
-                    Id = "call-1",
-                    OperationPath = "/Demo/Motor/RunTest",
-                    Arguments = new Dictionary<string, string> { ["speed"] = "50", ["durationSeconds"] = "5", ["gone"] = "x" }
-                }
+                new InvokeOperationAction { Id = "call-1", OperationPath = "/Demo/Motor/RunTest", Arguments = arguments },
+                new InvokeOperationAction { Id = "call-2", OperationPath = "/Demo/Motor/RunTest", Arguments = arguments }
             ];
         });
         try
         {
             var (page, dialog) = await OpenEditorAsync(name);
-            await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Washing machine");
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            var second = dialog.GetByTestId("automation-action").Nth(1);
+            await Assertions.Expect(second.GetByLabel("Speed")).ToHaveValueAsync("50", new() { Timeout = Timeout });
 
             // Act
+            await second.GetByLabel("Call operation", new() { Exact = true }).FillAsync("/Demo/Motor/SetTargetSpeed");
+            await Assertions.Expect(second.GetByLabel("DurationSeconds")).ToHaveCountAsync(0, new() { Timeout = Timeout });
             await SaveAsync(page, dialog);
 
             // Assert
-            var json = await _fixture.ReadFileAsync(filePath);
-            Assert.Contains("\"durationSeconds\": \"5\"", json);
-            Assert.DoesNotContain("gone", json);
+            using var saved = JsonDocument.Parse(await _fixture.ReadFileAsync(filePath));
+            var calls = saved.RootElement.GetProperty("rules").GetProperty("started").GetProperty("actions").EnumerateArray()
+                .ToDictionary(action => action.GetProperty("id").GetString()!, action => action.GetProperty("arguments").EnumerateObject().Select(entry => entry.Name).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(["durationSeconds", "gone", "speed"], calls["call-1"]);
+            Assert.Equal(["speed"], calls["call-2"]);
         }
         finally
         {

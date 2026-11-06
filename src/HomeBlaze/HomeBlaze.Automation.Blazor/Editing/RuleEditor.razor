@@ -159,6 +159,7 @@
 
     private Task SetActionAsync(DraftItem<AutomationAction> item, AutomationAction action)
     {
+        item.IsOperationChanged |= item.Value is InvokeOperationAction previous && action is InvokeOperationAction next && previous.OperationPath != next.OperationPath;
         item.Value = action;
         return Changed.InvokeAsync();
     }

@@ -11,4 +11,7 @@ public sealed class DraftItem<T>(T value)
     public string Id { get; } = Guid.NewGuid().ToString("N");
 
     public T Value { get; set; } = value;
+
+    /// <summary>Whether the operation of the action was changed while editing, so that the arguments of the previous operation may be stale.</summary>
+    public bool IsOperationChanged { get; set; }
 }

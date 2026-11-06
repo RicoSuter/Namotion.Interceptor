@@ -1,3 +1,5 @@
+using HomeBlaze.Abstractions.Metadata;
+
 namespace HomeBlaze.Automation.Blazor.Editing;
 
 /// <summary>
@@ -66,18 +68,18 @@ public sealed class RuleDraft
     public void MoveAction(DraftItem<AutomationAction> action, int offset) => DraftLists.Move(Actions, action, offset);
 
     /// <summary>
-    /// The rule as it is saved: a blank name, guard, rearm or filter is none. With the lookup of the fields of an operation by
-    /// its path, an operation action keeps only the arguments that its operation takes, which the binder requires, and all of
-    /// them when the path leads to no operation.
+    /// The rule as it is saved: a blank name, guard, rearm or filter is none. With the lookup of an operation by its path, an
+    /// operation action whose operation was changed keeps only the arguments that its operation takes, which the binder
+    /// requires, and all of them when the path leads to no operation. Any other action is saved as it was loaded.
     /// </summary>
-    public AutomationRule ToRule(Func<string, IReadOnlyList<ArgumentField>?>? getFields = null) => new()
+    public AutomationRule ToRule(Func<string, MethodMetadata?>? getMethod = null) => new()
     {
         Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim(),
         Mode = Mode,
         InState = InState,
         Guard = string.IsNullOrWhiteSpace(Guard) ? null : Guard,
         Triggers = [.. Triggers.Select(trigger => Normalize(trigger.Value))],
-        Actions = [.. Actions.Select(action => Prune(action.Value, getFields))]
+        Actions = [.. Actions.Select(action => action.IsOperationChanged ? Prune(action.Value, getMethod) : action.Value)]
     };
 
     // The deserialized arguments are a mutable dictionary that the live action shares, so the draft holds its own copy.
@@ -85,9 +87,9 @@ public sealed class RuleDraft
         ? invoke with { Arguments = new Dictionary<string, string>(invoke.Arguments) }
         : action;
 
-    private static AutomationAction Prune(AutomationAction action, Func<string, IReadOnlyList<ArgumentField>?>? getFields) =>
-        action is InvokeOperationAction invoke && getFields is not null
-            ? invoke with { Arguments = ArgumentFields.KeepKnown(getFields(invoke.OperationPath), invoke.Arguments) }
+    private static AutomationAction Prune(AutomationAction action, Func<string, MethodMetadata?>? getMethod) =>
+        action is InvokeOperationAction invoke && getMethod is not null
+            ? invoke with { Arguments = ArgumentFields.KeepKnown(getMethod(invoke.OperationPath), invoke.Arguments) }
             : action;
 
     private void AddAction(AutomationAction action, string prefix) =>

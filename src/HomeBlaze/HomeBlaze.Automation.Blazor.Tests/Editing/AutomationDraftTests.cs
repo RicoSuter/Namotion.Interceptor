@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
 
@@ -273,25 +274,24 @@ public class AutomationDraftTests
     }
 
     [Fact]
-    public void WhenTheActionsAreSaved_ThenArgumentsThatTheOperationDoesNotTakeAreDropped()
+    public void WhenTheActionsAreSaved_ThenOnlyAnActionWithAChangedOperationLosesArgumentsItDoesNotTake()
     {
         // Arrange
         var rule = AutomationDraft.From(CreateWasher()).FindRule("finished")!;
         rule.AddCallOperation();
-        rule.Actions[^1].Value = new InvokeOperationAction
-        {
-            Id = "call-2",
-            OperationPath = "/Demo/Motor/RunTest",
-            Arguments = new Dictionary<string, string> { ["speed"] = "5", ["gone"] = "x" }
-        };
-        IReadOnlyList<ArgumentField> fields = [new("speed", "Speed", typeof(int), true, false, null)];
+        rule.AddCallOperation();
+        var arguments = new Dictionary<string, string> { ["speed"] = "5", ["gone"] = "x" };
+        rule.Actions[^2].Value = new InvokeOperationAction { Id = "call-2", OperationPath = "/Demo/Motor/RunTest", Arguments = arguments };
+        rule.Actions[^1].Value = new InvokeOperationAction { Id = "call-3", OperationPath = "/Demo/Motor/RunTest", Arguments = arguments };
+        rule.Actions[^1].IsOperationChanged = true;
+        var method = new MethodMetadata(_ => null) { Parameters = [new MethodParameter { Name = "speed", Type = typeof(int) }] };
 
         // Act
-        var saved = rule.ToRule(path => path == "/Demo/Motor/RunTest" ? fields : null);
+        var saved = rule.ToRule(path => path == "/Demo/Motor/RunTest" ? method : null);
 
         // Assert
-        var kept = saved.Actions.OfType<InvokeOperationAction>().Single(action => action.Id == "call-2");
-        Assert.Equal(["speed"], kept.Arguments.Keys.ToArray());
-        Assert.Equal("/Notify/Send", saved.Actions.OfType<InvokeOperationAction>().Single(action => action.Id == "call-1").OperationPath);
+        var calls = saved.Actions.OfType<InvokeOperationAction>().ToDictionary(action => action.Id);
+        Assert.Equal(["gone", "speed"], calls["call-2"].Arguments.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(["speed"], calls["call-3"].Arguments.Keys.ToArray());
     }
 }

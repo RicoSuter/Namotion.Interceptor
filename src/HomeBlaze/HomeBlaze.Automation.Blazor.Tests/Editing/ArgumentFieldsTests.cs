@@ -107,7 +107,7 @@ public class ArgumentFieldsTests
     }
 
     [Fact]
-    public void WhenArgumentsAreKeptForAnotherOperation_ThenOnlyTheKeysOfItsFieldsRemain()
+    public void WhenArgumentsAreKeptForAnotherOperation_ThenOnlyTheKeysTheBinderAcceptsRemain()
     {
         // Arrange
         var method = new MethodMetadata(_ => null)
@@ -115,24 +115,25 @@ public class ArgumentFieldsTests
             Parameters =
             [
                 new MethodParameter { Name = "position", Type = typeof(int) },
-                new MethodParameter { Name = "notification", Type = typeof(Notification) }
+                new MethodParameter { Name = "notification", Type = typeof(Notification) },
+                new MethodParameter { Name = "optional", Type = typeof(Notification), IsNullable = true }
             ]
         };
-        var fields = ArgumentFields.Create(method);
         var arguments = new Dictionary<string, string>
         {
             ["Position"] = "5",
             ["notification.Message"] = "Hi",
             ["notification.Gone"] = "x",
+            ["optional.message"] = "Yo",
+            ["optional"] = "{}",
             ["speed"] = "3"
         };
 
         // Act
-        var kept = ArgumentFields.KeepKnown(fields, arguments);
+        var kept = ArgumentFields.KeepKnown(method, arguments);
 
         // Assert
-        Assert.Equal(["Position", "notification.Message"], kept.Keys.Order(StringComparer.Ordinal).ToArray());
-        Assert.Empty(ArgumentFields.KeepKnown([], arguments));
+        Assert.Equal(["Position", "notification.Message", "optional", "optional.message"], kept.Keys.Order(StringComparer.Ordinal).ToArray());
     }
 
     [Fact]

@@ -40,7 +40,7 @@ public sealed class AutomationDraft
         automation.States = [.. States];
         automation.InitialState = States.Count == 0 ? null : InitialState;
         automation.RuleOrder = [.. Rules.Select(rule => rule.Key)];
-        automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetFields(automation, rule.Key, path)));
+        automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetMethod(automation, rule.Key, path)));
     }
 
     /// <summary>The errors of the configuration as the automation and the editor check it, and the errors of inputs that do not parse.</summary>
@@ -49,7 +49,7 @@ public sealed class AutomationDraft
         .. AutomationValidator.Validate(
             States,
             States.Count == 0 ? null : InitialState,
-            Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule()),
+            Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => _automation is null ? null : ActionInputs.GetMethod(_automation, rule.Key, path))),
             [.. Rules.Select(rule => rule.Key)]),
         .. CheckActionInputs(),
         .. _inputErrors.Values

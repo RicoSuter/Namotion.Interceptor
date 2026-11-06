@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 
 namespace HomeBlaze.Automation.Blazor.Editing;
@@ -18,6 +19,10 @@ internal static class ActionInputs
     /// <summary>The fields of the operation at the path, or null when the path leads to no operation.</summary>
     public static IReadOnlyList<ArgumentField>? GetFields(Automation automation, string ruleKey, string path) =>
         AutomationPreview.ResolveTarget(automation, ruleKey, path)?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
+
+    /// <summary>The operation at the path, or null when the path leads to none.</summary>
+    public static MethodMetadata? GetMethod(Automation automation, string ruleKey, string path) =>
+        AutomationPreview.ResolveTarget(automation, ruleKey, path)?.TryGetMethodMetadata();
 
     /// <summary>The type of the property at the path, or null when the path leads to none.</summary>
     public static Type? GetTargetType(Automation automation, string ruleKey, string path) =>
