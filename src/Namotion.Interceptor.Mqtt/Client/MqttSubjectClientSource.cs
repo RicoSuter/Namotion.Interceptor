@@ -644,10 +644,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         // Add first, then validate (guarantees no memory leak)
-        _propertyToTopic[propertyReference] = (topic, resolvedMapping, structureVersion, mapperVersion);
+        var entry = (topic, resolvedMapping, structureVersion, mapperVersion);
+        _propertyToTopic[propertyReference] = entry;
         if (!IsRetainable(propertyReference.Subject))
         {
-            _propertyToTopic.TryRemove(propertyReference, out _);
+            _propertyToTopic.TryRemove(KeyValuePair.Create(propertyReference, entry));
         }
 
         return (topic, resolvedMapping);
@@ -683,10 +684,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         // A missing path can become reachable after a structural change; only cache resolved properties.
         if (propertyReference is { } resolvedProperty)
         {
-            _topicToProperty[topic] = (resolvedProperty, structureVersion, mapperVersion);
+            var entry = (resolvedProperty, structureVersion, mapperVersion);
+            _topicToProperty[topic] = entry;
             if (!IsRetainable(resolvedProperty.Subject))
             {
-                _topicToProperty.TryRemove(topic, out _);
+                _topicToProperty.TryRemove(KeyValuePair.Create(topic, entry));
             }
         }
         else if (hasCached)
