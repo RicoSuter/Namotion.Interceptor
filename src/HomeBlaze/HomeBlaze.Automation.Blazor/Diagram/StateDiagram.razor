@@ -1,0 +1,89 @@
+@using System.Globalization
+
+<svg viewBox="@($"0 0 {Format(Layout.Width)} {Format(Layout.Height)}")" width="@Format(Layout.Width)"
+     style="max-width: 100%; height: auto; display: block;" role="img" aria-label="@GetDescription()" data-testid="automation-state-diagram">
+    <defs>
+        <marker id="@_markerId" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--mud-palette-text-secondary)" />
+        </marker>
+    </defs>
+    @foreach (var edge in Layout.Edges)
+    {
+        <g style="@(RuleClicked.HasDelegate ? "cursor: pointer;" : null)" @onclick="@(() => RuleClicked.InvokeAsync(edge.RuleKey))"
+           data-testid="automation-state-edge">
+            <path d="@edge.PathData" fill="none" stroke="var(--mud-palette-text-secondary)" stroke-width="2" marker-end="@($"url(#{_markerId})")" />
+            <StateDiagramText X="@Format(edge.LabelX)" Y="@Format(edge.LabelY)" FontSize="13" Fill="var(--mud-palette-text-primary)">@edge.Label</StateDiagramText>
+            @if (edge.Detail is { } detail)
+            {
+                <StateDiagramText X="@Format(edge.LabelX)" Y="@Format(edge.LabelY + 14)" FontSize="11" Fill="var(--mud-palette-text-secondary)">@detail</StateDiagramText>
+            }
+        </g>
+    }
+    @foreach (var node in Layout.Nodes)
+    {
+        var isSelected = node.State is not null && node.State == SelectedState;
+        <g style="@(node.State is not null && StateClicked.HasDelegate ? "cursor: pointer;" : null)" @onclick="@(() => ClickStateAsync(node))"
+           data-testid="@($"automation-state-node-{node.State ?? "any"}")">
+            <rect x="@Format(node.X)" y="@Format(node.Y)" width="@Format(StateDiagramLayout.NodeWidth)" height="@Format(StateDiagramLayout.NodeHeight)" rx="8"
+                  fill="@(node.IsCurrent ? "var(--mud-palette-primary-hover)" : "var(--mud-palette-surface)")"
+                  stroke="@(node.IsCurrent || isSelected ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)")"
+                  stroke-width="@GetStrokeWidth(node, isSelected)"
+                  stroke-dasharray="@(node.State is null ? "4 3" : null)" />
+            <StateDiagramText X="@Format(node.X + (StateDiagramLayout.NodeWidth / 2))" Y="@Format(node.Y + 28)" FontSize="15" FontWeight="500"
+                              Fill="var(--mud-palette-text-primary)">@(node.State ?? "Any state")</StateDiagramText>
+            @if (GetDetail(node) is { } detail)
+            {
+                <StateDiagramText X="@Format(node.X + (StateDiagramLayout.NodeWidth / 2))" Y="@Format(node.Y + 48)" FontSize="12"
+                                  Fill="var(--mud-palette-text-secondary)">@detail</StateDiagramText>
+            }
+        </g>
+    }
+</svg>
+
+@code {
+    // Each diagram has its own arrow marker, because a page and an open editor show a diagram at the same time.
+    private readonly string _markerId = $"automation-arrow-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired] public StateDiagramLayout Layout { get; set; } = null!;
+
+    /// <summary>The second line of the current state, such as "Current, since 14:02"; "Current" when not set.</summary>
+    [Parameter] public string? CurrentDetail { get; set; }
+
+    [Parameter] public string? SelectedState { get; set; }
+
+    [Parameter] public EventCallback<string> StateClicked { get; set; }
+
+    [Parameter] public EventCallback<string> RuleClicked { get; set; }
+
+    private Task ClickStateAsync(StateDiagramNode node) =>
+        node.State is { } state ? StateClicked.InvokeAsync(state) : Task.CompletedTask;
+
+    private string? GetDetail(StateDiagramNode node)
+    {
+        if (node.IsCurrent)
+        {
+            return CurrentDetail ?? "Current";
+        }
+
+        return node.IsInitial ? "Initial state" : null;
+    }
+
+    private string GetDescription()
+    {
+        var states = string.Join(", ", Layout.Nodes.Where(node => node.State is not null).Select(node => node.State));
+        var current = Layout.Nodes.FirstOrDefault(node => node.IsCurrent)?.State;
+        return current is null ? $"States {states}" : $"States {states}, current state {current}";
+    }
+
+    private static string GetStrokeWidth(StateDiagramNode node, bool isSelected)
+    {
+        if (isSelected)
+        {
+            return "3";
+        }
+
+        return node.IsCurrent ? "2" : "1";
+    }
+
+    private static string Format(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+}
