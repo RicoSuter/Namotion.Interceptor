@@ -4,7 +4,8 @@
 
 @if (Automation is not null && _draft is { } draft)
 {
-    <MudStack Spacing="2" data-testid="automation-editor" data-dirty="@(_isDirty ? "true" : "false")">
+    <div class="automation-editor">
+    <MudStack Spacing="2" Class="automation-stack" data-testid="automation-editor" data-dirty="@(_isDirty ? "true" : "false")">
         @if (_pendingRows.Any)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-pending">
@@ -17,7 +18,7 @@
         }
         @if (_errors.Count > 0)
         {
-            <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-errors">
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="automation-errors" data-testid="automation-errors">
                 <MudText Typo="Typo.body2">Fix these before saving:</MudText>
                 <ul class="pl-4">
                     @foreach (var error in _errors)
@@ -28,7 +29,7 @@
             </MudAlert>
         }
         <CascadingValue Value="_pendingRows">
-            <MudTabs Elevation="0" Border="true" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnTabChanged" TabPanelsClass="pt-3">
+            <MudTabs Elevation="0" Border="true" Class="automation-tabs" ActivePanelIndex="_tabIndex" ActivePanelIndexChanged="OnTabChanged" TabPanelsClass="automation-tab-panels pt-3">
                 <MudTabPanel Text="General">
                     <GeneralTab Draft="draft" Changed="OnChanged" />
                 </MudTabPanel>
@@ -41,6 +42,7 @@
             </MudTabs>
         </CascadingValue>
     </MudStack>
+    </div>
 }
 
 @code {

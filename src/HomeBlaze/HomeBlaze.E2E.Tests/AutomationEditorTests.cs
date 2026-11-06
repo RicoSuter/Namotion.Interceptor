@@ -396,6 +396,7 @@ public class AutomationEditorTests
             await Assertions.Expect(action.GetByLabel("Speed")).ToHaveValueAsync("50", new() { Timeout = Timeout });
 
             // Act
+            await path.ClickAsync();
             await path.PressAsync("End");
             await path.PressAsync("Backspace");
             await Assertions.Expect(action.GetByLabel("Speed")).ToHaveCountAsync(0, new() { Timeout = Timeout });

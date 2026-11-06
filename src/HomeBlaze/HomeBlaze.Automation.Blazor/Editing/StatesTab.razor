@@ -1,7 +1,7 @@
 @implements IDisposable
 
-<div class="d-flex flex-wrap gap-4" data-testid="automation-states-tab">
-    <div style="flex: 1 1 480px; min-width: 0;">
+<div class="automation-tab automation-columns" data-testid="automation-states-tab">
+    <div class="automation-column automation-state-diagram">
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
             Edges are rules that are active in a state and change to another one. Click a state to edit it, an edge to open its rule.
         </MudText>
@@ -33,7 +33,7 @@
     @if (_selectedState is { } state && Draft.States.Contains(state))
     {
         var usage = Draft.GetStateUsage(state);
-        <MudPaper Outlined="true" Class="pa-3" Style="flex: 0 1 300px;" data-testid="automation-selected-state">
+        <MudPaper Outlined="true" Class="automation-column automation-state-panel pa-3" data-testid="automation-selected-state">
             <MudText Typo="Typo.overline">Selected state</MudText>
             <MudTextField T="string" Label="State name" Value="@_name" ValueChanged="RenameAsync"
                           Error="@(_renameError is not null)" ErrorText="@_renameError" />

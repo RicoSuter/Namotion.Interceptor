@@ -1,5 +1,5 @@
-<div class="d-flex flex-wrap gap-4" style="min-height: 50vh;">
-    <div style="flex: 0 0 240px;" data-testid="automation-rule-list">
+<div class="automation-tab automation-columns" data-testid="automation-rules-tab">
+    <div class="automation-column automation-rule-list" data-testid="automation-rule-list">
         <MudText Typo="Typo.caption" Class="mud-text-secondary">Rules run in this order</MudText>
         <MudStack Spacing="1" Class="mt-1">
             @for (var index = 0; index < Draft.Rules.Count; index++)
@@ -28,7 +28,7 @@
         </MudStack>
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRuleAsync" Class="mt-2" data-testid="automation-add-rule">Add rule</MudButton>
     </div>
-    <div style="flex: 1 1 480px; min-width: 0;">
+    <div class="automation-column automation-rule-details">
         @if (Draft.FindRule(SelectedRuleKey) is { } selected)
         {
             <RuleEditor @key="selected" Automation="Automation" Draft="Draft" Rule="selected" Errors="@GetErrors(selected)" Changed="Changed" Removed="RemoveAsync" />

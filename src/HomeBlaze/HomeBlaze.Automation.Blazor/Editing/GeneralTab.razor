@@ -1,4 +1,4 @@
-<MudStack Spacing="3">
+<MudStack Spacing="3" Class="automation-tab">
     <MudTextField T="string" Label="Name" Value="@Draft.Name" ValueChanged="SetNameAsync" Immediate="true"
                   HelperText="The title of the automation." data-testid="automation-name" />
     <MudSwitch T="bool" Value="@Draft.Enabled" ValueChanged="SetEnabledAsync" Color="Color.Primary" data-testid="automation-enabled"
