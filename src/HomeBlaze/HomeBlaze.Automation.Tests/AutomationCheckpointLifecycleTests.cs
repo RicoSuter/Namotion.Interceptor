@@ -1,5 +1,8 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Automation.Persistence;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -112,5 +115,67 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal(0L, host.Rule("started").RunCount);
         Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
         Assert.True(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Laundry.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheAutomationHadAnErrorBeforeItMoved_ThenItRunsWithoutTheError()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("jam", On("Jam", When("/Weather/Rain > 0"), Invoke("/Blinds/Jam")))));
+        host.Weather.Rain = 1;
+        await host.FlushAsync();
+        host.Weather.Rain = 0;
+        var automation = host.Automation;
+        var statusBeforeMove = automation.Status;
+        var basement = new TestRoot();
+        host.Graph.Add("Basement", basement);
+
+        // Act
+        basement.Children = new Dictionary<string, IInterceptorSubject> { ["Storm"] = automation };
+        host.Graph.Remove("Storm");
+        await automation.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusBeforeMove);
+        Assert.Equal(ServiceStatus.Running, automation.Status);
+        Assert.Null(automation.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheAutomationStartedBeforeItHadAPath_ThenItLoadsTheCheckpointOfItsFirstPath()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => { });
+        var checkpointPath = Path.Combine(host.DataDirectory, "Automations", "Basement", "Washer.json");
+        new AutomationCheckpointStore(checkpointPath).Write(new AutomationCheckpoint
+        {
+            CurrentState = "Running",
+            StateEnteredAt = AutomationTestHost.Start.AddHours(-1),
+            Rules = new Dictionary<string, RuleCheckpoint> { ["started"] = new() { RunCount = 3, LastTriggeredAt = AutomationTestHost.Start.AddHours(-1) } }
+        });
+        var washer = new Automation(host.Services, NullLogger<Automation>.Instance) { Name = "Washer" };
+        Washer()(washer);
+
+        // In the context of the graph as a root of its own, which has no path.
+        ((IInterceptorSubject)washer).Context.AddFallbackContext(host.Graph.Context);
+        await ((IHostedService)washer).StartAsync(CancellationToken.None);
+        await washer.FlushAsync();
+        var pathAtStart = host.Services.PathResolver.GetPath(washer, PathStyle.Canonical);
+        var stateWithoutPath = washer.CurrentState;
+        var basement = new TestRoot();
+        basement.Children = new Dictionary<string, IInterceptorSubject> { ["Washer"] = washer };
+
+        // Act
+        host.Graph.Add("Basement", basement);
+        await washer.FlushAsync();
+        await ((IHostedService)washer).StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(pathAtStart);
+        Assert.Equal("Idle", stateWithoutPath);
+        Assert.Equal("Running", washer.CurrentState);
+        Assert.Equal(3L, washer.Rules["started"].RunCount);
+        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(checkpointPath));
     }
 }

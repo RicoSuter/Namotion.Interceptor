@@ -164,6 +164,14 @@ internal sealed class AutomationRuntime
         var previous = Location;
         Location = CheckpointLocation.Of(_automation, _logger);
         _keeper.UseStore(Location.Store);
+
+        // Without a path at the start there was no checkpoint to keep, so the first path is where the automation starts.
+        if (previous.AutomationPath is null)
+        {
+            _engine.StartFromCheckpoint();
+            return;
+        }
+
         _engine.StartFresh();
         previous.DeleteIfOrphaned(_automation, _logger);
     }

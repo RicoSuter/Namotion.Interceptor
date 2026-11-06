@@ -65,22 +65,35 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     /// <summary>
     /// Starts again as a new automation, after the keeper was given the store of the path the automation moved to: the
-    /// initial state, no trigger times, no runs, and no trigger state carried over.
+    /// initial state, no trigger times, no runs, no trigger state carried over, and no error about the runs it no longer
+    /// has. An invalid configuration or a checkpoint that cannot be written is shown again.
     /// </summary>
     public void StartFresh()
     {
-        Stop();
-        _snapshot = CompiledAutomation.Empty;
-        _appliedConfigurationVersion = -1;
+        Unload();
 
         // Written at once, so that an older file at the new path is not read at the next start.
         if (_keeper.TryPersist(_keeper.Persisted) is { } error)
         {
             _status.Fail($"The checkpoint at the new path could not be written: {error}");
         }
+        else
+        {
+            _status.SetRunning();
+        }
 
         _logger.LogInformation("The automation {Automation} moved and starts from its initial state at {Path}.", Name, _keeper.Store.FilePath);
         Begin(null);
+    }
+
+    /// <summary>
+    /// Starts again from the checkpoint in the store the keeper was given, as at a start, for an automation that started
+    /// before it had a path and so had no checkpoint until now.
+    /// </summary>
+    public void StartFromCheckpoint()
+    {
+        Unload();
+        Start();
     }
 
     public void ApplyConfigurationIfChanged()
@@ -188,6 +201,13 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
+
+    private void Unload()
+    {
+        Stop();
+        _snapshot = CompiledAutomation.Empty;
+        _appliedConfigurationVersion = -1;
+    }
 
     private void Begin(AutomationCheckpoint? checkpoint)
     {
