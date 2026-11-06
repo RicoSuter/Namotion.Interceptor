@@ -69,13 +69,13 @@ internal static class ExpressionRows
     private static bool IsCondition(ExpressionRow row) =>
         Operators.Contains(row.Operator) && IsPath(row.Path) && IsOperand(row.Value);
 
-    private static bool IsOperand(string token) =>
+    internal static bool IsOperand(string token) =>
         IsQuoted(token) || (IsPlainToken(token) && !IsStructuralKeyword(token));
 
     private static bool IsStructuralKeyword(string token) =>
         Combinators.Contains(token, StringComparer.OrdinalIgnoreCase) || token.Equals("not", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsPath(string token) =>
+    internal static bool IsPath(string token) =>
         IsPlainToken(token) && !IsKeyword(token) && !StartsLikeNumber(token);
 
     // A token without a delimiter outside brackets is one word for the parser, with no operator or symbol glued to it.
