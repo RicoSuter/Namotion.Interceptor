@@ -1,3 +1,5 @@
+@implements IDisposable
+
 <div class="d-flex flex-wrap gap-4" data-testid="automation-states-tab">
     <div style="flex: 1 1 480px; min-width: 0;">
         <MudText Typo="Typo.caption" Class="mud-text-secondary">
@@ -13,7 +15,7 @@
         else
         {
             var layout = CreateLayout();
-            <StateDiagram Layout="layout" SelectedState="@_selectedState" StateClicked="SelectState" RuleClicked="OpenRuleAsync" />
+            <StateDiagram Layout="layout" SelectedState="@_selectedState" StateClicked="SelectClickedAsync" RuleClicked="OpenRuleAsync" />
             @if (layout.OtherRules.Count > 0)
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
@@ -35,6 +37,12 @@
             <MudText Typo="Typo.overline">Selected state</MudText>
             <MudTextField T="string" Label="State name" Value="@_name" ValueChanged="RenameAsync"
                           Error="@(_renameError is not null)" ErrorText="@_renameError" />
+            @if (Automation.CurrentState == state)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="my-2" data-testid="automation-current-state-warning">
+                    This is the current state. After a rename the automation stops with an error until it is reset.
+                </MudAlert>
+            }
             <MudCheckBox T="bool" Value="@(Draft.InitialState == state)" ValueChanged="@(_ => SetInitialAsync(state))"
                          Disabled="@(Draft.InitialState == state)" Label="Initial state" />
             @RenderRules("Entered by", usage.EnteredBy)
@@ -56,6 +64,7 @@
     private string? _selectedState;
     private string? _name;
     private string? _renameError;
+    private readonly string _inputId = Guid.NewGuid().ToString("N");
 
     [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
 
@@ -75,8 +84,17 @@
     {
         _selectedState = state;
         _name = state;
-        _renameError = null;
+        SetRenameError(null);
     }
+
+    // The error is also an input error of the draft, so that a rename that was not applied cannot be lost by saving.
+    private void SetRenameError(string? error)
+    {
+        _renameError = error;
+        Draft.SetInputError(_inputId, error is null ? null : new AutomationValidationError(null, $"State name: {error}"));
+    }
+
+    public void Dispose() => Draft.SetInputError(_inputId, null);
 
     private Task OpenRuleAsync(string ruleKey) => RuleOpened.InvokeAsync(ruleKey);
 
@@ -93,18 +111,33 @@
         _name = newName;
         if (_selectedState is not { } state || newName == state)
         {
-            _renameError = null;
+            await ClearRenameErrorAsync();
             return;
         }
 
         if (!Draft.RenameState(state, newName ?? string.Empty))
         {
-            _renameError = "Use a name that no other state has";
+            SetRenameError(string.IsNullOrWhiteSpace(newName) ? "Enter a name" : $"'{newName.Trim()}' is already a state");
+            await Changed.InvokeAsync();
             return;
         }
 
         SelectState(newName!.Trim());
         await Changed.InvokeAsync();
+    }
+
+    private Task SelectClickedAsync(string state)
+    {
+        var hadError = _renameError is not null;
+        SelectState(state);
+        return hadError ? Changed.InvokeAsync() : Task.CompletedTask;
+    }
+
+    private Task ClearRenameErrorAsync()
+    {
+        var hadError = _renameError is not null;
+        SetRenameError(null);
+        return hadError ? Changed.InvokeAsync() : Task.CompletedTask;
     }
 
     private Task SetInitialAsync(string state)

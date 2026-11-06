@@ -11,6 +11,10 @@
                 A condition is not finished. Complete or remove it before saving.
             </MudAlert>
         }
+        @if (GetCurrentStateNotice(draft) is { } notice)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" data-testid="automation-notices">@notice</MudAlert>
+        }
         @if (_errors.Count > 0)
         {
             <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-errors">
@@ -161,6 +165,12 @@
             IsValidChanged?.Invoke(isValid);
         }
     }
+
+    // Not an error, because the automation is still saved; it then stops until its state is reset.
+    private string? GetCurrentStateNotice(AutomationDraft draft) =>
+        Automation?.CurrentState is { } current && !draft.States.Contains(current)
+            ? $"The current state '{current}' is renamed or removed. After saving, the automation stops with an error until its state is reset."
+            : null;
 
     private static string Describe(AutomationDraft draft, AutomationValidationError error) =>
         draft.FindRule(error.RuleKey) is { } rule ? $"Rule '{rule.DisplayName}': {error.Message}" : error.Message;

@@ -845,14 +845,15 @@ public class AutomationEditorTests
             await stateName.PressAsync("Tab");
             await Assertions.Expect(dialog.GetByTestId("automation-state-node-Washing")).ToBeVisibleAsync(new() { Timeout = Timeout });
             await dialog.GetByTestId("automation-add-state").ClickAsync();
-            await Assertions.Expect(dialog.GetByTestId("automation-state-node-State 3")).ToBeVisibleAsync();
+            var addedName = await dialog.GetByLabel("State name").InputValueAsync();
+            await Assertions.Expect(dialog.GetByTestId($"automation-state-node-{addedName}")).ToBeVisibleAsync();
             await SaveAsync(page, dialog);
 
             // Assert
             var json = await _fixture.ReadFileAsync(filePath);
             Assert.Contains("\"inState\": \"Washing\"", json);
             Assert.Contains("\"targetState\": \"Washing\"", json);
-            Assert.Contains("\"State 3\"", json);
+            Assert.Contains($"\"{addedName}\"", json);
             Assert.DoesNotContain("\"Running\"", json);
             var (_, reopened) = await OpenEditorAsync(name, page);
             await reopened.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
@@ -866,7 +867,7 @@ public class AutomationEditorTests
     }
 
     [Fact]
-    public async Task WhenAStateIsRenamedToAnotherStateOrToNothing_ThenAnErrorShowsAndTheNameIsNotApplied()
+    public async Task WhenAStateIsRenamedToAnotherStateOrToNothing_ThenAnErrorBlocksSavingUntilItIsCorrectedAndTheNameIsNotApplied()
     {
         // Arrange
         var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
@@ -876,20 +877,89 @@ public class AutomationEditorTests
             await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
             await dialog.GetByTestId("automation-state-node-Running").ClickAsync();
             var stateName = dialog.GetByLabel("State name");
+            var selected = dialog.GetByTestId("automation-selected-state");
+            var save = dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
 
             // Act
             await stateName.FillAsync("Idle");
             await stateName.PressAsync("Tab");
 
             // Assert
-            var selected = dialog.GetByTestId("automation-selected-state");
-            await Assertions.Expect(selected).ToContainTextAsync("Use a name that no other state has", new() { Timeout = Timeout });
+            await Assertions.Expect(selected).ToContainTextAsync("'Idle' is already a state", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync("'Idle' is already a state", new() { Timeout = Timeout });
+            await Assertions.Expect(save).ToBeDisabledAsync();
             await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
             await stateName.FillAsync("  ");
             await stateName.PressAsync("Tab");
-            await Assertions.Expect(selected).ToContainTextAsync("Use a name that no other state has", new() { Timeout = Timeout });
-            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
+            await Assertions.Expect(selected).ToContainTextAsync("Enter a name", new() { Timeout = Timeout });
+            await Assertions.Expect(save).ToBeDisabledAsync();
             await Assertions.Expect(dialog.GetByTestId("automation-state-node-Idle")).ToHaveCountAsync(1);
+            await stateName.FillAsync("Washing");
+            await stateName.PressAsync("Tab");
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Washing")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await Assertions.Expect(save).ToBeEnabledAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnInvalidRenameIsLeftByChangingTheTab_ThenTheErrorIsGoneAndTheStateKeepsItsName()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await dialog.GetByTestId("automation-state-node-Running").ClickAsync();
+            await dialog.GetByLabel("State name").FillAsync("Idle");
+            await dialog.GetByLabel("State name").PressAsync("Tab");
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToBeVisibleAsync(new() { Timeout = Timeout });
+
+            // Act
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeEnabledAsync();
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheCurrentStateIsRenamedAndSaved_ThenAWarningShowsAndTheAutomationStopsWithAnErrorUntilTheStateIsReset()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running", new() { Timeout = Timeout });
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await dialog.GetByTestId("automation-state-node-Idle").ClickAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-current-state-warning")).ToContainTextAsync("This is the current state", new() { Timeout = Timeout });
+
+            // Act
+            var stateName = dialog.GetByLabel("State name");
+            await stateName.FillAsync("Waiting");
+            await stateName.PressAsync("Tab");
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-notices")).ToContainTextAsync("current state 'Idle'", new() { Timeout = Timeout });
+            await SaveAsync(page, dialog);
+            await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Error", new() { Timeout = Timeout });
+            await page.GetByTestId("automation-reset").ClickAsync();
+            await page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Reset", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.GetByTestId("automation-status")).ToHaveTextAsync("Running", new() { Timeout = Timeout });
         }
         finally
         {
