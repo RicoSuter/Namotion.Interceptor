@@ -24,11 +24,6 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// </summary>
 public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
-    private sealed class RunClientCounter
-    {
-        internal int Count;
-    }
-
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
     // which would cause a race condition if we returned the lists to a pool.
@@ -62,7 +57,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     private int _disposed;
     private MqttServer? _mqttServer;
-    private volatile RunClientCounter? _currentClientCounter;
+    private volatile MqttConnectedClientTracker? _currentConnectedClients;
 
     /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
     public override MqttServerDiagnostics Diagnostics { get; }
@@ -70,16 +65,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     /// <summary>
     /// Gets the number of clients currently connected to the broker.
     /// </summary>
-    internal int ConnectedClientCount
-    {
-        get
-        {
-            var clientCounter = _currentClientCounter;
-            return clientCounter is null
-                ? 0
-                : Math.Max(0, Volatile.Read(ref clientCounter.Count));
-        }
-    }
+    internal int ConnectedClientCount => _currentConnectedClients?.Count ?? 0;
 
     public MqttSubjectServer(
         IInterceptorSubject subject,
@@ -159,20 +145,20 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         var shutdownCts = new CancellationTokenSource();
         var shutdownToken = shutdownCts.Token;
         var initialStateTasks = new List<Task>();
-        var clientCounter = new RunClientCounter();
+        var connectedClients = new MqttConnectedClientTracker();
         var publishLease = new ConnectorCommitLease();
 
         Task ClientConnectedForRunAsync(ClientConnectedEventArgs args) =>
-            ClientConnectedAsync(args, server, shutdownToken, initialStateTasks, clientCounter);
+            ClientConnectedAsync(args, server, shutdownToken, initialStateTasks, connectedClients);
 
         Task ClientDisconnectedForRunAsync(ClientDisconnectedEventArgs args) =>
-            ClientDisconnectedAsync(args, clientCounter);
+            ClientDisconnectedAsync(args, connectedClients);
 
         Task InterceptingPublishForRunAsync(InterceptingPublishEventArgs args) =>
             InterceptingPublishAsync(args, server, shutdownToken, publishLease);
 
         _mqttServer = server;
-        _currentClientCounter = clientCounter;
+        _currentConnectedClients = connectedClients;
         lock (_initialStateTasksLock)
         {
             _runningInitialStateTasks = initialStateTasks;
@@ -219,14 +205,26 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                             if (!stoppingToken.IsCancellationRequested)
                             {
                                 await server.StopAsync().ConfigureAwait(false);
+                                Metrics.MarkNotOperational();
 
                                 // MQTTnet removes a stopped connection's session only after StopAsync returns, and
                                 // restarting the same server before that keeps the session referenced forever.
-                                // The delay takes no token so cancellation cannot skip the rest of this finally.
+                                // The delay takes no token so cancellation cannot skip the rest of this finally;
+                                // the loop condition ends the wait on a stop instead.
                                 var drainDeadline = Environment.TickCount64 + 5000;
-                                while (Volatile.Read(ref clientCounter.Count) > 0 && Environment.TickCount64 < drainDeadline)
+                                while (connectedClients.Count > 0 &&
+                                       !stoppingToken.IsCancellationRequested &&
+                                       Environment.TickCount64 < drainDeadline)
                                 {
                                     await Task.Delay(10).ConfigureAwait(false);
+                                }
+
+                                var remainingClientCount = connectedClients.Count;
+                                if (remainingClientCount > 0 && !stoppingToken.IsCancellationRequested)
+                                {
+                                    _logger.LogWarning(
+                                        "MQTT server restarts with {Count} client session(s) still open after waiting 5 seconds for them to close; they may stay referenced by the broker.",
+                                        remainingClientCount);
                                 }
                             }
 
@@ -288,7 +286,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 InterceptingPublishForRunAsync,
                 shutdownCts,
                 initialStateTasks,
-                clientCounter,
+                connectedClients,
                 publishLease).ConfigureAwait(false);
         }
     }
@@ -301,7 +299,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         Func<InterceptingPublishEventArgs, Task> interceptingPublishHandler,
         CancellationTokenSource shutdownCts,
         List<Task> initialStateTasks,
-        RunClientCounter clientCounter,
+        MqttConnectedClientTracker connectedClients,
         ConnectorCommitLease publishLease)
     {
         try
@@ -379,9 +377,9 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             }
         }
 
-        if (ReferenceEquals(_currentClientCounter, clientCounter))
+        if (ReferenceEquals(_currentConnectedClients, connectedClients))
         {
-            _currentClientCounter = null;
+            _currentConnectedClients = null;
         }
 
         _propertyToTopic.Clear();
@@ -590,10 +588,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         MqttServer server,
         CancellationToken shutdownToken,
         List<Task> initialStateTasks,
-        RunClientCounter clientCounter)
+        MqttConnectedClientTracker connectedClients)
     {
-        var count = Interlocked.Increment(ref clientCounter.Count);
-        _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, count);
+        connectedClients.Add(arg.ClientId);
+        _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, connectedClients.Count);
 
         // Publish all current property values to new client
         lock (_initialStateTasksLock)
@@ -817,10 +815,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         }
     }
 
-    private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg, RunClientCounter clientCounter)
+    private Task ClientDisconnectedAsync(ClientDisconnectedEventArgs arg, MqttConnectedClientTracker connectedClients)
     {
-        var count = Interlocked.Decrement(ref clientCounter.Count);
-        _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}.", arg.ClientId, count);
+        connectedClients.Remove(arg.ClientId);
+        _logger.LogInformation("Client {ClientId} disconnected. Total clients: {Count}.", arg.ClientId, connectedClients.Count);
         return Task.CompletedTask;
     }
 
