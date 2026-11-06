@@ -187,11 +187,12 @@ public class PathPatternTests
 
         // Act
         var result = policy.CanRead(brightness);
+        var canReadKitchenCounter = policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Models.Light.Brightness)));
 
         // Assert
         Assert.Equal("Rooms[Kitchen].Lights[Ceiling].Brightness", path);
         Assert.True(result);
-        Assert.False(policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Models.Light.Brightness))));
+        Assert.False(canReadKitchenCounter);
     }
 
     [Theory]

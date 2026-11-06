@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Interceptor.Authorization.Internal;
 using Namotion.Interceptor.Authorization.Tests.Models;
 using Namotion.Interceptor.Registry.Paths;
@@ -41,4 +42,33 @@ public class EvaluationStateTests
         // Assert
         Assert.NotSame(state, EvaluationState.Rent());
     }
+
+    [Fact]
+    public void WhenAStateBuiltPathsAndIsReturned_ThenItIsCachedAndForgetsThatPathsWereBuilt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context);
+        var leaf = new Person();
+        root.Father = leaf;
+        var state = EvaluationState.Rent();
+        var paths = state.BuildPaths(Registered(leaf), DefaultPathProvider.Instance, maxPaths: 64);
+        var hasBuiltPathsBeforeReturn = HasBuiltPathsSinceRent(state);
+
+        // Act
+        EvaluationState.Return(state);
+        var rented = EvaluationState.Rent();
+
+        // Assert
+        Assert.Equal(1, paths.Count);
+        Assert.True(hasBuiltPathsBeforeReturn);
+        Assert.Same(state, rented);
+        Assert.False(HasBuiltPathsSinceRent(rented));
+        Assert.Equal(0, rented.Paths.Count);
+    }
+
+    private static bool HasBuiltPathsSinceRent(EvaluationState state)
+        => (bool)typeof(EvaluationState)
+            .GetField("_hasBuiltPathsSinceRent", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(state)!;
 }

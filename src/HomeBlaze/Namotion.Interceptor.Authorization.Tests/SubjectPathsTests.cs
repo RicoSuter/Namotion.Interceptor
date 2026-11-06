@@ -261,8 +261,11 @@ public class SubjectPathsTests
         var grandfather = new Person(context);
         var root = new Person(context) { Father = new Person(context) { Mother = grandfather } };
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, grandfather, DefaultPathProvider.Instance, [[new PathLink("Father", null), new PathLink("Mother", null)]]);
+        // Act
+        var isComplete = TryGetPaths(Registered(grandfather), DefaultPathProvider.Instance, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, grandfather, DefaultPathProvider.Instance, isComplete, paths, [[new PathLink("Father", null), new PathLink("Mother", null)]]);
     }
 
     [Fact]
@@ -273,8 +276,11 @@ public class SubjectPathsTests
         var child = new TestItem(context);
         var root = new TestItem(context) { Children = new Dictionary<string, TestItem> { ["Entry"] = child } };
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, [[new PathLink("Children", "Entry")]], unofferedSpellings: ["Entry"]);
+        // Act
+        var isComplete = TryGetPaths(Registered(child), DefaultPathProvider.Instance, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, isComplete, paths, [[new PathLink("Children", "Entry")]], unofferedSpellings: ["Entry"]);
     }
 
     [Fact]
@@ -285,8 +291,11 @@ public class SubjectPathsTests
         var child = new Person(context);
         var root = new Person(context) { Children = [new Person(context), child] };
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, [[new PathLink("Children", "1")]], unofferedSpellings: ["1"]);
+        // Act
+        var isComplete = TryGetPaths(Registered(child), DefaultPathProvider.Instance, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, isComplete, paths, [[new PathLink("Children", "1")]], unofferedSpellings: ["1"]);
     }
 
     [Fact]
@@ -303,9 +312,11 @@ public class SubjectPathsTests
             }
         };
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, light, DefaultPathProvider.Instance,
-            [[new PathLink("Children", "Kitchen", "Kitchen", "Children", "Kitchen"), new PathLink("Children", "Light", "Light", "Children", "Light")]]);
+        // Act
+        var isComplete = TryGetPaths(Registered(light), DefaultPathProvider.Instance, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, light, DefaultPathProvider.Instance, isComplete, paths, [[new PathLink("Children", "Kitchen", "Kitchen", "Children", "Kitchen"), new PathLink("Children", "Light", "Light", "Children", "Light")]]);
     }
 
     [Fact]
@@ -316,8 +327,11 @@ public class SubjectPathsTests
         var child = new TestInlineContainer(context);
         var root = new TestInlineContainer(context) { Children = new Dictionary<string, TestInlineContainer> { ["Name"] = child } };
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, [[new PathLink("Children", "Name", null, "Children", "Name")]], unofferedSpellings: ["Name"]);
+        // Act
+        var isComplete = TryGetPaths(Registered(child), DefaultPathProvider.Instance, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, isComplete, paths, [[new PathLink("Children", "Name", null, "Children", "Name")]], unofferedSpellings: ["Name"]);
     }
 
     [Theory]
@@ -336,8 +350,11 @@ public class SubjectPathsTests
         var root = new TestInlineContainer(context) { Children = new Dictionary<string, TestInlineContainer> { [key] = child } };
         string[] unofferedSpellings = isReadBare || key.Length == 0 ? [] : [key];
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, [[new PathLink("Children", key, isReadBare ? key : null, "Children", isReadBare ? key : null)]], unofferedSpellings);
+        // Act
+        var isComplete = TryGetPaths(Registered(child), DefaultPathProvider.Instance, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, child, DefaultPathProvider.Instance, isComplete, paths, [[new PathLink("Children", key, isReadBare ? key : null, "Children", isReadBare ? key : null)]], unofferedSpellings);
     }
 
     [Fact]
@@ -350,10 +367,13 @@ public class SubjectPathsTests
         {
             Children = new Dictionary<string, TestShadowedInlineContainer> { ["CNC01"] = child }
         };
+        var pathProvider = new AttributeBasedPathProvider("test");
 
-        // Act & Assert
-        AssertLinksMatchRegistry(root, child, new AttributeBasedPathProvider("test"), [[new PathLink(null, "CNC01", "CNC01", "Children", "CNC01")]],
-            unofferedSpellings: ["Children[CNC01]"]);
+        // Act
+        var isComplete = TryGetPaths(Registered(child), pathProvider, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(root, child, pathProvider, isComplete, paths, [[new PathLink(null, "CNC01", "CNC01", "Children", "CNC01")]], unofferedSpellings: ["Children[CNC01]"]);
     }
 
     [Fact]
@@ -365,9 +385,11 @@ public class SubjectPathsTests
         home.Areas = new Dictionary<string, Room> { ["Garage"] = garage };
         Member(home, nameof(Home.Wifi)).AddAttribute("Garage", typeof(string), _ => "x", null);
 
-        // Act & Assert
-        AssertLinksMatchRegistry(home, garage, Policies.SlashPaths, [[new PathLink("Areas", "Garage", null, "Areas", "Garage")]],
-            unofferedSpellings: ["Garage"]);
+        // Act
+        var isComplete = TryGetPaths(Registered(garage), Policies.SlashPaths, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(home, garage, Policies.SlashPaths, isComplete, paths, [[new PathLink("Areas", "Garage", null, "Areas", "Garage")]], unofferedSpellings: ["Garage"]);
     }
 
     [Fact]
@@ -379,9 +401,11 @@ public class SubjectPathsTests
         home.Areas = new Dictionary<string, Room> { ["Garage"] = garage };
         Member(home, nameof(Home.Wifi)).AddAttribute("Areas", typeof(string), _ => "x", null);
 
-        // Act & Assert
-        AssertLinksMatchRegistry(home, garage, Policies.SlashPaths, [[new PathLink(null, "Garage", "Garage", "Areas", "Garage")]],
-            unofferedSpellings: ["Areas[Garage]"]);
+        // Act
+        var isComplete = TryGetPaths(Registered(garage), Policies.SlashPaths, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(home, garage, Policies.SlashPaths, isComplete, paths, [[new PathLink(null, "Garage", "Garage", "Areas", "Garage")]], unofferedSpellings: ["Areas[Garage]"]);
     }
 
     [Fact]
@@ -393,9 +417,11 @@ public class SubjectPathsTests
         var bedroom = new Room { Lights = new Dictionary<string, Light> { ["Lamp"] = lamp } };
         home.Areas = new Dictionary<string, Room> { ["Kitchen"] = new Room { Neighbor = bedroom } };
 
-        // Act & Assert
-        AssertLinksMatchRegistry(home, lamp, Policies.SlashPaths,
-            [[new PathLink("Areas", "Kitchen", "Kitchen", "Areas", "Kitchen"), new PathLink("Neighbor", null), new PathLink("Lights", "Lamp")]]);
+        // Act
+        var isComplete = TryGetPaths(Registered(lamp), Policies.SlashPaths, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(home, lamp, Policies.SlashPaths, isComplete, paths, [[new PathLink("Areas", "Kitchen", "Kitchen", "Areas", "Kitchen"), new PathLink("Neighbor", null), new PathLink("Lights", "Lamp")]]);
     }
 
     [Fact]
@@ -407,9 +433,11 @@ public class SubjectPathsTests
         var probe = new Light();
         sensor.Temperature_Probe = probe;
 
-        // Act & Assert
-        AssertLinksMatchRegistry(home, probe, Policies.SlashPaths,
-            [[new PathLink("Rooms", "Kitchen"), new PathLink("Sensor", null), new PathLink("Probe", null)]]);
+        // Act
+        var isComplete = TryGetPaths(Registered(probe), Policies.SlashPaths, MaxPaths, out var paths);
+
+        // Assert
+        AssertLinksMatchRegistry(home, probe, Policies.SlashPaths, isComplete, paths, [[new PathLink("Rooms", "Kitchen"), new PathLink("Sensor", null), new PathLink("Probe", null)]]);
     }
 
     [Fact]
@@ -468,13 +496,13 @@ public class SubjectPathsTests
     }
 
     private static void AssertLinksMatchRegistry(
-        IInterceptorSubject root, IInterceptorSubject subject, PathProviderBase pathProvider, PathLink[][] expectedPaths,
-        string[]? unofferedSpellings = null)
+        IInterceptorSubject root, IInterceptorSubject subject, PathProviderBase pathProvider, bool isComplete, List<PathLink[]> paths,
+        PathLink[][] expectedPaths, string[]? unofferedSpellings = null)
     {
         var registeredRoot = Registered(root);
         var registeredSubject = Registered(subject);
 
-        Assert.True(TryGetPaths(registeredSubject, pathProvider, MaxPaths, out var paths));
+        Assert.True(isComplete);
         Assert.Equal(expectedPaths, paths);
 
         // A deny matches every spelling an allow matches.

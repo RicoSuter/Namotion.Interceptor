@@ -35,9 +35,13 @@ public class SubjectReadTests
         var home = Create();
         var policy = Compile(Role("Reader", allow: [Rule(Read, tags: ["state"]), Rule(Read, tags: ["subjects"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Registered(home.Rooms["Kitchen"].Lights["Ceiling"])));
-        Assert.True(policy.CanRead(Registered(home)));
+        // Act
+        var canReadKitchenCeilingSubject = policy.CanRead(Registered(home.Rooms["Kitchen"].Lights["Ceiling"]));
+        var canReadSubject = policy.CanRead(Registered(home));
+
+        // Assert
+        Assert.True(canReadKitchenCeilingSubject);
+        Assert.True(canReadSubject);
     }
 
     [Fact]
@@ -71,10 +75,15 @@ public class SubjectReadTests
             deny: [Rule(Read, members: ["Rooms"])]);
         var policy = Compile(role);
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Registered(ceiling)));
-        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), policy.Explain(Registered(ceiling)));
-        Assert.False(policy.CanRead(Registered(home.Rooms["Kitchen"].Lights["Counter"])));
+        // Act
+        var canReadCeiling = policy.CanRead(Registered(ceiling));
+        var decision = policy.Explain(Registered(ceiling));
+        var canReadCounter = policy.CanRead(Registered(home.Rooms["Kitchen"].Lights["Counter"]));
+
+        // Assert
+        Assert.True(canReadCeiling);
+        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
+        Assert.False(canReadCounter);
     }
 
     [Fact]
@@ -98,6 +107,77 @@ public class SubjectReadTests
     }
 
     [Fact]
+    public void WhenParentsFormARootlessCycleLongerThanTheTrackingDepth_ThenTheWalkTerminatesAndTheSubjectIsNotReadable()
+    {
+        // Arrange
+        const int ringSize = 40;
+        var context = CreateContext();
+        var ring = Enumerable.Range(0, ringSize).Select(index => index == 0 ? new Person(context) : new Person()).ToArray();
+        for (var index = 0; index < ringSize; index++)
+        {
+            ring[index].Father = ring[(index + 1) % ringSize];
+        }
+
+        var policy = Compile(Role("Reader", allow: [Rule(Read)]));
+
+        // Act
+        var decision = policy.Explain(Registered(ring[20]));
+
+        // Assert
+        Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, DeniedProperty: null), decision);
+    }
+
+    [Fact]
+    public void WhenTwoBranchesJoinAtOneAncestorAndOnlyOneLinkIsDenied_ThenTheSubjectIsReadableThroughTheOtherBranch()
+    {
+        // Arrange: R.Father is A and R.Mother is B; X is under A.Father and B.Father, S under X.Father; Mother is denied.
+        var context = CreateContext();
+        var root = new Person(context);
+        var branchA = new Person();
+        var branchB = new Person();
+        var joined = new Person();
+        var subject = new Person();
+        root.Father = branchA;
+        root.Mother = branchB;
+        branchA.Father = joined;
+        branchB.Father = joined;
+        joined.Father = subject;
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Mother"])]));
+
+        // Act
+        var decision = policy.Explain(Registered(subject));
+
+        // Assert
+        Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
+    }
+
+    [Fact]
+    public void WhenTwoBranchesJoinAtOneAncestorAndEveryLinkOfBothIsDenied_ThenTheSubjectIsHiddenAndADeniedLinkIsNamed()
+    {
+        // Arrange: R.Father is A and R.Mother is B; X is under A.Mother and B.Mother, S under X.Father; Mother is denied.
+        var context = CreateContext();
+        var root = new Person(context);
+        var branchA = new Person();
+        var branchB = new Person();
+        var joined = new Person();
+        var subject = new Person();
+        root.Father = branchA;
+        root.Mother = branchB;
+        branchA.Mother = joined;
+        branchB.Mother = joined;
+        joined.Father = subject;
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, members: ["Mother"])]));
+
+        // Act
+        var decision = policy.Explain(Registered(subject));
+
+        // Assert
+        Assert.False(decision.IsReadable);
+        Assert.True(decision.HasReadableMember);
+        Assert.Equal(nameof(Person.Mother), decision.DeniedProperty?.Name);
+    }
+
+    [Fact]
     public void WhenADenyCoversABranch_ThenEverySubjectBeneathIsHidden()
     {
         // Arrange
@@ -107,10 +187,15 @@ public class SubjectReadTests
             deny: [Rule(Read, paths: ["/Rooms[Bedroom]/**"])]);
         var policy = Compile(role);
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Registered(home.Rooms["Bedroom"])));
-        Assert.False(policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"])));
-        Assert.True(policy.CanRead(Registered(home.Rooms["Kitchen"])));
+        // Act
+        var canReadBedroomSubject = policy.CanRead(Registered(home.Rooms["Bedroom"]));
+        var canReadBedroomLampSubject = policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"]));
+        var canReadKitchenSubject = policy.CanRead(Registered(home.Rooms["Kitchen"]));
+
+        // Assert
+        Assert.False(canReadBedroomSubject);
+        Assert.False(canReadBedroomLampSubject);
+        Assert.True(canReadKitchenSubject);
     }
 
     [Fact]
@@ -123,11 +208,13 @@ public class SubjectReadTests
 
         // Act
         var decision = policy.Explain(Registered(kitchen.Sensor!));
+        var canReadKitchenTemperature = policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature)));
+        var canReadKitchenSubject = policy.CanRead(Registered(kitchen));
 
         // Assert
         Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(kitchen, nameof(Room.Sensor))), decision);
-        Assert.True(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
-        Assert.True(policy.CanRead(Registered(kitchen)));
+        Assert.True(canReadKitchenTemperature);
+        Assert.True(canReadKitchenSubject);
     }
 
     [Fact]
@@ -143,11 +230,13 @@ public class SubjectReadTests
 
         // Act
         var decision = hidden.Explain(Registered(probe));
+        var openCanReadProbeSubject = open.CanRead(Registered(probe));
+        var hiddenCanReadProbeIsOn = hidden.CanRead(Member(probe, nameof(Light.IsOn)));
 
         // Assert
-        Assert.True(open.CanRead(Registered(probe)));
+        Assert.True(openCanReadProbeSubject);
         Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Attribute(sensor, nameof(Sensor.Temperature), "Probe")), decision);
-        Assert.True(hidden.CanRead(Member(probe, nameof(Light.IsOn))));
+        Assert.True(hiddenCanReadProbeIsOn);
     }
 
     [Fact]
@@ -215,10 +304,31 @@ public class SubjectReadTests
 
         // Act
         var decision = policy.Explain(Registered(subject));
+        var canReadOwnerFather = policy.CanRead(Member(owner, nameof(Person.Father)));
 
         // Assert
-        Assert.False(policy.CanRead(Member(owner, nameof(Person.Father))));
+        Assert.False(canReadOwnerFather);
         Assert.Equal(new SubjectReadDecision(IsReadable: false, HasReadableMember: true, Member(owner, nameof(Person.Father))), decision);
+    }
+
+    [Fact]
+    public void WhenAMembersPathSearchRunsOutOfBudget_ThenADenyWithPathsFailsClosedAndAnAllowStillMatchesAListedPath()
+    {
+        // Arrange: the owner's search spends more than its budget of parent links, so its paths are incomplete; the path
+        // Father was listed before the budget ran out.
+        var root = CreateBranchingGraph("BudgetSpentAboveTheOwner", out _);
+        var owner = root.Father!;
+        var member = Member(owner, nameof(Person.Children));
+        var deny = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Nope/**"])]));
+        var allow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Father/**"])]));
+
+        // Act
+        var denyCanRead = deny.CanRead(member);
+        var allowCanRead = allow.CanRead(member);
+
+        // Assert
+        Assert.False(denyCanRead);
+        Assert.True(allowCanRead);
     }
 
     [Fact]
@@ -233,9 +343,10 @@ public class SubjectReadTests
 
         // Act
         var decision = policy.Explain(Registered(subject));
+        var canReadOwnerFather = policy.CanRead(Member(owner, nameof(Person.Father)));
 
         // Assert
-        Assert.True(policy.CanRead(Member(owner, nameof(Person.Father))));
+        Assert.True(canReadOwnerFather);
         Assert.Equal(new SubjectReadDecision(IsReadable: true, HasReadableMember: true, DeniedProperty: null), decision);
     }
 

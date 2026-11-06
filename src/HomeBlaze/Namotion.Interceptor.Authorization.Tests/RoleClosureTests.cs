@@ -144,4 +144,35 @@ public class RoleClosureTests
         // Assert
         Assert.Equal("Role 'Role65' is nested more than 64 levels deep.", exception.Message);
     }
+
+    [Fact]
+    public void WhenRolesAreNestedExactly64LevelsDeep_ThenResolveSucceeds()
+    {
+        // Arrange
+        var roles = CreateChain(65);
+
+        // Act
+        var closure = RoleClosure.Resolve(roles, ["Role0"]);
+
+        // Assert
+        Assert.Equal(65, closure.Count);
+    }
+
+    [Fact]
+    public void WhenRolesAreNested65LevelsDeep_ThenResolveThrowsNamingTheRoleBeyondTheLimit()
+    {
+        // Arrange
+        var roles = CreateChain(66);
+
+        // Act
+        var exception = Assert.Throws<AuthorizationException>(() => RoleClosure.Resolve(roles, ["Role0"]));
+
+        // Assert
+        Assert.Equal("Role 'Role65' is nested more than 64 levels deep.", exception.Message);
+    }
+
+    private static AuthorizationRole[] CreateChain(int roleCount)
+        => Enumerable.Range(0, roleCount)
+            .Select(index => index < roleCount - 1 ? Role($"Role{index}", $"Role{index + 1}") : Role($"Role{index}"))
+            .ToArray();
 }

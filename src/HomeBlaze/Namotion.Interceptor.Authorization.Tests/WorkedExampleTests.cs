@@ -57,8 +57,11 @@ public class WorkedExampleTests
         var home = Create();
         var brightness = Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness));
 
-        // Act & Assert
-        Assert.True(Policy().CanWrite(brightness));
+        // Act
+        var canWriteBrightness = Policy().CanWrite(brightness);
+
+        // Assert
+        Assert.True(canWriteBrightness);
     }
 
     [Fact]
@@ -85,9 +88,13 @@ public class WorkedExampleTests
         var policy = Policy();
         var brightness = Member(home.Rooms["Bedroom"].Lights["Lamp"], nameof(Light.Brightness));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(brightness));
-        Assert.True(policy.IsAllowed(brightness, History));
+        // Act
+        var canReadBrightness = policy.CanRead(brightness);
+        var isAllowedBrightness = policy.IsAllowed(brightness, History);
+
+        // Assert
+        Assert.True(canReadBrightness);
+        Assert.True(isAllowedBrightness);
     }
 
     [Fact]
@@ -113,9 +120,13 @@ public class WorkedExampleTests
         var home = Create();
         var policy = Policy();
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.False(policy.CanRead(Registered(home.Wifi!)));
+        // Act
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var canReadSubject = policy.CanRead(Registered(home.Wifi!));
+
+        // Assert
+        Assert.False(canReadSsid);
+        Assert.False(canReadSubject);
     }
 
     [Fact]
@@ -126,12 +137,20 @@ public class WorkedExampleTests
         var policy = Policy();
         var sensor = home.Rooms["Kitchen"].Sensor!;
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Registered(home)));
-        Assert.True(policy.CanRead(Registered(home.Rooms["Kitchen"])));
-        Assert.True(policy.CanRead(Registered(sensor)));
-        Assert.True(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
-        Assert.True(policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"])));
-        Assert.False(policy.CanRead(Registered(home.Wifi!)));
+        // Act
+        var canReadHomeSubject = policy.CanRead(Registered(home));
+        var canReadKitchenSubject = policy.CanRead(Registered(home.Rooms["Kitchen"]));
+        var canReadSensorSubject = policy.CanRead(Registered(sensor));
+        var canReadSensorTemperatureUnit = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit"));
+        var canReadBedroomLampSubject = policy.CanRead(Registered(home.Rooms["Bedroom"].Lights["Lamp"]));
+        var canReadWifiSubject = policy.CanRead(Registered(home.Wifi!));
+
+        // Assert
+        Assert.True(canReadHomeSubject);
+        Assert.True(canReadKitchenSubject);
+        Assert.True(canReadSensorSubject);
+        Assert.True(canReadSensorTemperatureUnit);
+        Assert.True(canReadBedroomLampSubject);
+        Assert.False(canReadWifiSubject);
     }
 }

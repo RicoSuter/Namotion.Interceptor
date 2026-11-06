@@ -81,6 +81,13 @@ public class RoleJsonTests
     }
 
     [Fact]
+    public void WhenARoleHasAnUnknownPropertyWithDefaultOptions_ThenDeserializationFails()
+    {
+        // Act & Assert
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<AuthorizationRole>("""{ "Name": "Op", "Denny": [] }"""));
+    }
+
+    [Fact]
     public void WhenARoleWithoutListsIsDeserializedWithSourceGeneration_ThenTheListsAreEmptyAndItRoundTrips()
     {
         // Arrange

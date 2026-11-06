@@ -242,17 +242,6 @@ public class PermissionRuleJsonTests
         Assert.Equal(holder.Rules.AsEnumerable(), roundTrip.Rules.AsEnumerable());
     }
 
-    [AttributeUsage(AttributeTargets.Property)]
-    private sealed class PersistedAttribute : Attribute;
-
-    private sealed class RuleHolder
-    {
-        [Persisted]
-        public ImmutableArray<PermissionRule> Rules { get; set; } = [];
-
-        public string? Comment { get; set; }
-    }
-
     [Fact]
     public void WhenARuleIsCreatedWithDefaultLists_ThenTheListsAreEmpty()
     {
@@ -267,5 +256,16 @@ public class PermissionRuleJsonTests
         Assert.True(rule.Tags.IsEmpty);
         Assert.True(rule.Actions.IsEmpty);
         Assert.True(copy.Tags.IsEmpty);
+    }
+
+    [AttributeUsage(AttributeTargets.Property)]
+    private sealed class PersistedAttribute : Attribute;
+
+    private sealed class RuleHolder
+    {
+        [Persisted]
+        public ImmutableArray<PermissionRule> Rules { get; set; } = [];
+
+        public string? Comment { get; set; }
     }
 }
