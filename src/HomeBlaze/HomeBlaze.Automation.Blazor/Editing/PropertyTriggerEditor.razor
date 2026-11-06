@@ -7,8 +7,10 @@
     <ConditionField @key="@ConditionFieldId" FieldId="@ConditionFieldId" Label="Condition" Lead="When" Value="@_trigger.Expression" ValueChanged="SetExpressionAsync"
                     Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-trigger-condition" />
     <div class="d-flex flex-wrap gap-3 mt-2">
-        <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" Draft="Draft" RuleKey="@RuleKey"
-                       HelperText="Empty: fires at once" Style="flex: 1 1 160px;" />
+        <div style="flex: 1 1 160px;">
+            <DurationField Label="For at least" Value="@_trigger.For" ValueChanged="SetHoldAsync" Draft="Draft" RuleKey="@RuleKey"
+                           HelperText="Empty: fires at once" />
+        </div>
         <div style="flex: 1 1 200px;">
             <MudSelect T="TriggerActivation" Label="When the rule starts" Value="@_trigger.OnActivation" ValueChanged="SetActivationAsync"
                        ToStringFunc="@FormatActivation">
