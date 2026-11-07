@@ -208,9 +208,9 @@ namespace HomeBlaze.Automation
     {
         public const string ClockEqualityHint = "The clock never equals a value exactly, so now or time with == or != does not mat" +
             "ch a moment: use >=, such as time >= 7h.";
-        public const string EverySecondHint = "Checked every second, since when this use of the clock changes cannot be computed" +
-            ". A comparison such as now - ./LastTriggeredAt > 30m or time >= 7h is checked on" +
-            "ly when its result can change.";
+        public const string EverySecondHint = "Checked every second, because when this use of the clock changes cannot be comput" +
+            "ed. A comparison such as now - ./LastTriggeredAt > 30m or time >= 7h is checked " +
+            "only when its result can change.";
         public static System.Collections.Immutable.ImmutableArray<string> Variables { get; }
         public static System.Collections.Generic.IReadOnlyList<string> GetConditionHints(string? text) { }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }

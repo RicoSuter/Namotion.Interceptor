@@ -14,7 +14,7 @@ internal static partial class ConditionHints
         "The clock never equals a value exactly, so now or time with == or != does not match a moment: use >=, such as time >= 7h.";
 
     public const string EverySecond =
-        "Checked every second, since when this use of the clock changes cannot be computed. " +
+        "Checked every second, because when this use of the clock changes cannot be computed. " +
         "A comparison such as now - ./LastTriggeredAt > 30m or time >= 7h is checked only when its result can change.";
 
     public static IReadOnlyList<string> Get(string? text)
