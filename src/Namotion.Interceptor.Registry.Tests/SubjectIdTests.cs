@@ -264,6 +264,58 @@ public class SubjectIdTests
     }
 
     [Fact]
+    public void WhenAddingASubjectThroughAPropertyTheRegistryDoesNotKnowFails_ThenItsSubjectIdIsNotIndexed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var registry = context.GetService<ISubjectRegistry>();
+        var person = new Models.Person(context);
+        Models.Person? value = null;
+        ((IInterceptorSubject)person).AddProperties(new SubjectPropertyMetadata(
+            "Unregistered", typeof(Models.Person), [],
+            _ => value,
+            (_, newValue) => value = (Models.Person?)newValue,
+            isIntercepted: true, isDynamic: true));
+        var child = new Models.Person();
+        child.SetSubjectId("childId");
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => new PropertyReference(person, "Unregistered")
+            .SetPropertyValueWithInterception(child, null, (_, newValue) => value = (Models.Person?)newValue));
+
+        // Assert
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+        Assert.False(context.GetService<ISubjectIdRegistry>().TryGetSubjectById("childId", out _));
+    }
+
+    [Fact]
+    public void WhenASubjectIsAddedThroughAKnownPropertyAfterAFailedAdd_ThenItsSubjectIdIsIndexed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var registry = context.GetService<ISubjectRegistry>();
+        var person = new Models.Person(context);
+        Models.Person? value = null;
+        ((IInterceptorSubject)person).AddProperties(new SubjectPropertyMetadata(
+            "Unregistered", typeof(Models.Person), [],
+            _ => value,
+            (_, newValue) => value = (Models.Person?)newValue,
+            isIntercepted: true, isDynamic: true));
+        var child = new Models.Person();
+        child.SetSubjectId("childId");
+        Assert.Throws<InvalidOperationException>(() => new PropertyReference(person, "Unregistered")
+            .SetPropertyValueWithInterception(child, null, (_, newValue) => value = (Models.Person?)newValue));
+
+        // Act
+        person.Mother = child;
+
+        // Assert
+        Assert.Single(registry.TryGetRegisteredSubject(child)!.Parents);
+        Assert.True(context.GetService<ISubjectIdRegistry>().TryGetSubjectById("childId", out var found));
+        Assert.Same(child, found);
+    }
+
+    [Fact]
     public void SetSubjectId_WithNullOrWhitespace_Throws()
     {
         // Arrange

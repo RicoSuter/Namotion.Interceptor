@@ -154,12 +154,31 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
         if (change.IsContextAttach || change.IsPropertyReferenceAdded)
         {
+            // The property is resolved before the subject is registered: a registration marks the subject attached,
+            // so a property that cannot be found must not leave it registered as attached without parents, which
+            // reads as a root.
+            RegisteredSubjectProperty? registeredProperty = null;
+            if (change is { IsPropertyReferenceAdded: true, Property: { } property })
+            {
+                if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
+                {
+                    parentRegisteredSubject = RegisterSubject(property.Subject);
+                }
+
+                registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
+                    throw new InvalidOperationException($"Property '{property.Name}' not found.");
+            }
+
+            var isNewlyRegistered = false;
             if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
             {
                 registeredSubject = RegisterSubject(change.Subject);
+                isNewlyRegistered = true;
             }
 
-            if (change.IsContextAttach)
+            // Also when the subject is registered by an add without a context attach, as after an add that attached
+            // it threw: the lifecycle reports the context attach only once.
+            if (change.IsContextAttach || isNewlyRegistered)
             {
                 // Auto-register pre-assigned subject ID in reverse index;
                 // skip silently on conflict to avoid aborting the lifecycle.
@@ -174,16 +193,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 }
             }
 
-            if (change is { IsPropertyReferenceAdded: true, Property: { } property })
+            if (registeredProperty is not null)
             {
-                if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
-                {
-                    parentRegisteredSubject = RegisterSubject(property.Subject);
-                }
-
-                var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
-                    throw new InvalidOperationException($"Property '{property.Name}' not found.");
-
                 registeredSubject.AddParent(registeredProperty, change.Index);
                 registeredProperty.AddChild(new SubjectPropertyChild
                 {
@@ -200,6 +211,12 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
             if (registeredSubject is not null)
             {
+                if (change.IsContextDetach)
+                {
+                    // Before the critical section that changes its parents, see RegisteredSubject.IsAttached.
+                    registeredSubject.MarkDetached();
+                }
+
                 if (change is { IsPropertyReferenceRemoved: true, Property: not null })
                 {
                     var property = _knownSubjects
@@ -277,6 +294,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
     {
         var registeredSubject = new RegisteredSubject(subject);
+        registeredSubject.MarkAttached();
         _knownSubjects[subject] = registeredSubject;
         Volatile.Write(ref _knownSubjectsSnapshot, null);
         return registeredSubject;
