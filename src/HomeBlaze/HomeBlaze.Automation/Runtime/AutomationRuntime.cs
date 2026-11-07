@@ -12,6 +12,9 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class AutomationRuntime
 {
+    /// <summary>How long a stop waits for the worker to end before it abandons the worker.</summary>
+    public static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
+
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1);
 
     private readonly Automation _automation;
@@ -20,6 +23,7 @@ internal sealed class AutomationRuntime
     private readonly AutomationInputQueue _queue = new();
     private readonly AutomationEngine _engine;
     private readonly AutomationChangeReceiver _changes;
+    private CheckpointLocation _location;
     private int _isTickPending;
 
     /// <summary>Creates the worker of the automation, whose checkpoint is at <paramref name="location"/>.</summary>
@@ -27,17 +31,39 @@ internal sealed class AutomationRuntime
     {
         _automation = automation;
         _logger = logger;
-        Location = location;
+        _location = location;
         _keeper = new AutomationStateKeeper(location.Store);
         _changes = new AutomationChangeReceiver(_queue);
         _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes);
     }
 
     /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
-    public CheckpointLocation Location { get; private set; }
+    public CheckpointLocation Location
+    {
+        get => Volatile.Read(ref _location);
+        private set => Volatile.Write(ref _location, value);
+    }
+
+    /// <summary>Runs the stop with a token that is canceled with <paramref name="cancellationToken"/> or after <see cref="StopTimeout"/>.</summary>
+    public static async Task WaitForStopAsync(Func<CancellationToken, Task> stop, TimeProvider timeProvider, CancellationToken cancellationToken)
+    {
+        using var timeout = new CancellationTokenSource(StopTimeout, timeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        await stop(linked.Token);
+    }
 
     /// <summary>Gives up the checkpoint file once the worker ended, so that another worker of the path owns it.</summary>
     public void Release() => Location.Store.Release();
+
+    /// <summary>
+    /// Abandons a worker that did not end when the automation stopped: from now on it changes neither the automation, its
+    /// rules nor the checkpoint file, and the rules show that the automation stopped.
+    /// </summary>
+    public void Abandon()
+    {
+        _engine.Abandon();
+        Release();
+    }
 
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 

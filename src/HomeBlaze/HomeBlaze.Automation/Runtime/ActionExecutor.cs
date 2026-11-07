@@ -35,11 +35,19 @@ internal sealed class ActionExecutor(
 
         using var timeout = new CancellationTokenSource(Timeout, timeProvider);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        using var abandon = new CancellationTokenSource();
+        using var onStop = cancellationToken.Register(() => AbandonWhenBoth(timeout.Token, abandon));
+        using var onTimeout = timeout.Token.Register(() => AbandonWhenBoth(cancellationToken, abandon));
         try
         {
-            // Awaited also after the timeout, so that an operation that ignores its cancellation never overlaps a later run.
-            await operation.Method.InvokeAsync(operation.Arguments, serviceProvider, linked.Token);
+            // Awaited also after the timeout, so that an operation that ignores its cancellation never overlaps a later
+            // run; only a stop gives up on it, once it timed out, since no later run follows.
+            await operation.Method.InvokeAsync(operation.Arguments, serviceProvider, linked.Token).WaitAsync(abandon.Token);
             return ActionResult.Success(operation.Description);
+        }
+        catch (OperationCanceledException) when (abandon.IsCancellationRequested)
+        {
+            return ActionResult.Failure($"{operation.Description} did not end within {Timeout.TotalSeconds:0} seconds and was abandoned, since the automation stopped");
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -66,6 +74,15 @@ internal sealed class ActionExecutor(
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             return ActionResult.Failure($"{write.Description} failed: {exception.Message}");
+        }
+    }
+
+    // Each token checks the other when it is canceled, so that whichever comes second abandons the operation.
+    private static void AbandonWhenBoth(CancellationToken other, CancellationTokenSource abandon)
+    {
+        if (other.IsCancellationRequested)
+        {
+            abandon.Cancel();
         }
     }
 

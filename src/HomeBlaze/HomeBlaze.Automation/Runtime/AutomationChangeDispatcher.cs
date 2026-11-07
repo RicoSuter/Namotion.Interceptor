@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
@@ -16,6 +17,10 @@ internal sealed class AutomationChangeDispatcher
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<PropertyChangeInterceptor, ChangeSource> _sources = [];
+
+    /// <summary>Gets the registered dispatcher, or a dispatcher of its own for a caller when none is registered.</summary>
+    public static AutomationChangeDispatcher From(IServiceProvider serviceProvider) =>
+        serviceProvider.GetService<AutomationChangeDispatcher>() ?? new AutomationChangeDispatcher();
 
     // White-box test hook: the number of change streams with a subscription.
     internal int SourceCount

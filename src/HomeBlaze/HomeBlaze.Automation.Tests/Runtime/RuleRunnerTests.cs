@@ -235,6 +235,8 @@ public class RuleRunnerTests
 
         public string? CurrentState { get; private set; }
 
+        public bool IsAbandoned => false;
+
         public string? ChangeState(string targetState)
         {
             CurrentState = targetState;

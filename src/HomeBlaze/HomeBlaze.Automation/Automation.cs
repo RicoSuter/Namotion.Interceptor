@@ -4,7 +4,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Services;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
@@ -51,7 +50,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         TimeProvider = timeProvider;
         Authorizer = authorizer;
         ServiceProvider = serviceProvider;
-        ChangeDispatcher = serviceProvider.GetService<AutomationChangeDispatcher>() ?? new AutomationChangeDispatcher();
+        ChangeDispatcher = AutomationChangeDispatcher.From(serviceProvider);
         _logger = logger;
         Enabled = true;
         States = [];
@@ -179,28 +178,43 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         return base.StartAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Stops the worker and waits until it ended, at most until <paramref name="cancellationToken"/> is canceled or
+    /// <see cref="AutomationRuntime.StopTimeout"/> passed. A worker that did not end, such as one in an operation that ignores its
+    /// cancellation, is abandoned: it changes neither the automation nor its checkpoint anymore, also after a new start.
+    /// </summary>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        await base.StopAsync(cancellationToken);
+        await AutomationRuntime.WaitForStopAsync(token => base.StopAsync(token), TimeProvider, cancellationToken);
 
-        // A stop before the worker ran leaves the runtime of the start behind.
-        if (Interlocked.Exchange(ref _runtime, null) is { } runtime)
-        {
-            runtime.Close();
-            OnWorkerEnded(runtime);
-            runtime.Release();
-            Status = ServiceStatus.Stopped;
-        }
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (Volatile.Read(ref _runtime) is not { } runtime)
+        // A worker that ended took its runtime; one that did not end, or never ran because the stop came first, left it.
+        if (Interlocked.Exchange(ref _runtime, null) is not { } runtime)
         {
             return;
         }
 
-        var finalStatus = ServiceStatus.Stopped;
+        if (ExecuteTask is { IsCompleted: false })
+        {
+            _logger.LogWarning(
+                "The automation {Automation} did not stop in time, such as for an operation that ignores its cancellation, and its worker is abandoned.",
+                Title);
+        }
+
+        runtime.Close();
+        OnWorkerEnded(runtime);
+        runtime.Abandon();
+        Status = ServiceStatus.Stopped;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // A stop that came first already took the runtime of this start, which may be the runtime of a later start now.
+        if (stoppingToken.IsCancellationRequested || Volatile.Read(ref _runtime) is not { } runtime)
+        {
+            return;
+        }
+
+        string? error = null;
         try
         {
             await runtime.RunAsync(stoppingToken);
@@ -212,17 +226,23 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         catch (Exception exception)
         {
             _logger.LogError(exception, "The automation {Automation} stopped after an unexpected error.", Title);
-            StatusMessage = exception.Message;
-            finalStatus = ServiceStatus.Error;
-        }
-        finally
-        {
-            Interlocked.CompareExchange(ref _runtime, null, runtime);
-            OnWorkerEnded(runtime);
-            runtime.Release();
+            error = exception.Message;
         }
 
-        Status = finalStatus;
+        // A worker that a stop abandoned no longer owns the automation, which may run again with another worker.
+        if (Interlocked.CompareExchange(ref _runtime, null, runtime) != runtime)
+        {
+            return;
+        }
+
+        OnWorkerEnded(runtime);
+        runtime.Release();
+        if (error is not null)
+        {
+            StatusMessage = error;
+        }
+
+        Status = error is null ? ServiceStatus.Stopped : ServiceStatus.Error;
     }
 
     // Runs after the worker ended, so that nothing writes the file anymore, and when the graph no longer holds this

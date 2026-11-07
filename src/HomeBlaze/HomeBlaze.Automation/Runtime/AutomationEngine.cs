@@ -25,6 +25,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     // An unreadable checkpoint stays shown after successful runs, until a reset or a valid configuration is applied.
     private bool _hasCheckpointError;
+    private volatile bool _isAbandoned;
 
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
@@ -43,6 +44,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
+
+    public bool IsAbandoned => _isAbandoned;
 
     /// <summary>Restores the checkpoint without a state-change event and applies the configuration.</summary>
     public void Start()
@@ -211,11 +214,29 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void ReportUnexpectedError(Exception exception)
     {
         _logger.LogError(exception, "The automation {Automation} failed to process an input.", Name);
-        _status.SetError(exception.Message);
+        if (!_isAbandoned)
+        {
+            _status.SetError(exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Shows every rule as stopped and has a worker that a stop abandoned change nothing anymore. Called by the stop, not
+    /// by the worker.
+    /// </summary>
+    public void Abandon()
+    {
+        _isAbandoned = true;
+        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
     }
 
     public void RefreshRuleStatuses()
     {
+        if (_isAbandoned)
+        {
+            return;
+        }
+
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
@@ -234,6 +255,11 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void End()
     {
         Stop();
+        if (_isAbandoned)
+        {
+            return;
+        }
+
         if (_keeper.WriteRuns() is { } error)
         {
             _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
@@ -401,8 +427,16 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
         finally
         {
-            PublishStateChanges();
-            _triggers.TrackPending(_snapshot.Rules, requests);
+            if (!_isAbandoned)
+            {
+                PublishStateChanges();
+                _triggers.TrackPending(_snapshot.Rules, requests);
+            }
+        }
+
+        if (_isAbandoned)
+        {
+            return;
         }
 
         // A skipped trigger of a rule that stays active runs in a later input, after the state change.

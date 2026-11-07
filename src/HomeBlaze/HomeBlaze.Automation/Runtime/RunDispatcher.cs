@@ -7,7 +7,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// Runs the requests of one input in rule order and records every run. A request that does not run is not recorded: one
 /// that Only if rejects, and, once a rule changed the state, the remaining requests of the input; the rule shows why
 /// and the log says it once per reason, and its property trigger stays pending. A request of a rule that is no longer
-/// active is dropped. Used by the worker only.
+/// active is dropped, and so are the requests after a run that a stop canceled. Used by the worker only.
 /// </summary>
 internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, AutomationStateKeeper keeper, ILogger logger)
 {
@@ -20,6 +20,12 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         var summary = new DispatchSummary();
         foreach (var request in requests)
         {
+            // A stop ends the input: the requests after a canceled run do not run.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
             await DispatchOneAsync(request, isActive, summary, cancellationToken);
         }
 
@@ -51,6 +57,11 @@ internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, Au
         }
 
         var result = await _runner.RunAsync(request, host, cancellationToken);
+        if (host.IsAbandoned)
+        {
+            return;
+        }
+
         if (!result.IsRun)
         {
             Skip(request, result.Message);
