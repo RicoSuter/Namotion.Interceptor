@@ -36,6 +36,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         "than http, https and mailto";
 
     private readonly MarkdownContentParser _parser;
+
+    /// <summary>The links that widgets of the page resolved, kept by <see cref="MarkdownContentParser.ResolveLink"/>.</summary>
+    internal ResolvedLinks? ResolvedLinks { get; set; }
     private readonly ConfigurableSubjectSerializer _serializer;
 
     // The parse state is one immutable snapshot that is replaced as a whole. Reloads and write-backs run
