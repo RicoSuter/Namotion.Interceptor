@@ -19,6 +19,9 @@ public sealed class AuthorizationMcpAccessPolicy : IMcpAccessPolicy
 
     private readonly ILogger? _logger;
     private readonly string? _clientName;
+    private readonly AuthorizationPolicy _policy;
+    private readonly Func<AuthorizationPolicy>? _getCallPolicy;
+    private readonly AsyncLocal<AuthorizationPolicy?>? _callPolicy;
 
     /// <param name="policy">The policy that decides.</param>
     /// <param name="logger">
@@ -33,13 +36,48 @@ public sealed class AuthorizationMcpAccessPolicy : IMcpAccessPolicy
     public AuthorizationMcpAccessPolicy(AuthorizationPolicy policy, ILogger? logger = null, string? clientName = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
-        Policy = policy;
+        _policy = policy;
         _logger = logger;
         _clientName = clientName;
     }
 
-    /// <summary>Gets the policy that decides.</summary>
-    public AuthorizationPolicy Policy { get; }
+    private AuthorizationMcpAccessPolicy(
+        AuthorizationPolicy policy, Func<AuthorizationPolicy> getCallPolicy, ILogger? logger, string? clientName)
+        : this(policy, logger, clientName)
+    {
+        _getCallPolicy = getCallPolicy;
+        _callPolicy = new AsyncLocal<AuthorizationPolicy?>();
+    }
+
+    /// <summary>
+    /// Gets the policy that decides: within a call that <see cref="BeginCall"/> started, the policy fetched for it, and
+    /// otherwise the policy the instance was created with.
+    /// </summary>
+    public AuthorizationPolicy Policy => _callPolicy?.Value ?? _policy;
+
+    /// <summary>
+    /// Creates an access policy that decides with <paramref name="policy"/> until <see cref="BeginCall"/> fetches the
+    /// current one from <paramref name="getCallPolicy"/> for a call, so that a change of roles applies from the next call.
+    /// </summary>
+    internal static AuthorizationMcpAccessPolicy CreatePerCall(
+        AuthorizationPolicy policy, Func<AuthorizationPolicy> getCallPolicy, ILogger? logger, string? clientName)
+        => new(policy, getCallPolicy, logger, clientName);
+
+    /// <summary>
+    /// Starts a tool call on the current async flow: a policy created with <see cref="CreatePerCall"/> fetches the current
+    /// policy once and decides the whole call with it, until the returned scope is disposed; any other does nothing.
+    /// </summary>
+    internal IDisposable? BeginCall()
+    {
+        if (_getCallPolicy is null || _callPolicy is null)
+        {
+            return null;
+        }
+
+        var previous = _callPolicy.Value;
+        _callPolicy.Value = _getCallPolicy();
+        return new CallScope(_callPolicy, previous);
+    }
 
     /// <summary>
     /// Whether <paramref name="accessPolicy"/> allows the action on the member, as <see cref="IMcpAccessPolicy.IsAllowed"/>
@@ -91,5 +129,10 @@ public sealed class AuthorizationMcpAccessPolicy : IMcpAccessPolicy
         var parent = parents[0];
         var subjectPath = parent.Property.TryGetPath(McpAuthorization.PathProvider, null, parent.Index);
         return subjectPath is null ? member.Name : "/" + subjectPath + "/" + member.Name;
+    }
+
+    private sealed class CallScope(AsyncLocal<AuthorizationPolicy?> callPolicy, AuthorizationPolicy? previous) : IDisposable
+    {
+        public void Dispose() => callPolicy.Value = previous;
     }
 }

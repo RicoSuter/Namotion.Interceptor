@@ -85,7 +85,7 @@ The CLI always runs on the subscription login:
 
 ## Creating an agent
 
-Create a `ClaudeCliAgent` or `AnthropicAgent` (category AI) in the subject browser, see [Subjects](subjects.md). Configuration changes apply to the next turn; a running turn keeps the settings it started with. As JSON files:
+Create a `ClaudeCliAgent` or `AnthropicAgent` (category AI) in the subject browser, see [Subjects](subjects.md). Configuration changes apply to the next turn; a running turn keeps the settings it started with, except `Roles`, which apply from the next tool call, see [Authorization](authorization.md#agents). As JSON files:
 
 ```json
 {

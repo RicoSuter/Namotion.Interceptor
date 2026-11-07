@@ -111,7 +111,7 @@ The property panel of a role shows three values:
 - **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role.
 - **`UsedByAgents`**: the number of started agents that name the role.
 
-Role names compare ignoring case. A change of the file applies to the next turn of each agent.
+Role names compare ignoring case. A change of the file applies to the next tool call of each agent, also within a running turn.
 
 ---
 
@@ -229,7 +229,7 @@ Each agent has the setting `Roles`, a list of role names:
 - **Default**: `["Operator"]`, for a new agent and for a file without the setting, so `AllowedTools` is the gate of such an agent. Restrict an agent with `Reader` or a custom role.
 - **Edit form**: the Roles section offers the built-in roles and the custom roles. A name that is no role, such as a removed custom role, shows as an error chip that can be removed, and so does a custom role that exists but cannot be used, such as one whose name another role has as well, with the reason as its tooltip. At least one role is required, as an agent without roles is denied everything.
 - **Settings tab**: lists the roles, and the reason when the agent is denied everything.
-- **When it applies**: each chat turn and background run takes the policy of the roles when it starts, so a change of the roles or of `Authorization.json` applies to the next turn.
+- **When it applies**: each tool call takes the policy of the agent's roles when it starts and decides the whole call with it, so a change of the roles or of `Authorization.json` applies to the next tool call, also within a running turn and on the MCP route of a CLI agent. The tools a turn offers, its `AllowedTools`, and the "Invalid roles" status are taken when the turn starts.
 
 ### Invalid Roles
 

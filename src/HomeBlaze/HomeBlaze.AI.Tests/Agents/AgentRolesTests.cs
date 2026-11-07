@@ -325,6 +325,38 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenARoleIsRemovedDuringATurn_ThenTheNextToolCallIsRefused()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", ("Custom", new Role { Includes = [BuiltInRoles.ReaderName] }));
+        var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
+        var results = new List<string>();
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            Roles = ["Custom"],
+            AllowedTools = ["get_property"],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var getProperty = request.Tools.Tools.First(tool => tool.Name == "get_property");
+                var input = JsonSerializer.SerializeToElement(new { path = "/Temperature" });
+                results.Add(JsonSerializer.Serialize(await getProperty.Handler(input, cancellationToken)));
+                authorization.Roles = new Dictionary<string, Role>();
+                results.Add(JsonSerializer.Serialize(await getProperty.Handler(input, cancellationToken)));
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("Read the temperature twice.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Contains("21.5", results[0]);
+        Assert.Contains("Path not found", results[1]);
+    }
+
+    [Fact]
     public async Task WhenAUsedRoleIsRemovedFromTheAuthorization_ThenTheAgentShowsTheErrorWithoutATurn()
     {
         // Arrange
