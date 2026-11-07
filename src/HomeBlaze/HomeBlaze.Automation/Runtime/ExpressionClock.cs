@@ -95,9 +95,18 @@ internal sealed partial class ExpressionClock
     /// instants does. False when a path leads to a value that is no instant, so that the expression is evaluated every
     /// second.
     /// </summary>
-    public bool TryGetNextChange(Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange)
+    public bool TryGetNextChange(Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange) =>
+        TryGetNextChange(readInstant, now, timeZone, out nextChange, out _);
+
+    /// <summary>
+    /// Gets the next change as the other overload does, and whether a comparison changed already before
+    /// <paramref name="now"/>, which a wall clock set back can undo.
+    /// </summary>
+    public bool TryGetNextChange(
+        Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange, out bool hasChanged)
     {
         nextChange = null;
+        hasChanged = false;
         foreach (var comparison in Elapsed)
         {
             switch (readInstant(comparison.Path))
@@ -105,6 +114,7 @@ internal sealed partial class ExpressionClock
                 case null:
                     continue;
                 case DateTimeOffset instant:
+                    hasChanged |= instant + comparison.Duration <= now;
                     nextChange = Earliest(nextChange, instant + comparison.Duration, now);
                     break;
                 default:

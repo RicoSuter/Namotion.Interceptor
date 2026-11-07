@@ -143,4 +143,23 @@ public class AutomationWakeUpTests
         Assert.Equal(1, host.Blinds.OpenCount);
         Assert.True(File.Exists(host.CheckpointPath));
     }
+
+    [Fact]
+    public async Task WhenTheWallClockIsSetBackBeforeAnElapsedTimeThatHadPassed_ThenTheTriggerRearmsAndFiresAgainWhenItPasses()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("stale", On("Stale", When("now - /Weather/LastUpdated > 5m"), Invoke("/Blinds/Close")))));
+        host.Weather.LastUpdated = AutomationTestHost.Start.AddMinutes(-10);
+        await host.FlushAsync();
+        var runsBeforeTheCorrection = host.Blinds.CloseCount;
+
+        // Act
+        host.Clock.WallClockShift = TimeSpan.FromMinutes(-20);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(20), TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal(1, runsBeforeTheCorrection);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
 }

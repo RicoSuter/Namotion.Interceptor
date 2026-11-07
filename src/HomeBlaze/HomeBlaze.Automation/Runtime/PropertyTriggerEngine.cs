@@ -344,9 +344,13 @@ internal sealed class PropertyTriggerEngine(
         {
             var rule = trigger.Rule.Rule;
             if (clock.IsEverySecond ||
-                !clock.TryGetNextChange(path => ReadObserved(path, rule), now, timeProvider.LocalTimeZone, out var change))
+                !clock.TryGetNextChange(path => ReadObserved(path, rule), now, timeProvider.LocalTimeZone, out var change, out var hasChanged))
             {
                 change = ExpressionClock.GetNextSecond(now);
+            }
+            else if (change is null && hasChanged)
+            {
+                change = CheckForSetBackClock(now);
             }
 
             next = Earliest(next, change);
@@ -357,6 +361,10 @@ internal sealed class PropertyTriggerEngine(
     }
 
     private static DateTimeOffset Max(DateTimeOffset first, DateTimeOffset second) => first > second ? first : second;
+
+    // A comparison of elapsed time that changed already changes again only when the wall clock is set back, which a tick
+    // notices; checked as often as the worker wakes up at most.
+    private static DateTimeOffset CheckForSetBackClock(DateTimeOffset now) => now + WakeTimer.MaxWakeInterval;
 
     private object? ReadObserved(string path, AutomationRule rule) =>
         AutomationPaths.ResolveProperty(resolver, path, rule) is { } property ? _values.GetValue(property) : null;
@@ -420,13 +428,14 @@ internal sealed class PropertyTriggerEngine(
         }
 
         if (clock.IsEverySecond ||
-            !clock.TryGetNextChange(path => AutomationPaths.ResolveProperty(resolver, path, rule.Rule)?.GetValue(), now, timeProvider.LocalTimeZone, out var nextChange))
+            !clock.TryGetNextChange(
+                path => AutomationPaths.ResolveProperty(resolver, path, rule.Rule)?.GetValue(), now, timeProvider.LocalTimeZone, out var nextChange, out var hasChanged))
         {
             rule.RechecksGuardEverySecond = true;
             return;
         }
 
-        rule.GuardRecheckAt = nextChange;
+        rule.GuardRecheckAt = nextChange ?? (hasChanged ? CheckForSetBackClock(now) : null);
     }
 
     private TriggerObservation Observe(CompiledPropertyTrigger trigger, DateTimeOffset now)
