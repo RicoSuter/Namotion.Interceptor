@@ -3,6 +3,7 @@ using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -236,6 +237,36 @@ public class AutomationPropertyTriggerTests
         holder.Sensor = replacement;
         await host.FlushAsync();
         replacement.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenASubjectIsReplacedWhileTheWorkerIsBusy_ThenTheTriggerReadsTheCurrentValueOfTheNewSubject()
+    {
+        // Arrange
+        var gate = new TestGate { BlockOnCall = 1 };
+        var holder = new TestSensorHolder { Sensor = new TestSensor() };
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Holder/Sensor/Gust > 8 and /Weather/Rain > 0"), Invoke("/Blinds/Close"))),
+            ("step", On("Step", When("/Weather/Rain > 0"), Invoke("/Gate/Step"))),
+            ("wait", On("Wait", When("/Weather/Power > 0"), Invoke("/Blinds/Wait")))));
+        host.Graph.Add("Holder", holder);
+        host.Graph.Add("Gate", gate);
+        await host.FlushAsync();
+        host.Weather.Power = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        host.Weather.Rain = 1;
+        var replacement = new TestSensor { Gust = 0 };
+        holder.Sensor = replacement;
+        host.Blinds.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => gate.IsWaiting);
+
+        // Act
+        replacement.Gust = 10;
+        gate.Release();
         await host.FlushAsync();
 
         // Assert

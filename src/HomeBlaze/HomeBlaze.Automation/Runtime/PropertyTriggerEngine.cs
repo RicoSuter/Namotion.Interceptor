@@ -171,9 +171,13 @@ internal sealed class PropertyTriggerEngine(
     private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
     {
         var watched = ActiveTriggers(rules).Concat(activating).SelectMany(trigger => trigger.Dependencies).ToFrozenSet();
+        var previous = _watched;
         _watched = watched;
         publishWatched(watched);
-        _values.Retain(watched);
+
+        // A value read while its property was not watched may have changed since without a queued change, so a property
+        // that becomes watched is read from the graph again.
+        _values.Retain(watched, previous);
     }
 
     private static RunRequest CreateRequest(CompiledPropertyTrigger trigger) => new(trigger.Rule, null, trigger.Description);
