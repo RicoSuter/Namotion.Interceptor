@@ -1,6 +1,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Automation))]
 @implements ISubjectEditComponent
 @implements IDisposable
+@inject ISnackbar Snackbar
 
 @if (Automation is not null && _draft is { } draft)
 {
@@ -37,7 +38,7 @@
                     <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" />
                 </MudTabPanel>
                 <MudTabPanel Text="States">
-                    <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" RuleOpened="OpenRule" />
+                    <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" InputChanged="Revalidate" RuleOpened="OpenRule" />
                 </MudTabPanel>
             </MudTabs>
         </CascadingValue>
@@ -46,13 +47,15 @@
 }
 
 @code {
+    private const int RulesTabIndex = 1;
+
     private readonly PendingRows _pendingRows = new();
     private AutomationDraft? _draft;
     private IReadOnlyList<AutomationValidationError> _errors = [];
+    private int _validatedInputErrorVersion;
     private int _tabIndex;
     private string? _selectedRuleKey;
     private bool _isDirty;
-    private bool _needsRevalidation;
     private bool _wasValid = true;
     private bool _isDisposed;
 
@@ -68,9 +71,9 @@
 
     public bool IsDirty => _isDirty;
 
-    // Validated on every read, because an input that is removed while it shows an error clears the error only when it is
-    // disposed, after the change that removed it.
-    public bool IsValid => _draft is not null && !_pendingRows.Any && _draft.Validate().Count == 0;
+    // The errors are validated after each edit and after a render in which an input changed its error, such as one that
+    // was disposed, not on every read: the host reads this on every input event.
+    public bool IsValid => _draft is not null && !_pendingRows.Any && _errors.Count == 0;
 
     private Automation? Automation => Subject as Automation;
 
@@ -79,20 +82,25 @@
         if (Automation is { } automation)
         {
             _draft = AutomationDraft.From(automation);
-            _errors = _draft.Validate();
+            Validate();
             _selectedRuleKey = _draft.Rules.Count > 0 ? _draft.Rules[0].Key : null;
         }
 
         _wasValid = IsValid;
         _pendingRows.Changed += OnPendingRowsChanged;
+        _pendingRows.Discarded += OnInputDiscarded;
     }
 
     public Task SaveAsync(CancellationToken cancellationToken)
     {
-        if (Automation is { } automation && _draft is { } draft && IsValid)
+        if (Automation is { } automation && _draft is { } draft)
         {
-            draft.ApplyTo(automation);
-            SetDirty(false);
+            Validate();
+            if (IsValid)
+            {
+                draft.ApplyTo(automation);
+                SetDirty(false);
+            }
         }
 
         return Task.CompletedTask;
@@ -109,42 +117,37 @@
         }
     });
 
-    private void OnTabChanged(int index)
+    private void OnInputDiscarded(string input) => _ = InvokeAsync(() =>
     {
-        _tabIndex = index;
-        _needsRevalidation = true;
-    }
+        if (!_isDisposed)
+        {
+            Snackbar.Add($"{input} was discarded.", Severity.Warning);
+        }
+    });
 
-    private const int RulesTabIndex = 1;
+    private void OnTabChanged(int index) => _tabIndex = index;
 
     private void OpenRule(string ruleKey)
     {
         _selectedRuleKey = ruleKey;
         _tabIndex = RulesTabIndex;
-        _needsRevalidation = true;
     }
 
-    private void OnRuleSelected(string? key)
-    {
-        _selectedRuleKey = key;
-        _needsRevalidation = true;
-    }
+    private void OnRuleSelected(string? key) => _selectedRuleKey = key;
 
     // An input that shows an error clears it when it is disposed, which happens in the render after a selection or an edit
     // that removed it, so the errors are read again after that render. This is no edit, so the dialog does not become dirty.
     protected override void OnAfterRender(bool firstRender)
     {
-        if (!_needsRevalidation || _draft is null)
+        if (_draft is null || _draft.InputErrorVersion == _validatedInputErrorVersion)
         {
             return;
         }
 
-        _needsRevalidation = false;
-        var errors = _draft.Validate();
-        ReportValidity();
-        if (!errors.SequenceEqual(_errors))
+        var previous = _errors;
+        Revalidate();
+        if (!previous.SequenceEqual(_errors))
         {
-            _errors = errors;
             StateHasChanged();
         }
     }
@@ -152,10 +155,25 @@
     /// <summary>Every tab raises this after each edit of the draft, so that the errors and the validity follow it.</summary>
     private void OnChanged()
     {
-        _errors = _draft?.Validate() ?? [];
-        _needsRevalidation = true;
+        Validate();
         SetDirty(true);
         ReportValidity();
+    }
+
+    /// <summary>Raised when an input changed its error without an edit of the draft, which keeps the dialog as dirty as it was.</summary>
+    private void Revalidate()
+    {
+        Validate();
+        ReportValidity();
+    }
+
+    private void Validate()
+    {
+        if (_draft is { } draft)
+        {
+            _errors = draft.Validate();
+            _validatedInputErrorVersion = draft.InputErrorVersion;
+        }
     }
 
     // Raised on transitions only, because the host renders its save button again on each event.
@@ -182,6 +200,7 @@
     {
         _isDisposed = true;
         _pendingRows.Changed -= OnPendingRowsChanged;
+        _pendingRows.Discarded -= OnInputDiscarded;
     }
 
     private void SetDirty(bool isDirty)

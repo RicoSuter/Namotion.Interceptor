@@ -76,6 +76,25 @@ public class PendingRowsLifecycleTests
     }
 
     [Fact]
+    public void WhenATrackerWithAPendingRowIsDisposed_ThenTheDiscardedInputIsReported()
+    {
+        // Arrange
+        var pending = new PendingRows();
+        var discarded = new List<string>();
+        pending.Discarded += discarded.Add;
+        var finished = new PendingRowTracker(pending, "a");
+        var unfinished = new PendingRowTracker(pending, "b");
+        unfinished.Report(true);
+
+        // Act
+        finished.Dispose();
+        unfinished.Dispose();
+
+        // Assert
+        Assert.Equal(["An unfinished condition"], discarded.ToArray());
+    }
+
+    [Fact]
     public void WhenTheTrackerHasNoRegistry_ThenReportingDoesNothing()
     {
         // Arrange

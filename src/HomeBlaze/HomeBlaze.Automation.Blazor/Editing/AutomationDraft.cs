@@ -68,16 +68,23 @@ public sealed class AutomationDraft
                     .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
             });
 
+    /// <summary>Increases whenever an input error is set or cleared, so that a cached result of <see cref="Validate"/> can tell it is stale.</summary>
+    public int InputErrorVersion { get; private set; }
+
     /// <summary>Sets or clears the error of an input whose text does not parse, such as a duration, so that the draft cannot be saved meanwhile.</summary>
     public void SetInputError(string inputId, AutomationValidationError? error)
     {
-        if (error is null)
-        {
-            _inputErrors.Remove(inputId);
-        }
-        else
+        var isChanged = error is null
+            ? _inputErrors.Remove(inputId)
+            : !_inputErrors.TryGetValue(inputId, out var previous) || previous != error;
+        if (error is not null)
         {
             _inputErrors[inputId] = error;
+        }
+
+        if (isChanged)
+        {
+            InputErrorVersion++;
         }
     }
 
@@ -127,6 +134,11 @@ public sealed class AutomationDraft
         if (index < 0 || name.Length == 0 || (name != state && States.Contains(name)))
         {
             return false;
+        }
+
+        if (name == state)
+        {
+            return true;
         }
 
         States[index] = name;

@@ -13,6 +13,8 @@
     private TimeSpan? _shownValue;
     private bool _isInitialized;
 
+    [CascadingParameter] private PendingRows? PendingRows { get; set; }
+
     [Parameter] public string Label { get; set; } = string.Empty;
 
     [Parameter] public TimeSpan? Value { get; set; }
@@ -83,5 +85,13 @@
         return ValueChanged.InvokeAsync(value);
     }
 
-    public void Dispose() => Draft.SetInputError(_inputId, null);
+    public void Dispose()
+    {
+        if (_error is not null)
+        {
+            PendingRows?.Discard($"An invalid duration in '{Label}'");
+        }
+
+        Draft.SetInputError(_inputId, null);
+    }
 }

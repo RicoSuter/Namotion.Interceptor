@@ -12,6 +12,9 @@ internal sealed class PendingRows
     /// <summary>Raised after a field was marked or unmarked, on the thread that changed it, which may be one that disposes a component.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised with what was discarded when a field goes away with an edit that was not applied.</summary>
+    public event Action<string>? Discarded;
+
     public bool Any => _fieldIds.Count > 0;
 
     /// <summary>Marks or unmarks a field, identified by an id that is unique in the editor.</summary>
@@ -26,4 +29,7 @@ internal sealed class PendingRows
 
         return isChanged;
     }
+
+    /// <summary>Reports that a field went away with an edit that was not applied.</summary>
+    public void Discard(string input) => Discarded?.Invoke(input);
 }

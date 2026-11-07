@@ -181,6 +181,7 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public AutomationDraft() { }
         public bool Enabled { get; set; }
         public string? InitialState { get; set; }
+        public int InputErrorVersion { get; }
         public string? Name { get; set; }
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Rules { get; }
         public System.Collections.Generic.List<string> States { get; }
@@ -405,9 +406,12 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.AutomationDraft Draft { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback InputChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string> RuleOpened { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
+        protected override void OnInitialized() { }
     }
     public class TemplateField : Microsoft.AspNetCore.Components.ComponentBase
     {

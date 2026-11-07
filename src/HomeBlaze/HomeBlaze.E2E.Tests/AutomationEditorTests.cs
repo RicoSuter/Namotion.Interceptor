@@ -1022,6 +1022,61 @@ public class AutomationEditorTests
         }
     }
 
+    [Fact]
+    public async Task WhenANewStateIsDeletedAfterARejectedRename_ThenNoErrorStaysAndTheDialogCanBeSaved()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await dialog.GetByTestId("automation-add-state").ClickAsync();
+            await Assertions.Expect(dialog.GetByLabel("State name")).ToHaveValueAsync("State 3", new() { Timeout = Timeout });
+            await dialog.GetByLabel("State name").FillAsync("Idle");
+
+            // Act
+            // The click leaves the field first, which rejects the rename, and then deletes the state.
+            await dialog.GetByTestId("automation-delete-state").ClickAsync();
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-selected-state")).ToHaveCountAsync(0, new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToHaveCountAsync(0);
+            await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeEnabledAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStateIsRenamedToItsOwnNameWithASpace_ThenNothingIsRenamedAndTheDialogStaysUnchanged()
+    {
+        // Arrange
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "States" }).ClickAsync();
+            await dialog.GetByTestId("automation-state-node-Running").ClickAsync();
+            var stateName = dialog.GetByLabel("State name");
+
+            // Act
+            await stateName.FillAsync("Running ");
+            await stateName.PressAsync("Tab");
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-state-node-Running")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-renamed-state-warning")).ToHaveCountAsync(0);
+            await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToHaveAttributeAsync("data-dirty", "false");
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
     /// <summary>Opens the page of the automation, or uses the open one, and opens its edit dialog with its Edit button.</summary>
     private async Task<(IPage Page, ILocator Dialog)> OpenEditorAsync(string name, IPage? page = null)
     {

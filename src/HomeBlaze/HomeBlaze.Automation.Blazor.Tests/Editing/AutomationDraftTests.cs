@@ -85,6 +85,25 @@ public class AutomationDraftTests
     }
 
     [Fact]
+    public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheVersionChangesOnlyWithTheErrors()
+    {
+        // Arrange
+        var draft = new AutomationDraft();
+        var error = new AutomationValidationError(null, "Hold: Use a duration above 0");
+
+        // Act
+        draft.SetInputError("hold", error);
+        draft.SetInputError("hold", error);
+        var afterSet = draft.InputErrorVersion;
+        draft.SetInputError("hold", null);
+        draft.SetInputError("hold", null);
+
+        // Assert
+        Assert.Equal(1, afterSet);
+        Assert.Equal(2, draft.InputErrorVersion);
+    }
+
+    [Fact]
     public void WhenTheDraftIsRead_ThenItHasTheConfigurationWithTheRulesInRunOrder()
     {
         // Act
