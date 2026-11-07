@@ -33,9 +33,12 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     /// <summary>Whether the rule is active: its triggers are subscribed or about to evaluate their activation.</summary>
     public bool IsActivated { get; set; }
 
-    /// <summary>Whether the rule observes its triggers in an automation with this enabled flag and current state.</summary>
+    /// <summary>
+    /// Whether the rule observes its triggers in an automation with this enabled flag and current state: only in the modes
+    /// <see cref="AutomationRuleMode.DryRun"/> and <see cref="AutomationRuleMode.On"/>.
+    /// </summary>
     public bool IsActiveIn(bool isEnabled, string? currentState) =>
-        isEnabled && Mode != AutomationRuleMode.Off && (InState is null || string.Equals(InState, currentState, StringComparison.Ordinal));
+        isEnabled && Mode is AutomationRuleMode.DryRun or AutomationRuleMode.On && (InState is null || string.Equals(InState, currentState, StringComparison.Ordinal));
 
     public IReadOnlyList<TriggerStatus> GetTriggerStatuses()
     {

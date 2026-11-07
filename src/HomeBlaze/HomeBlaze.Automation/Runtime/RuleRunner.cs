@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Runs one request of one rule: checks the guard against the graph, records a dry run with the rendered actions, or
-/// sets the trigger time and runs the actions in order under their error policy. Logs every failed action with the
-/// automation, the rule, the action and the trigger.
+/// Runs one request of one rule: checks the guard against the graph, records a dry run with the rendered actions, or, in
+/// the mode <see cref="AutomationRuleMode.On"/> only, sets the trigger time and runs the actions in order under their
+/// error policy. Logs every failed action with the automation, the rule, the action and the trigger.
 /// </summary>
 internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger)
 {
@@ -27,6 +27,11 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         if (request.Rule.Mode == AutomationRuleMode.DryRun)
         {
             return RuleRunResult.DryRun("Would run " + string.Join("; ", Describe(request, host)));
+        }
+
+        if (request.Rule.Mode != AutomationRuleMode.On)
+        {
+            return RuleRunResult.Rejected($"Not run: the mode {request.Rule.Mode} is not defined");
         }
 
         request.Rule.Rule.LastTriggeredAt = timeProvider.GetUtcNow();

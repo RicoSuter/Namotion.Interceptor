@@ -92,8 +92,25 @@ public class AutomationCompilerTests
             "Rule 'Storm': action 'speed': argument 'speed': the value is missing"
         },
         { [], null, Rule(triggers: [null!], actions: [null!]), "Rule 'Storm': trigger 1: the type is unknown; action 1: the type is unknown" },
-        { [null!], null, Rule(), "A state needs a name; Choose the initial state" }
+        { [null!], null, Rule(), "A state needs a name; Choose the initial state" },
+        { [], null, WithMode(Rule(), (AutomationRuleMode)5), "Rule 'Storm': the mode 5 is not defined" },
+        {
+            [], null,
+            Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", OnActivation = (TriggerActivation)7 }]),
+            "Rule 'Storm': trigger 1: the activation policy 7 is not defined"
+        },
+        {
+            [], null,
+            Rule(actions: [new InvokeOperationAction { Id = "close", OperationPath = "/Blinds/Close", OnError = (ActionErrorPolicy)3 }]),
+            "Rule 'Storm': action 'close': the error policy 3 is not defined"
+        }
     };
+
+    private static AutomationRule WithMode(AutomationRule rule, AutomationRuleMode mode)
+    {
+        rule.Mode = mode;
+        return rule;
+    }
 
     [Theory]
     [MemberData(nameof(InvalidConfigurations))]

@@ -193,6 +193,24 @@ public class RuleRunnerTests
     }
 
     [Fact]
+    public async Task WhenTheModeIsUndefined_ThenNoActionRuns()
+    {
+        // Arrange
+        var rule = Rule(AutomationRuleMode.On, null, Invoke("/Blinds/Close"));
+        var request = Request(rule);
+        rule.Mode = (AutomationRuleMode)5;
+        var compiled = new CompiledRule("r1", rule, guard: null);
+
+        // Act
+        var result = await CreateRunner().RunAsync(request with { Rule = compiled }, new FakeRunHost(_host), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, _blinds.CloseCount);
+        Assert.Null(rule.LastTriggeredAt);
+        Assert.False(result.ExecutedActions);
+    }
+
+    [Fact]
     public async Task WhenTheAutomationStopsDuringARun_ThenTheRunIsCanceled()
     {
         // Arrange

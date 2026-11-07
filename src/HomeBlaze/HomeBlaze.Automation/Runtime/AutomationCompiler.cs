@@ -54,6 +54,11 @@ internal static class AutomationCompiler
     {
         var errors = new List<string>();
         var candidate = new CompiledRule(key, rule, CompileGuard(rule.Guard, errors));
+        if (!Enum.IsDefined(rule.Mode))
+        {
+            errors.Add($"the mode {rule.Mode} is not defined");
+        }
+
         if (rule.InState is { } state && !states.Contains(state, StringComparer.Ordinal))
         {
             errors.Add($"'{state}' is not a state");
@@ -185,6 +190,11 @@ internal static class AutomationCompiler
             return "the hold cannot be negative";
         }
 
+        if (!Enum.IsDefined(trigger.OnActivation))
+        {
+            return $"the activation policy {trigger.OnActivation} is not defined";
+        }
+
         ParsedExpression? rearm = null;
         if (!string.IsNullOrWhiteSpace(trigger.Rearm) &&
             !AutomationExpressionCheck.TryParseExpression(trigger.Rearm, allowsEvent: false, out rearm, out error))
@@ -236,7 +246,10 @@ internal static class AutomationCompiler
         }
     }
 
-    private static string? CheckAction(AutomationAction? action, bool allowsEvent, IReadOnlyList<string> states) => action switch
+    private static string? CheckAction(AutomationAction? action, bool allowsEvent, IReadOnlyList<string> states) =>
+        action is not null && !Enum.IsDefined(action.OnError) ? $"the error policy {action.OnError} is not defined" : CheckActionType(action, allowsEvent, states);
+
+    private static string? CheckActionType(AutomationAction? action, bool allowsEvent, IReadOnlyList<string> states) => action switch
     {
         InvokeOperationAction invoke => CheckInvoke(invoke, allowsEvent),
         SetPropertyAction set => CheckSet(set, allowsEvent),
