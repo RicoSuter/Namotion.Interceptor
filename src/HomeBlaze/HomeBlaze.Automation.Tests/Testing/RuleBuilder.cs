@@ -8,9 +8,9 @@ internal static class RuleBuilder
         AutomationRuleMode mode,
         AutomationTrigger[] triggers,
         AutomationAction[] actions,
-        string? guard = null,
+        string? onlyIf = null,
         string? inState = null) =>
-        new() { Name = name, Mode = mode, Triggers = triggers, Actions = actions, Guard = guard, InState = inState };
+        new() { Name = name, Mode = mode, Triggers = triggers, Actions = actions, OnlyIf = onlyIf, InState = inState };
 
     public static AutomationRule On(string name, AutomationTrigger trigger, params AutomationAction[] actions) =>
         Create(name, AutomationRuleMode.On, [trigger], actions);

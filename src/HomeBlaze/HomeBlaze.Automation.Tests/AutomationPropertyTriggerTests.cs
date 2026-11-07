@@ -10,15 +10,15 @@ namespace HomeBlaze.Automation.Tests;
 
 public class AutomationPropertyTriggerTests
 {
-    private const string StormGuard = "not /Blinds/IsMoving and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
+    private const string StormOnlyIf = "not /Blinds/IsMoving and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)";
 
-    private static Action<Automation> Storm(string? guard = null) => automation => automation.Rules = Keyed(
+    private static Action<Automation> Storm(string? onlyIf = null) => automation => automation.Rules = Keyed(
         ("retract", Create(
             "Retract blinds",
             AutomationRuleMode.On,
             [When("/Weather/Gust > 8", TimeSpan.FromSeconds(20), rearm: "/Weather/Gust < 6")],
             [Invoke("/Blinds/Close")],
-            guard)));
+            onlyIf)));
 
     private static async Task HoldGustAsync(AutomationTestHost host, double gust)
     {
@@ -159,10 +159,10 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardRejects_ThenNoRunIsRecordedAndTheStatusSaysWhy()
+    public async Task WhenOnlyIfRejects_ThenNoRunIsRecordedAndTheStatusSaysWhy()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(Storm(StormGuard));
+        await using var host = await AutomationTestHost.StartAsync(Storm(StormOnlyIf));
         var rule = host.Rule("retract");
         host.Blinds.IsMoving = true;
 
@@ -180,10 +180,10 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
-    public async Task WhenTheRuleTriggersAgainWithinTheCooldown_ThenTheGuardRejectsIt()
+    public async Task WhenTheRuleTriggersAgainWithinTheCooldown_ThenOnlyIfRejectsIt()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(Storm(StormGuard));
+        await using var host = await AutomationTestHost.StartAsync(Storm(StormOnlyIf));
         var rule = host.Rule("retract");
         await HoldGustAsync(host, 9);
 

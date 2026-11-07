@@ -10,12 +10,12 @@ public class AutomationCompilerTests
         string? name = "Storm",
         AutomationTrigger[]? triggers = null,
         AutomationAction[]? actions = null,
-        string? guard = null,
+        string? onlyIf = null,
         string? inState = null) => new()
     {
         Name = name,
         Mode = AutomationRuleMode.On,
-        Guard = guard,
+        OnlyIf = onlyIf,
         InState = inState,
         Triggers = triggers ?? [new PropertyTrigger { Expression = "/Weather/Gust > 8" }],
         Actions = actions ?? [new InvokeOperationAction { Id = "close", OperationPath = "/Blinds/Close" }]
@@ -64,7 +64,7 @@ public class AutomationCompilerTests
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "event/Gesture == Release" }]), "Rule 'Storm': trigger 1: " + EventOnly },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromSeconds(-1) }]), "Rule 'Storm': trigger 1: the hold cannot be negative" },
         { [], null, Rule(triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }]), "Rule 'Storm': trigger 1: the event type is missing" },
-        { [], null, Rule(guard: "event/Gesture == Release"), "Rule 'Storm': guard: " + EventOnly },
+        { [], null, Rule(onlyIf: "event/Gesture == Release"), "Rule 'Storm': Only if: " + EventOnly },
         { [], null, Rule(actions: [new InvokeOperationAction { OperationPath = "" }]), "Rule 'Storm': action 1: the operation path is missing" },
         {
             [], null,
@@ -163,11 +163,11 @@ public class AutomationCompilerTests
     }
 
     [Fact]
-    public void WhenOneRuleHasSeveralErrors_ThenGuardTriggerAndActionErrorsAreReportedInOrder()
+    public void WhenOneRuleHasSeveralErrors_ThenOnlyIfTriggerAndActionErrorsAreReportedInOrder()
     {
         // Arrange
         var rule = Rule(
-            guard: "event/Gesture == Release",
+            onlyIf: "event/Gesture == Release",
             triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }],
             actions: [new InvokeOperationAction { OperationPath = "" }]);
 
@@ -178,7 +178,7 @@ public class AutomationCompilerTests
         Assert.False(isCompiled);
         Assert.Null(compiled);
         Assert.Equal(
-            "Rule 'Storm': guard: " + EventOnly + "; trigger 1: the event type is missing; action 1: the operation path is missing",
+            "Rule 'Storm': Only if: " + EventOnly + "; trigger 1: the event type is missing; action 1: the operation path is missing",
             error);
     }
 

@@ -148,7 +148,7 @@ public class AutomationRestartTests
     }
 
     [Fact]
-    public async Task WhenRestartedWithinTheCooldown_ThenTheGuardStillRejects()
+    public async Task WhenRestartedWithinTheCooldown_ThenOnlyIfStillRejects()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
@@ -157,7 +157,7 @@ public class AutomationRestartTests
                 AutomationRuleMode.On,
                 [When("/Weather/Gust > 8")],
                 [Invoke("/Blinds/Close")],
-                guard: "./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m"))));
+                onlyIf: "./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m"))));
         host.Weather.Gust = 9;
         await host.FlushAsync();
 

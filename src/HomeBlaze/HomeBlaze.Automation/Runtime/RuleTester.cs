@@ -4,7 +4,7 @@ using HomeBlaze.Automation.Expressions;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Evaluates a rule for <see cref="AutomationRule.TestNow"/>: its triggers and its guard against the graph at this
+/// Evaluates a rule for <see cref="AutomationRule.TestNow"/>: its triggers and Only if against the graph at this
 /// instant, and its actions with their rendered arguments. It compiles the rule on its own, so it works in every mode and
 /// while the automation is stopped, and it changes no runtime state.
 /// </summary>
@@ -19,8 +19,8 @@ internal static class RuleTester
         }
 
         var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
-        var guard = compiled.Guard is { } guardExpression ? evaluation.EvaluateCondition(guardExpression) : true;
-        IReadOnlyList<string> guardMissingPaths = guard is null ? [.. evaluation.MissingPaths] : [];
+        var onlyIf = compiled.OnlyIf is { } onlyIfExpression ? evaluation.EvaluateCondition(onlyIfExpression) : true;
+        IReadOnlyList<string> onlyIfMissingPaths = onlyIf is null ? [.. evaluation.MissingPaths] : [];
         var triggers = compiled.PropertyTriggers.Select(trigger => TestPropertyTrigger(trigger, evaluation))
             .Concat(compiled.EventTriggers.Select(trigger => TestEventTrigger(trigger, automation)))
             .OrderBy(trigger => trigger.Number)
@@ -31,9 +31,9 @@ internal static class RuleTester
         {
             IsActive = compiled.IsActiveIn(automation.Enabled, automation.CurrentState),
             Triggers = triggers,
-            HasGuard = compiled.Guard is not null,
-            GuardResult = guard,
-            GuardMissingPaths = guardMissingPaths,
+            HasOnlyIf = compiled.OnlyIf is not null,
+            OnlyIfResult = onlyIf,
+            OnlyIfMissingPaths = onlyIfMissingPaths,
             Actions = [.. compiled.Actions.Select(action => executor.Describe(action, scope))]
         };
     }

@@ -143,7 +143,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     /// <summary>
-    /// Gets when the next tick is due: for a trigger or a guard that is due, to write the runs or to log drops; null when nothing is,
+    /// Gets when the next tick is due: for a trigger or an Only if that is due, to write the runs or to log drops; null when nothing is,
     /// so that an automation without holds, clock reads, waiting rules or unwritten runs is never woken up.
     /// </summary>
     public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
@@ -237,7 +237,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         {
             _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
 
-            // No recheck of their guard follows, since a recheck would run them and continue the chain.
+            // No recheck of their Only if follows, since a recheck would run them and continue the chain.
             _triggers.TrackPending(_snapshot.Rules, stopped);
         }
 
@@ -377,7 +377,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _status.ApplyEnabled();
         ActivateRules();
 
-        // A trigger that waits keeps waiting across a Save, whose new guard may let it run now.
+        // A trigger that waits keeps waiting across a Save, whose new Only if may let it run now.
         if (_triggers.HasPending)
         {
             _triggers.RequestPendingRecheck();
@@ -498,7 +498,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         RunUnlessAbandoned(() =>
         {
             // A skipped trigger of a rule that stays active runs in a later input, after the state change, and a trigger
-            // that started to wait checks its guard again once the properties of the guard are watched.
+            // that started to wait checks Only if again once the properties of Only if are watched.
             if (hasNewPending || summary.SkippedForStateChange)
             {
                 _triggers.RequestPendingRecheck();

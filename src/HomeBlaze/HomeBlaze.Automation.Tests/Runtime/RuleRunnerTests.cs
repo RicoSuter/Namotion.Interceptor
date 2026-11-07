@@ -38,11 +38,11 @@ public class RuleRunnerTests
         return new RunRequest(compiled, capturedEvent, "trigger 1");
     }
 
-    private static AutomationRule Rule(AutomationRuleMode mode, string? guard, params AutomationAction[] actions) => new()
+    private static AutomationRule Rule(AutomationRuleMode mode, string? onlyIf, params AutomationAction[] actions) => new()
     {
         Name = "Storm",
         Mode = mode,
-        Guard = guard,
+        OnlyIf = onlyIf,
         Triggers = [new PropertyTrigger { Expression = "/Weather/Gust > 8" }],
         Actions = actions
     };
@@ -56,7 +56,7 @@ public class RuleRunnerTests
     };
 
     [Fact]
-    public async Task WhenTheGuardPasses_ThenTheActionsRunInOrderAndTheTriggerTimeIsSet()
+    public async Task WhenOnlyIfPasses_ThenTheActionsRunInOrderAndTheTriggerTimeIsSet()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "not /Blinds/IsMoving", Invoke("/Blinds/MoveTo", position: "40"), Invoke("/Blinds/Close"));
@@ -76,7 +76,7 @@ public class RuleRunnerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardIsFalse_ThenTheRequestDoesNotRunAndNothingRuns()
+    public async Task WhenOnlyIfIsFalse_ThenTheRequestDoesNotRunAndNothingRuns()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "not /Blinds/IsMoving", Invoke("/Blinds/Close"));
@@ -94,7 +94,7 @@ public class RuleRunnerTests
     }
 
     [Fact]
-    public async Task WhenTheGuardIsUnknown_ThenTheRequestDoesNotRunNamingTheMissingPaths()
+    public async Task WhenOnlyIfIsUnknown_ThenTheRequestDoesNotRunNamingTheMissingPaths()
     {
         // Arrange
         var rule = Rule(AutomationRuleMode.On, "/Weather/Rain > 0", Invoke("/Blinds/Close"));
@@ -199,7 +199,7 @@ public class RuleRunnerTests
         var rule = Rule(AutomationRuleMode.On, null, Invoke("/Blinds/Close"));
         var request = Request(rule);
         rule.Mode = (AutomationRuleMode)5;
-        var compiled = new CompiledRule("r1", rule, guard: null);
+        var compiled = new CompiledRule("r1", rule, onlyIf: null);
 
         // Act
         var result = await CreateRunner().RunAsync(request with { Rule = compiled }, new FakeRunHost(_host), CancellationToken.None);

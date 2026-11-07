@@ -296,7 +296,7 @@ public class AutomationRunTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
             ("jam", On("Jam", When("/Weather/Rain > 0"), Invoke("/Blinds/Jam"))),
-            ("close", Create("Close", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], guard: "/Blinds/IsLocked"))));
+            ("close", Create("Close", AutomationRuleMode.On, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")], onlyIf: "/Blinds/IsLocked"))));
         host.Weather.Rain = 1;
         await host.FlushAsync();
         var messageAfterTheFailure = host.Automation.StatusMessage;

@@ -22,7 +22,7 @@ public class AutomationRuleSerializationTests
             Name = "Retract blinds",
             Mode = AutomationRuleMode.On,
             InState = "Day",
-            Guard = "not /Blinds/IsMoving",
+            OnlyIf = "not /Blinds/IsMoving",
             Triggers =
             [
                 new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromSeconds(20), Rearm = "/Weather/Gust < 6", OnActivation = TriggerActivation.WaitForFalseToTrue },
@@ -51,6 +51,7 @@ public class AutomationRuleSerializationTests
         using var document = JsonDocument.Parse(json);
         Assert.Equal("PropertyTrigger", document.RootElement.GetProperty("triggers")[0].GetProperty("$type").GetString());
         Assert.Equal("20s", document.RootElement.GetProperty("triggers")[0].GetProperty("for").GetString());
+        Assert.Equal("not /Blinds/IsMoving", document.RootElement.GetProperty("onlyIf").GetString());
         Assert.Equal("InvokeOperation", document.RootElement.GetProperty("actions")[1].GetProperty("$type").GetString());
         Assert.Equal(rule.Triggers, copy.Triggers);
         Assert.Equal(rule.Actions[2], copy.Actions[2]);
@@ -60,7 +61,7 @@ public class AutomationRuleSerializationTests
         Assert.Equal("Gust {{ /Weather/Gust }} m/s", notify.Arguments["notification.Message"]);
         Assert.Equal(AutomationRuleMode.On, copy.Mode);
         Assert.Equal("Day", copy.InState);
-        Assert.Equal("not /Blinds/IsMoving", copy.Guard);
+        Assert.Equal("not /Blinds/IsMoving", copy.OnlyIf);
     }
 
     [Theory]
@@ -120,6 +121,31 @@ public class AutomationRuleSerializationTests
           "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8", "for": {{value}} } ]
         }
         """;
+
+    [Fact]
+    public void WhenTheRuleHasAnUnknownKey_ThenTheKeyIsIgnored()
+    {
+        // Arrange
+        var serializer = CreateSerializer();
+        const string json = """
+            {
+              "$type": "HomeBlaze.Automation.AutomationRule",
+              "name": "Retract",
+              "guard": "not /Blinds/IsMoving",
+              "triggers": [ { "$type": "PropertyTrigger", "expression": "/Weather/Gust > 8" } ]
+            }
+            """;
+        var skipped = new List<SkippedConfigurationProperty>();
+
+        // Act
+        var rule = (AutomationRule)serializer.Deserialize(json, created: null, skipped.Add)!;
+
+        // Assert
+        Assert.Equal("Retract", rule.Name);
+        Assert.Null(rule.OnlyIf);
+        Assert.Single(rule.Triggers);
+        Assert.Empty(skipped);
+    }
 
     [Fact]
     public void WhenTriggerHasAnUnknownDiscriminator_ThenTheTriggersAreRejected()

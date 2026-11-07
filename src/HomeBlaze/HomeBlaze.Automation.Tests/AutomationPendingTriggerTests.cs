@@ -8,13 +8,13 @@ public class AutomationPendingTriggerTests
 {
     private const string Cooldown = "./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m";
 
-    private static Action<Automation> ConveyorGuard(string guard = Cooldown) => automation => automation.Rules = Keyed(
+    private static Action<Automation> ConveyorGuard(string onlyIf = Cooldown) => automation => automation.Rules = Keyed(
         ("overheat", Create(
             "Slow down when hot",
             AutomationRuleMode.On,
             [When("/Weather/Power > 40", TimeSpan.FromSeconds(30), rearm: "/Weather/Power < 38")],
             [Invoke("/Blinds/Close")],
-            guard)));
+            onlyIf)));
 
     private static async Task SetAsync(AutomationTestHost host, double power)
     {

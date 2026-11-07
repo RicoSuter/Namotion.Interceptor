@@ -10,9 +10,9 @@ public class ExpressionClockTests
 
     private static readonly TimeZoneInfo Zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
 
-    private static ExpressionClock? Create(string guard)
+    private static ExpressionClock? Create(string text)
     {
-        Assert.True(AutomationExpressionCheck.TryParseExpression(guard, allowsEvent: false, out var expression, out var error), error);
+        Assert.True(AutomationExpressionCheck.TryParseExpression(text, allowsEvent: false, out var expression, out var error), error);
         return ExpressionClock.Create(expression);
     }
 
@@ -20,10 +20,10 @@ public class ExpressionClockTests
     [InlineData("./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m", "./LastTriggeredAt", 600, 1)]
     [InlineData("not /Blinds/IsMoving and (./LastTriggeredAt == null or now - ./LastTriggeredAt >= 1h30m)", "./LastTriggeredAt", 5400, 0)]
     [InlineData("now - /Weather/LastUpdated < 15m && /Weather/Gust > 8", "/Weather/LastUpdated", 900, 0)]
-    public void WhenTheGuardComparesElapsedTime_ThenItChangesOnlyAtTheDerivedInstant(string guard, string path, int seconds, int ticks)
+    public void WhenAnExpressionComparesElapsedTime_ThenItChangesOnlyAtTheDerivedInstant(string text, string path, int seconds, int ticks)
     {
         // Act
-        var clock = Create(guard);
+        var clock = Create(text);
 
         // Assert
         Assert.NotNull(clock);
@@ -39,10 +39,10 @@ public class ExpressionClockTests
     [InlineData("now > ../StateEnteredAt + 5m")]
     [InlineData("now - ./LastTriggeredAt > 10m or now == ../StateEnteredAt")]
     [InlineData("now - ./LastTriggeredAt > 600")]
-    public void WhenTheGuardReadsTheClockOtherwise_ThenItIsEvaluatedEverySecond(string guard)
+    public void WhenAnExpressionReadsTheClockOtherwise_ThenItIsEvaluatedEverySecond(string text)
     {
         // Act
-        var clock = Create(guard);
+        var clock = Create(text);
 
         // Assert
         Assert.NotNull(clock);
@@ -50,7 +50,7 @@ public class ExpressionClockTests
     }
 
     [Fact]
-    public void WhenTheGuardDoesNotReadTheClock_ThenItHasNoClock()
+    public void WhenAnExpressionDoesNotReadTheClock_ThenItHasNoClock()
     {
         // Act
         var clock = Create("not /Blinds/IsMoving");

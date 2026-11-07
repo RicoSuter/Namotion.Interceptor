@@ -18,7 +18,7 @@
           "rearm": "/Demo/Conveyor/Temperature < 38"
         }
       ],
-      "guard": "./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m",
+      "onlyIf": "./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m",
       "actions": [
         {
           "$type": "InvokeOperation",

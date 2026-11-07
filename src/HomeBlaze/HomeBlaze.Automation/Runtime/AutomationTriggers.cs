@@ -196,7 +196,7 @@ internal sealed class AutomationTriggers
     /// <summary>Queues a request of the runs of every pending property trigger, such as after a state change skipped them.</summary>
     public void RequestPendingRecheck() => _queue.TryEnqueue(new PendingRecheckInput(AutomationInputQueue.CausedChainDepth));
 
-    /// <summary>Gets when the next property trigger or guard is due for a tick, or null when none is.</summary>
+    /// <summary>Gets when the next property trigger or Only if is due for a tick, or null when none is.</summary>
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now) => _propertyTriggers.GetNextDueAt(rules, now);
 
     /// <summary>Whether a property trigger is pending.</summary>
@@ -204,7 +204,7 @@ internal sealed class AutomationTriggers
 
     /// <summary>
     /// Keeps track of the pending property triggers after the requests were dispatched. Returns whether a trigger became
-    /// pending, whose guard is to be checked again in a later input: a property it reads may have changed before it was
+    /// pending, whose Only if is to be checked again in a later input: a property it reads may have changed before it was
     /// watched.
     /// </summary>
     public bool TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
