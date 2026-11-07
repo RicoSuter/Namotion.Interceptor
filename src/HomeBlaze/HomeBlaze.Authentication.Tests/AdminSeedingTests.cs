@@ -5,6 +5,7 @@ using HomeBlaze.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor.Authorization;
 using Xunit;
 
 namespace HomeBlaze.Authentication.Tests;
@@ -203,6 +204,31 @@ public class AdminSeedingTests
         Assert.False(await graph.UserManager.IsLockedOutAsync(admin));
         Assert.Contains(BuiltInRoles.EverythingName, graph.UserStore.GetRoles(admin.Id));
         Assert.False(graph.Authorization.Users["admin"].IsLockedOut);
+    }
+
+    [Fact]
+    public async Task WhenAdminHoldsARoleThatDeniesAdministerAndIsReset_ThenItHoldsOnlyEverythingAndAdministersAgain()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        var saved = await graph.RoleStore.SaveRoleAsync(null, new AuthorizationRole
+        {
+            Name = "noadmin",
+            Deny = [new PermissionRule { Actions = [AuthorizationActions.Administer] }]
+        }, null, CancellationToken.None);
+        Assert.True(saved.Succeeded, saved.Error);
+        await graph.AddUserAsync("boss", [BuiltInRoles.EverythingName]);
+        var bossId = graph.UserStore.GetUserId("boss")!;
+        var denied = await graph.AdministrationAs(bossId).SetRolesAsync("admin", [BuiltInRoles.EverythingName, "noadmin", BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(denied.Succeeded, denied.Error);
+
+        // Act
+        await graph.ResetAdminAsync();
+        var administered = await graph.AdministrationAs(graph.AdminUserId).SetRolesAsync("boss", [BuiltInRoles.OperatorName], CancellationToken.None);
+
+        // Assert
+        Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
+        Assert.True(administered.Succeeded, administered.Error);
     }
 
     [Fact]

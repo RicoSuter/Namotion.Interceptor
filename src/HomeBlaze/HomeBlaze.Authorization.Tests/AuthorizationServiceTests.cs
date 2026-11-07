@@ -539,6 +539,26 @@ public sealed class AuthorizationServiceTests : IDisposable
     }
 
     [Fact]
+    public void WhenARoleInTheClosureDeniesAdminister_ThenTheHolderIsNoFullAdministrator()
+    {
+        // Arrange
+        AddAuthorization(
+            ("noadmin", new Role { Deny = [new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Administer] }] }),
+            ("admins", new Role { Includes = [BuiltInRoles.EverythingName, "noadmin"] }),
+            ("nowrite", new Role { Deny = [new PermissionRule { Paths = ["/Devices/**"], Actions = [PermissionAction.Write] }] }));
+
+        // Act
+        var isDirectlyFullAdministrator = _service.IsFullAdministrator([BuiltInRoles.EverythingName, "noadmin"]);
+        var isIncludedFullAdministrator = _service.IsFullAdministrator(["admins"]);
+        var isWithOtherDenyFullAdministrator = _service.IsFullAdministrator([BuiltInRoles.EverythingName, "nowrite"]);
+
+        // Assert
+        Assert.False(isDirectlyFullAdministrator);
+        Assert.False(isIncludedFullAdministrator);
+        Assert.True(isWithOtherDenyFullAdministrator);
+    }
+
+    [Fact]
     public void WhenTheClosureIsGivenToTheFullAdministratorCheck_ThenItDecidesAsWithoutIt()
     {
         // Arrange

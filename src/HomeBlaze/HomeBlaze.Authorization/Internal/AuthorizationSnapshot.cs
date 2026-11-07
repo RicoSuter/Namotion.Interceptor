@@ -296,6 +296,13 @@ internal sealed class AuthorizationSnapshot
         return index >= 0 ? !_roles[index].Deny.IsDefaultOrEmpty : null;
     }
 
+    /// <summary>Whether the usable role named <paramref name="name"/> denies administer, see <see cref="AuthorizationServiceRoleExtensions.DeniesAdminister"/>.</summary>
+    public bool DeniesAdminister(string name)
+    {
+        var index = IndexOfRole(name);
+        return index >= 0 && AuthorizationServiceRoleExtensions.DeniesAdminister(_roles[index]);
+    }
+
     private int IndexOfRole(string name)
     {
         for (var index = 0; index < _roles.Length; index++)

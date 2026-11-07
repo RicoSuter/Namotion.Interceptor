@@ -543,6 +543,44 @@ public class UserStoreTests
     }
 
     [Fact]
+    public async Task WhenTheLastFullAdministratorWouldGetARoleThatDeniesAdminister_ThenItIsRefused()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await SaveRoleAsync(graph, NoAdministrationRole());
+        var administration = graph.AdministrationAs(graph.AdminUserId);
+
+        // Act
+        var result = await administration.SetRolesAsync("admin", [BuiltInRoles.EverythingName, NoAdministrationRole().Name], CancellationToken.None);
+
+        // Assert
+        Assert.Equal("'admin' is the last unlocked full administrator; give another user everything first.", result.Error);
+        Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
+    }
+
+    [Fact]
+    public async Task WhenTheOnlyOtherUserWithEverythingHasARoleThatDeniesAdminister_ThenTheyDoNotCount()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await SaveRoleAsync(graph, NoAdministrationRole());
+        await graph.AddUserAsync("boss", [BuiltInRoles.EverythingName, NoAdministrationRole().Name]);
+        var administration = graph.AdministrationAs(graph.AdminUserId);
+
+        // Act
+        var demoted = await administration.SetRolesAsync("admin", [BuiltInRoles.OperatorName], CancellationToken.None);
+        var removed = await administration.RemoveAsync("admin", CancellationToken.None);
+        var locked = await administration.SetLockedAsync("admin", true, CancellationToken.None);
+
+        // Assert
+        var expected = "'admin' is the last unlocked full administrator; give another user everything first.";
+        Assert.Equal(expected, demoted.Error);
+        Assert.Equal(expected, removed.Error);
+        Assert.Equal(expected, locked.Error);
+        Assert.Equal([BuiltInRoles.EverythingName], graph.UserStore.GetRoles(graph.AdminUserId));
+    }
+
+    [Fact]
     public async Task WhenTheOnlyOtherFullAdministratorIsLockedOutAfterFailedSignIns_ThenTheyCount()
     {
         // Arrange
@@ -864,6 +902,19 @@ public class UserStoreTests
             new PermissionRule { Paths = ["/Authorization/Users/**"], Actions = [AuthorizationActions.Administer] },
             new PermissionRule { Paths = ["/Authorization/AddUser"], Actions = [AuthorizationActions.Administer] }
         ]
+    };
+
+    private static async Task SaveRoleAsync(AuthenticationTestGraph graph, AuthorizationRole role)
+    {
+        var saved = await graph.RoleStore.SaveRoleAsync(null, role, null, CancellationToken.None);
+        Assert.True(saved.Succeeded, saved.Error);
+    }
+
+    // Denies administer on one branch only, which still takes full administration away.
+    private static AuthorizationRole NoAdministrationRole() => new()
+    {
+        Name = "noadmin",
+        Deny = [new PermissionRule { Paths = ["/Heating/**"], Actions = [AuthorizationActions.Administer] }]
     };
 
     // Includes Operator and denies writing below /Heating.

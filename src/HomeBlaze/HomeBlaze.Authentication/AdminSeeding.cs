@@ -98,7 +98,7 @@ public static class AdminSeeding
     }
 
     /// <summary>
-    /// Creates <see cref="AdminUserName"/> when missing, grants it <see cref="BuiltInRoles.EverythingName"/>, clears its
+    /// Creates <see cref="AdminUserName"/> when missing, sets its roles to <see cref="BuiltInRoles.EverythingName"/> alone, clears its
     /// password so that it signs in with an empty one and must set a password, unlocks it, updates the security stamp
     /// of every user so that every session ends, and writes the seed marker. The missing built-in roles and users are
     /// created too.
@@ -137,6 +137,16 @@ public static class AdminSeeding
             ThrowIfFailed(await userManager.SetLockoutEnabledAsync(admin, true));
             ThrowIfFailed(await userManager.SetLockoutEndDateAsync(admin, null));
             ThrowIfFailed(await userManager.ResetAccessFailedCountAsync(admin));
+            // Only everything, so that no other role, such as one that denies administer, keeps the administrator from
+            // administering.
+            var otherRoles = (await userManager.GetRolesAsync(admin))
+                .Where(role => !string.Equals(role, BuiltInRoles.EverythingName, StringComparison.Ordinal))
+                .ToArray();
+            if (otherRoles.Length > 0)
+            {
+                ThrowIfFailed(await userManager.RemoveFromRolesAsync(admin, otherRoles));
+            }
+
             if (!await userManager.IsInRoleAsync(admin, BuiltInRoles.EverythingName))
             {
                 ThrowIfFailed(await userManager.AddToRoleAsync(admin, BuiltInRoles.EverythingName));

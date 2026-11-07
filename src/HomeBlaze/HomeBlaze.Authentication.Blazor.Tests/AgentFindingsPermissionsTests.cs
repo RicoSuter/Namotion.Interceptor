@@ -147,6 +147,27 @@ public class AgentFindingsPermissionsTests
     }
 
     [Fact]
+    public async Task WhenAPersonWithEverythingHoldsARoleThatDeniesAdminister_ThenTheyAreNoFullAdministrator()
+    {
+        // Arrange
+        var noAdministrationRole = new AuthorizationRole
+        {
+            Name = "noadmin",
+            Deny = [new PermissionRule { Paths = ["/Heating/**"], Actions = [AuthorizationActions.Administer] }]
+        };
+        await using var graph = await PermissionsTestGraph.CreateAsync(
+            roles: [BuiltInRoles.EverythingName, noAdministrationRole.Name], customRoles: [noAdministrationRole]);
+
+        // Act
+        var canActThroughNoRoles = graph.Permissions.CanActThrough([]);
+        var holdsKid = graph.Permissions.HoldsAllRoles([KidRole.Name]);
+
+        // Assert
+        Assert.False(canActThroughNoRoles);
+        Assert.False(holdsKid);
+    }
+
+    [Fact]
     public async Task WhenAPersonHoldsNoRoleWithDenyRules_ThenTheyChatWithAgentsHoldingTheirRolesAsBefore()
     {
         // Arrange

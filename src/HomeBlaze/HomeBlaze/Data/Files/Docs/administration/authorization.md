@@ -64,7 +64,7 @@ A new user has no password. Adding a user and resetting a password create a one-
 
 ### Recovery
 
-`--reset-admin` creates `admin` when it is missing, gives it `everything`, removes its password so that it signs in with an empty one and must set a new one, unlocks it, ends every session of every user and writes the seed marker. It then exits without starting the server, so it can run while no one can sign in. Stop HomeBlaze first, then run it once:
+`--reset-admin` creates `admin` when it is missing, sets its roles to `everything` alone, so that no other role, such as one that denies `administer`, keeps it from administering, removes its password so that it signs in with an empty one and must set a new one, unlocks it, ends every session of every user and writes the seed marker. It then exits without starting the server, so it can run while no one can sign in. Stop HomeBlaze first, then run it once:
 
 ```bash
 dotnet run --project src/HomeBlaze/HomeBlaze -- --reset-admin
@@ -100,7 +100,7 @@ The field "Roles" of "Add User" and "Set Roles" picks the roles from a list with
 
 The pane of a user disables the operations that do not apply to the user, with the reason as tooltip: "Remove", "Reset Password", "Lock", "Unlock" and "Set Display Name" on the built-in users, and "Create Key" and "Revoke Key" on every user but `mcp`. Passwords, security stamps and setup codes are never part of a user. Every change of a user, role or the `mcp` key is logged without secrets, as are sign-ins, failed sign-ins, lockouts and setup codes, which is the record available until an audit trail exists.
 
-Two rules protect the installation: the last unlocked user with `everything` cannot be removed, locked or lose `everything`, and a change of a role that would leave no unlocked user with `everything` is refused, as is one that would give a deny rule on `administer` to every unlocked user with `everything`. Unlocked means not locked by an administrator; a lockout after wrong passwords does not count.
+Two rules protect the installation, both counting only full administrators, people with `everything` and no role that denies `administer`, see [Administration](#administration): a user operation that would leave no unlocked full administrator is refused, such as removing or locking the last one, taking `everything` from them or giving them a role that denies `administer`, and so is a change of a role that would leave no unlocked full administrator, such as adding a deny rule on `administer` to a role every one of them holds. Unlocked means not locked by an administrator; a lockout after wrong passwords does not count.
 
 ### Names
 
@@ -160,7 +160,7 @@ The built-in roles are defined in code, always available and cannot be changed. 
 |------|--------|
 | `reader` | `read` and `history` on every member; `execute` on `query` |
 | `operator` | All `reader` allows, and `write` on every member and `execute` on `operation` |
-| `everything` | Every action on every member, including `administer`. A person with it is a full administrator, see [Administration](#administration) |
+| `everything` | Every action on every member, including `administer`. A person with it is a full administrator unless another of their roles denies `administer`, see [Administration](#administration) |
 
 The [system rules](#system-rules) apply to all three, so even `everything` never reads a secret and never writes configuration through `write`. For agents and `/mcp` clients it also never runs an operation that requires confirmation, reaches an agent or administers. `reader` and `operator` do not allow `administer`.
 
@@ -408,7 +408,7 @@ Changing configuration can run code or point the application at its own data, su
 **Who may administer**
 
 - **Users**: a role that allows `administer` on the users, `Authorization.Users`, `Add User` and `User`, lets a person manage users under the rules of [Delegating User Management](#delegating-user-management).
-- **Everything else** needs a full administrator, a person whose roles include `everything`: changing configuration, creating and deleting subjects, editing pages and files, the other administration operations, role definitions, and the roles and key of `anonymous` and `mcp`. A grant of `administer` on any other member does not make a person an administrator of it; scoped administration of configuration and pages is not available yet.
+- **Everything else** needs a full administrator, a person whose roles include `everything` and none of whose roles, counting the roles those include, has a deny rule on `administer`, whatever it selects: changing configuration, creating and deleting subjects, editing pages and files, the other administration operations, role definitions, and the roles and key of `anonymous` and `mcp`. A grant of `administer` on any other member does not make a person an administrator of it; scoped administration of configuration and pages is not available yet.
 - **Agents and `/mcp` clients** never administer, whatever their roles say, because what an agent does is steered by text it reads, such as pages and device values.
 
 **What the browser checks**

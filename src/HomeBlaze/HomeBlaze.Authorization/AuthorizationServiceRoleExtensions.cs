@@ -64,8 +64,9 @@ public static class AuthorizationServiceRoleExtensions
 
     /// <summary>
     /// Whether a person holding <paramref name="roleNames"/> is a full administrator: the closure of the names contains
-    /// <see cref="BuiltInRoles.EverythingName"/> and the names compile into the policy of a person, so that a set naming an
-    /// unknown or broken role, whose policy denies everything, never counts.
+    /// <see cref="BuiltInRoles.EverythingName"/>, no role of the closure denies administer (see <see cref="DeniesAdminister"/>),
+    /// and the names compile into the policy of a person, so that a set naming an unknown or broken role, whose policy
+    /// denies everything, never counts.
     /// </summary>
     public static bool IsFullAdministrator(this AuthorizationService service, IReadOnlyCollection<string> roleNames) =>
         service.IsFullAdministrator(roleNames, service.GetRoleClosure(roleNames));
@@ -79,7 +80,40 @@ public static class AuthorizationServiceRoleExtensions
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(roleClosure);
 
-        return roleClosure.Contains(BuiltInRoles.EverythingName) && service.GetPolicy(roleNames, PrincipalKind.Person).Error is null;
+        if (!roleClosure.Contains(BuiltInRoles.EverythingName))
+        {
+            return false;
+        }
+
+        var snapshot = service.GetSnapshot();
+        foreach (var name in roleClosure)
+        {
+            if (snapshot.DeniesAdminister(name))
+            {
+                return false;
+            }
+        }
+
+        return snapshot.GetPolicy(roleNames, PrincipalKind.Person).Error is null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="role"/> has a deny rule that names <see cref="AuthorizationActions.Administer"/>, whatever
+    /// it selects, which keeps a person holding it, directly or through includes, from being a full administrator.
+    /// </summary>
+    public static bool DeniesAdminister(AuthorizationRole role)
+    {
+        ArgumentNullException.ThrowIfNull(role);
+
+        foreach (var rule in role.Deny)
+        {
+            if (rule.Actions.Contains(AuthorizationActions.Administer))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

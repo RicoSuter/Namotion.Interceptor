@@ -5,7 +5,8 @@ namespace HomeBlaze.Authentication.Internal;
 
 /// <summary>
 /// Whether role sets reach <see cref="BuiltInRoles.EverythingName"/> through the includes of a given set of custom roles,
-/// with no role in reach that denies <c>administer</c>, which would keep the person from administering roles and users.
+/// with no role in reach that denies <c>administer</c>, as <see cref="AuthorizationServiceRoleExtensions.IsFullAdministrator(AuthorizationService, IReadOnlyCollection{string})"/>
+/// decides for the current roles.
 /// </summary>
 internal static class FullAdministrators
 {
@@ -71,8 +72,7 @@ internal static class FullAdministrators
                 continue;
             }
 
-            // Any deny of administer counts, whatever it selects, as the guard does not resolve rules against the graph.
-            if (role.Deny.Any(rule => rule.Actions.Contains(AuthorizationActions.Administer)))
+            if (AuthorizationServiceRoleExtensions.DeniesAdminister(role))
             {
                 return false;
             }
