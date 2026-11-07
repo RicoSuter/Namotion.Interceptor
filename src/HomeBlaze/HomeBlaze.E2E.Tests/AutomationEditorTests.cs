@@ -2,6 +2,7 @@ using HomeBlaze.Automation;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using System.Text.Json;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests;
@@ -367,6 +368,57 @@ public class AutomationEditorTests
         finally
         {
             await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheOperationOfAnActionInARuleThatIsNotShownAppearsBeforeSave_ThenSaveListsItsMissingArgumentAndKeepsTheDialogOpen()
+    {
+        // Arrange
+        var motorName = PlaywrightFixture.CreateMotorName();
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["finished"].Actions =
+            [
+                new InvokeOperationAction
+                {
+                    Id = "call-1",
+                    OperationPath = $"/{motorName}/RunTest",
+                    Arguments = new Dictionary<string, string> { ["speed"] = "50" }
+                }
+            ];
+        });
+        string? motorFilePath = null;
+        IInterceptorSubject? motor = null;
+        try
+        {
+            var (page, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByLabel("Name", new() { Exact = true }).FillAsync("Changed washer");
+            var save = dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });
+            await Assertions.Expect(save).ToBeEnabledAsync(new() { Timeout = Timeout });
+            var fileBefore = await _fixture.ReadFileAsync(filePath);
+            (_, motorFilePath, motor) = await _fixture.AddStoredMotorAsync(motorName);
+
+            // Act
+            await save.ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.GetByText("Fix the errors listed in the editor before saving.")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(
+                "Rule 'Finished': action 'call-1': DurationSeconds: Required", new() { Timeout = Timeout });
+            await Assertions.Expect(save).ToBeDisabledAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-editor")).ToBeVisibleAsync();
+            Assert.Equal(fileBefore, await _fixture.ReadFileAsync(filePath));
+            Assert.Equal("Washer", automation.Name);
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+            if (motorFilePath is not null && motor is not null)
+            {
+                await _fixture.DeleteStoredSubjectAsync(motorFilePath, motor);
+            }
         }
     }
 

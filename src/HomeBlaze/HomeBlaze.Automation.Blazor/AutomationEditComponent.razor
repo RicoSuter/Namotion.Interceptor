@@ -91,16 +91,23 @@
         _pendingRows.Discarded += OnInputDiscarded;
     }
 
+    // Errors that depend on the live graph, such as the arguments of an operation that appeared after the last edit in a
+    // rule that is not shown, can show up only here. The host shows the exception and keeps the dialog open instead of
+    // persisting without the edits.
     public Task SaveAsync(CancellationToken cancellationToken)
     {
         if (Automation is { } automation && _draft is { } draft)
         {
             Validate();
-            if (IsValid)
+            if (!IsValid)
             {
-                draft.ApplyTo(automation);
-                SetDirty(false);
+                ReportValidity();
+                StateHasChanged();
+                throw new InvalidOperationException("Fix the errors listed in the editor before saving.");
             }
+
+            draft.ApplyTo(automation);
+            SetDirty(false);
         }
 
         return Task.CompletedTask;

@@ -187,16 +187,19 @@ public class PlaywrightFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Stores a new motor as a JSON file of the root storage, as the create dialog does.
+    /// Stores a new motor as a JSON file of the root storage, as the create dialog does, with the given name or a new one.
     /// </summary>
     /// <returns>The name of the motor under the root, which is its path, the path of its file and the motor.</returns>
-    public async Task<(string Name, string FilePath, IInterceptorSubject Subject)> AddStoredMotorAsync()
+    public async Task<(string Name, string FilePath, IInterceptorSubject Subject)> AddStoredMotorAsync(string? name = null)
     {
-        var name = $"Motor{Guid.NewGuid():N}";
+        name ??= CreateMotorName();
         var motor = ServerServices.GetRequiredService<SubjectFactory>().CreateSubject<HomeBlaze.Samples.Motor>();
         await GetRoot().AddSubjectAsync($"{name}.json", motor, CancellationToken.None);
         return (name, GetPagePath($"{name}.json"), motor);
     }
+
+    /// <summary>A name for <see cref="AddStoredMotorAsync"/> that no other motor has.</summary>
+    public static string CreateMotorName() => $"Motor{Guid.NewGuid():N}";
 
     /// <summary>
     /// Stores a new automation, configured before it is stored, as a JSON file of the root storage, as the create dialog
