@@ -67,6 +67,21 @@ public class HomeBlazeMemberTagProviderTests
     }
 
     [Fact]
+    public void WhenAConfigurationPropertyHasNoConfigurationAttributeYet_ThenItIsTaggedConfiguration()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var member = new TagTestSubject(context).TryGetRegisteredSubject()!.TryGetProperty(nameof(TagTestSubject.Host))!;
+
+        // Act
+        var tags = _provider.GetTags(member);
+
+        // Assert
+        Assert.Null(member.TryGetAttribute(KnownAttributes.Configuration));
+        AssertTags([MemberTags.Configuration], tags);
+    }
+
+    [Fact]
     public void WhenAMemberIsAQuery_ThenItIsTaggedQuery()
     {
         // Arrange

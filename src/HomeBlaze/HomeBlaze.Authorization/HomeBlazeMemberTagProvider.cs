@@ -88,10 +88,7 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
             }
         }
 
-        if (IsDeclaredSecret(member))
-        {
-            markers |= Markers.Configuration | Markers.Secret;
-        }
+        markers |= GetDeclaredConfigurationMarkers(member);
 
         markers |= GetMethodMarkers(member);
 
@@ -115,17 +112,17 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
 
     // The configuration attribute is added only after the subject is registered, so a member of a subject that is still
     // attaching is readable through the registry without it; its declaration is there from the start.
-    private static bool IsDeclaredSecret(RegisteredSubjectProperty member)
+    private static Markers GetDeclaredConfigurationMarkers(RegisteredSubjectProperty member)
     {
         foreach (var attribute in member.ReflectionAttributes)
         {
-            if (attribute is ConfigurationAttribute { IsSecret: true })
+            if (attribute is ConfigurationAttribute configuration)
             {
-                return true;
+                return configuration.IsSecret ? Markers.Configuration | Markers.Secret : Markers.Configuration;
             }
         }
 
-        return false;
+        return Markers.None;
     }
 
     // Only a property of the type that methods are registered with is read, so that a getter of another property, which

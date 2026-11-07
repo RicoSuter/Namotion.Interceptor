@@ -249,8 +249,8 @@ internal sealed class AuthorizationSnapshot
         return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;
     }
 
-    // The authorization library refuses such a name for the whole definition, which would deny every role. Per code
-    // point, so that format characters outside the BMP, such as tag characters, are refused as well.
+    // The authorization library refuses such a name for the whole definition, which would deny every role. Checked per
+    // code point, which also refuses format characters outside the BMP, such as tag characters, that the library accepts.
     private static bool HasOuterWhitespaceOrInvisibleCharacter(string name)
     {
         if (char.IsWhiteSpace(name[0]) || char.IsWhiteSpace(name[^1]))

@@ -218,6 +218,8 @@ public sealed class AuthorizationServiceTests : IDisposable
     [InlineData("kitchen ")]
     [InlineData(" kitchen")]
     [InlineData("kit\u200Bchen")]
+    [InlineData("kit\u200Cchen")]
+    [InlineData("kit\u200Dchen")]
     [InlineData("kit\u0007chen")]
     [InlineData("kit\U000E0041chen")]
     public async Task WhenACustomRoleNameHasOuterWhitespaceOrAnInvisibleCharacter_ThenOnlyThatRoleIsUnavailable(string name)
