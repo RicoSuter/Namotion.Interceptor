@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
@@ -244,27 +246,68 @@ public class AutomationPropertyTriggerTests
     public async Task WhenTwoAutomationsWatchDifferentProperties_ThenAChangeIsRoutedOnlyToTheAutomationThatWatchesIt()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+        await using var host = await AutomationTestHost.StartAsync(_ => { });
+        var listeners = new List<CountingListener>();
+        host.Services.ChangeDispatcher.ListenerDecorator = listener =>
+        {
+            var counting = new CountingListener(listener);
+            listeners.Add(counting);
+            return counting;
+        };
+        var gusts = await host.AddAutomationAsync("Gusts", automation => automation.Rules = Keyed(
             ("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+        var gustsListener = Assert.Single(listeners);
+        var showers = await host.AddAutomationAsync("Showers", automation => automation.Rules = Keyed(
+            ("open", On("Open", When("/Weather/Rain > 5"), Invoke("/Blinds/Open")))));
+        var showersListener = listeners[1];
+
+        // Act
+        host.Weather.Gust = 9;
+        await gusts.FlushAsync();
+        await showers.FlushAsync();
+
+        // Assert
+        Assert.Equal(nameof(TestSensor.Gust), Assert.Single(gustsListener.WatchedChanges).Name);
+        Assert.Empty(showersListener.WatchedChanges);
+        Assert.Equal(1L, gusts.Rules["retract"].RunCount);
+        Assert.Equal(0L, showers.Rules["open"].RunCount);
+        Assert.Equal(1, host.Services.ChangeDispatcher.SourceCount);
+    }
+
+    [Fact]
+    public async Task WhenTheLastAutomationOfAGraphStops_ThenTheDispatcherReleasesTheGraph()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(Storm());
         var storm = host.Automation;
         var shower = await host.AddAutomationAsync("Shower", automation => automation.Rules = Keyed(
             ("open", On("Open", When("/Weather/Rain > 5"), Invoke("/Blinds/Open")))));
         var dispatcher = host.Services.ChangeDispatcher;
-        var gust = new PropertyReference(host.Weather, nameof(TestSensor.Gust));
-        var rain = new PropertyReference(host.Weather, nameof(TestSensor.Rain));
 
         // Act
-        host.Weather.Gust = 9;
-        await storm.FlushAsync();
-        await shower.FlushAsync();
+        await ((IHostedService)storm).StopAsync(CancellationToken.None);
+        var sourcesWithOneAutomation = dispatcher.SourceCount;
+        var watchersOfGust = dispatcher.CountWatchers(host.Graph.Context, new PropertyReference(host.Weather, nameof(TestSensor.Gust)));
+        await ((IHostedService)shower).StopAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(1, dispatcher.SourceCount);
-        Assert.Equal(1, dispatcher.CountWatchers(host.Graph.Context, gust));
-        Assert.Equal(1, dispatcher.CountWatchers(host.Graph.Context, rain));
-        Assert.Equal(1L, storm.Rules["retract"].RunCount);
-        Assert.Equal(0L, shower.Rules["open"].RunCount);
-        Assert.Equal(1, host.Blinds.CloseCount);
-        Assert.Equal(0, host.Blinds.OpenCount);
+        Assert.Equal(1, sourcesWithOneAutomation);
+        Assert.Equal(0, watchersOfGust);
+        Assert.Equal(0, dispatcher.SourceCount);
+    }
+
+    private sealed class CountingListener(IAutomationChangeListener inner) : IAutomationChangeListener
+    {
+        private readonly ConcurrentQueue<PropertyReference> _watchedChanges = new();
+
+        public IReadOnlyList<PropertyReference> WatchedChanges => [.. _watchedChanges];
+
+        public void OnWatchedPropertyChanged(PropertyChangedInput input)
+        {
+            _watchedChanges.Enqueue(input.Property);
+            inner.OnWatchedPropertyChanged(input);
+        }
+
+        public void OnGraphChanged(int chainDepth) => inner.OnGraphChanged(chainDepth);
     }
 }
