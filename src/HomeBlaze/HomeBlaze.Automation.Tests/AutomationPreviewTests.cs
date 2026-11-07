@@ -184,4 +184,26 @@ public class AutomationPreviewTests
         Assert.Null(template.Error);
         Assert.Equal("cannot be read: The reading is corrupt", template.Text);
     }
+
+    [Fact]
+    public async Task WhenTheCallerMayNotReadAValueThatThrows_ThenThePreviewTreatsItAsMissingWithoutReadingIt()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Reading = new UnreadableReading();
+
+        // Act
+        AutomationExpressionPreview value;
+        AutomationExpressionPreview template;
+        using (PropertyReadAccess.Enter(property => property.Name != nameof(TestSensor.Reading)))
+        {
+            value = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Reading", allowsEvent: false);
+            template = AutomationPreview.Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}", allowsEvent: false);
+        }
+
+        // Assert
+        Assert.Null(value.Value);
+        Assert.Null(value.Text);
+        Assert.Equal("Reading ", template.Text);
+    }
 }
