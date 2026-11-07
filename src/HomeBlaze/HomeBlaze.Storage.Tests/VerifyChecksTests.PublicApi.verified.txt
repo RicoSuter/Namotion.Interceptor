@@ -117,8 +117,10 @@ namespace HomeBlaze.Storage.Files
         [HomeBlaze.Abstractions.Attributes.Query(Description="Returns the markdown file source, including unevaluated {{ path }} expressions. S" +
             "ecret configuration values in blocks are shown as ***", Icon="Description", Title="Read Raw Content")]
         public string? ReadRawContent() { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces the whole markdown source of this file.", Icon="EditNote", Title="Replace Content")]
         public System.Threading.Tasks.Task ReplaceContentAsync(string content, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.ExcludeFrom(HomeBlaze.Abstractions.Attributes.ExclusionTarget.UserInterface)]
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Replaces one exact, unique passage of the markdown source.", Icon="FindReplace", Title="Replace Text")]
         public System.Threading.Tasks.Task ReplaceTextAsync(string oldText, string newText, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<HomeBlaze.Storage.Pages.MarkdownEditResult> ReplaceTextBlockAsync(HomeBlaze.Storage.Internal.HtmlSegment segment, string expectedText, string newText, System.Threading.CancellationToken cancellationToken) { }
@@ -339,7 +341,6 @@ namespace HomeBlaze.Storage.Internal
         public RenderExpression(string text, HomeBlaze.Storage.Files.MarkdownFile parent, HomeBlaze.Services.SubjectPathResolver pathResolver) { }
         public string? Error { get; }
         public HomeBlaze.Storage.Files.MarkdownFile Parent { get; }
-        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> ReadProperties { get; }
         public string Text { get; }
         public string? Title { get; }
         [Namotion.Interceptor.Attributes.Derived]
