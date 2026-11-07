@@ -1,16 +1,12 @@
-using System.Collections.Immutable;
-using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.TimeZones;
 using HomeBlaze.Services;
 using HomeBlaze.Authorization.Abstractions;
-using HomeBlaze.Services.Display;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -24,12 +20,6 @@ public partial class RenderExpression : ITitleProvider
 {
     private readonly SubjectPathResolver _pathResolver;
     private readonly ParsedExpression? _expression;
-
-    // The pipes up to the last map, the only pipe that reads properties.
-    private readonly int _sharedPipeCount;
-
-    // Null until the first evaluation; replaced as a whole by each one.
-    private RegisteredSubjectProperty[]? _readProperties;
 
     /// <summary>The text between the braces, as the page has it.</summary>
     public string Text { get; }
@@ -47,26 +37,6 @@ public partial class RenderExpression : ITitleProvider
     [Derived]
     public object? Value => EvaluateShared();
 
-    /// <summary>
-    /// The properties that the last evaluation of <see cref="Value"/> read, also those that the cases of a value map read,
-    /// in the order they were first read. Each of them is a dependency of <see cref="Value"/>.
-    /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> ReadProperties
-    {
-        get
-        {
-            var readProperties = Volatile.Read(ref _readProperties);
-            if (readProperties is null)
-            {
-                // Not evaluated yet, such as in a context that does not track derived properties.
-                EvaluateShared();
-                readProperties = Volatile.Read(ref _readProperties)!;
-            }
-
-            return ImmutableCollectionsMarshal.AsImmutableArray(readProperties);
-        }
-    }
-
     public RenderExpression(string text, MarkdownFile parent, SubjectPathResolver pathResolver)
     {
         Text = text;
@@ -74,7 +44,6 @@ public partial class RenderExpression : ITitleProvider
         _pathResolver = pathResolver;
         _expression = MarkdownExpressions.Parse(text, out var error);
         Error = error;
-        _sharedPipeCount = _expression is null ? 0 : GetSharedPipeCount(_expression);
     }
 
     /// <summary>
@@ -95,41 +64,16 @@ public partial class RenderExpression : ITitleProvider
         return context.ToText(_expression.Evaluate(ref context));
     }
 
-    private static int GetSharedPipeCount(ParsedExpression expression)
-    {
-        for (var index = expression.Pipes.Length - 1; index >= 0; index--)
-        {
-            if (expression.Pipes[index].Name.Equals(ExpressionDisplay.MapPipe, StringComparison.OrdinalIgnoreCase))
-            {
-                return index + 1;
-            }
-        }
-
-        return 0;
-    }
-
-    // Evaluated without a check of any viewer, as the derived value and its dependencies are shared by every viewer. The
-    // pipes up to the last map are applied as well, so that what the cases of a map read is recorded and is a dependency,
-    // but only the value before them is kept.
+    // Evaluated without a check of any viewer, as the derived value and its dependencies are shared by every viewer. It is
+    // the value before the pipes, which no property read by a pipe, such as by the cases of a map, can change.
     private object? EvaluateShared()
     {
         if (_expression is null)
         {
-            Volatile.Write(ref _readProperties, []);
             return null;
         }
 
-        var recorder = new ReadRecordingPermissions();
-        var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null, recorder);
-        var value = _expression.EvaluateWithoutPipes(ref context);
-        var piped = value;
-        for (var index = 0; index < _sharedPipeCount; index++)
-        {
-            var pipe = _expression.Pipes[index];
-            piped = context.ApplyPipe(pipe.Name, pipe.Arguments, piped);
-        }
-
-        Volatile.Write(ref _readProperties, recorder.ToArray(Volatile.Read(ref _readProperties)));
-        return value.Value;
+        var context = new MarkdownExpressionContext(_pathResolver, Parent, timeZone: null, UnrestrictedPermissions.Instance);
+        return _expression.EvaluateWithoutPipes(ref context).Value;
     }
 }
