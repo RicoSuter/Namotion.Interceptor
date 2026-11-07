@@ -156,7 +156,7 @@ A background run starts when the **poll interval** elapses, when a **watched val
 - Changes are collected for 100 milliseconds before they request a run. Properties of agents never trigger one, so agents cannot keep starting each other.
 - Runs never overlap, also not with chat turns. Requests during a run combine into one follow-up run.
 - Automatic runs wait until `MinRunInterval` has passed since the previous run started, so a value that keeps changing starts at most one run per interval.
-- **Run now** ignores the interval, the backoff and the pauses.
+- **Run now** ignores the interval, the backoff and the pauses. These settings bound how often the agent runs and so what it costs, and only a full administrator changes them, so **Run now** requires a full administrator as well, see [Administration](authorization.md#administration). A chat message, which anyone who may chat with the agent sends, starts a chat turn, not a background run.
 
 ### Failures and pauses
 
