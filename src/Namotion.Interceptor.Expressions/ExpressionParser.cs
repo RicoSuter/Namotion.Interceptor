@@ -399,6 +399,9 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         return token.Equals("null", StringComparison.OrdinalIgnoreCase) ? new LiteralNode(null) : null;
     }
 
+    /// <summary>Whether the token is a keyword, an operator or a literal, without regard to case.</summary>
+    internal static bool IsKeyword(string token) => IsOperatorKeyword(token) || TryCreateKeywordLiteral(token) is not null;
+
     private static bool IsOperatorKeyword(string token) =>
         token.Equals("and", StringComparison.OrdinalIgnoreCase) ||
         token.Equals("or", StringComparison.OrdinalIgnoreCase) ||
