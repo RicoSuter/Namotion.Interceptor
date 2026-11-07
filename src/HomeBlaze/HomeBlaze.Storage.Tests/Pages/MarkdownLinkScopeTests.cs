@@ -15,6 +15,8 @@ public class MarkdownLinkScopeTests
         var page = await fixture.AddPageAsync("page.md", $$$"""
             [Other](other.md)
 
+            ![Picture](picture.png)
+
             :: {{{Namespace}}}.TestLeaf#leaf Count=1
             ::
             """);
@@ -38,10 +40,23 @@ public class MarkdownLinkScopeTests
         Assert.Contains($"href=\"{link}\"", html);
     }
 
+    [Fact]
+    public async Task WhenLinkIsToAFileNextToThePage_ThenItResolvesLikeAPictureInTheText()
+    {
+        // Arrange
+        var (_, leaf, html) = await AddPageAsync();
+
+        // Act
+        var link = leaf.ResolveScopedLink("picture.png");
+
+        // Assert
+        Assert.Equal("/files/picture.png", link);
+        Assert.Contains($"src=\"{link}\"", html);
+    }
+
     [Theory]
     [InlineData("/pages/Demo/Blocks.md")]
     [InlineData("https://example.com/a.md")]
-    [InlineData("picture.png")]
     public async Task WhenLinkNeedsNoResolving_ThenItIsReturnedAsWritten(string written)
     {
         // Arrange
