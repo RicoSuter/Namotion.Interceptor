@@ -84,6 +84,28 @@ public class AutomationWakeUpTests
     }
 
     [Fact]
+    public async Task WhenTheTimeAdvancesRightAfterAFlush_ThenATriggerThatWaitsForTimeSinceAnInstantFiresOnTime()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("stale", On("Stale", When("now - /Weather/LastUpdated > 5m"), Invoke("/Blinds/Close")))));
+        host.Weather.LastUpdated = AutomationTestHost.Start;
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromSeconds(299), TimeSpan.FromSeconds(1));
+
+        // Act
+        host.Clock.PauseNextRead();
+        await host.FlushAsync();
+        host.Time.Advance(TimeSpan.FromSeconds(1));
+        host.Clock.ResumeRead();
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal(AutomationTestHost.Start.AddMinutes(5).AddSeconds(1), host.Rule("stale").LastTriggeredAt);
+    }
+
+    [Fact]
     public async Task WhenTheWallClockIsSetForward_ThenATimeOfDayTriggerFiresWithinAMinute()
     {
         // Arrange
