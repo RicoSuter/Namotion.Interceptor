@@ -1,4 +1,6 @@
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -111,5 +113,34 @@ public class AutomationWakeUpTests
         // Assert
         Assert.Equal("On: Triggered, waiting to rearm", statusAtStart);
         Assert.Equal("On: Armed", host.Rule("lunch").Status);
+    }
+
+    [Fact]
+    public async Task WhenAWakeUpIsDroppedBecauseTheQueueIsFull_ThenTheAutomationWakesUpAgainAfterwards()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("close", On("Close", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))),
+            ("wait", On("Wait", When("/Weather/Rain > 0"), Invoke("/Blinds/Wait"))),
+            ("hold", On("Hold", When("/Weather/Power > 0", TimeSpan.FromSeconds(30)), Invoke("/Blinds/Open")))));
+        host.Weather.Gust = 9;
+        host.Weather.Power = 1;
+        await host.FlushAsync();
+        host.Weather.Rain = 1;
+        await AsyncTestHelpers.WaitUntilAsync(() => host.Blinds.IsWaiting);
+        for (var rain = 2; rain <= AutomationInputQueue.Capacity + 10; rain++)
+        {
+            host.Weather.Rain = rain;
+        }
+
+        // Act
+        host.Time.Advance(TimeSpan.FromSeconds(6));
+        host.Blinds.Release();
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal(1, host.Blinds.OpenCount);
+        Assert.True(File.Exists(host.CheckpointPath));
     }
 }

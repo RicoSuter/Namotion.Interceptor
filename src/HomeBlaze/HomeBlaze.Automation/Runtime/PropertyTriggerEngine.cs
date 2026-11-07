@@ -99,6 +99,7 @@ internal sealed class PropertyTriggerEngine(
         {
             _derivedAt = now;
         }
+
         var requests = ObserveWhere(rules, trigger => trigger.NextCheckAt is { } checkAt && (checkAt <= now || isClockSetBack));
         if (_pending.Count == 0)
         {

@@ -16,7 +16,6 @@ internal sealed class AutomationRuntime
     /// <summary>How long a stop waits for the worker to end before it abandons the worker.</summary>
     public static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
 
-
     private readonly Automation _automation;
     private readonly ILogger _logger;
     private readonly AutomationStateKeeper _keeper;
@@ -224,7 +223,6 @@ internal sealed class AutomationRuntime
         if (input is TickInput)
         {
             Volatile.Write(ref _isTickPending, 0);
-            _wakeTimer?.OnWokenUp();
         }
         else if (input is GraphChangedInput)
         {

@@ -3,7 +3,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The one timer of the worker of an automation: set to the instant the worker is due next, at most
 /// <see cref="MaxWakeInterval"/> ahead, and stopped while nothing is due. Its callback only enqueues. Set by the worker
-/// only.
+/// only; set again after every callback, also when the full queue dropped its tick.
 /// </summary>
 internal sealed class WakeTimer : IDisposable
 {
@@ -15,41 +15,48 @@ internal sealed class WakeTimer : IDisposable
 
     private readonly ITimer _timer;
     private DateTimeOffset? _scheduledDueAt;
-    private bool _isScheduled;
+
+    // Cleared by every callback, also one whose tick the full queue drops, so that the worker sets the timer again.
+    private volatile bool _isScheduled;
 
     public WakeTimer(TimeProvider timeProvider, Action wake) =>
-        _timer = timeProvider.CreateTimer(_ => wake(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _timer = timeProvider.CreateTimer(
+            _ =>
+            {
+                _isScheduled = false;
+                wake();
+            },
+            null,
+            Timeout.InfiniteTimeSpan,
+            Timeout.InfiniteTimeSpan);
 
     /// <summary>
-    /// Sets the timer to <paramref name="dueAt"/>, or stops it for null; does nothing when it is set to that instant
-    /// already, so that most inputs cost one comparison here.
+    /// Sets the timer to <paramref name="dueAt"/>, or stops it for null; does nothing when it is set to that future
+    /// instant already, so that most inputs cost one comparison here.
     /// </summary>
     public void Schedule(DateTimeOffset? dueAt, DateTimeOffset now)
     {
-        if (_isScheduled && dueAt == _scheduledDueAt)
+        if (_isScheduled && dueAt == _scheduledDueAt && dueAt > now)
         {
             return;
         }
 
         _scheduledDueAt = dueAt;
-        _isScheduled = dueAt is not null;
         if (dueAt is not { } due)
         {
+            _isScheduled = false;
             _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             return;
         }
 
+        // Set before the timer, so that a callback that comes at once clears it. The delay is rounded up to whole
+        // milliseconds, which the timer counts, so that a wake-up that comes early sets a delay of at least one
+        // millisecond again instead of zero until the instant passed.
+        _isScheduled = true;
         var delay = due - now;
-        if (delay < TimeSpan.Zero)
-        {
-            delay = TimeSpan.Zero;
-        }
-
-        _timer.Change(delay > MaxWakeInterval ? MaxWakeInterval : delay, Timeout.InfiniteTimeSpan);
+        var milliseconds = delay <= TimeSpan.Zero ? 0 : Math.Ceiling(delay.TotalMilliseconds);
+        _timer.Change(TimeSpan.FromMilliseconds(Math.Min(milliseconds, MaxWakeInterval.TotalMilliseconds)), Timeout.InfiniteTimeSpan);
     }
-
-    /// <summary>Called when the worker takes the tick of a wake-up, after which the timer is set again.</summary>
-    public void OnWokenUp() => _isScheduled = false;
 
     public void Dispose() => _timer.Dispose();
 }
