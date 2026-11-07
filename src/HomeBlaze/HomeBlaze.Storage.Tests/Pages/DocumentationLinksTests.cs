@@ -7,9 +7,9 @@ using Markdig.Syntax.Inlines;
 namespace HomeBlaze.Storage.Tests.Pages;
 
 /// <summary>
-/// Follows the links of the documentation, and of the demo pages that link into it, to other pages and to
-/// sections, so that a page that is renamed or a heading that is reworded is found here and not by the
-/// reader who clicks the link.
+/// Follows the links and pictures of the documentation, and of the demo pages that link into it, to other pages,
+/// to sections and to files of the storage, so that a page or a file that is renamed or a heading that is reworded
+/// is found here and not by the reader who clicks the link.
 /// </summary>
 /// <remarks>
 /// A section is addressed by the id of its heading. The pages are parsed with the pipeline of a page, so
@@ -73,17 +73,17 @@ public class DocumentationLinksTests
         Assert.Empty(fixedOrRemoved);
     }
 
-    /// <summary>Gets the links of the page that are not images, each with its 1-based line.</summary>
+    /// <summary>Gets the links and pictures of the page, each with its 1-based line.</summary>
     private static List<(string Url, int Line)> FindLinks(string relativePath) =>
         MarkdownPageParser
             .Parse(RepositoryPagesTests.ReadPage(relativePath))
             .Document
             .Descendants<LinkInline>()
-            .Where(link => link is { IsImage: false, Url: not null })
+            .Where(link => link.Url is not null)
             .Select(link => (link.Url!, link.Line + 1))
             .ToList();
 
-    /// <summary>Gets what is wrong with a link of the page, or null for a link that leads somewhere or is not checked.</summary>
+    /// <summary>Gets what is wrong with a link or a picture of the page, or null for one that leads somewhere or is not checked.</summary>
     private static string? FindProblem(string relativePath, string url)
     {
         var file = Path.Combine(RepositoryPagesTests.FindRepositoryRoot(), relativePath);
@@ -104,7 +104,10 @@ public class DocumentationLinksTests
         {
             if (!pagePath.EndsWith(PageExtension, StringComparison.OrdinalIgnoreCase))
             {
-                return null;
+                // A file of the storage, served under the file route: its path ends at a query or a fragment.
+                var pathEnd = url.IndexOfAny(['?', '#']);
+                var filePath = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, pathEnd < 0 ? url : url[..pathEnd]));
+                return File.Exists(filePath) || Directory.Exists(filePath) ? null : "leads to a file that does not exist";
             }
 
             target = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, pagePath));

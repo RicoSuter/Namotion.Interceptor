@@ -100,13 +100,16 @@ Check the [installation guide](../administration/installation.md) for examples.
 | `[Link](../../root.md)` | Two levels up |
 | `[Link](sibling.md#section)` | A section of a page in the same folder |
 | `[Link](#section)` | A section of the page itself |
+| `![Picture](images/plan.png)` | A picture of the storage, see [Pictures](#pictures) |
+| `[Link](manual.pdf)` | A file of the storage, opens in a new tab |
 
 A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
 
 ### Link Targets
 
-- **Links on a page open in the same tab**: a relative link to a page, an address of the application such as `/browser/Demo`, and a web address alike. So does the `Href` of a [Card](widgets/card.md).
-- **A new tab**: write the link as an HTML element with a target, `<a href="https://example.com" target="_blank" rel="noopener">Example</a>`. The page keeps the attribute as written.
+- **Links on a page open in the same tab**: a relative link to a page and an address of the application such as `/browser/Demo`. So does the `Href` of a [Card](widgets/card.md).
+- **Links that open in a new tab**: a web address, any other link with a scheme such as `mailto:`, and a relative link to a file of the storage such as `[Manual](manual.pdf)`.
+- **A page in a new tab**: write the link as an HTML element with a target, `<a href="/pages/Docs/home.md" target="_blank" rel="noopener">Home</a>`. The page keeps the attribute as written.
 - **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
 - **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
 
@@ -120,11 +123,23 @@ A picture is written as in any markdown text, with the address of a picture on t
 ![The heat pump](https://example.com/heat-pump.jpg)
 ~~~~
 
+A picture can also be a file of the storage. Put the file next to the page, or in a folder next to it, and write its path relative to the page:
+
+~~~~markdown
+![Sample floor plan](images/sample-floor-plan.svg)
+~~~~
+
+![Sample floor plan](images/sample-floor-plan.svg)
+
+- **Address**: the picture is served under `/files/` with its path in the storage, here `/files/Docs/administration/images/sample-floor-plan.svg`. The `Image` of a [Card](widgets/card.md) takes a relative path in the same way.
+- **What is served**: any file that is not a page and not a JSON file, such as `.png`, `.jpg`, `.svg` or `.pdf`. Pages (`.md`), JSON files and hidden files, whose name starts with a dot, are never served.
+- **A changed file**: a picture that is replaced in the storage shows on the next view of the page.
+
 A picture is shown in a size that fits the page, and it always keeps its proportions:
 
 - **Width**: never wider than the place it stands in, such as the text of the page, a narrow screen or a card.
 - **Height**: at most four fifths of the height of the browser window.
-- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height.
+- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height. A picture of the storage written as HTML needs its address, as in `<img src="/files/Docs/administration/images/sample-floor-plan.svg" width="300">`, because the path in an HTML element is not rewritten.
 - **Not available**: a picture that cannot be loaded is replaced by a placeholder with its text. The address of the picture is the tooltip of the placeholder.
 
 ---
