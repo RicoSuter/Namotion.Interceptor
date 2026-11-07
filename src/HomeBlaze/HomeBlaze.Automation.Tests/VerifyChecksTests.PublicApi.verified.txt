@@ -21,7 +21,7 @@ namespace HomeBlaze.Automation
     [System.ComponentModel.DisplayName("Automation")]
     public class Automation : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged, System.IObservable<HomeBlaze.Automation.AutomationStateChangedEvent>
     {
-        public Automation(HomeBlaze.Automation.AutomationServices services, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Automation.Automation> logger) { }
+        public Automation(HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider, HomeBlaze.Automation.IAutomationAuthorizer authorizer, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Automation.Automation> logger) { }
         [HomeBlaze.Abstractions.Attributes.State("Current State", IsDiscrete=true, Position=1)]
         public string? CurrentState { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -145,14 +145,6 @@ namespace HomeBlaze.Automation
     public static class AutomationServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeAutomation(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
-    }
-    public sealed class AutomationServices
-    {
-        public AutomationServices(HomeBlaze.Services.SubjectPathResolver pathResolver, System.TimeProvider timeProvider, HomeBlaze.Automation.IAutomationAuthorizer authorizer, System.IServiceProvider serviceProvider) { }
-        public HomeBlaze.Automation.IAutomationAuthorizer Authorizer { get; }
-        public HomeBlaze.Services.SubjectPathResolver PathResolver { get; }
-        public System.IServiceProvider ServiceProvider { get; }
-        public System.TimeProvider TimeProvider { get; }
     }
     public sealed class AutomationStateChangedEvent : HomeBlaze.Abstractions.Messaging.IEvent, HomeBlaze.Abstractions.Messaging.IMessage, System.IEquatable<HomeBlaze.Automation.AutomationStateChangedEvent>
     {

@@ -9,10 +9,10 @@ namespace HomeBlaze.Automation.Runtime;
 /// and the log says it once per reason, and its property trigger stays pending. A request of a rule that is no longer
 /// active is dropped. Used by the worker only.
 /// </summary>
-internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices services, AutomationStateKeeper keeper, ILogger logger)
+internal sealed class RunDispatcher(IRuleRunHost host, Automation automation, AutomationStateKeeper keeper, ILogger logger)
 {
-    private readonly RuleRunner _runner = RuleRunner.Create(services, logger);
-    private readonly RunRecorder _recorder = new(keeper, services.TimeProvider);
+    private readonly RuleRunner _runner = RuleRunner.Create(automation, logger);
+    private readonly RunRecorder _recorder = new(keeper, automation.TimeProvider);
 
     public async Task<DispatchSummary> DispatchAsync(
         IReadOnlyList<RunRequest> requests, Func<CompiledRule, bool> isActive, CancellationToken cancellationToken)

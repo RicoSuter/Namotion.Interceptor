@@ -16,7 +16,6 @@ public static class AutomationServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
         services.TryAddSingleton<AutomationChangeDispatcher>();
-        services.TryAddSingleton<AutomationServices>();
         return services;
     }
 }

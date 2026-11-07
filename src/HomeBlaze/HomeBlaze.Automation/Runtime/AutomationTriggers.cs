@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -16,15 +17,16 @@ internal sealed class AutomationTriggers
     private readonly EventTriggerEngine _eventTriggers;
 
     public AutomationTriggers(
-        AutomationServices services,
+        SubjectPathResolver resolver,
+        TimeProvider timeProvider,
         AutomationInputQueue queue,
         ILogger logger,
         Func<string> getAutomationName,
         Action<FrozenSet<PropertyReference>> publishWatched)
     {
         _queue = queue;
-        _propertyTriggers = new PropertyTriggerEngine(services.PathResolver, services.TimeProvider, logger, getAutomationName, publishWatched);
-        _eventTriggers = new EventTriggerEngine(services.PathResolver, services.TimeProvider, queue);
+        _propertyTriggers = new PropertyTriggerEngine(resolver, timeProvider, logger, getAutomationName, publishWatched);
+        _eventTriggers = new EventTriggerEngine(resolver, timeProvider, queue);
     }
 
     /// <summary>

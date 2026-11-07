@@ -209,14 +209,14 @@ public class AutomationCheckpointLifecycleTests
             StateEnteredAt = AutomationTestHost.Start.AddHours(-1),
             Rules = new Dictionary<string, RuleCheckpoint> { ["started"] = new() { RunCount = 3, LastTriggeredAt = AutomationTestHost.Start.AddHours(-1) } }
         });
-        var washer = new Automation(host.Services, NullLogger<Automation>.Instance) { Name = "Washer" };
+        var washer = host.CreateAutomation("Washer");
         Washer()(washer);
 
         // In the context of the graph as a root of its own, which has no path.
         ((IInterceptorSubject)washer).Context.AddFallbackContext(host.Graph.Context);
         await ((IHostedService)washer).StartAsync(CancellationToken.None);
         await washer.FlushAsync();
-        var pathAtStart = host.Services.PathResolver.GetPath(washer, PathStyle.Canonical);
+        var pathAtStart = host.Graph.Resolver.GetPath(washer, PathStyle.Canonical);
         var stateWithoutPath = washer.CurrentState;
         var basement = new TestRoot();
         basement.Children = new Dictionary<string, IInterceptorSubject> { ["Washer"] = washer };

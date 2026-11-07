@@ -328,7 +328,7 @@ public class AutomationPropertyTriggerTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(_ => { });
         var listeners = new List<CountingListener>();
-        host.Services.ChangeDispatcher.ListenerDecorator = listener =>
+        host.ChangeDispatcher.ListenerDecorator = listener =>
         {
             var counting = new CountingListener(listener);
             listeners.Add(counting);
@@ -351,7 +351,7 @@ public class AutomationPropertyTriggerTests
         Assert.Empty(showersListener.WatchedChanges);
         Assert.Equal(1L, gusts.Rules["retract"].RunCount);
         Assert.Equal(0L, showers.Rules["open"].RunCount);
-        Assert.Equal(1, host.Services.ChangeDispatcher.SourceCount);
+        Assert.Equal(1, host.ChangeDispatcher.SourceCount);
     }
 
     [Fact]
@@ -362,7 +362,7 @@ public class AutomationPropertyTriggerTests
         var storm = host.Automation;
         var shower = await host.AddAutomationAsync("Shower", automation => automation.Rules = Keyed(
             ("open", On("Open", When("/Weather/Rain > 5"), Invoke("/Blinds/Open")))));
-        var dispatcher = host.Services.ChangeDispatcher;
+        var dispatcher = host.ChangeDispatcher;
 
         // Act
         await ((IHostedService)storm).StopAsync(CancellationToken.None);

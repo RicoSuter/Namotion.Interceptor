@@ -105,7 +105,7 @@ public class AutomationPendingTriggerTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(ConveyorGuard("not /Blinds/IsMoving"));
         var isMoving = new PropertyReference(host.Blinds, nameof(TestBlinds.IsMoving));
-        var dispatcher = host.Services.ChangeDispatcher;
+        var dispatcher = host.ChangeDispatcher;
         host.Blinds.IsMoving = true;
         var watchersWhileIdle = dispatcher.CountWatchers(host.Graph.Context, isMoving);
         await SetAsync(host, 41);

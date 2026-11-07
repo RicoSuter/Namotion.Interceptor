@@ -66,7 +66,7 @@ internal sealed class AutomationRuntime
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         var context = ((IInterceptorSubject)_automation).Context;
-        using var registration = _changes.Register(_automation.Services.ChangeDispatcher, context);
+        using var registration = _changes.Register(_automation.ChangeDispatcher, context);
         try
         {
             _engine.Start();
@@ -207,7 +207,7 @@ internal sealed class AutomationRuntime
 
     private ITimer StartTicker()
     {
-        var timeProvider = _automation.Services.TimeProvider;
+        var timeProvider = _automation.TimeProvider;
         var pastSecond = timeProvider.GetUtcNow().UtcTicks % TimeSpan.TicksPerSecond;
         var untilNextSecond = TimeSpan.FromTicks(TimeSpan.TicksPerSecond - pastSecond);
         return timeProvider.CreateTimer(_ => EnqueueOnce(ref _isTickPending, TickInput.Instance), null, untilNextSecond, TickInterval);

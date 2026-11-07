@@ -29,13 +29,12 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
-        var services = automation.Services;
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = new AutomationTriggers(services, queue, logger, () => Name, changes.PublishWatched);
-        _dispatcher = new RunDispatcher(this, services, keeper, logger);
-        _states = new StateTransitions(automation, keeper, services.TimeProvider, logger);
+        _triggers = new AutomationTriggers(automation.PathResolver, automation.TimeProvider, queue, logger, () => Name, changes.PublishWatched);
+        _dispatcher = new RunDispatcher(this, automation, keeper, logger);
+        _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
     }
 
@@ -49,7 +48,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void Start()
     {
         _hasCheckpointError = false;
-        var checkpoint = _keeper.Load(_automation.Services.TimeProvider.GetUtcNow(), out var error);
+        var checkpoint = _keeper.Load(_automation.TimeProvider.GetUtcNow(), out var error);
         if (error is null && checkpoint is null)
         {
             _logger.LogInformation("The automation {Automation} has no checkpoint at {Path} and starts from its initial state.", Name, _keeper.Store.FilePath);
@@ -128,7 +127,7 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     public Task OnTickAsync(CancellationToken cancellationToken)
     {
-        if (_keeper.WriteRunsIfDue(_automation.Services.TimeProvider.GetUtcNow()) is { } error)
+        if (_keeper.WriteRunsIfDue(_automation.TimeProvider.GetUtcNow()) is { } error)
         {
             _status.Fail($"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}");
         }
@@ -220,7 +219,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var notApplied = _hasConfigurationError && _automation.ConfigurationVersion == _appliedConfigurationVersion
             ? RuleStatusPublisher.NotAppliedInvalid
             : RuleStatusPublisher.NotAppliedYet;
-        RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.Services.TimeProvider.LocalTimeZone, notApplied);
+        RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.TimeProvider.LocalTimeZone, notApplied);
     }
 
     public void Stop()
@@ -240,7 +239,7 @@ internal sealed class AutomationEngine : IRuleRunHost
             _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
         }
 
-        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.Services.TimeProvider.LocalTimeZone);
+        RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);

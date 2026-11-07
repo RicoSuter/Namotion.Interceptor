@@ -22,6 +22,10 @@ internal sealed class ActionExecutor(
     /// <summary>How long an operation may run before its cancellation is requested.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(1);
 
+    /// <summary>Creates the executor of the rules of the automation, with its services.</summary>
+    public static ActionExecutor For(Automation automation) =>
+        new(automation.PathResolver, automation.Authorizer, automation.ServiceProvider, automation.TimeProvider);
+
     public async Task<ActionResult> InvokeOperationAsync(InvokeOperationAction action, ActionScope scope, CancellationToken cancellationToken)
     {
         if (!TryPrepareOperation(action, scope, cancellationToken, out var operation, out var error))

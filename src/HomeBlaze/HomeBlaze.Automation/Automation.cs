@@ -3,6 +3,8 @@ using System.Reactive.Subjects;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Automation.Runtime;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
@@ -29,9 +31,27 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
     private int _configurationVersion;
     private volatile bool _isDetached;
 
-    public Automation(AutomationServices services, ILogger<Automation> logger)
+    /// <summary>Creates an automation with the services it takes, which dependency injection resolves.</summary>
+    /// <param name="pathResolver">Resolves the paths of the rules.</param>
+    /// <param name="timeProvider">The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>.</param>
+    /// <param name="authorizer">Decides which operation calls and property writes the rules may make.</param>
+    /// <param name="serviceProvider">
+    /// Resolves the services that operations take with <c>[FromServices]</c>, and the dispatcher that routes property
+    /// changes to every automation; without a registered dispatcher, the automation routes its changes on its own.
+    /// </param>
+    /// <param name="logger">The logger of the automation.</param>
+    public Automation(
+        SubjectPathResolver pathResolver,
+        TimeProvider timeProvider,
+        IAutomationAuthorizer authorizer,
+        IServiceProvider serviceProvider,
+        ILogger<Automation> logger)
     {
-        Services = services;
+        PathResolver = pathResolver;
+        TimeProvider = timeProvider;
+        Authorizer = authorizer;
+        ServiceProvider = serviceProvider;
+        ChangeDispatcher = serviceProvider.GetService<AutomationChangeDispatcher>() ?? new AutomationChangeDispatcher();
         _logger = logger;
         Enabled = true;
         States = [];
@@ -88,7 +108,18 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         _ => null
     };
 
-    internal AutomationServices Services { get; }
+    internal SubjectPathResolver PathResolver { get; }
+
+    /// <summary>The clock of <c>now</c>, <c>time</c>, holds and timeouts; its local time zone is that of <c>time</c>.</summary>
+    internal TimeProvider TimeProvider { get; }
+
+    internal IAutomationAuthorizer Authorizer { get; }
+
+    /// <summary>Resolves the services that operations take with <c>[FromServices]</c>.</summary>
+    internal IServiceProvider ServiceProvider { get; }
+
+    /// <summary>Routes the property changes to the automations: the registered dispatcher, or a dispatcher of its own when none is registered.</summary>
+    internal AutomationChangeDispatcher ChangeDispatcher { get; }
 
     internal int ConfigurationVersion => Volatile.Read(ref _configurationVersion);
 

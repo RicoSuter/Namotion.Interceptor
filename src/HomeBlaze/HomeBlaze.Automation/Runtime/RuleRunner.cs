@@ -12,11 +12,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// </summary>
 internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger)
 {
-    public static RuleRunner Create(AutomationServices services, ILogger logger)
-    {
-        var executor = new ActionExecutor(services.PathResolver, services.Authorizer, services.ServiceProvider, services.TimeProvider);
-        return new RuleRunner(executor, services.PathResolver, services.TimeProvider, logger);
-    }
+    public static RuleRunner Create(Automation automation, ILogger logger) =>
+        new(ActionExecutor.For(automation), automation.PathResolver, automation.TimeProvider, logger);
 
     public async Task<RuleRunResult> RunAsync(RunRequest request, IRuleRunHost host, CancellationToken cancellationToken)
     {
