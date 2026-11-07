@@ -11,8 +11,7 @@ public class AutomationWakeUpTests
     {
         for (var elapsed = TimeSpan.Zero; elapsed < time; elapsed += step)
         {
-            host.Time.Advance(step);
-            await host.FlushAsync();
+            await host.AdvanceAsync(step);
         }
     }
 
@@ -99,7 +98,7 @@ public class AutomationWakeUpTests
         host.Time.Advance(TimeSpan.FromSeconds(1));
         host.Clock.ResumeRead();
         await host.FlushAsync();
-        await AdvanceAsync(host, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal(AutomationTestHost.Start.AddMinutes(5).AddSeconds(1), host.Rule("stale").LastTriggeredAt);

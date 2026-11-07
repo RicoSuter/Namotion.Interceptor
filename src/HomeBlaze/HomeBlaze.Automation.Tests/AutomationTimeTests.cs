@@ -28,8 +28,7 @@ public class AutomationTimeTests
         var stateBefore = host.Automation.CurrentState;
 
         // Act
-        host.Time.Advance(TimeSpan.FromSeconds(1));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal("Night", stateBefore);
@@ -45,8 +44,7 @@ public class AutomationTimeTests
         var stateAfterStart = host.Automation.CurrentState;
 
         // Act
-        host.Time.Advance(TimeSpan.FromSeconds(1));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal("Day", stateAfterStart);
@@ -91,8 +89,7 @@ public class AutomationTimeTests
         var endTime = DateTimeOffset.Parse(end, CultureInfo.InvariantCulture);
         while (host.Time.GetUtcNow() < endTime)
         {
-            host.Time.Advance(TimeSpan.FromMinutes(1));
-            await host.FlushAsync();
+            await host.AdvanceAsync(TimeSpan.FromMinutes(1));
         }
 
         // Assert
@@ -113,8 +110,7 @@ public class AutomationTimeTests
         // Act
         for (var minute = 0; minute < 6 * 60; minute++)
         {
-            host.Time.Advance(TimeSpan.FromMinutes(1));
-            await host.FlushAsync();
+            await host.AdvanceAsync(TimeSpan.FromMinutes(1));
         }
 
         // Assert

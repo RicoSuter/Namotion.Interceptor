@@ -19,11 +19,6 @@ public class AutomationResetTests
         await host.FlushAsync();
     }
 
-    private static async Task ResetAsync(AutomationTestHost host)
-    {
-        host.Automation.ResetState();
-        await host.FlushAsync();
-    }
 
     [Fact]
     public async Task WhenTheStateIsReset_ThenARuleThatRunsOnActivationRunsAgainOnceWhileTheConditionStaysTrue()
@@ -35,7 +30,7 @@ public class AutomationResetTests
         var runsBeforeTheReset = host.Rule("retract").RunCount;
 
         // Act
-        await ResetAsync(host);
+        await host.ResetAsync();
         var runsAfterTheReset = host.Rule("retract").RunCount;
         await SetGustAsync(host, 11);
 
@@ -55,7 +50,7 @@ public class AutomationResetTests
         var runsBeforeTheReset = host.Rule("retract").RunCount;
 
         // Act
-        await ResetAsync(host);
+        await host.ResetAsync();
         await SetGustAsync(host, 10);
         var runsWhileStillTrue = host.Rule("retract").RunCount;
         await SetGustAsync(host, 2);
@@ -77,7 +72,7 @@ public class AutomationResetTests
         await SetGustAsync(host, 9);
 
         // Act
-        await ResetAsync(host);
+        await host.ResetAsync();
         await SetGustAsync(host, 7);
         await SetGustAsync(host, 9);
         var runsWithoutRearm = host.Rule("retract").RunCount;
@@ -95,16 +90,13 @@ public class AutomationResetTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(InInitialState(When("/Weather/Gust > 5", TimeSpan.FromMinutes(10))));
         await SetGustAsync(host, 9);
-        host.Time.Advance(TimeSpan.FromMinutes(6));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(6));
 
         // Act
-        await ResetAsync(host);
-        host.Time.Advance(TimeSpan.FromMinutes(6));
-        await host.FlushAsync();
+        await host.ResetAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(6));
         var runsBeforeTheNewHoldEnds = host.Rule("retract").RunCount;
-        host.Time.Advance(TimeSpan.FromMinutes(4));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(4));
 
         // Assert
         Assert.Equal(0L, runsBeforeTheNewHoldEnds);
@@ -117,11 +109,10 @@ public class AutomationResetTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(InInitialState(When("/Weather/Gust > 5")));
         await SetGustAsync(host, 9);
-        File.Delete(host.CheckpointPath);
-        Directory.CreateDirectory(host.CheckpointPath);
+        host.BreakCheckpointWrites();
 
         // Act
-        await ResetAsync(host);
+        await host.ResetAsync();
 
         // Assert
         Assert.Equal(1L, host.Rule("retract").RunCount);

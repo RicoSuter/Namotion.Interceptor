@@ -24,8 +24,7 @@ public class AutomationPropertyTriggerTests
     {
         host.Weather.Gust = gust;
         await host.FlushAsync();
-        host.Time.Advance(TimeSpan.FromSeconds(20));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(20));
     }
 
     [Fact]
@@ -38,11 +37,9 @@ public class AutomationPropertyTriggerTests
         await host.FlushAsync();
 
         // Act
-        host.Time.Advance(TimeSpan.FromSeconds(19));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(19));
         var runsBeforeTheHold = rule.RunCount;
-        host.Time.Advance(TimeSpan.FromSeconds(1));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal(0L, runsBeforeTheHold);
@@ -114,8 +111,7 @@ public class AutomationPropertyTriggerTests
         // Act
         for (var second = 0; second < 5; second++)
         {
-            host.Time.Advance(TimeSpan.FromSeconds(1));
-            await host.FlushAsync();
+            await host.AdvanceAsync(TimeSpan.FromSeconds(1));
         }
 
         // Assert
@@ -227,8 +223,7 @@ public class AutomationPropertyTriggerTests
                 Invoke("/Notifier/SendNotification", ("notification.Message", "The rain gauge has not reported for 15 minutes"))))));
 
         // Act
-        host.Time.Advance(TimeSpan.FromMinutes(15));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
 
         // Assert
         Assert.Equal("The rain gauge has not reported for 15 minutes", Assert.Single(host.Notifier.Sent).Message);
@@ -260,11 +255,9 @@ public class AutomationPropertyTriggerTests
         await host.FlushAsync();
 
         // Act
-        host.Time.Advance(TimeSpan.FromMinutes(15));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
         var runsAtFifteenMinutes = host.Blinds.CloseCount;
-        host.Time.Advance(TimeSpan.FromSeconds(1));
-        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal(0, runsAtFifteenMinutes);

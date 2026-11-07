@@ -37,11 +37,6 @@ public class AutomationStateTests
         await host.FlushAsync();
     }
 
-    private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
-    {
-        host.Time.Advance(time);
-        await host.FlushAsync();
-    }
 
     [Fact]
     public async Task WhenACycleEnds_ThenOneNotificationIsSentAndThePumpPhaseIsIgnored()
@@ -53,12 +48,12 @@ public class AutomationStateTests
 
         // Act
         await SetPowerAsync(host, 3);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(5));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(5));
         await SetPowerAsync(host, 300);
         await SetPowerAsync(host, 3);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(9));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(9));
         var notificationsBeforeTheHold = host.Notifier.Sent.Count;
-        await AdvanceAsync(host, TimeSpan.FromMinutes(1));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(1));
 
         // Assert
         Assert.Equal("Running", stateWhileWashing);
@@ -76,7 +71,7 @@ public class AutomationStateTests
 
         // Act
         await SetPowerAsync(host, 2);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(15));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
 
         // Assert
         Assert.Empty(host.Notifier.Sent);
@@ -232,8 +227,7 @@ public class AutomationStateTests
         var triggeredBeforeReset = host.Rule("started").LastTriggeredAt;
 
         // Act
-        host.Automation.ResetState();
-        await host.FlushAsync();
+        await host.ResetAsync();
         var nameAfterReset = host.Weather.Name;
         var triggeredAfterReset = host.Rule("started").LastTriggeredAt;
         await host.RestartAsync();
@@ -254,14 +248,11 @@ public class AutomationStateTests
         await SetPowerAsync(host, 600);
         host.Automation.States = ["Idle"];
         host.Automation.RuleOrder = [];
-        host.Automation.Rules = new Dictionary<string, AutomationRule>();
-        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
-        await host.FlushAsync();
+        await host.SaveAsync(new Dictionary<string, AutomationRule>());
         var messageBeforeReset = host.Automation.StatusMessage;
 
         // Act
-        host.Automation.ResetState();
-        await host.FlushAsync();
+        await host.ResetAsync();
 
         // Assert
         Assert.StartsWith("The saved state 'Running' is not a state of the automation", messageBeforeReset);
@@ -276,12 +267,10 @@ public class AutomationStateTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(WashingMachine());
         await SetPowerAsync(host, 600);
-        File.Delete(host.CheckpointPath);
-        Directory.CreateDirectory(host.CheckpointPath);
+        host.BreakCheckpointWrites();
 
         // Act
-        host.Automation.ResetState();
-        await host.FlushAsync();
+        await host.ResetAsync();
 
         // Assert
         Assert.Equal("Running", host.Automation.CurrentState);
@@ -309,8 +298,7 @@ public class AutomationStateTests
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(WashingMachine(withEntryRule: true));
-        File.Delete(host.CheckpointPath);
-        Directory.CreateDirectory(host.CheckpointPath);
+        host.BreakCheckpointWrites();
 
         // Act
         await SetPowerAsync(host, 600);

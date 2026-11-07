@@ -153,14 +153,14 @@ public class AutomationRunTests
             automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
         host.Weather.Gust = 9;
         await host.FlushAsync();
-        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(5));
         var sizeAfterOneRun = new FileInfo(host.CheckpointPath).Length;
 
         // Act
         host.Weather.Gust = 5;
         host.Weather.Gust = 9;
         await host.FlushAsync();
-        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.Equal(sizeAfterOneRun, new FileInfo(host.CheckpointPath).Length);
@@ -180,9 +180,9 @@ public class AutomationRunTests
         await host.FlushAsync();
 
         // Act
-        await AdvanceAsync(host, TimeSpan.FromSeconds(4));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(4));
         var writtenAfterFourSeconds = await ReadRunCountAsync(host, "retract");
-        await AdvanceAsync(host, TimeSpan.FromSeconds(1));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
 
         // Assert
         Assert.Equal(2L, host.Rule("retract").RunCount);
@@ -241,14 +241,13 @@ public class AutomationRunTests
             automation.InitialState = "Idle";
             automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
         });
-        File.Delete(host.CheckpointPath);
-        Directory.CreateDirectory(host.CheckpointPath);
+        host.BreakCheckpointWrites();
         host.Weather.Gust = 9;
         await host.FlushAsync();
         var statusAfterTheRun = host.Automation.Status;
 
         // Act
-        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.Equal(ServiceStatus.Running, statusAfterTheRun);
@@ -267,20 +266,19 @@ public class AutomationRunTests
             automation.InitialState = "Idle";
             automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
         });
-        File.Delete(host.CheckpointPath);
-        Directory.CreateDirectory(host.CheckpointPath);
+        host.BreakCheckpointWrites();
         host.Weather.Gust = 9;
         await host.FlushAsync();
         for (var retry = 0; retry < 4; retry++)
         {
-            await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+            await host.AdvanceAsync(TimeSpan.FromSeconds(5));
         }
 
         var messageWhileFailing = host.Automation.StatusMessage;
 
         // Act
         Directory.Delete(host.CheckpointPath);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(5));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(5));
 
         // Assert
         Assert.StartsWith("The runs could not be saved", messageWhileFailing);
@@ -312,11 +310,6 @@ public class AutomationRunTests
         Assert.Equal(0L, host.Rule("close").RunCount);
     }
 
-    private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
-    {
-        host.Time.Advance(time);
-        await host.FlushAsync();
-    }
 
     private static async Task<long?> ReadRunCountAsync(AutomationTestHost host, string ruleKey)
     {

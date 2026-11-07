@@ -9,12 +9,6 @@ public class AutomationConfigurationTests
 {
     private static AutomationRule Retract(string expression = "/Weather/Gust > 8") => On("Retract", When(expression), Invoke("/Blinds/Close"));
 
-    private static async Task SaveAsync(AutomationTestHost host, Dictionary<string, AutomationRule> rules)
-    {
-        host.Automation.Rules = rules;
-        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
-        await host.FlushAsync();
-    }
 
     [Fact]
     public async Task WhenTheConfigurationIsSavedWithAnUnchangedTrigger_ThenTheRuleDoesNotRunAgain()
@@ -25,7 +19,7 @@ public class AutomationConfigurationTests
         await host.FlushAsync();
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Retract())));
+        await host.SaveAsync(Keyed(("retract", Retract())));
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
@@ -44,7 +38,7 @@ public class AutomationConfigurationTests
         var runsBefore = host.Blinds.CloseCount;
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        await host.SaveAsync(Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
         await host.FlushAsync();
 
         // Assert
@@ -63,7 +57,7 @@ public class AutomationConfigurationTests
         await host.FlushAsync();
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
+        await host.SaveAsync(Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close")]))));
         await host.FlushAsync();
 
         // Assert
@@ -80,7 +74,7 @@ public class AutomationConfigurationTests
         await host.FlushAsync();
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Create(
+        await host.SaveAsync(Keyed(("retract", Create(
             "Retract", AutomationRuleMode.On, [When("/Weather/Gust > 8"), When("/Weather/Rain > 0")], [Invoke("/Blinds/Close"), Invoke("/Blinds/Close")]))));
         await host.FlushAsync();
 
@@ -97,7 +91,7 @@ public class AutomationConfigurationTests
         await host.FlushAsync();
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Retract("/Weather/Gust > 5"))));
+        await host.SaveAsync(Keyed(("retract", Retract("/Weather/Gust > 5"))));
 
         // Assert
         Assert.Equal(2, host.Blinds.CloseCount);
@@ -111,7 +105,7 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Retract("/Weather/Gust >"))));
+        await host.SaveAsync(Keyed(("retract", Retract("/Weather/Gust >"))));
         host.Weather.Gust = 9;
         await host.FlushAsync();
 
@@ -136,7 +130,7 @@ public class AutomationConfigurationTests
         await host.FlushAsync();
 
         // Act
-        await SaveAsync(host, Keyed(("rain", On("Rain", When("/Weather/Rain > 0"), Invoke("/Blinds/Close")))));
+        await host.SaveAsync(Keyed(("rain", On("Rain", When("/Weather/Rain > 0"), Invoke("/Blinds/Close")))));
 
         // Assert
         Assert.DoesNotContain("\"retract\"", await File.ReadAllTextAsync(host.CheckpointPath));
@@ -202,7 +196,7 @@ public class AutomationConfigurationTests
             ("press", Create("Press", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")], [Invoke("/Blinds/Close")]))));
 
         // Act
-        await SaveAsync(host, Keyed(
+        await host.SaveAsync(Keyed(
             ("press", Create("Press", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent", "event/Gesture == Hold")], [Invoke("/Blinds/Close")]))));
         host.Button.Press("Release");
         host.Button.Press("Hold");
@@ -256,7 +250,7 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
 
         // Act
-        await SaveAsync(host, Keyed(("retract", Retract()), ("broken", Retract("/Weather/Gust >"))));
+        await host.SaveAsync(Keyed(("retract", Retract()), ("broken", Retract("/Weather/Gust >"))));
 
         // Assert
         Assert.Equal("Not applied: the configuration is invalid", host.Rule("broken").Status);
@@ -288,7 +282,7 @@ public class AutomationConfigurationTests
         var broken = On("Retract", When("/Weather/Gust > 5"), Invoke("/Blinds/Close") with { Arguments = null! });
 
         // Act
-        await SaveAsync(host, Keyed(("retract", broken)));
+        await host.SaveAsync(Keyed(("retract", broken)));
         host.Weather.Gust = 9;
         await host.FlushAsync();
 
@@ -307,7 +301,7 @@ public class AutomationConfigurationTests
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
 
         // Act
-        await SaveAsync(host, new Dictionary<string, AutomationRule> { ["retract"] = Retract(), ["broken"] = null! });
+        await host.SaveAsync(new Dictionary<string, AutomationRule> { ["retract"] = Retract(), ["broken"] = null! });
 
         // Assert
         Assert.Equal(

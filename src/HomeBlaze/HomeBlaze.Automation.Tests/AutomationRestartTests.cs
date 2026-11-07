@@ -29,11 +29,6 @@ public class AutomationRestartTests
         await host.FlushAsync();
     }
 
-    private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
-    {
-        host.Time.Advance(time);
-        await host.FlushAsync();
-    }
 
     [Fact]
     public async Task WhenTheDoorStaysOpen_ThenTheReminderIsSentOnceAfterTenMinutes()
@@ -43,10 +38,10 @@ public class AutomationRestartTests
         await SetDoorAsync(host, DoorState.Open);
 
         // Act
-        await AdvanceAsync(host, TimeSpan.FromMinutes(10));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(10));
         var sentAtTenMinutes = host.Notifier.Sent.Count;
-        await AdvanceAsync(host, TimeSpan.FromSeconds(1));
-        await AdvanceAsync(host, TimeSpan.FromMinutes(5));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(5));
 
         // Assert
         Assert.Equal(0, sentAtTenMinutes);
@@ -60,11 +55,11 @@ public class AutomationRestartTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(DoorReminder());
         await SetDoorAsync(host, DoorState.Open);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(5));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(5));
 
         // Act
         await SetDoorAsync(host, DoorState.Closed);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(10));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(10));
 
         // Assert
         Assert.Equal("Closed", host.Automation.CurrentState);
@@ -115,7 +110,7 @@ public class AutomationRestartTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(DoorReminder());
         await SetDoorAsync(host, DoorState.Open);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(10) + TimeSpan.FromSeconds(1));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(10) + TimeSpan.FromSeconds(1));
         var stateChanges = new List<string>();
         using var subscription = host.Automation.Subscribe(Observer.Create<AutomationStateChangedEvent>(change => stateChanges.Add(change.NewState)));
 
