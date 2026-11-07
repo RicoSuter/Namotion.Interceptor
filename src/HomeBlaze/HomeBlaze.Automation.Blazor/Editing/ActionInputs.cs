@@ -17,10 +17,6 @@ internal static class ActionInputs
     /// <summary>The key of the error of the value of a property write.</summary>
     public const string ValueKey = "value";
 
-    /// <summary>The fields of the operation at the path, or null when the path leads to no operation.</summary>
-    public static IReadOnlyList<ArgumentField>? GetFields(Automation automation, string ruleKey, string path) =>
-        GetFields(AutomationPreview.ResolveTarget(automation, ruleKey, path));
-
     /// <summary>The fields of the operation that the target is, or null when the target is no operation.</summary>
     public static IReadOnlyList<ArgumentField>? GetFields(RegisteredSubjectProperty? target) =>
         target?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
@@ -29,17 +25,19 @@ internal static class ActionInputs
     public static MethodMetadata? GetMethod(Automation automation, string ruleKey, string path) =>
         AutomationPreview.ResolveTarget(automation, ruleKey, path)?.TryGetMethodMetadata();
 
-    /// <summary>The type of the property at the path, or null when the path leads to none.</summary>
-    public static Type? GetTargetType(Automation automation, string ruleKey, string path) =>
-        AutomationPreview.ResolveTarget(automation, ruleKey, path)?.Type;
+    /// <summary>The path of the operation or property the action targets, or null for an action without one.</summary>
+    public static string? GetTargetPath(AutomationAction action) => action switch
+    {
+        InvokeOperationAction invoke => invoke.OperationPath,
+        SetPropertyAction write => write.PropertyPath,
+        _ => null
+    };
 
-    public static IReadOnlyList<ActionInputError> Check(AutomationAction action, Automation automation, string ruleKey, RuleExpressions expressions) =>
-        action switch
-        {
-            InvokeOperationAction invoke => Check(invoke, GetFields(automation, ruleKey, invoke.OperationPath), null, expressions),
-            SetPropertyAction write => Check(write, null, GetTargetType(automation, ruleKey, write.PropertyPath), expressions),
-            _ => []
-        };
+    public static IReadOnlyList<ActionInputError> Check(AutomationAction action, Automation automation, string ruleKey, RuleExpressions expressions)
+    {
+        var target = AutomationPreview.ResolveTarget(automation, ruleKey, GetTargetPath(action));
+        return Check(action, action is InvokeOperationAction ? GetFields(target) : null, action is SetPropertyAction ? target?.Type : null, expressions);
+    }
 
     /// <summary>
     /// The errors of an action whose operation has the fields, or whose property has the type. A path that leads nowhere is
@@ -61,8 +59,7 @@ internal static class ActionInputs
 
         if (action is SetPropertyAction write)
         {
-            var isText = targetType is not null && (Nullable.GetUnderlyingType(targetType) ?? targetType) == typeof(string);
-            var isRequired = !isText && !string.IsNullOrWhiteSpace(write.PropertyPath);
+            var isRequired = !ArgumentFields.IsText(targetType) && !string.IsNullOrWhiteSpace(write.PropertyPath);
             return ArgumentFields.Validate(write.Value, targetType, isRequired, expressions) is { } error ? [new ActionInputError(ValueKey, "Value", error)] : [];
         }
 

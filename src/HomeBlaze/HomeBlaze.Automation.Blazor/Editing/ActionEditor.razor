@@ -55,7 +55,6 @@
     private AutomationAction _value = null!;
     private IReadOnlyList<ArgumentField>? _fields;
     private Type? _targetType;
-    private bool _isTextTarget;
     private Dictionary<string, string> _errors = [];
     private AutomationAction? _checkedValue;
     private RuleExpressions? _checkedExpressions;
@@ -98,7 +97,7 @@
     // its inputs and errors. Only a changed target checks the inputs again.
     private async Task CheckTargetAsync()
     {
-        if (GetTargetPath(_value) is not { } path || ReferenceEquals(AutomationPreview.ResolveTarget(Automation, RuleKey, path), _target))
+        if (ActionInputs.GetTargetPath(_value) is not { } path || ReferenceEquals(AutomationPreview.ResolveTarget(Automation, RuleKey, path), _target))
         {
             return;
         }
@@ -111,13 +110,6 @@
 
     public void Dispose() => _ticker?.Dispose();
 
-    private static string? GetTargetPath(AutomationAction action) => action switch
-    {
-        InvokeOperationAction invoke => invoke.OperationPath,
-        SetPropertyAction write => write.PropertyPath,
-        _ => null
-    };
-
     // The targets are resolved and the inputs checked when the action or the expressions change, not on every render of the editor.
     private void Refresh()
     {
@@ -128,10 +120,9 @@
 
         _checkedValue = _value;
         _checkedExpressions = Expressions;
-        _target = AutomationPreview.ResolveTarget(Automation, RuleKey, GetTargetPath(_value));
+        _target = AutomationPreview.ResolveTarget(Automation, RuleKey, ActionInputs.GetTargetPath(_value));
         _fields = _value is InvokeOperationAction ? ActionInputs.GetFields(_target) : null;
         _targetType = _value is SetPropertyAction ? _target?.Type : null;
-        _isTextTarget = _targetType is not null && (Nullable.GetUnderlyingType(_targetType) ?? _targetType) == typeof(string);
         _errors = ActionInputs.Check(_value, _fields, _targetType, Expressions).ToDictionary(error => error.Key, error => error.Error);
     }
 
@@ -191,7 +182,7 @@
     {
         var error = GetError(ValueKey);
         <div class="mt-2 ml-6">
-            @if (_isTextTarget)
+            @if (ArgumentFields.IsText(_targetType))
             {
                 <TemplateField Label="Value" Value="@write.Value" Expressions="Expressions" ValueChanged="SetWriteValueAsync" />
             }

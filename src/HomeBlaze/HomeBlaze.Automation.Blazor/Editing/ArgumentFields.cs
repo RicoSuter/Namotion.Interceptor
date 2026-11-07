@@ -60,13 +60,16 @@ internal static class ArgumentFields
             return null;
         }
 
-        if ((Nullable.GetUnderlyingType(type) ?? type) == typeof(string))
+        if (IsText(type))
         {
             return expressions.ValidateTemplate(text);
         }
 
         return ParameterConverter.TryConvert(text, type, out _) ? null : expressions.Validate(text);
     }
+
+    /// <summary>Whether the type is a string or a nullable string, whose inputs are templates.</summary>
+    public static bool IsText(Type? type) => type is not null && (Nullable.GetUnderlyingType(type) ?? type) == typeof(string);
 
     private static IEnumerable<ArgumentField> CreateFields(MethodParameter parameter)
     {
