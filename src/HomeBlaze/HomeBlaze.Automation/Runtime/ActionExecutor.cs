@@ -9,7 +9,8 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Runs the operation calls and property writes of rules: resolves the target, refuses what an automation may not do,
-/// what its roles do not allow or what the authorizer failed to decide, binds the arguments and executes. A failure is a
+/// what its roles or the roles of a rejected configuration do not allow or what the authorizer failed to decide, binds the
+/// arguments and executes. A failure is a
 /// result with its reason; only a cancellation of the caller's token is thrown.
 /// </summary>
 internal sealed class ActionExecutor(
@@ -124,7 +125,7 @@ internal sealed class ActionExecutor(
         // Refused before the authorizer is asked: what an automation never does, and a disabled operation.
         error = AutomationTargets.CheckOperationNever(path, method) ??
             (property.IsMethodEnabled() ? null : $"{path} is disabled") ??
-            AutomationTargets.CheckOperation(path, property, method, GetPermissions(scope));
+            AutomationTargets.GetDenial(path, property, GetPermissions(scope), isWrite: false);
         if (error is not null)
         {
             return false;
@@ -151,7 +152,7 @@ internal sealed class ActionExecutor(
             return false;
         }
 
-        error = AutomationTargets.CheckWriteNever(path, property) ?? AutomationTargets.CheckWrite(path, property, GetPermissions(scope));
+        error = AutomationTargets.CheckWriteNever(path, property) ?? AutomationTargets.GetDenial(path, property, GetPermissions(scope), isWrite: true);
         if (error is not null)
         {
             return false;
@@ -168,7 +169,13 @@ internal sealed class ActionExecutor(
     }
 
     // Asked for every action, so that a changed custom role applies to the next action of a run.
-    private IAutomationPermissions GetPermissions(ActionScope scope) => AutomationTargets.GetPermissions(authorizer, scope.Roles);
+    private IAutomationPermissions GetPermissions(ActionScope scope)
+    {
+        var permissions = AutomationTargets.GetPermissions(authorizer, scope.Roles);
+        return scope.RejectedRoles is { } rejectedRoles
+            ? new RejectedRolesPermissions(permissions, AutomationTargets.GetPermissions(authorizer, rejectedRoles))
+            : permissions;
+    }
 
     private sealed record PreparedOperation(MethodMetadata Method, object?[] Arguments, string Description);
 

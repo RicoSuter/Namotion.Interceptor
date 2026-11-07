@@ -237,6 +237,8 @@ public class RuleRunnerTests
 
         public IReadOnlyList<string> Roles { get; } = [];
 
+        public IReadOnlyList<string>? RejectedRoles => null;
+
         public bool RunUnlessAbandoned(Action write)
         {
             write();

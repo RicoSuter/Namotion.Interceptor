@@ -91,7 +91,11 @@ public static class AutomationTargets
     private static bool CallsOrWrites(AutomationRule? rule) =>
         rule?.Actions.Any(action => action is InvokeOperationAction or SetPropertyAction) == true;
 
-    private static string? GetDenial(string path, RegisteredSubjectProperty property, IAutomationPermissions permissions, bool isWrite)
+    /// <summary>
+    /// Gets why the roles refuse calling or writing the target, starting with the path, or null; what an automation never
+    /// does is not checked.
+    /// </summary>
+    internal static string? GetDenial(string path, RegisteredSubjectProperty property, IAutomationPermissions permissions, bool isWrite)
     {
         try
         {

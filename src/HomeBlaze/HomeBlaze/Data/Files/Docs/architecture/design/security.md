@@ -53,7 +53,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 | Built-in agent | Its `Roles`, default `["Operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
 | Watch paths of an agent | `Everything` with the system rules: the operator chose the paths, so the agent's roles do not filter them |
 | External `/mcp` | `Everything` with the system rules, and `McpServer:ReadOnly` |
-| Automation | Its `Roles`, none by default, so it calls and writes nothing until a role allows it. `RoleAutomationAuthorizer`, the default `IAutomationAuthorizer`, asks `execute` on an operation and `write` on a property. One check (`AutomationTargets`) runs when the automation applies a configuration (`ActionTargetCheck` in `AutomationCompiler`), in the editor (`AutomationValidator`, with the roles of the dialog) and before each action. A target that does not resolve yet is checked when the action runs. Roles that yield `DenyAll` refuse every call and write but do not block applying a configuration, so an automation that starts before `Authorization.json` is loaded runs once it is. Conditions and texts read without the roles, as watch paths do |
+| Automation | Its `Roles`, none by default, so it calls and writes nothing until a role allows it. `RoleAutomationAuthorizer`, the default `IAutomationAuthorizer`, asks `execute` on an operation and `write` on a property. One check (`AutomationTargets`) runs when the automation applies a configuration (`ActionTargetCheck` in `AutomationCompiler`), in the editor (`AutomationValidator`, with the roles of the dialog) and before each action. A target that does not resolve yet is checked when the action runs. Roles that yield `DenyAll` refuse every call and write but do not block applying a configuration, so an automation that starts before `Authorization.json` is loaded runs once it is. While a configuration is rejected, the previous rules keep running and each action needs both the applied roles and the roles of the rejected configuration (`RejectedRolesPermissions`), so roles narrowed in a rejected file apply at once and widened ones allow nothing more. Conditions and texts read without the roles, as watch paths do |
 | People in the browser | No policy yet |
 
 ### Enforcement
@@ -117,7 +117,7 @@ Planned. Today every `/mcp` client shares the `Everything` policy. With a client
 ## Open Questions
 
 - Roles of people in the browser, the role editor and a "preview as" tester
-- Rights of the person who edits an automation, once people have roles
+- Rights of the person who edits an automation, once people have roles. The previews of the automation editor refresh on timers that do not carry the ambient read check, so the read check of the person must then reach `AutomationPreview.Evaluate` and `Render` as a parameter that each component captures
 - Inter-node authentication mechanism (TLS, tokens, certificates)
 - MCP session identity model
 - Authorization for cross-instance operation proxying

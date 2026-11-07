@@ -8,8 +8,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// Checks the targets of actions while a configuration is validated, with the checks the actions run with: what an
 /// automation never does, and what its roles do not allow. A target that does not resolve yet, such as a device that is
-/// not loaded or a relative path of a rule that is not saved, is not checkable and passes; the action checks it when it
-/// runs. While the roles cannot be used, for example before the custom roles are loaded, the roles are not checked here
+/// not loaded or a relative path of a rule that is not saved, is not checkable and passes; it is checked when the saved
+/// configuration is applied and when the action runs. While the roles cannot be used, for example before the custom roles are loaded, the roles are not checked here
 /// either, and every call and write is refused when it runs.
 /// </summary>
 internal sealed class ActionTargetCheck
@@ -50,13 +50,13 @@ internal sealed class ActionTargetCheck
         }
 
         return property.TryGetMethodMetadata() is { } method
-            ? AutomationTargets.CheckOperationNever(path, method) ?? CheckRoles(() => AutomationTargets.CheckOperation(path, property, method, _permissions))
+            ? AutomationTargets.CheckOperationNever(path, method) ?? CheckRoles(() => AutomationTargets.GetDenial(path, property, _permissions, isWrite: false))
             : $"No operation at {path}";
     }
 
     private string? CheckWrite(string ruleKey, string path) =>
         Resolve(ruleKey, path) is { } property
-            ? AutomationTargets.CheckWriteNever(path, property) ?? CheckRoles(() => AutomationTargets.CheckWrite(path, property, _permissions))
+            ? AutomationTargets.CheckWriteNever(path, property) ?? CheckRoles(() => AutomationTargets.GetDenial(path, property, _permissions, isWrite: true))
             : null;
 
     // The roles are checked only when they can be used; otherwise the run refuses, with the reason.

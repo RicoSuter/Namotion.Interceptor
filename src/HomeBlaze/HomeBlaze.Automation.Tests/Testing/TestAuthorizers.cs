@@ -47,3 +47,10 @@ internal sealed class RecordingAuthorizer(IAutomationPermissions permissions) : 
         return permissions;
     }
 }
+
+/// <summary>An authorizer that gives the permissions of the first role, and no permissions for a role it does not know.</summary>
+internal sealed class FirstRoleAuthorizer(IReadOnlyDictionary<string, IAutomationPermissions?> permissions) : IAutomationAuthorizer
+{
+    public IAutomationPermissions GetPermissions(IReadOnlyList<string> roles) =>
+        roles.Count > 0 && permissions.TryGetValue(roles[0], out var found) ? found! : null!;
+}
