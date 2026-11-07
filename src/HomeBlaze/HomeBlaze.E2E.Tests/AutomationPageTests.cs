@@ -92,7 +92,7 @@ public class AutomationPageTests
             await Assertions.Expect(widget).ToContainTextAsync("Washer", new() { Timeout = Timeout });
             await Assertions.Expect(widget).ToContainTextAsync("Idle since");
             await Assertions.Expect(widget.GetByTestId("automation-widget-status")).ToBeVisibleAsync();
-            await Assertions.Expect(widget.GetByRole(AriaRole.Link, new() { Name = "Washer" })).ToHaveAttributeAsync("href", $"pages/{name}");
+            await Assertions.Expect(widget.GetByRole(AriaRole.Link, new() { Name = "Washer" })).ToHaveAttributeAsync("href", $"/pages/{name}");
         }
         finally
         {

@@ -14,7 +14,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.AutoMode" Size="Size.Small" />
                 @if (path is not null)
                 {
-                    <MudLink Href="@($"pages{path}")" Typo="Typo.subtitle1" Style="overflow-wrap: anywhere;">@automation.Title</MudLink>
+                    <MudLink Href="@($"/pages{path}")" Typo="Typo.subtitle1" Style="overflow-wrap: anywhere;">@automation.Title</MudLink>
                 }
                 else
                 {
