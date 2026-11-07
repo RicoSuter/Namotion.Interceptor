@@ -18,6 +18,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     {
         Graph = graph;
         Time = time;
+        Clock = new TestClock(time);
         DataDirectory = dataDirectory;
         Authorizer = authorizer;
         ServiceProvider = new ServiceCollection().AddSingleton<AutomationChangeDispatcher>().BuildServiceProvider();
@@ -25,7 +26,11 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public TestGraph Graph { get; }
 
+    /// <summary>The fake time, which drives the timers of the automations.</summary>
     public FakeTimeProvider Time { get; }
+
+    /// <summary>The clock of the automations: the fake time, with a wall clock that a test can set apart and counted wake-ups.</summary>
+    public TestClock Clock { get; }
 
     public string DataDirectory { get; }
 
@@ -76,7 +81,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     /// <summary>Creates an automation with the services of the host, not attached yet.</summary>
     public Automation CreateAutomation(string name) =>
-        new(Graph.Resolver, Time, Authorizer, ServiceProvider, Logger) { Name = name };
+        new(Graph.Resolver, Clock, Authorizer, ServiceProvider, Logger) { Name = name };
 
     /// <summary>Attaches a new automation under <c>/key</c>, starts it and waits until it processed its activation.</summary>
     public async Task<Automation> AddAutomationAsync(string key, Action<Automation> configure)

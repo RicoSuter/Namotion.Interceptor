@@ -27,7 +27,7 @@ internal sealed class CompiledRule(string key, AutomationRule rule, ParsedExpres
     public IReadOnlyList<string> GuardPropertyPaths { get; } = guard is null ? [] : [.. AutomationExpressionCheck.GetPropertyPaths(guard)];
 
     /// <summary>When the guard can change with the clock alone, or null for a guard that does not read the clock.</summary>
-    public GuardClock? GuardClock { get; } = guard is null ? null : GuardClock.Create(guard);
+    public ExpressionClock? GuardClock { get; } = guard is null ? null : ExpressionClock.Create(guard);
 
     /// <summary>The properties that <see cref="GuardPropertyPaths"/> resolved to while a trigger of the rule is pending.</summary>
     public PropertyReference[] GuardDependencies { get; set; } = [];

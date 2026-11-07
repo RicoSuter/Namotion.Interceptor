@@ -16,7 +16,7 @@ internal sealed class CompiledPropertyTrigger
         Rearm = rearm;
         var rearmPaths = rearm is null ? Enumerable.Empty<string>() : AutomationExpressionCheck.GetPropertyPaths(rearm);
         PropertyPaths = [.. AutomationExpressionCheck.GetPropertyPaths(expression).Concat(rearmPaths).Distinct()];
-        UsesTime = AutomationExpressionCheck.UsesTime(expression) || (rearm is not null && AutomationExpressionCheck.UsesTime(rearm));
+        Clock = ExpressionClock.Combine(ExpressionClock.Create(expression), rearm is null ? null : ExpressionClock.Create(rearm));
         State = CreateState();
     }
 
@@ -34,8 +34,14 @@ internal sealed class CompiledPropertyTrigger
     /// <summary>The paths of the expression and the rearm expression that are no variable.</summary>
     public IReadOnlyList<string> PropertyPaths { get; }
 
-    /// <summary>Whether the trigger reads <c>now</c> or <c>time</c> and is evaluated every second.</summary>
-    public bool UsesTime { get; }
+    /// <summary>When the expressions can change with the clock alone, or null for a trigger that does not read the clock.</summary>
+    public ExpressionClock? Clock { get; }
+
+    /// <summary>
+    /// When the trigger is evaluated again without a change of its properties: when its hold ends or its expressions can
+    /// change with the clock, whichever comes first; null for neither.
+    /// </summary>
+    public DateTimeOffset? NextCheckAt { get; set; }
 
     public PropertyTriggerState State { get; private set; }
 
@@ -49,6 +55,7 @@ internal sealed class CompiledPropertyTrigger
     {
         target.State = State;
         target.Dependencies = Dependencies;
+        target.NextCheckAt = NextCheckAt;
         State = CreateState();
         Dependencies = [];
     }

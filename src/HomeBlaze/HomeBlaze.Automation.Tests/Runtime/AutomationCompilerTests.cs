@@ -43,7 +43,7 @@ public class AutomationCompilerTests
         Assert.Equal(["c", "a", "b"], compiled.Rules.Select(rule => rule.Key).ToArray());
         var ruleB = compiled.Rules[2];
         var propertyTrigger = Assert.Single(ruleB.PropertyTriggers);
-        Assert.True(propertyTrigger.UsesTime);
+        Assert.NotNull(propertyTrigger.Clock);
         Assert.Equal(["./LastTriggeredAt", "/Weather/Gust"], propertyTrigger.PropertyPaths.ToArray());
         Assert.Equal(1, Assert.Single(ruleB.EventTriggers).Index);
         Assert.True(ruleB.AllowsEvent);

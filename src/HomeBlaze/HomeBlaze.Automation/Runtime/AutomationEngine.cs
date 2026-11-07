@@ -2,7 +2,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Persistence;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -35,9 +34,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
-        _triggers = new AutomationTriggers(
-            automation.PathResolver, automation.TimeProvider, queue, logger, () => Name, changes.PublishWatched, () => registry?.StructureVersion ?? -1);
+        _triggers = AutomationTriggers.For(automation, queue, logger, () => Name, changes.PublishWatched);
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
@@ -130,28 +127,28 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    public Task OnPropertyChangedAsync(PropertyChangedInput input, CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnPropertyChanged(_snapshot.Rules, input), cancellationToken);
-
-    public Task OnTickAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Gets when the next tick is due: for a trigger or a guard that is due, or to write the runs; null when nothing is,
+    /// so that an automation without holds, clock reads, waiting rules or unwritten runs is never woken up.
+    /// </summary>
+    public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
     {
-        WriteRunsIfDue();
-        return DispatchAsync(_triggers.OnTick(_snapshot.Rules), cancellationToken);
+        var next = _triggers.GetNextDueAt(_snapshot.Rules, now);
+        return _keeper.RunsDueAt is { } runsDueAt && (next is null || runsDueAt < next) ? runsDueAt : next;
     }
 
-    public Task OnEventAsync(EventInput input, CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnEvent(input), cancellationToken);
-
-    public Task OnGraphChangedAsync(CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnGraphChanged(_snapshot.Rules), cancellationToken);
-
-    public Task OnPendingRecheckAsync(CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnPendingRecheck(_snapshot.Rules), cancellationToken);
-
-    public Task OnActivationAsync(ActivationInput input, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the requests of an input of the triggers: a property change, a tick, which also writes the runs that are due,
+    /// an event, a graph change, an activation or a recheck of the pending triggers.
+    /// </summary>
+    public Task HandleAsync(AutomationInput input, CancellationToken cancellationToken)
     {
-        var rules = input.Rules.Where(rule => rule.IsActivated && _snapshot.Rules.Contains(rule)).ToList();
-        return DispatchAsync(_triggers.OnActivation(rules, _snapshot.Rules), cancellationToken);
+        if (input is TickInput)
+        {
+            WriteRunsIfDue();
+        }
+
+        return DispatchAsync(_triggers.GetRequests(input, _snapshot.Rules), cancellationToken);
     }
 
     // A failed write of the runs is shown and logged when its error changes, stays shown while the writes fail, and is
@@ -187,13 +184,13 @@ internal sealed class AutomationEngine : IRuleRunHost
     /// state did not change. A saved reset clears the error shown unless the configuration is invalid, since a reset is how
     /// an automation leaves a saved state that its configuration no longer has.
     /// </summary>
-    public Task ResetStateAsync()
+    public void ResetState()
     {
         _keeper.AllowOverwrite();
         if (_states.Reset(_snapshot, _automation.Rules.Values, RestartRules) is { } error)
         {
             _status.Fail(error);
-            return Task.CompletedTask;
+            return;
         }
 
         _hasCheckpointError = false;
@@ -202,21 +199,12 @@ internal sealed class AutomationEngine : IRuleRunHost
         {
             _status.SetRunning();
         }
-
-        return Task.CompletedTask;
     }
 
     private void RestartRules()
     {
-        foreach (var rule in _snapshot.Rules)
-        {
-            if (rule.IsActivated)
-            {
-                Deactivate(rule);
-            }
-        }
-
-        ApplyScopeChange();
+        Stop();
+        ActivateRules();
     }
 
     /// <summary>
@@ -272,7 +260,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         RuleStatusPublisher.Publish(_automation.Rules, _snapshot, GetInactiveReason, _automation.TimeProvider.LocalTimeZone, notApplied);
     }
 
-    public void Stop()
+    private void Stop()
     {
         foreach (var rule in _snapshot.Rules)
         {

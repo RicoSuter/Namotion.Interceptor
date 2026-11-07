@@ -7,15 +7,15 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a change
 /// of a property that holds subjects (coalesced), both routed by <see cref="AutomationChangeDispatcher"/>, and a tick
-/// every wall-clock second (coalesced). The worker processes one input at a time with <see cref="AutomationEngine"/>, so
-/// no rule runs inside a property setter.
+/// (coalesced) from <see cref="WakeTimer"/>, which the worker sets after every input to when the engine is due next and
+/// stops while nothing is due. The worker processes one input at a time with
+/// <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
 /// </summary>
 internal sealed class AutomationRuntime
 {
     /// <summary>How long a stop waits for the worker to end before it abandons the worker.</summary>
     public static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
 
-    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1);
 
     private readonly Automation _automation;
     private readonly ILogger _logger;
@@ -25,6 +25,7 @@ internal sealed class AutomationRuntime
     private readonly AutomationChangeReceiver _changes;
     private CheckpointLocation _location;
     private int _isTickPending;
+    private WakeTimer? _wakeTimer;
 
     /// <summary>Creates the worker of the automation, whose checkpoint is at <paramref name="location"/>.</summary>
     public AutomationRuntime(Automation automation, CheckpointLocation location, ILogger logger)
@@ -70,8 +71,7 @@ internal sealed class AutomationRuntime
     /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>
     public bool RequestReset()
     {
-        var chainDepth = AutomationInputQueue.CausedChainDepth;
-        return _queue.TryEnqueue(chainDepth == 0 ? ResetStateInput.Instance : new ResetStateInput(chainDepth));
+        return _queue.TryEnqueue(new ResetStateInput(AutomationInputQueue.CausedChainDepth));
     }
 
     public Task FlushAsync()
@@ -103,11 +103,14 @@ internal sealed class AutomationRuntime
             // A move between the start and the registration queued no graph change.
             FollowPath();
             _engine.RefreshRuleStatuses();
-            using var ticker = StartTicker();
+            using var wakeTimer = new WakeTimer(_automation.TimeProvider, () => EnqueueOnce(ref _isTickPending, TickInput.Instance));
+            _wakeTimer = wakeTimer;
+            ScheduleWake();
             while (!cancellationToken.IsCancellationRequested)
             {
                 var input = await _queue.ReadAsync(cancellationToken);
                 await HandleAsync(input, cancellationToken);
+                ScheduleWake();
             }
         }
         finally
@@ -146,18 +149,22 @@ internal sealed class AutomationRuntime
         _engine.RefreshRuleStatuses();
     }
 
-    private Task RouteAsync(AutomationInput input, CancellationToken cancellationToken) => input switch
+    private Task RouteAsync(AutomationInput input, CancellationToken cancellationToken)
     {
-        PropertyChangedInput change => _engine.OnPropertyChangedAsync(change, cancellationToken),
-        GraphChangedInput => OnGraphChangedAsync(cancellationToken),
-        EventInput subjectEvent => _engine.OnEventAsync(subjectEvent, cancellationToken),
-        TickInput => _engine.OnTickAsync(cancellationToken),
-        ActivationInput activation => _engine.OnActivationAsync(activation, cancellationToken),
-        PendingRecheckInput => _engine.OnPendingRecheckAsync(cancellationToken),
-        ResynchronizeInput resynchronize => ResynchronizeAsync(resynchronize, cancellationToken),
-        ResetStateInput => _engine.ResetStateAsync(),
-        _ => Task.CompletedTask
-    };
+        switch (input)
+        {
+            case ResynchronizeInput resynchronize:
+                return ResynchronizeAsync(resynchronize, cancellationToken);
+            case ResetStateInput:
+                _engine.ResetState();
+                return Task.CompletedTask;
+            case GraphChangedInput:
+                FollowPath();
+                break;
+        }
+
+        return _engine.HandleAsync(input, cancellationToken);
+    }
 
     // The runs that make up for inputs the full queue dropped continue the chain of those inputs, so that an overload does
     // not restart a chain at depth 0.
@@ -171,12 +178,6 @@ internal sealed class AutomationRuntime
 
         using var run = AutomationInputQueue.EnterRun(dropped.OverloadDepth);
         await _engine.ResynchronizeAsync(dropped, cancellationToken);
-    }
-
-    private Task OnGraphChangedAsync(CancellationToken cancellationToken)
-    {
-        FollowPath();
-        return _engine.OnGraphChangedAsync(cancellationToken);
     }
 
     // The checkpoint belongs to the path, so an automation that moved, such as a file moved to another folder, starts
@@ -223,6 +224,7 @@ internal sealed class AutomationRuntime
         if (input is TickInput)
         {
             Volatile.Write(ref _isTickPending, 0);
+            _wakeTimer?.OnWokenUp();
         }
         else if (input is GraphChangedInput)
         {
@@ -238,11 +240,9 @@ internal sealed class AutomationRuntime
         }
     }
 
-    private ITimer StartTicker()
+    private void ScheduleWake()
     {
-        var timeProvider = _automation.TimeProvider;
-        var pastSecond = timeProvider.GetUtcNow().UtcTicks % TimeSpan.TicksPerSecond;
-        var untilNextSecond = TimeSpan.FromTicks(TimeSpan.TicksPerSecond - pastSecond);
-        return timeProvider.CreateTimer(_ => EnqueueOnce(ref _isTickPending, TickInput.Instance), null, untilNextSecond, TickInterval);
+        var now = _automation.TimeProvider.GetUtcNow();
+        _wakeTimer?.Schedule(_engine.GetNextDueAt(now), now);
     }
 }

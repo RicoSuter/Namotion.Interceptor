@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -17,6 +18,15 @@ internal sealed class AutomationTriggers
     private readonly EventTriggerEngine _eventTriggers;
     private readonly Func<long> _getStructureVersion;
     private long _boundStructureVersion = -1;
+
+    /// <summary>Creates the triggers of the automation, with the structure version of the registry of its context.</summary>
+    public static AutomationTriggers For(
+        Automation automation, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName, Action<FrozenSet<PropertyReference>> publishWatched)
+    {
+        var registry = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>();
+        return new AutomationTriggers(
+            automation.PathResolver, automation.TimeProvider, queue, logger, getAutomationName, publishWatched, () => registry?.StructureVersion ?? -1);
+    }
 
     /// <summary>
     /// Creates the triggers, whose property triggers publish their watched set to <paramref name="publishWatched"/> and
@@ -92,16 +102,13 @@ internal sealed class AutomationTriggers
     {
         var changed = _propertyTriggers.Apply(changes);
         var requests = new List<RunRequest>(evaluateAll ? RebindAndEvaluateAll(rules) : _propertyTriggers.ObserveReaders(rules, changed));
-        var activated = activations.SelectMany(activation => activation.Rules)
-            .Where(rule => rule.IsActivated && rules.Contains(rule))
-            .Distinct()
-            .ToList();
+        var activated = _propertyTriggers.Activate([.. activations.SelectMany(activation => activation.Rules)], rules);
         if (activated.Count == 0)
         {
             return requests;
         }
 
-        requests.AddRange(_propertyTriggers.Activate(activated, rules));
+        requests.AddRange(activated);
         return [.. requests.OrderBy(request => IndexOf(rules, request.Rule))];
     }
 
@@ -139,12 +146,17 @@ internal sealed class AutomationTriggers
         _eventTriggers.Rebind(rules);
     }
 
-    public IReadOnlyList<RunRequest> OnPropertyChanged(IReadOnlyList<CompiledRule> rules, PropertyChangedInput input) =>
-        _propertyTriggers.OnPropertyChanged(rules, input);
-
-    public IReadOnlyList<RunRequest> OnTick(IReadOnlyList<CompiledRule> rules) => _propertyTriggers.OnTick(rules);
-
-    public IReadOnlyList<RunRequest> OnEvent(EventInput input) => _eventTriggers.OnEvent(input);
+    /// <summary>Turns an input of the worker into the run requests of the triggers, in rule order; none for any other input.</summary>
+    public IReadOnlyList<RunRequest> GetRequests(AutomationInput input, IReadOnlyList<CompiledRule> rules) => input switch
+    {
+        PropertyChangedInput change => _propertyTriggers.OnPropertyChanged(rules, change),
+        TickInput => _propertyTriggers.OnTick(rules),
+        EventInput subjectEvent => _eventTriggers.OnEvent(subjectEvent),
+        GraphChangedInput => OnGraphChanged(rules),
+        ActivationInput activation => _propertyTriggers.Activate(activation.Rules, rules),
+        PendingRecheckInput => _propertyTriggers.RequestPendingRuns(rules),
+        _ => []
+    };
 
     /// <summary>
     /// Resolves the paths again after a change of a property that holds subjects, unless the structure of the graph is
@@ -171,15 +183,11 @@ internal sealed class AutomationTriggers
         return _propertyTriggers.OnGraphChanged(rules, evaluateAll: true);
     }
 
-    /// <summary>Activates the property triggers of the rules and returns the runs they request at once.</summary>
-    public IReadOnlyList<RunRequest> OnActivation(IReadOnlyList<CompiledRule> activated, IReadOnlyList<CompiledRule> rules) =>
-        _propertyTriggers.Activate(activated, rules);
-
-    /// <summary>Requests the runs of every pending property trigger.</summary>
-    public IReadOnlyList<RunRequest> OnPendingRecheck(IReadOnlyList<CompiledRule> rules) => _propertyTriggers.RequestPendingRuns(rules);
-
     /// <summary>Queues a request of the runs of every pending property trigger, such as after a state change skipped them.</summary>
     public void RequestPendingRecheck() => _queue.TryEnqueue(new PendingRecheckInput(AutomationInputQueue.CausedChainDepth));
+
+    /// <summary>Gets when the next property trigger or guard is due for a tick, or null when none is.</summary>
+    public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now) => _propertyTriggers.GetNextDueAt(rules, now);
 
     /// <summary>Keeps track of the pending property triggers after the requests were dispatched.</summary>
     public void TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>

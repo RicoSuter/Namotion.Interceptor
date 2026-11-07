@@ -27,6 +27,9 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
     /// <summary>Whether runs were recorded that are not written yet.</summary>
     public bool HasUnwrittenRuns => _runsDueAt is not null;
 
+    /// <summary>When the runs not written yet are due to be written, or null without such runs.</summary>
+    public DateTimeOffset? RunsDueAt => _runsDueAt;
+
     /// <summary>Keeps the checkpoint in the store from now on, starting from an empty one, as for a new automation.</summary>
     public void UseStore(AutomationCheckpointStore newStore)
     {

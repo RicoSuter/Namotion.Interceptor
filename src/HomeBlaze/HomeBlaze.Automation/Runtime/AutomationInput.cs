@@ -40,10 +40,7 @@ internal sealed record ConfigurationChangedInput() : AutomationInput(0)
 /// The state of the automation is reset to its initial state. A reset requested by a run continues the chain of that run,
 /// so that rules that reset the automation and enter a state again are stopped as a feedback chain.
 /// </summary>
-internal sealed record ResetStateInput(int ChainDepth) : AutomationInput(ChainDepth)
-{
-    public static ResetStateInput Instance { get; } = new(0);
-}
+internal sealed record ResetStateInput(int ChainDepth) : AutomationInput(ChainDepth);
 
 /// <summary>Completes once the queue is empty when it is processed.</summary>
 internal sealed record FlushInput(TaskCompletionSource Completion) : AutomationInput(0)
