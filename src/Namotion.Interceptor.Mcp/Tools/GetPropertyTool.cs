@@ -69,7 +69,7 @@ internal class GetPropertyTool
 
         var response = new Dictionary<string, object?>
         {
-            ["value"] = property.GetValue(),
+            ["value"] = McpToolHelper.GetValue(property, _configuration),
             ["type"] = JsonSchemaTypeMapper.ToJsonSchemaType(property.Type)
         };
 

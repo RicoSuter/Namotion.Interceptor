@@ -295,6 +295,9 @@ var config = new McpServerConfiguration
     // Optional: decide per member and action what the tools show and change (default: ReadOnlyMcpAccessPolicy.Instance)
     AccessPolicy = new MyAccessPolicy(),
 
+    // Optional: change the values the tools return, for example to leave out what the policy hides
+    ValueFilters = { new MyValueFilter() },
+
     // Optional: subject types that browse, search and list_types leave out
     ExcludeTypes = [typeof(MyInternalSubject)],
 
@@ -340,6 +343,8 @@ The tools apply these rules. A policy that allows every read changes nothing abo
 With `ReadOnlyMcpAccessPolicy` or `AllowAllMcpAccessPolicy`, which allow every read, nothing of the read rules is evaluated or allocated; a policy of the application is asked even when it allows every read.
 
 Declare properties that hold subjects with subject types, otherwise their values are listed as values and the policy is not asked about the subjects inside, for example the devices in a property typed as a dictionary of lists of devices.
+
+A value can name what the policy hides, such as a list of the names of hidden subjects. An `IMcpValueFilter` in `ValueFilters` changes such a value. The built-in tools pass these values through the filters in order: the value of a property in `get_property`, `browse` and `search`, the `previousValue` of `set_property`, the value of a listed attribute, and every value a `where` filter of `search` compares. Results of other tools, such as the tools of an `IMcpToolProvider`, are not filtered: such a tool calls `configuration.ApplyValueFilters(member, value)` for a member value it returns or compares, so that it shows what the built-in tools show. A filter is only asked about a member the tools may read, may be called concurrently and must be thread-safe.
 
 `list_types` is not filtered, because types are schema rather than data. Enrichments such as `$methods` come from the `IMcpSubjectEnricher` of the application, which filters them itself. A custom tool resolves paths the way the tools do with `configuration.TryGetReadableProperty(root, path)` and `configuration.TryGetReadableSubject(root, path)`, which return null for what is hidden. It builds the path `search` lists for a subject, which is also the `$path` `browse` returns for a subject it lists, with `configuration.TryGetSubjectPath(root, subject)`, which returns null for a subject that has no path, is not readable or is of a type in `ExcludeTypes`, so it lists exactly the subjects `search` can list. `TryGetReadableSubject` resolves a path it returns, for any subject but the root, back to that subject when the path provider resolves the path with the `PathPrefix`, as without a prefix or with the prefix `/` and the separator `/`. The three helpers take the tool root as `root`: it is readable, and paths are resolved and built from it.
 

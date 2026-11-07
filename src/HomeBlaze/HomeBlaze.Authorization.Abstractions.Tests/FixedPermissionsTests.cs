@@ -46,7 +46,8 @@ public class FixedPermissionsTests
 
     // Calls every method of IUserPermissions with a registered member, its subject or a set of roles; a method that takes
     // anything else, or answers with anything but a decision or role names, fails the test, so that a new question is
-    // answered here as well. With names, gives for each method answering with role names whether it named none.
+    // answered here as well. GetValue gives a value, not a decision, and is asked only for a member CanRead allows. With
+    // names, gives for each method answering with role names whether it named none.
     private static Dictionary<string, bool> AskEveryQuestion(IUserPermissions permissions, bool names = false)
     {
         var subject = new FixedPermissionsTestSubject(InterceptorSubjectContext.Create().WithRegistry());
@@ -54,7 +55,7 @@ public class FixedPermissionsTests
         var member = registered.TryGetProperty(nameof(FixedPermissionsTestSubject.Value))!;
 
         var answers = new Dictionary<string, bool>();
-        foreach (var method in typeof(IUserPermissions).GetMethods(BindingFlags.Public | BindingFlags.Instance).Where(method => !method.IsSpecialName))
+        foreach (var method in typeof(IUserPermissions).GetMethods(BindingFlags.Public | BindingFlags.Instance).Where(method => !method.IsSpecialName && method.Name != nameof(IUserPermissions.GetValue)))
         {
             var arguments = method.GetParameters().Select(parameter => parameter.ParameterType switch
             {

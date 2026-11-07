@@ -239,8 +239,11 @@ public sealed class AuthorizationService : IDisposable
 
         _principals.Set(principal, roleNames);
         Interlocked.Increment(ref _statusVersion);
-        GetSnapshot();
-        WriteStatuses();
+        GetSnapshot(out var hasWrittenStatuses);
+        if (!hasWrittenStatuses)
+        {
+            WriteStatuses();
+        }
     }
 
     /// <summary>
@@ -250,12 +253,13 @@ public sealed class AuthorizationService : IDisposable
     public IReadOnlyList<PrincipalRoleSet> GetPrincipalRoleSets() => _principals.GetRoleSets();
 
     /// <summary>
-    /// Stops observing property changes. Policies already returned stay valid.
+    /// Stops observing the graph. Policies already returned stay valid.
     /// </summary>
     public void Dispose()
     {
         _isDisposed = true;
         _subscription.Dispose();
+        _graphObserver.Detach();
     }
 
     private void OnPropertyChanged(SubjectPropertyChange change)
@@ -299,6 +303,11 @@ public sealed class AuthorizationService : IDisposable
 
     private void Refresh()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         // Cleared first, so that a change during the rebuild schedules another one.
         Volatile.Write(ref _isRefreshScheduled, 0);
         try
@@ -311,8 +320,12 @@ public sealed class AuthorizationService : IDisposable
         }
     }
 
-    internal AuthorizationSnapshot GetSnapshot()
+    internal AuthorizationSnapshot GetSnapshot() => GetSnapshot(out _);
+
+    // hasWrittenStatuses tells whether this call built a snapshot, and so wrote the statuses after publishing it.
+    private AuthorizationSnapshot GetSnapshot(out bool hasWrittenStatuses)
     {
+        hasWrittenStatuses = false;
         var version = Volatile.Read(ref _version);
         var snapshot = Volatile.Read(ref _snapshot);
         if (snapshot is not null && snapshot.Version == version)
@@ -346,6 +359,7 @@ public sealed class AuthorizationService : IDisposable
 
         // Outside the lock: a write notifies observers synchronously, which must not wait for a rebuild.
         WriteStatuses();
+        hasWrittenStatuses = true;
         return snapshot;
     }
 

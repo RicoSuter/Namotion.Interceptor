@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
@@ -25,12 +27,13 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage that the tools list and whose metadata member the access
-    /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and no match for a
-    /// result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
+    /// Gets the first 100 matches of SearchMetadata of a storage that the tools list, whose metadata member the access
+    /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and whose metadata
+    /// still matches the input arguments as the value filters of the configuration show it, and no match for a result of
+    /// SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration, PathProviderBase pathProvider)
+        RegisteredSubject subject, MethodMetadata method, object?[] arguments, object? result, McpServerConfiguration configuration)
     {
         if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) || subject.Subject is not IMetadataStore)
         {
@@ -42,8 +45,12 @@ internal static class AgentMetadataAccess
             return Array.Empty<MetadataSearchMatch>();
         }
 
+        // The input parameters in declaration order: tag, key, value and path.
+        var (tag, key, value) = arguments is [var tagArgument, var keyArgument, var valueArgument, ..]
+            ? (tagArgument as string, keyArgument as string, valueArgument as string)
+            : (null, null, null);
         return matches
-            .Where(match => IsReadable(subject, match, configuration, pathProvider))
+            .Where(match => IsReadable(subject, match, configuration) && MatchesShownMetadata(subject, match, configuration, tag, key, value))
             .Take(MaxSearchMetadataMatches)
             .ToArray();
     }
@@ -55,12 +62,11 @@ internal static class AgentMetadataAccess
     /// <see cref="AgentOrderAccess.GetSetOrderError"/>. Other operations are not refused.
     /// </summary>
     public static string? GetOperationError(
-        RegisteredSubject subject, MethodMetadata method, object?[] arguments, McpServerConfiguration configuration,
-        PathProviderBase pathProvider, IInterceptorSubject root)
+        RegisteredSubject subject, MethodMetadata method, object?[] arguments, McpServerConfiguration configuration, IInterceptorSubject root)
     {
         if (method.PropertyName == AgentOrderAccess.SetOrderMethodName && subject.Subject is IMetadataContainer)
         {
-            return AgentOrderAccess.GetSetOrderError(subject, arguments, configuration, pathProvider, root);
+            return AgentOrderAccess.GetSetOrderError(subject, arguments, configuration, root);
         }
 
         if (method.PropertyName != FluentStorageContainer.SetMetadataMethodName || subject.Subject is not IMetadataStore)
@@ -76,9 +82,9 @@ internal static class AgentMetadataAccess
         }
 
         var propertyName = arguments[1] as string;
-        return GetSetMetadataError(subject, path, propertyName, configuration, pathProvider) ??
+        return GetSetMetadataError(subject, path, propertyName, configuration) ??
             (propertyName is null && FluentStorageContainer.ResolveMetadataPath(subject.Subject, path) is { } target
-                ? AgentOrderAccess.GetMetadataOrderError(target, values, configuration, pathProvider, root)
+                ? AgentOrderAccess.GetMetadataOrderError(target, values, configuration, root)
                 : null);
     }
 
@@ -89,14 +95,14 @@ internal static class AgentMetadataAccess
     /// allow to write its metadata member.
     /// </summary>
     public static string? GetSetMetadataError(
-        RegisteredSubject storage, string path, string? propertyName, McpServerConfiguration configuration, PathProviderBase pathProvider)
+        RegisteredSubject storage, string path, string? propertyName, McpServerConfiguration configuration)
     {
         if (TryGetListedTarget(storage, path, configuration) is not { } target)
         {
             return FluentStorageContainer.GetNoSubjectMessage(path);
         }
 
-        if (propertyName is not null && IsPropertyChecked(target.Subject) && !IsPropertyReadable(target, propertyName, configuration, pathProvider))
+        if (propertyName is not null && IsPropertyChecked(target.Subject) && !IsPropertyReadable(target, propertyName, configuration))
         {
             return FluentStorageContainer.GetNoPropertyMessage(propertyName);
         }
@@ -129,15 +135,34 @@ internal static class AgentMetadataAccess
     }
 
     // The match is listed by the tools, and its metadata member is readable at the path at which get_property resolves it.
-    private static bool IsReadable(RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration, PathProviderBase pathProvider)
+    private static bool IsReadable(RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration)
     {
         if (TryGetListedTarget(storage, match.Path, configuration) is not { } target ||
-            (match.Property is not null && IsPropertyChecked(target.Subject) && !IsPropertyReadable(target, match.Property, configuration, pathProvider)))
+            (match.Property is not null && IsPropertyChecked(target.Subject) && !IsPropertyReadable(target, match.Property, configuration)))
         {
             return false;
         }
 
         return IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
+    }
+
+    // A value filter can leave out the part of the metadata that matched, such as a hidden child in the order of a folder,
+    // so the match must hold for the metadata as the tools show it, or it confirms what they hide.
+    private static bool MatchesShownMetadata(
+        RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration, string? tag, string? key, string? value)
+    {
+        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, match.Path)?.TryGetRegisteredSubject();
+        var member = match.Property is null
+            ? target?.TryGetProperty(KnownAttributes.Metadata)
+            : target?.TryGetProperty(match.Property)?.TryGetAttribute(KnownAttributes.Metadata);
+        if (member?.GetValue() is not ImmutableDictionary<string, JsonElement> metadata)
+        {
+            return false;
+        }
+
+        var shown = configuration.ApplyValueFilters(member, metadata);
+        return ReferenceEquals(shown, metadata) ||
+            (shown is ImmutableDictionary<string, JsonElement> shownMetadata && MetadataSearch.IsMatch(shownMetadata, tag, key, value));
     }
 
     /// <summary>
@@ -194,8 +219,8 @@ internal static class AgentMetadataAccess
         => target is not (FluentStorageContainer or VirtualFolder) && target.FindMetadataStore()?.CanStoreMetadata(target) == true;
 
     private static bool IsPropertyReadable(
-        RegisteredSubject subject, string propertyName, McpServerConfiguration configuration, PathProviderBase pathProvider)
+        RegisteredSubject subject, string propertyName, McpServerConfiguration configuration)
         => subject.TryGetProperty(propertyName) is { IsAttribute: false } property &&
-            pathProvider.IsPropertyIncluded(property) &&
+            configuration.PathProvider.IsPropertyIncluded(property) &&
             configuration.IsAllowed(property, McpAccessActions.Read);
 }

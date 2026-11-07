@@ -121,8 +121,9 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                 .Select(parameter => McpMethodParameter.Create(
                     parameter.Name, parameter.Type, parameter.IsNullable, GetUnitDescription(parameter.Unit)))
                 .ToArray()
-        });
+        }).ToArray();
 
+        // Materialized within the call, as the access policy of a call decides only until the call returns.
         return Task.FromResult<object?>(new { methods });
     }
 

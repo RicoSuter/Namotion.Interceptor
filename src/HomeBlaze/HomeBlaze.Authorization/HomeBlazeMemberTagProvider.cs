@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
@@ -75,6 +76,8 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
             }
         }
 
+        markers |= GetDeclaredConfigurationMarkers(member);
+
         markers |= GetMethodMarkers(member);
 
         if (member.CanContainSubjects)
@@ -93,6 +96,21 @@ public sealed class HomeBlazeMemberTagProvider : IMemberTagProvider
         }
 
         return markers;
+    }
+
+    // The configuration attribute is added only after the subject is registered, so a member of a subject that is still
+    // attaching is readable through the registry without it; its declaration is there from the start.
+    private static Markers GetDeclaredConfigurationMarkers(RegisteredSubjectProperty member)
+    {
+        foreach (var attribute in member.ReflectionAttributes)
+        {
+            if (attribute is ConfigurationAttribute configuration)
+            {
+                return configuration.IsSecret ? Markers.Configuration | Markers.Secret : Markers.Configuration;
+            }
+        }
+
+        return Markers.None;
     }
 
     // Only a property of the type that methods are registered with is read, so that a getter of another property, which

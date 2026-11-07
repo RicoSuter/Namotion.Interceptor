@@ -85,16 +85,6 @@ public class AuthorizationMcpAccessPolicyTests
     }
 
     [Fact]
-    public void WhenCreated_ThenThePolicyIsExposed()
-    {
-        // Act
-        var accessPolicy = new AuthorizationMcpAccessPolicy(AuthorizationPolicy.DenyAll);
-
-        // Assert
-        Assert.Same(AuthorizationPolicy.DenyAll, accessPolicy.Policy);
-    }
-
-    [Fact]
     public void WhenAPolicyWithALoggerDeniesAnAction_ThenOnlyDeniedExecuteAndHistoryAreLoggedWithTheClientAndThePath()
     {
         // Arrange

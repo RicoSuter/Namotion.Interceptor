@@ -16,7 +16,7 @@ namespace HomeBlaze.AI.Mcp;
 /// may be read when its path from the root resolves back to it through the readable resolution of the tools, so every
 /// property on the path must be readable and every subject it passes readable as well, as for get_property. Unlike the
 /// tools, every member is named on a path, so that an expression may read a member the tools do not list, such as a
-/// derived title.
+/// derived title. A readable value is shown as the tools return it, after the value filters of the configuration.
 /// </summary>
 internal sealed class McpPageReadAccess
 {
@@ -63,6 +63,13 @@ internal sealed class McpPageReadAccess
         ReferenceEquals(subject.Subject, root) ||
         (root.TryGetRegisteredSubject() is { } registeredRoot && _configuration.TryGetSubjectPath(registeredRoot, subject) is not null);
 
+    // The value the tools return for the member, so that a page shows no more than get_property.
+    private object? GetValue(RegisteredSubjectProperty member)
+    {
+        var value = member.GetValue();
+        return _configuration.ValueFilters.Count > 0 ? _configuration.ApplyValueFilters(member, value) : value;
+    }
+
     private bool IsAllowed(RegisteredSubjectProperty member, string action) =>
         AuthorizationMcpAccessPolicy.IsAllowedWithoutLogging(_configuration.AccessPolicy, member, action);
 
@@ -90,6 +97,8 @@ internal sealed class McpPageReadAccess
 
         public bool CanRead(RegisteredSubjectProperty member) =>
             GetCached(_canRead, member, static (access, property, root) => access.CanRead(property, root));
+
+        public object? GetValue(RegisteredSubjectProperty member) => _access.GetValue(member);
 
         // A query only reads, so its reader neither writes nor runs anything, whatever the policy allows.
         public bool CanWrite(RegisteredSubjectProperty member) => false;

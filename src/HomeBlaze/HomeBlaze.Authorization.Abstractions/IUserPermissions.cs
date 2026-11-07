@@ -13,6 +13,12 @@ public interface IUserPermissions
     /// <summary>Whether the user may read the value of <paramref name="member"/>.</summary>
     bool CanRead(RegisteredSubjectProperty member);
 
+    /// <summary>
+    /// Gets the value of <paramref name="member"/> as the user is shown it, such as one that leaves out what the user may
+    /// not see, for a member <see cref="CanRead"/> allows. By default, its value as it is.
+    /// </summary>
+    object? GetValue(RegisteredSubjectProperty member) => member.GetValue();
+
     /// <summary>Whether the user may change the value of <paramref name="member"/>.</summary>
     bool CanWrite(RegisteredSubjectProperty member);
 

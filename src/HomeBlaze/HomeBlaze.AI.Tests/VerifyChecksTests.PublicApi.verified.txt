@@ -391,6 +391,11 @@ namespace HomeBlaze.AI.Mcp
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeMcpToolProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<HomeBlaze.AI.McpToolProviderContext, Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider> create) { }
     }
+    public class RulePathProvider : HomeBlaze.AI.Mcp.StateAttributePathProvider
+    {
+        public RulePathProvider() { }
+        public override bool TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
+    }
     public class StateAttributePathProvider : Namotion.Interceptor.Registry.Paths.PathProviderBase
     {
         public StateAttributePathProvider() { }

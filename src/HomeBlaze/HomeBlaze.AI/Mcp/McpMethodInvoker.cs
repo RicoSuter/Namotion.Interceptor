@@ -27,7 +27,7 @@ internal sealed class McpMethodInvoker
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
     private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
-    private readonly Func<RegisteredSubject, MethodMetadata, object?, object?>? _resultFilter;
+    private readonly Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? _resultFilter;
     private readonly McpPageReadAccess _pageReadAccess;
     private readonly ReaderServiceProvider _operationServices;
 
@@ -39,14 +39,15 @@ internal sealed class McpMethodInvoker
     /// <param name="serviceProvider">Resolves the services that the methods take, except <see cref="IUserPermissions"/>.</param>
     /// <param name="logger">Logs failed calls.</param>
     /// <param name="operationFilter">Gets why a call of an operation with the given arguments is refused, or null when it is not.</param>
-    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method; null passes every result on.</param>
+    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method called with
+    /// the given input arguments; null passes every result on.</param>
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
         McpServerConfiguration configuration,
         IServiceProvider serviceProvider,
         ILogger logger,
         Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter,
-        Func<RegisteredSubject, MethodMetadata, object?, object?>? resultFilter = null)
+        Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? resultFilter = null)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _configuration = configuration;
@@ -98,8 +99,9 @@ internal sealed class McpMethodInvoker
     /// does not fit or the method fails. A method the access policy does not allow to read is not found; one it does not
     /// allow to execute is refused. A query that takes <see cref="IUserPermissions"/> gets the permissions of the policy,
     /// so a page expression over a property that does not resolve through the readable resolution of the tools, because it
-    /// or a property on its path is not readable or a subject on its path is hidden, renders empty. An operation gets
-    /// <see cref="DenyAllPermissions"/>.
+    /// or a property on its path is not readable or a subject on its path is hidden, renders empty, and one over a
+    /// readable property renders the value the tools return, after the value filters of the configuration. An operation
+    /// gets <see cref="DenyAllPermissions"/>.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
@@ -138,7 +140,7 @@ internal sealed class McpMethodInvoker
                 : _operationServices;
             var result = await method.InvokeAsync(arguments, services, cancellationToken);
 
-            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, result));
+            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, arguments ?? [], result));
             return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (ArgumentException exception)

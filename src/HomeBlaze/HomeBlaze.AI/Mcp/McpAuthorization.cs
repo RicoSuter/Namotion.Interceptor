@@ -10,10 +10,10 @@ namespace HomeBlaze.AI.Mcp;
 internal static class McpAuthorization
 {
     /// <summary>
-    /// The path provider the authorization matches rule paths with: one like that of the tools, so that a rule path
-    /// matches the paths the tools build.
+    /// The path provider the authorization matches rule paths with: the paths the tools build, and a path for every
+    /// attribute and metadata member that does not depend on its value.
     /// </summary>
-    public static StateAttributePathProvider PathProvider { get; } = new();
+    public static RulePathProvider PathProvider { get; } = new();
 
     /// <summary>
     /// Gets the access policy of a client holding <paramref name="roleNames"/> from the <see cref="AuthorizationService"/>;

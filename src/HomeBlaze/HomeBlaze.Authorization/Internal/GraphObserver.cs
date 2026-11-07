@@ -13,21 +13,26 @@ namespace HomeBlaze.Authorization.Internal;
 /// <see cref="AuthorizationService.GraphVersion"/> names. Thread-safe.
 /// </summary>
 // After the registry, so that a rebuild started by a change finds the subject among the known subjects, or no longer,
-// and so that the version changes once the registry holds the change.
+// and so that the version changes once the registry holds the change. The context has no way to remove a service, so
+// Detach lets go of a disposed service while the observer stays.
 [RunsAfter(typeof(SubjectRegistry))]
 internal sealed class GraphObserver(Action rolesChanged) : ILifecycleHandler, IPropertyLifecycleHandler, IChildIndexHandler
 {
+    private Action? _rolesChanged = rolesChanged;
     private long _graphVersion;
 
     /// <summary>The number of changes counted.</summary>
     public long GraphVersion => Volatile.Read(ref _graphVersion);
+
+    /// <summary>Stops telling the service about changes of the roles, so that the context no longer holds it.</summary>
+    public void Detach() => Volatile.Write(ref _rolesChanged, null);
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         Increment();
         if (change.Subject is Authorization or Role)
         {
-            rolesChanged();
+            Volatile.Read(ref _rolesChanged)?.Invoke();
         }
     }
 

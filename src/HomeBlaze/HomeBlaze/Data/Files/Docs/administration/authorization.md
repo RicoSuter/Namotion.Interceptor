@@ -27,7 +27,6 @@ On this page:
 - [Remote Access](#remote-access): the unencrypted HTTP warning and reverse proxy settings
 - [Role Settings](#role-settings): `includes`, `allow` and `deny`
 - [Known Limits](#known-limits)
-- [Changes Against the Previous Version](#changes-against-the-previous-version)
 
 ---
 
@@ -166,7 +165,7 @@ The built-in roles are defined in code, always available and cannot be changed. 
 The [system rules](#system-rules) apply to all three, so even `everything` never reads a secret and never writes configuration through `write`. For agents and `/mcp` clients it also never runs an operation that requires confirmation, reaches an agent or administers. `reader` and `operator` do not allow `administer`.
 
 - **`reader`** reads every member, also one without a marker, such as a derived title, a property without `[State]` or `[Configuration]` and non-secret configuration. The tools list only state, but such a value reaches a client through page expressions. Read on operations lets `list_methods` list them without allowing them to run.
-- **`operator`** allows exactly what an agent could do before roles existed with every tool allowed, which makes it the default of an agent: the system rules keep secrets, configuration writes, operations that require confirmation and agents out of reach, as the hand-written limits did before. For a person it is the household role: read, write state and run operations, but change no configuration.
+- **`operator`** allows every write and every operation that the system rules leave, which makes it the default of an agent: `AllowedTools` decides which tools the agent has, and the system rules keep secrets, configuration writes, operations that require confirmation and agents out of reach. For a person it is the household role: read, write state and run operations, but change no configuration.
 - The built-in roles are broad on purpose; restrict an agent with a custom role.
 - **`everything`** is the role of a full administrator, the seeded `admin` holds it. Give it to people only when they should be able to change everything, see [Administration](#administration). Do not give it to an agent or to `mcp`: the system rules keep these from administering, and an agent is steered by text it reads.
 
@@ -245,7 +244,7 @@ The property panel of a role shows these values:
 - **`Warning`**: hints about rules that likely do not do what they say, or empty; the role stays usable. "Path pattern '/Devices/Kitchen' names a subject, not a member, and matches nothing; use '/Devices/Kitchen/**' for the subject and everything below it, or '/Devices/Kitchen/*' for its members." for a pattern without a wildcard that names an entry of a folder. The patterns are checked against the graph when the roles change, so a subject that appears later is found at the next change of a role. The edit dialog of the role shows above its tabs the warning the role would have with its unsaved changes; it and the field "Paths" of a rule card check a pattern against the current graph while you edit, see [Rule Cards](#rule-cards).
 - **`UsedByAgents`**: the number of started agents that name the role.
 
-Role names compare exactly, see [Names](#names). A saved change applies to the next turn of each agent and to the open pages of people at once, as a whole: nobody gets a part of the changes of one save.
+Role names compare exactly, see [Names](#names). A saved change applies to the next tool call of each agent, also within a running turn, and to the open pages of people at once, as a whole: nobody gets a part of the changes of one save.
 
 When a role was changed by someone else since you opened its dialog, "Save" does not overwrite their change. It shows "The role 'light-operator' changed since you opened it."; close the dialog, open it again and repeat the change.
 
@@ -280,7 +279,7 @@ The rules are edited on three tabs:
 
 | Field | Takes |
 |-------|-------|
-| "Paths" | [Path patterns](#path-patterns) of members, such as `/Devices/Sonos/*` or `/Devices/**/Volume`. The search button next to the field, named "Browse Paths" for screen readers, opens "Select Path" with the tree of the subjects and their members: properties, methods and attributes. A secret can be picked, so that a deny rule can name it, but its value is never shown. Pick one and click "OK" to put its pattern into the field: a subject, or a property that holds subjects, comes with `/**` appended, so that the pattern covers everything below it, and any other member comes with its own path, such as `/Devices/Sonos/Play`. Edit the pattern, such as to end in `/*` for the subject's own members only, and click "Add". A pattern is checked as you type: an invalid one shows its error under the field, such as "Path pattern 'Devices' must start with '/'.", and one that names an entry of a folder shows the warning of the role's `Warning` below the field, see [Status and Usage](#status-and-usage), and a yellow chip once added. |
+| "Paths" | [Path patterns](#path-patterns) of members, such as `/Devices/Sonos/*` or `/Devices/**/Volume`. The search button next to the field, named "Browse Paths" for screen readers, opens "Select Path" with the tree of the subjects and their members: properties, methods and attributes. A secret can be picked, so that a deny rule can name it, but its value is not shown, nor is the value of a record or object that has a secret property by its declared property types; a secret held in a property typed as `object`, an interface or a base type, in a field or in a tuple is not detected and is shown. Pick one and click "OK" to put its pattern into the field: a subject, or a property that holds subjects, comes with `/**` appended, so that the pattern covers everything below it, and any other member comes with its own path, such as `/Devices/Sonos/Play`. Edit the pattern, such as to end in `/*` for the subject's own members only, and click "Add". A pattern is checked as you type: an invalid one shows its error under the field, such as "Path pattern 'Devices' must start with '/'.", and one that names an entry of a folder shows the warning of the role's `Warning` below the field, see [Status and Usage](#status-and-usage), and a yellow chip once added. |
 | "Types" | Type names, case-sensitive. While you type, the field suggests the subject types HomeBlaze knows and the device interfaces they implement, such as `ILightbulb`, by simple name. Any other name can be typed as well, simple or full; a name that matches no known type or interface, such as `ILightBulb`, shows as a yellow chip with the tooltip "No known subject type or interface has this name; check its spelling and case." and can still be saved, for a type of a plugin that is not loaded. A name with whitespace is rejected with "A type name contains no whitespace." |
 | "Members" | Member names, case-sensitive, such as `Temperature`; `*` matches any text, such as `Set*`. A name with whitespace is rejected with "A member name contains no whitespace." |
 | "Tags" | [Tags](#tags), suggested while you type. Another text shows "Unknown tag; use one of state, configuration, secret, query, operation, requires-confirmation, subjects, attribute, metadata, administration." |
@@ -382,7 +381,7 @@ A path pattern is written as the tools build paths, with `/` and `[InlinePaths]`
 
 To cover a subject, end the pattern with `/**`, or with `/*` for its own members only. A pattern that names a subject, such as `/Devices/Kitchen`, matches at most the property that holds it, and nothing when the subject is an entry of a folder, such as a device in `/Devices`; the role's `Warning` points this out. A `deny` of `read` on a property that holds subjects, such as `/Devices/Kitchen/Lights`, hides those subjects and everything below them, since a subject is readable only when the properties that hold it are readable. A pattern starts with `/` and has no empty segment, so a doubled or trailing `/` makes the role fail to compile. A pattern that can match no member, such as `/` or one that ends with an index like `/Line/Machines[CNC1]`, makes the role fail to compile with a hint to add `/**` or `/*`.
 
-Attributes are matched by the path the tools give them. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/authorization.md#path-patterns) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member it matches, so keep its patterns narrow or give it another selector when you can.
+An attribute is matched by its property's name followed by `@` and its own name, such as `/Devices/Pump/Temperature@Unit`, as the tools show it under its property, and the metadata of a property by `/Devices/Pump/Temperature@HomeBlaze:Metadata` and that of a subject by `/Devices/Pump/HomeBlaze:Metadata`. These paths do not depend on a value, so a rule on metadata applies to its first write as well. The [library documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/authorization.md#path-patterns) has the complete pattern rules, including subjects with several paths. A deny rule that has only `paths` is checked against every member it matches, so keep its patterns narrow or give it another selector when you can.
 
 ---
 
@@ -392,13 +391,13 @@ A role allows one or more of the actions below. In the browser the same actions 
 
 | Action | In the tools |
 |--------|--------------|
-| `read` | `browse` and `search` list, and `get_property` reads, the property or subject only with `read`. `list_methods` and `$methods` list a method only with `read` on it, and `invoke_query` and `invoke_operation` report a method without it as "Method not found: ...". Page expressions, `search_markdown` notes, `SearchMetadata` matches and the children `GetOrder` names need it as well |
+| `read` | `browse` and `search` list, and `get_property` reads, the property or subject only with `read`. `list_methods` and `$methods` list a method only with `read` on it, `$title` and `$icon` are given only with `read` on the title and the icon when they are members of the subject, such as a derived title, and `invoke_query` and `invoke_operation` report a method without it as "Method not found: ...". Page expressions, `search_markdown` notes, `SearchMetadata` matches and the children `GetOrder` names need it as well |
 | `write` | `set_property` writes the property, else "Property is not writable: /path. The access policy does not allow it.". `SetMetadata` needs `write` on the metadata member of its target, else "Metadata of 'path' is not writable. The access policy does not allow it.", and `SetOrder` on the metadata member of its folder, else "Metadata of '/path' is not writable. The access policy does not allow it." |
 | `execute` | `invoke_query` and `invoke_operation` run the method, else "Query 'Name' is not permitted. The access policy does not allow it." or "Operation 'Name' is not permitted. ...". The Markdown tools run `ReplaceText`, `ReplaceContent` and `CreateMarkdownFile`, and `search_markdown` searches a page only with `execute` on its `ReadRawContent` |
 | `history` | `get_property_history` reads the history of the property, else "History is not available: /path. The access policy does not allow it." A path the roles do not allow to read gives "Path not found: /path" |
 | `administer` | Managing users, and the administration a full administrator does, see [Administration](#administration). Agents and `/mcp` clients are always denied it, whatever their roles say |
 
-A subject the roles hide gives "Subject not found." in the method and Markdown tools, "Path not found: ..." in `get_property`, and "No subject at '...' in this storage." in `SetMetadata`. `GetOrder` of a folder leaves it out, and an order in `SetOrder` or in the `order` of `SetMetadata` that names it is refused as a name that is no child, and the refusal names only the children the tools list. `list_types`, `update_memory` and the web tools do not touch the graph and are not affected. A denied `execute` or `history` of an agent is logged at debug level with the agent and the member; denied reads and writes are not logged, as the tools ask them for every member they list.
+A subject the roles hide gives "Subject not found." in the method and Markdown tools, "Path not found: ..." in `get_property`, and "No subject at '...' in this storage." in `SetMetadata`. `GetOrder` of a folder leaves it out, and so does the `order` in the metadata of a folder as `get_property`, `browse`, `search` and page expressions show it, `SearchMetadata` does not find a folder by the name of such a child in its `order`, and an order in `SetOrder` or in the `order` of `SetMetadata` that names it is refused as a name that is no child, and the refusal names only the children the tools list. `list_types`, `update_memory` and the web tools do not touch the graph and are not affected. A denied `execute` or `history` of an agent is logged at debug level with the agent and the member; denied reads and writes are not logged, as the tools ask them for every member they list.
 
 ---
 
@@ -450,12 +449,13 @@ The system rules are deny rules that apply whatever the roles allow. The kind of
 
 - **Confirmation first**: for an agent or `/mcp` client, an operation that requires confirmation is refused with "'Name' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.", which names the actual reason. `list_methods` marks such methods with `requiresConfirmation`.
 - **Effects of operations**: the rules decide about members, not about what an operation does. An operation may still change configuration as part of its work, such as **Set Speed** of the sample motor setting `TargetSpeed`, so grant `execute` on operations as carefully as `invoke_operation`. The writes an operation makes are not checked again.
+- **OPC UA server**: a started OPC UA server is an anonymous read-write gateway over the graph that ignores roles: every OPC UA client that reaches its port reads and writes what the server exposes below its `Path`, whatever the roles of a person, an agent or an `/mcp` client hide. Starting it needs only `execute` on its operation **Start**, no `administer`; as **Start** requires confirmation, only a person starts it, from the HomeBlaze UI. Whoever starts it decides about this access for every OPC UA client.
 
 ---
 
 ## One Authorization Subject
 
-Only one `Authorization` subject may exist. The create dialog offers the type only while there is none. A second one can still appear, for example from a copied or restored file. Then:
+Only one `Authorization` subject may exist. The create dialog offers the type only while there is none. Agents and `/mcp` clients cannot create an `Authorization` or a `Role`: they create no subjects or files, as that is administration, and change only Markdown pages, whose write rules refuse every added block except layout blocks, also with the permission to edit page layout. A second one can still appear, for example from a copied or restored file. Then:
 
 - neither is used, and each, with each of its roles, shows the status "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.",
 - the built-in roles keep working,
@@ -476,11 +476,11 @@ Each agent has the setting `Roles`, a list of role names:
 }
 ```
 
-- **Default**: `["operator"]`, for a new agent and for a file without the setting, so an agent created before roles existed keeps what it could do and `AllowedTools` stays its gate. Restrict an agent with `reader` or a custom role.
+- **Default**: `["operator"]`, for a new agent and for a file without the setting, so `AllowedTools` is the gate of such an agent. Restrict an agent with `reader` or a custom role.
 - **Edit form**: the field "Roles" offers the built-in roles and the custom roles, and each selected role shows as a chip below it. A name that is no role, such as a deleted custom role or the old name of a renamed one, shows as an error chip with the tooltip "Unknown role" that can be removed, and so does a custom role that exists but cannot be used, such as one whose name another role has as well, with the reason as its tooltip. At least one role is required, as an agent without roles is denied everything.
 - **Settings tab**: lists the roles, and the reason when the agent is denied everything.
 - **Who may change it**: creating an agent and changing its settings, including its roles, require a full administrator, see [Administration](#administration).
-- **When it applies**: each chat turn and background run takes the policy of the roles when it starts, so a change of the agent's roles, or of a role with its operations or in its dialog, applies to the next turn.
+- **When it applies**: each tool call takes the policy of the agent's roles when it starts and decides the whole call with it, so a change of the agent's roles, or of a role with its operations or in its dialog, applies to the next tool call, also within a running turn and on the MCP route of a CLI agent. The tools a turn offers, its `AllowedTools`, and the "Invalid roles" status are taken when the turn starts.
 
 ### Invalid Roles
 
@@ -490,13 +490,13 @@ When the roles cannot be used, the agent shows the status Error with "Invalid ro
 - "Role 'light-operator' is not defined.", for a name that is no built-in or custom role,
 - "A role name is empty.",
 - why a custom role does not compile, see [Status and Usage](#status-and-usage),
-- "Role '...' is unavailable: ...", for a role with a reserved name or a name with `/`, `[`, `]` or an invisible character, or while [several Authorization subjects](#one-authorization-subject) exist.
+- "Role '...' is unavailable: ...", for a role with a reserved name or a name with `/`, `[`, `]`, leading or trailing whitespace or an invisible character, or while [several Authorization subjects](#one-authorization-subject) exist.
 
 Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows a saved role without waiting for a turn.
 
 ### Who May Chat With an Agent
 
-An agent has one conversation, timeline and memory, shared by everyone who chats with it, and its background runs feed their findings into that conversation. A person may therefore chat with an agent, read its timeline, activity, memory and `Last Analysis`, start a new conversation and run it now, only when they hold every role of the agent, counting the roles those include, or are a full administrator, and the agent's roles include each of the person's roles with deny rules, see [Roles With Deny Rules](#roles-with-deny-rules). Everything the agent can see or do is then something every person who may chat with it may see or do, so shared history, findings and memory cannot leak or escalate between people. The agent page shows why it is refused, such as "You can chat with this agent only if you hold its roles. Missing: Operator." or "You can chat with this agent only if it holds your roles with deny rules, so that it cannot do what they deny you. Missing: Kid." An agent without roles can be used only by a full administrator. A turn keeps the roles it started with.
+An agent has one conversation, timeline and memory, shared by everyone who chats with it, and its background runs feed their findings into that conversation. A person may therefore chat with an agent, read its timeline, activity, memory and `Last Analysis`, start a new conversation and run it now, only when they hold every role of the agent, counting the roles those include, or are a full administrator, and the agent's roles include each of the person's roles with deny rules, see [Roles With Deny Rules](#roles-with-deny-rules). Everything the agent can see or do is then something every person who may chat with it may see or do, so shared history, findings and memory cannot leak or escalate between people. The agent page shows why it is refused, such as "You can chat with this agent only if you hold its roles. Missing: Operator." or "You can chat with this agent only if it holds your roles with deny rules, so that it cannot do what they deny you. Missing: Kid." An agent without roles can be used only by a full administrator. Each tool call of a turn uses the agent's roles at that call, see [Agents](#agents).
 
 ---
 
@@ -521,13 +521,13 @@ The two built-in users are principals without a password. Only a full administra
 
 ## Watch Paths
 
-The state a background run receives from the agent's `WatchPaths` is read with the agent's roles and the system rules, so a value the roles may not read, and the state of agents, stay out of the message. A watch path in a branch the roles hide therefore delivers nothing from it. Because the agent reports into a conversation that every person who holds its roles can read, see [Who May Chat With an Agent](#who-may-chat-with-an-agent), watch only what these people may see.
+The state a background run receives from the agent's `WatchPaths` is read with the agent's roles and the system rules, as the tools read it, so a value the roles may not read, and the state of agents, stay out of the message. A watch path that the roles hide as a whole appears in the background message with the error of a path that does not exist, which points to a watch path the roles do not cover; below a watched subject, what the roles hide is left out. A change the roles hide starts no background run either, so the timing of runs does not tell when a hidden value changes. Because the agent reports into a conversation that every person who holds its roles can read, see [Who May Chat With an Agent](#who-may-chat-with-an-agent), watch only what these people may see.
 
 ---
 
 ## Page Expressions
 
-When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property that is readable for the tools at its path: the property, every property on its path and every subject on the way readable. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `/Devices/Cameras/**`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it.
+When an agent or an `/mcp` client reads a page through the tools, a page expression renders only a property that is readable for the tools at its path: the property, every property on its path and every subject on the way readable. Anything else renders empty, as a secret does, and `ReadEvaluatedContent` with `includeSourcePaths` leaves out its path. So an expression below a branch the roles hide, such as `{{ /Devices/Cameras/Door/IsOpen }}` for a role that denies `read` on `/Devices/Cameras/**`, renders empty although `IsOpen` itself is readable. Unlike the tools, an expression may read a member the tools do not list, such as a derived title, when its roles allow it. A value map that an expression applies with `map:` must be readable as well: one the roles hide gives "Cannot resolve map: name", as a missing one does.
 
 For an agent the policy comes from its roles; for `/mcp` clients it comes from the roles of `mcp`. The check applies to queries, such as `ReadEvaluatedContent`, which evaluate pages: they take the permissions of the reader. An operation runs with permissions that deny everything, so the change handlers, renders and background work it starts are not restricted by the caller's roles.
 
@@ -602,23 +602,6 @@ A role has these settings, each optional. Roles are added, renamed and deleted w
 - **Read denies apply to member paths, not to where data flows**: a query, a derived property or the raw source of a page can show data of a member the viewer may not read. Inside a widget whose subject is shown, reading is decided per subject. Hide such data with a deny on every path it flows through, not on one.
 - **Plugins**: a plugin widget that assigns a property directly bypasses the checks of the UI, see [Administration](#administration).
 - **Gaps in collection indexes**: a hidden item of a collection is left out where the item is listed, such as in the subject browser, the path picker and a table, but the other items keep their indexes. A viewer can therefore tell from a gap, such as `[0]` and `[2]` without `[1]`, that an item is hidden, though not what it is.
-
----
-
-## Changes Against the Previous Version
-
-- **Agents are hidden** from agents and from `/mcp` clients: `browse` and `search` leave them out, `get_property` reports "Path not found", and the method tools report "Subject not found." instead of "Agents cannot run operations of agents.". Before, both could read the state of agents, and `/mcp` clients could run their operations, such as Run now.
-- **Metadata and notes of agents**: `SetMetadata` for an agent or a subject inside one reports "No subject at '...' in this storage." instead of "Agents cannot change the metadata of agents.", and `SearchMetadata` and `search_markdown` leave them out for `/mcp` clients as well.
-- **Metadata of what the tools do not list**: `/mcp` clients get the same `SetMetadata` refusals as agents, see [Anonymous and MCP](#anonymous-and-mcp). Before, they could set this metadata, and their arguments were not checked first.
-- **The `Authorization` subject and its roles** are not reachable through MCP.
-- **History**: agents and `/mcp` clients no longer get the history of a path that does not resolve.
-- **Page expressions** of an agent or an `/mcp` client over a property its policy does not allow to read, or below a branch it hides, render empty, such as the state of an agent for `/mcp` clients.
-- **Order of folders**: `GetOrder` leaves out children the policy hides, such as agents, and `SetOrder` needs `write` on the metadata of the folder.
-- **Watch paths** no longer include the state of agents.
-- **Signing in is required**, see [Upgrading](installation.md#upgrading-to-sign-in) for what to do with tablets and bookmarks. The `everything` role, the `mcp` roles and `anonymous` decide what each kind of visitor may do, see [Signing In](#signing-in) and [Anonymous and MCP](#anonymous-and-mcp). `/mcp` no longer has a read-only setting: it uses the roles of `mcp`, `reader` by default.
-- **Configuration is administration**: people change configuration only as full administrators, through the dialogs and page controls; the system rules keep `write` from reaching it for everyone.
-- **Agents** can be chatted with only by people who hold every role of the agent, create no Markdown files and read their watch paths with their own roles, see [Agents](#agents).
-- **Unchanged**: a refused configuration write still reads "Property is not writable: /path. The access policy does not allow it.", and an agent with the default role `operator` can do what it could before.
 
 ---
 

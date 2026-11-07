@@ -7,6 +7,7 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Mcp;
+using HomeBlaze.Components;
 using HomeBlaze.Authorization;
 using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
@@ -24,6 +25,7 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -190,6 +192,58 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.False(humidity.TryGetProperty("property", out _));
     }
 
+    [Fact]
+    public async Task WhenTheRolesHideAPartOfAWatchedBranch_ThenTheBackgroundMessageLeavesItOut()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole
+        {
+            Name = "nocellar",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = ["/Devices/Cellar/**"], Actions = [PermissionAction.Read] }]
+        });
+        AddDevices(graph);
+        var agent = new FakeAgent(graph.AgentServices) { Roles = ["nocellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        var runCount = agent.RunCount;
+        agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.RunCount > runCount && !agent.IsBusy, message: "The background run should finish.");
+
+        // Assert
+        var message = agent.Requests[^1].UserMessage;
+        Assert.Contains("/Devices/Kitchen", message);
+        Assert.DoesNotContain("Cellar", message);
+    }
+
+    [Fact]
+    public async Task WhenAWatchedChangeIsHiddenByTheRoles_ThenItStartsNoRunWhileAReadableOneDoes()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole
+        {
+            Name = "nocellar",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = ["/Devices/Cellar/**"], Actions = [PermissionAction.Read] }]
+        });
+        AddDevices(graph);
+        var logger = new RecordingLogger();
+        var agent = new FakeAgent(graph.AgentServices, logger) { Roles = ["nocellar"], WatchPaths = ["/Devices"], MinRunInterval = TimeSpan.Zero };
+        await AttachAndWaitForStartAsync(graph, agent);
+        var devices = (AgentTestRoot)graph.Root.Children["Devices"];
+
+        // Act
+        ((TestThing)devices.Children["Cellar"]).Temperature = 5;
+        ((TestThing)devices.Children["Kitchen"]).Temperature = 25;
+        await AsyncTestHelpers.WaitUntilAsync(() => agent.RunCount == 1, message: "The readable change should start a run.");
+
+        // Assert
+        // Changes are evaluated in order, so once the later readable change has started a run, the hidden one was evaluated too.
+        var runRequest = Assert.Single(logger.Entries, entry => entry.Message.Contains("requests a background run", StringComparison.Ordinal));
+        Assert.Contains("/Devices/Kitchen", runRequest.Message);
+    }
+
     [Theory]
     [InlineData(BuiltInRoles.ReaderName, false)]
     [InlineData(BuiltInRoles.OperatorName, true)]
@@ -339,6 +393,82 @@ public sealed class AgentRolesTests : IAsyncLifetime
             () => agent.Status == ServiceStatus.Running && !(agent.StatusMessage ?? string.Empty).Contains("'late'"),
             message: "The roles error should clear.");
         Assert.Empty(agent.Requests);
+    }
+
+    [Fact]
+    public async Task WhenARoleIsRemovedDuringATurn_ThenTheNextToolCallIsRefused()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] });
+        var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
+        var results = new List<string>();
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            Roles = ["custom"],
+            AllowedTools = ["get_property"],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var getProperty = request.Tools.Tools.First(tool => tool.Name == "get_property");
+                var input = JsonSerializer.SerializeToElement(new { path = "/Temperature" });
+                results.Add(JsonSerializer.Serialize(await getProperty.Handler(input, cancellationToken)));
+                authorization.ReplaceRoles([]);
+                results.Add(JsonSerializer.Serialize(await getProperty.Handler(input, cancellationToken)));
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("Read the temperature twice.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Contains("21.5", results[0]);
+        Assert.Contains("Path not found", results[1]);
+    }
+
+    [Fact]
+    public async Task WhenARoleHidesAMethodDuringATurn_ThenTheNextListMethodsLeavesItOutAlsoWhenItsResultIsReadLater()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", new AuthorizationRole { Name = "custom", Includes = [BuiltInRoles.ReaderName] });
+        var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
+        var results = new List<string>();
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            Roles = ["custom"],
+            AllowedTools = ["list_methods"],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var listMethods = request.Tools.Tools.First(tool => tool.Name == "list_methods");
+                var input = JsonSerializer.SerializeToElement(new { path = "/Storage" });
+                results.Add(JsonSerializer.Serialize(await listMethods.Handler(input, cancellationToken)));
+                authorization.ReplaceRoles(
+                [
+                    new AuthorizationRole
+                    {
+                        Name = "custom",
+                        Includes = [BuiltInRoles.ReaderName],
+                        Deny = [new PermissionRule { Members = [nameof(FluentStorageContainer.GetOrder)], Actions = [PermissionAction.Read] }]
+                    }
+                ]);
+
+                // Serialized after the call returned, as a backend serializes a result.
+                var result = await listMethods.Handler(input, cancellationToken);
+                results.Add(JsonSerializer.Serialize(result));
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("List the methods twice.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Contains("\"GetOrder\"", results[0]);
+        Assert.DoesNotContain("\"GetOrder\"", results[1]);
+        Assert.Contains("\"SearchMetadata\"", results[1]);
     }
 
     [Fact]
@@ -495,6 +625,88 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         // Assert
         Assert.Equal("Kitchen: [Yes], cellar: [], temperature: [18]", evaluated);
+    }
+
+    public static TheoryData<string> AuthorizationBlocks => new()
+    {
+        $":: {typeof(Authorization.Authorization).FullName}#auth\n::",
+        $":: {typeof(Role).FullName}#role\n::",
+        $"```subject(auth)\n{{ \"$type\": \"{typeof(Authorization.Authorization).FullName}\" }}\n```",
+        $":: {typeof(GridLayout).FullName}\n::: Cell\n:::: {typeof(Authorization.Authorization).FullName}#auth\n::::\n:::\n::"
+    };
+
+    [Theory]
+    [MemberData(nameof(AuthorizationBlocks))]
+    public async Task WhenAnAgentWritesAnAuthorizationOrRoleBlock_ThenEveryPageWriteRefusesItAlsoWithThePageLayoutPermission(string block)
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var results = new List<string>();
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            AllowedTools = [.. HomeBlazeMarkdownToolProvider.ToolNames, HomeBlazeMcpToolProvider.InvokeOperationToolName, AgentToolSet.EditPageLayoutPermission],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var tools = request.Tools.Tools.ToDictionary(tool => tool.Name);
+                async Task CallAsync(string name, object input) => results.Add(JsonSerializer.Serialize(
+                    await tools[name].Handler(JsonSerializer.SerializeToElement(input), cancellationToken)));
+
+                await CallAsync(HomeBlazeMarkdownToolProvider.CreateMarkdownToolName, new { folder_path = "/Storage", name = "Roles.md", content = "# Roles\n\n" + block });
+                await CallAsync(HomeBlazeMarkdownToolProvider.WriteMarkdownToolName, new { path = "/Storage/Notes.md", content = "# Notes\n\n" + block });
+                await CallAsync(HomeBlazeMarkdownToolProvider.EditMarkdownToolName, new { path = "/Storage/Notes.md", old_text = "# Notes", new_text = "# Notes\n\n" + block });
+                await CallAsync(HomeBlazeMcpToolProvider.InvokeOperationToolName, new
+                {
+                    path = "/Storage/Notes.md", method = "ReplaceContent", parameters = new { content = "# Notes\n\n" + block }
+                });
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("Add a role.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal([BuiltInRoles.OperatorName], agent.Roles);
+        Assert.Equal(4, results.Count);
+
+        // Creating a page is administration, which agents never have; the other writes refuse the block.
+        Assert.Contains("CreateMarkdownFile", results[0]);
+        Assert.Contains("is not permitted", results[0]);
+        Assert.All(results.Skip(1), result => Assert.Contains("With the permission to edit page layout", result));
+        var knownSubjects = ((IInterceptorSubject)graph.Root).Context.GetService<ISubjectRegistry>().KnownSubjects.Keys;
+        var authorization = Assert.Single(knownSubjects.OfType<Authorization.Authorization>());
+        Assert.True(knownSubjects.OfType<Role>().ToHashSet().SetEquals(authorization.Roles.Values), "Only the roles of the Authorization exist.");
+        Assert.Equal("# Notes", await File.ReadAllTextAsync(Path.Combine(_directory.FullName, "Notes.md")));
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Roles.md")));
+    }
+
+    [Theory]
+    [InlineData(false, "State: [warm]")]
+    [InlineData(true, "State: [Cannot resolve map: busy]")]
+    public async Task WhenARoleHidesAValueMap_ThenAPageExpressionCannotApplyIt(bool hidesMap, string expected)
+    {
+        // Arrange
+        var graph = await CreateGraphAsync($$$"""
+            :: {{{typeof(ValueMap).FullName}}}#busy
+            ::: Case When="value > 20" Text="warm"
+            ::
+
+            State: [{{ /Temperature | map:busy }}]
+            """);
+        var role = new AuthorizationRole
+        {
+            Name = "nomap",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = hidesMap ? [new PermissionRule { Paths = ["/Storage/Notes.md/busy/**"], Actions = [PermissionAction.Read] }] : []
+        };
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var evaluated = await ReadEvaluatedContentAsync(tools, includeSourcePaths: false);
+
+        // Assert
+        Assert.Equal(expected, evaluated?.Split('\n')[^1]);
     }
 
     [Fact]
@@ -667,6 +879,8 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(ValueMap).Assembly);
+        typeProvider.AddAssembly(typeof(Authorization.Authorization).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();

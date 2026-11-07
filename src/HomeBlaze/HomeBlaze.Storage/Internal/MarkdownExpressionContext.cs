@@ -18,7 +18,7 @@ namespace HomeBlaze.Storage.Internal;
 /// <param name="page">The page the paths resolve from.</param>
 /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
 /// <param name="permissions">The permissions of the viewer, for whom a property it may not read resolves to missing, also in the
-/// cases of a map.</param>
+/// cases of a map, and a readable one to its value as the viewer is shown it.</param>
 internal readonly struct MarkdownExpressionContext(
     SubjectPathResolver pathResolver,
     IInterceptorSubject page,
@@ -40,7 +40,7 @@ internal readonly struct MarkdownExpressionContext(
 
         return property is null || !permissions.CanRead(property)
             ? ExpressionValue.Missing
-            : ExpressionValue.FromProperty(property, property.GetValue());
+            : ExpressionValue.FromProperty(property, permissions.GetValue(property));
     }
 
     // The text of a page binds no variable, and MarkdownExpressions refuses one before an expression is evaluated.

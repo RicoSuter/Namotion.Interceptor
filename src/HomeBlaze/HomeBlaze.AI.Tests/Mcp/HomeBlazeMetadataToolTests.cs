@@ -5,9 +5,12 @@ using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Authorization;
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions.Metadata;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -154,6 +157,84 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal("Pump", metadata.GetProperty("value").GetProperty("navTitle").GetString());
     }
 
+    [Theory]
+    [InlineData(PumpFileSizeMetadataPath, false)]
+    [InlineData(PumpFileSizeMetadataPath, true)]
+    [InlineData(PumpMetadataPath, false)]
+    [InlineData(PumpMetadataPath, true)]
+    public async Task WhenARoleDeniesWritingMetadataByPath_ThenOnlyThatMemberIsRefusedWhetherOrNotItHasMetadata(string deniedPath, bool hasMetadata)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        if (hasMetadata)
+        {
+            WriteFile("Docs/Pump.metadata.json", """{ "navTitle": "Pump", "$properties": { "FileSize": { "comment": "grows" } } }""");
+        }
+
+        var role = new AuthorizationRole
+        {
+            Name = "DeniedMetadataPath",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = [new PermissionRule { Paths = [deniedPath], Actions = [PermissionAction.Write] }]
+        };
+        var (tools, _) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var propertyResult = await SetPumpMetadataAsync(tools, "FileSize");
+        var subjectResult = await SetPumpMetadataAsync(tools, null);
+
+        // Assert
+        Assert.Equal(deniedPath == PumpFileSizeMetadataPath, propertyResult.TryGetProperty("error", out _));
+        Assert.Equal(deniedPath == PumpMetadataPath, subjectResult.TryGetProperty("error", out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenARoleAllowsWritingTheMetadataOfAPropertyByPath_ThenTheFirstAndLaterWritesSucceed(bool hasMetadata)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        if (hasMetadata)
+        {
+            WriteFile("Docs/Pump.metadata.json", """{ "$properties": { "FileSize": { "comment": "grows" } } }""");
+        }
+
+        var role = new AuthorizationRole
+        {
+            Name = "FileSizeMetadataOnly",
+            Includes = [BuiltInRoles.ReaderName],
+            Allow =
+            [
+                new PermissionRule { Members = ["SetMetadata"], Actions = [AuthorizationActions.Execute] },
+                new PermissionRule { Paths = [PumpFileSizeMetadataPath], Actions = [PermissionAction.Write] }
+            ]
+        };
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var first = await SetPumpMetadataAsync(tools, "FileSize");
+        var second = await SetPumpMetadataAsync(tools, "FileSize");
+        var subjectResult = await SetPumpMetadataAsync(tools, null);
+
+        // Assert
+        Assert.True(first.GetProperty("success").GetBoolean());
+        Assert.True(second.GetProperty("success").GetBoolean());
+        Assert.Equal("Metadata of 'Docs/Pump.json' is not writable. The access policy does not allow it.", subjectResult.GetProperty("error").GetString());
+        var pump = ((VirtualFolder)storage.Children["Docs"]).Children["Pump.json"];
+        Assert.Equal("x", pump.TryGetRegisteredSubject()!.TryGetProperty("FileSize")!.GetMetadata()!["comment"].GetString());
+    }
+
+    private const string PumpMetadataPath = "/Storage/Docs/Pump.json/HomeBlaze:Metadata";
+
+    private const string PumpFileSizeMetadataPath = "/Storage/Docs/Pump.json/FileSize@HomeBlaze:Metadata";
+
+    private static Task<JsonElement> SetPumpMetadataAsync(Dictionary<string, McpToolInfo> tools, string? property) =>
+        CallAsync(tools["invoke_operation"], new
+        {
+            path = "/Storage", method = "SetMetadata", parameters = new { path = "Docs/Pump.json", property, values = new { comment = "x" } }
+        });
+
     [Fact]
     public async Task WhenARoleHidesABranch_ThenSetMetadataRefusesItsSubjectsAsMissingOnes()
     {
@@ -289,6 +370,72 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.IsType<ClaudeCliAgent>(storage.Children["Agent"]);
         Assert.Equal(["Agent", "Docs", "Secret"], storage.GetOrder().Order(StringComparer.Ordinal));
         Assert.Equal(["Docs"], result.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Fact]
+    public async Task WhenTheOrderOfAFolderNamesAnAgentOrAHiddenBranch_ThenItsMetadataLeavesThemOut()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "navTitle": "Root", "order": ["Secret", "Agent", "Docs"] }""");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var metadata = await CallAsync(tools["get_property"], new { path = "/Storage/HomeBlaze:Metadata" });
+        var browseResult = await CallAsync(tools["browse"], new { path = "/Storage", depth = 0, includeProperties = true, format = "json" });
+
+        // Assert
+        Assert.Equal(["Secret", "Agent", "Docs"], storage.GetMetadata()![MetadataKeys.Order].EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal("Root", metadata.GetProperty("value").GetProperty("navTitle").GetString());
+        Assert.Equal(["Docs"], metadata.GetProperty("value").GetProperty("order").EnumerateArray().Select(name => name.GetString()));
+        var browsedMetadata = browseResult.GetProperty("result").GetProperty("properties").GetProperty("HomeBlaze:Metadata").GetProperty("value");
+        Assert.Equal(["Docs"], browsedMetadata.GetProperty("order").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Fact]
+    public async Task WhenAPageExpressionShowsTheMetadataOfAFolder_ThenItsOrderLeavesOutAnAgentAndAHiddenBranch()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "order": ["Secret", "Agent", "Docs"] }""");
+        WriteFile("Probe.md", "Order: {{ /Storage/HomeBlaze:Metadata }}");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage/Probe.md", method = "ReadEvaluatedContent" });
+
+        // Assert
+        var unfiltered = ((MarkdownFile)storage.Children["Probe.md"]).ReadEvaluatedContent(UnrestrictedPermissions.Instance);
+        Assert.Contains("Secret", unfiltered);
+        var evaluated = result.GetProperty("result").GetString();
+        Assert.Contains("Docs", evaluated);
+        Assert.DoesNotContain("Secret", evaluated);
+        Assert.DoesNotContain("Agent", evaluated);
+    }
+
+    [Theory]
+    [InlineData("Secret", false)]
+    [InlineData("Agent", false)]
+    [InlineData("Docs", true)]
+    public async Task WhenSearchMetadataLooksForAChildInTheOrderOfAFolder_ThenOnlyAListedChildMatches(string name, bool matches)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "order": ["Secret", "Agent", "Docs"] }""");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { key = "order", value = name } });
+
+        // Assert
+        Assert.Single(storage.SearchMetadata(null, "order", name, null));
+        Assert.Equal(matches ? ["|"] : [], GetMatches(result));
     }
 
     [Theory]
@@ -572,9 +719,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
 
         // Act
-        var pathProvider = new StateAttributePathProvider();
         var result = AgentMetadataAccess.FilterSearchMetadataResult(
-            subject, method, new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = pathProvider }, pathProvider);
+            subject, method, [], new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() });
 
         // Assert
         Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));

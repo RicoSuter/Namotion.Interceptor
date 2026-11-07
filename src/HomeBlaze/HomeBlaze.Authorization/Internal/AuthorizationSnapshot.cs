@@ -51,6 +51,7 @@ internal sealed class AuthorizationSnapshot
         _pathProvider = pathProvider;
         _roles = roles;
         _unavailableRoles = unavailableRoles;
+        UnavailableRoles = unavailableRoles.AsReadOnly();
         _customRolesError = customRolesError;
         _compiler = new RoleCompiler(roles, pathProvider);
         _leadingSeparatorErrors = PathPatternChecks.GetLeadingSeparatorErrors(roles, pathProvider.PathSeparator);
@@ -64,7 +65,7 @@ internal sealed class AuthorizationSnapshot
     public IReadOnlyList<string> RoleNames { get; }
 
     /// <summary>The custom roles that exist but cannot be used, by name, with the reason.</summary>
-    public IReadOnlyDictionary<string, string> UnavailableRoles => _unavailableRoles;
+    public IReadOnlyDictionary<string, string> UnavailableRoles { get; }
 
     /// <summary>The status of each <see cref="Authorization"/> subject.</summary>
     public ImmutableArray<(Authorization Authorization, string? Status)> AuthorizationStatuses { get; private set; } = [];

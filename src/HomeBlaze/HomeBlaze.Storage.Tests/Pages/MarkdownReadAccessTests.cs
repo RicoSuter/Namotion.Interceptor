@@ -2,6 +2,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Authorization.Abstractions;
+using HomeBlaze.Components;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
@@ -127,6 +128,23 @@ public class MarkdownReadAccessTests
         // Assert
         Assert.Equal("State: 1.23 kW", GetLastLine(evaluated));
         Assert.Equal("State: busy at 1.23 kW", GetLastLine(evaluatedUnrestricted));
+    }
+
+    [Fact]
+    public async Task WhenTheReaderMayReadNoMemberOfAValueMap_ThenTheMapReadsAsMissing()
+    {
+        // Arrange
+        var (_, page) = await AddPageAsync("State: {{ meter/Power | map:busy }}, other: {{ meter/Power | map:missing }}");
+        var map = page.Children.Values.OfType<ValueMap>().Single();
+        var permissions = new ReadablePermissions(property => !ReferenceEquals(property.Subject, map));
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent(permissions);
+        var evaluatedUnrestricted = page.ReadEvaluatedContent(UnrestrictedPermissions.Instance);
+
+        // Assert
+        Assert.Equal("State: Cannot resolve map: busy, other: Cannot resolve map: missing", GetLastLine(evaluated));
+        Assert.Equal("State: busy at 1.23 kW, other: Cannot resolve map: missing", GetLastLine(evaluatedUnrestricted));
     }
 
     [Fact]

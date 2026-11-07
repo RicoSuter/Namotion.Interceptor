@@ -31,6 +31,7 @@ namespace HomeBlaze.Authorization.Abstractions
         bool CanShow(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject);
         bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
         System.Collections.Generic.IReadOnlyList<string> GetRolesWithDenyRulesMissingFrom(System.Collections.Generic.IReadOnlyCollection<string> roles);
+        object? GetValue(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member);
         bool HoldsAllRoles(System.Collections.Generic.IReadOnlyCollection<string> roles);
     }
     public enum PermittedOperationOutcome

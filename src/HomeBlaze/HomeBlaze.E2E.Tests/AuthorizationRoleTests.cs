@@ -117,15 +117,20 @@ public class AuthorizationRoleTests
             await Assertions.Expect(paths.GetByTestId("rule-paths-chip")).ToHaveTextAsync(FolderPattern, new() { Timeout = Timeout });
             await Assertions.Expect(paths.Locator("input")).ToHaveValueAsync(string.Empty);
 
-            // Typed into a field with suggestions and saved at once, without Enter or leaving the field first.
-            await rule.GetByTestId("rule-types").Locator("input").PressSequentiallyAsync(TypeName);
+            // Entered into a field with suggestions and saved at once, without Enter or leaving the field first. Filled
+            // rather than typed key by key, which can lose keys when the focus moves or the field renders while typing.
+            // The value check catches only a render that replaced the text in the browser before the save, not text the
+            // server never received; the failure below shows the roles in memory for that.
+            var typesInput = rule.GetByTestId("rule-types").Locator("input");
+            await typesInput.FillAsync(TypeName);
+            await Assertions.Expect(typesInput).ToHaveValueAsync(TypeName);
             await SaveAsync(roleDialog);
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => authorization.Roles.TryGetValue(RoleName, out var role) && IsStateReadRule(role.Allow.SingleOrDefault()),
-                TimeSpan.FromSeconds(30),
-                message: "The allow rule was not stored.");
+                () => $"The allow rule was not stored. The roles in memory: {DescribeRoles(authorization)}",
+                TimeSpan.FromSeconds(30));
 
             // A full administrator is never refused, also not when the dialog persists the role it saved.
             await Assertions.Expect(roleDialog.Page.GetByText(AccessDeniedTexts.Administer)).ToHaveCountAsync(0);
@@ -362,4 +367,13 @@ public class AuthorizationRoleTests
         // The notification is the last step of the save, so everything it writes is written by now.
         await Assertions.Expect(dialog.Page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = Timeout });
     }
+
+    private static string DescribeRoles(Authorization.Authorization authorization) =>
+        string.Join("; ", authorization.Roles
+            .Select(role => $"{role.Key}: allow {DescribeRules(role.Value.Allow)}, deny {DescribeRules(role.Value.Deny)}"));
+
+    private static string DescribeRules(IReadOnlyList<PermissionRule> rules) =>
+        "[" + string.Join(", ", rules.Select(rule =>
+            $"paths=[{string.Join(",", rule.Paths)}] types=[{string.Join(",", rule.Types)}] members=[{string.Join(",", rule.Members)}] " +
+            $"tags=[{string.Join(",", rule.Tags)}] actions=[{string.Join(",", rule.Actions)}]")) + "]";
 }
