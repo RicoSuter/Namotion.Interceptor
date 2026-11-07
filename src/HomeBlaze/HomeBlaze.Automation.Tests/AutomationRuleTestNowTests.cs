@@ -82,7 +82,7 @@ public class AutomationRuleTestNowTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(
             automation => automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))),
-            authorizer: new ThrowingAuthorizer());
+            authorizer: _ => new ThrowingAuthorizer());
 
         // Act
         var result = host.Rule("retract").TestNow();

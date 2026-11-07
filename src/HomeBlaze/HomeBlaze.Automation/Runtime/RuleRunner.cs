@@ -112,7 +112,7 @@ internal sealed class RuleRunner(ActionExecutor executor, SubjectPathResolver re
         host.ChangeState(change.TargetState) is { } error ? ActionResult.Failure(error) : ActionResult.Success(ActionExecutor.DescribeChangeState(change));
 
     private ActionScope CreateScope(RunRequest request, IRuleRunHost host) =>
-        new(host.Automation, request.Rule.Rule, CreateEvaluation(request), request.Rule.AllowsEvent);
+        new(host.Automation, request.Rule.Rule, CreateEvaluation(request), request.Rule.AllowsEvent, host.Roles);
 
     // A new evaluation per guard and per action, so that each reads now when it is evaluated.
     private AutomationEvaluation CreateEvaluation(RunRequest request) =>

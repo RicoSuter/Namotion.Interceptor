@@ -11,8 +11,7 @@ namespace HomeBlaze.Automation
     public sealed class AllowAllAutomationAuthorizer : HomeBlaze.Automation.IAutomationAuthorizer
     {
         public AllowAllAutomationAuthorizer() { }
-        public string? GetOperationDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty operation) { }
-        public string? GetPropertyWriteDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public HomeBlaze.Automation.IAutomationPermissions GetPermissions(System.Collections.Generic.IReadOnlyList<string> roles) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("AutoMode")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -33,6 +32,8 @@ namespace HomeBlaze.Automation
         public string? InitialState { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string[] Roles { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string[] RuleOrder { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -183,6 +184,13 @@ namespace HomeBlaze.Automation
         public string? PreviousState { get; init; }
         public required System.DateTimeOffset Timestamp { get; init; }
     }
+    public static class AutomationTargets
+    {
+        public static bool CanCall(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, HomeBlaze.Automation.IAutomationPermissions permissions) { }
+        public static bool CanWrite(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, HomeBlaze.Automation.IAutomationPermissions permissions) { }
+        public static HomeBlaze.Automation.IAutomationPermissions GetPermissions(HomeBlaze.Automation.Automation automation, System.Collections.Generic.IReadOnlyList<string> roles) { }
+        public static string? GetRolesError(HomeBlaze.Automation.IAutomationPermissions permissions, System.Collections.Generic.IEnumerable<HomeBlaze.Automation.AutomationRule?> rules) { }
+    }
     [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.PropertyTrigger), "PropertyTrigger")]
     [System.Text.Json.Serialization.JsonDerivedType(typeof(HomeBlaze.Automation.SubjectEventTrigger), "SubjectEventTrigger")]
     [System.Text.Json.Serialization.JsonPolymorphic(TypeDiscriminatorPropertyName="$type", UnknownDerivedTypeHandling=System.Text.Json.Serialization.JsonUnknownDerivedTypeHandling.FailSerialization)]
@@ -219,8 +227,13 @@ namespace HomeBlaze.Automation
     }
     public interface IAutomationAuthorizer
     {
-        string? GetOperationDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty operation);
-        string? GetPropertyWriteDenial(Namotion.Interceptor.IInterceptorSubject automation, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
+        HomeBlaze.Automation.IAutomationPermissions GetPermissions(System.Collections.Generic.IReadOnlyList<string> roles);
+    }
+    public interface IAutomationPermissions
+    {
+        string? Error { get; }
+        string? GetOperationDenial(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty operation);
+        string? GetPropertyWriteDenial(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
     }
     public sealed class InvokeOperationAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.InvokeOperationAction>
     {

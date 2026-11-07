@@ -12,6 +12,9 @@ internal interface IRuleRunHost
 
     string? CurrentState { get; }
 
+    /// <summary>The roles of the applied configuration, which decide what the actions may call and write.</summary>
+    IReadOnlyList<string> Roles { get; }
+
     /// <summary>Runs the write unless a stop abandoned the worker, which then writes nothing anymore; returns whether it ran.</summary>
     bool RunUnlessAbandoned(Action write);
 

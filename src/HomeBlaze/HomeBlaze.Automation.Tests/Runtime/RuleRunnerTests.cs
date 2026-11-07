@@ -235,6 +235,8 @@ public class RuleRunnerTests
 
         public string? CurrentState { get; private set; }
 
+        public IReadOnlyList<string> Roles { get; } = [];
+
         public bool RunUnlessAbandoned(Action write)
         {
             write();

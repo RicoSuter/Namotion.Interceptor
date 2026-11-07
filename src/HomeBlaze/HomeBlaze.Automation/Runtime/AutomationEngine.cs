@@ -20,6 +20,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private readonly AutomationStatusReporter _status;
     private readonly ILogger _logger;
     private CompiledAutomation _snapshot = CompiledAutomation.Empty;
+    private IReadOnlyList<string> _roles = [];
     private int _appliedConfigurationVersion = -1;
     private bool _hasConfigurationError;
 
@@ -48,6 +49,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
+
+    public IReadOnlyList<string> Roles => _roles;
 
     public bool RunUnlessAbandoned(Action write)
     {
@@ -130,10 +133,12 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         _appliedConfigurationVersion = version;
         var rules = _automation.Rules;
+        var roles = _automation.Roles;
         TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
         if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
         {
+            _roles = roles;
             Replace(compiled);
         }
         else
@@ -323,6 +328,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         Stop();
         _snapshot = CompiledAutomation.Empty;
+        _roles = [];
         _appliedConfigurationVersion = -1;
     }
 

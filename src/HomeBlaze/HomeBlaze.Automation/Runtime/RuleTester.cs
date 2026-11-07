@@ -26,7 +26,7 @@ internal static class RuleTester
             .OrderBy(trigger => trigger.Number)
             .ToList();
         var executor = ActionExecutor.For(automation);
-        var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent);
+        var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent, automation.Roles);
         return new AutomationRuleTestResult
         {
             IsActive = compiled.IsActiveIn(automation.Enabled, automation.CurrentState),

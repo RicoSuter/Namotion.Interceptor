@@ -61,14 +61,17 @@ internal sealed class AutomationTestHost : IAsyncDisposable
     public string CheckpointPath => Path.Combine(DataDirectory, "AutomationState", Key + ".json");
 
     public static async Task<AutomationTestHost> StartAsync(
-        Action<Automation> configure, DateTimeOffset? start = null, TimeZoneInfo? timeZone = null, IAutomationAuthorizer? authorizer = null)
+        Action<Automation> configure,
+        DateTimeOffset? start = null,
+        TimeZoneInfo? timeZone = null,
+        Func<TestGraph, IAutomationAuthorizer>? authorizer = null)
     {
         var time = new FakeTimeProvider(start ?? Start);
         time.SetLocalTimeZone(timeZone ?? TimeZoneInfo.Utc);
         var graph = new TestGraph();
         var dataDirectory = Directory.CreateTempSubdirectory("automation-test").FullName;
         graph.Context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));
-        var host = new AutomationTestHost(graph, time, dataDirectory, authorizer ?? new AllowAllAutomationAuthorizer());
+        var host = new AutomationTestHost(graph, time, dataDirectory, authorizer?.Invoke(graph) ?? new AllowAllAutomationAuthorizer());
         graph.Add("Weather", host.Weather);
         graph.Add("Blinds", host.Blinds);
         graph.Add("Notifier", host.Notifier);
