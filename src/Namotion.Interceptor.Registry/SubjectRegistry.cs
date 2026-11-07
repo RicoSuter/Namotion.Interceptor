@@ -169,12 +169,16 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     throw new InvalidOperationException($"Property '{property.Name}' not found.");
             }
 
+            var isNewlyRegistered = false;
             if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
             {
                 registeredSubject = RegisterSubject(change.Subject);
+                isNewlyRegistered = true;
             }
 
-            if (change.IsContextAttach)
+            // Also when the subject is registered by an add without a context attach, as after an add that attached
+            // it threw: the lifecycle reports the context attach only once.
+            if (change.IsContextAttach || isNewlyRegistered)
             {
                 // Auto-register pre-assigned subject ID in reverse index;
                 // skip silently on conflict to avoid aborting the lifecycle.
