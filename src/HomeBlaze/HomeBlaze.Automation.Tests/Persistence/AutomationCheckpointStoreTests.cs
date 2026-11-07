@@ -114,6 +114,41 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     }
 
     [Fact]
+    public void WhenAnotherStoreTakesTheFile_ThenTheFirstStoreNoLongerWritesOrDeletesIt()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "AutomationState", "Storm.json");
+        var first = new AutomationCheckpointStore(path);
+        first.Write(new AutomationCheckpoint { CurrentState = "Open" });
+
+        // Act
+        var second = new AutomationCheckpointStore(path);
+        second.Write(new AutomationCheckpoint { CurrentState = "Closed" });
+        first.Write(new AutomationCheckpoint { CurrentState = "Open" });
+        var isDeletedByTheFirst = first.Delete();
+
+        // Assert
+        Assert.False(isDeletedByTheFirst);
+        Assert.Equal("Closed", second.Read()?.CurrentState);
+    }
+
+    [Fact]
+    public void WhenAStoreIsReleased_ThenItNoLongerWritesTheFile()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "AutomationState", "Storm.json");
+        var store = new AutomationCheckpointStore(path);
+        store.Write(new AutomationCheckpoint { CurrentState = "Open" });
+
+        // Act
+        store.Release();
+        store.Write(new AutomationCheckpoint { CurrentState = "Closed" });
+
+        // Assert
+        Assert.Equal("Open", store.Read()?.CurrentState);
+    }
+
+    [Fact]
     public void WhenTheFileCannotBeReplaced_ThenTheWriteThrows()
     {
         // Arrange

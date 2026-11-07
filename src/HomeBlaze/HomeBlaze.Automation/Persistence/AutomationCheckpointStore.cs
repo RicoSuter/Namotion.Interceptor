@@ -13,9 +13,11 @@ namespace HomeBlaze.Automation.Persistence;
 /// <c>AutomationState/Demo/ConveyorGuard.json</c> for <c>/Demo/ConveyorGuard</c>. Each path has a file of its own: a
 /// character that a file name cannot hold, the escape character <c>%</c>, a name that Windows reserves and a folder name
 /// that ends with <c>.json</c> are percent-encoded. Without a path nothing is read or written. A write replaces the file
-/// atomically, so it holds the old or the new checkpoint and never a part of one.
+/// atomically, so it holds the old or the new checkpoint and never a part of one. A store owns its file from its
+/// creation until it is released or a later store of the same file is created, process-wide; a store that does not own
+/// its file writes, moves and deletes nothing, so that two workers never write one file.
 /// </summary>
-internal sealed class AutomationCheckpointStore(string? filePath)
+internal sealed class AutomationCheckpointStore
 {
     private const string Extension = ".json";
 
@@ -28,10 +30,24 @@ internal sealed class AutomationCheckpointStore(string? filePath)
         "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    private readonly Lock _lock = new();
+    // Taken only to change the owner of a file or to forget a file without one, never while a file is written.
+    private static readonly Lock OwnersLock = new();
+    private static readonly Dictionary<string, FileOwner> Owners = new(StringComparer.Ordinal);
+
+    private readonly FileOwner? _file;
     private bool _isDeleted;
 
-    public string? FilePath { get; } = filePath;
+    /// <summary>Creates the store of the file and makes it the owner of the file; without a path it has no file.</summary>
+    public AutomationCheckpointStore(string? filePath)
+    {
+        FilePath = filePath;
+        if (filePath is not null)
+        {
+            _file = Claim(filePath, this);
+        }
+    }
+
+    public string? FilePath { get; }
 
     /// <summary>Gets the path of the checkpoint file of the automation at the canonical path, or null without both.</summary>
     public static string? GetFilePath(string? dataDirectory, string? automationPath)
@@ -75,58 +91,111 @@ internal sealed class AutomationCheckpointStore(string? filePath)
     /// <exception cref="UnauthorizedAccessException">The file cannot be renamed.</exception>
     public string? MoveAside(DateTimeOffset now)
     {
-        if (FilePath is null)
+        if (_file is null)
         {
             return null;
         }
 
         var target = $"{FilePath}.unreadable-{now.UtcDateTime.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture)}";
-        lock (_lock)
+        lock (_file.Lock)
         {
-            File.Move(FilePath, target);
+            if (!ReferenceEquals(_file.Store, this))
+            {
+                return null;
+            }
+
+            File.Move(FilePath!, target);
         }
 
         return target;
     }
 
-    /// <summary>Replaces the file with the checkpoint; does nothing without a path or after <see cref="Delete"/>.</summary>
+    /// <summary>Replaces the file with the checkpoint; does nothing without a path, without owning it or after <see cref="Delete"/>.</summary>
     /// <exception cref="IOException">The file cannot be written.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be written.</exception>
     public void Write(AutomationCheckpoint checkpoint)
     {
-        if (FilePath is null)
+        if (_file is null)
         {
             return;
         }
 
-        lock (_lock)
+        lock (_file.Lock)
         {
-            if (!_isDeleted)
+            if (!_isDeleted && ReferenceEquals(_file.Store, this))
             {
-                WriteAtomically(FilePath, JsonSerializer.Serialize(checkpoint, AutomationCheckpointJsonContext.Default.AutomationCheckpoint));
+                WriteAtomically(FilePath!, JsonSerializer.Serialize(checkpoint, AutomationCheckpointJsonContext.Default.AutomationCheckpoint));
             }
         }
     }
 
     /// <summary>
-    /// Deletes the file; returns whether there was one. Later writes do nothing, so that a worker that is still stopping
-    /// cannot create it again.
+    /// Deletes the file of the store that owns it; returns whether there was one. Later writes do nothing, so that a worker
+    /// that is still stopping cannot create it again.
     /// </summary>
     /// <exception cref="IOException">The file cannot be deleted.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be deleted.</exception>
     public bool Delete()
     {
-        if (FilePath is null)
+        if (_file is null)
         {
             return false;
         }
 
-        lock (_lock)
+        lock (_file.Lock)
         {
             _isDeleted = true;
+            if (!ReferenceEquals(_file.Store, this))
+            {
+                return false;
+            }
+
             var existed = File.Exists(FilePath);
-            File.Delete(FilePath);
+            File.Delete(FilePath!);
             return existed;
+        }
+    }
+
+    /// <summary>Gives up the file, so that the store writes, moves and deletes nothing anymore.</summary>
+    public void Release()
+    {
+        if (_file is null)
+        {
+            return;
+        }
+
+        lock (OwnersLock)
+        {
+            lock (_file.Lock)
+            {
+                if (!ReferenceEquals(_file.Store, this))
+                {
+                    return;
+                }
+
+                _file.Store = null;
+            }
+
+            Owners.Remove(FilePath!);
+        }
+    }
+
+    private static FileOwner Claim(string filePath, AutomationCheckpointStore store)
+    {
+        lock (OwnersLock)
+        {
+            if (!Owners.TryGetValue(filePath, out var file))
+            {
+                file = new FileOwner();
+                Owners.Add(filePath, file);
+            }
+
+            lock (file.Lock)
+            {
+                file.Store = store;
+            }
+
+            return file;
         }
     }
 
@@ -189,5 +258,14 @@ internal sealed class AutomationCheckpointStore(string? filePath)
         }
 
         return isFolder && index == segment.Length - Extension.Length && segment.EndsWith(Extension, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The store that owns a file, and the lock of its writes.</summary>
+    private sealed class FileOwner
+    {
+        public Lock Lock { get; } = new();
+
+        // Changed under the lock.
+        public AutomationCheckpointStore? Store { get; set; }
     }
 }

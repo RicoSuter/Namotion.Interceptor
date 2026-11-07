@@ -36,6 +36,9 @@ internal sealed class AutomationRuntime
     /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
     public CheckpointLocation Location { get; private set; }
 
+    /// <summary>Gives up the checkpoint file once the worker ended, so that another worker of the path owns it.</summary>
+    public void Release() => Location.Store.Release();
+
     public void RequestConfiguration() => _queue.TryEnqueue(ConfigurationChangedInput.Instance);
 
     /// <summary>Queues a reset; false when the queue is full or closed, or the reset continues a feedback chain beyond the limit.</summary>
@@ -70,6 +73,9 @@ internal sealed class AutomationRuntime
         try
         {
             _engine.Start();
+
+            // A move between the start and the registration queued no graph change.
+            FollowPath();
             _engine.RefreshRuleStatuses();
             using var ticker = StartTicker();
             while (!cancellationToken.IsCancellationRequested)
@@ -173,6 +179,7 @@ internal sealed class AutomationRuntime
 
         _engine.StartFresh();
         previous.DeleteIfOrphaned(_automation, _logger);
+        previous.Store.Release();
     }
 
     private void CompleteOrRequeue(FlushInput flush)

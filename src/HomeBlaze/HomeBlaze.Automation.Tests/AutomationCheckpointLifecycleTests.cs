@@ -233,4 +233,34 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal(3L, washer.Rules["started"].RunCount);
         Assert.Contains("\"Running\"", await File.ReadAllTextAsync(checkpointPath));
     }
+
+    [Fact]
+    public async Task WhenTheAutomationMovesBeforeItsWorkerWatchesTheGraph_ThenItFollowsTheMoveAtOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => { });
+        var washer = host.CreateAutomation("Washer");
+        Washer()(washer);
+        host.Graph.Add("Washer", washer);
+        var basement = new TestRoot();
+        host.Graph.Add("Basement", basement);
+
+        // The move happens on the worker while it registers, after the start took the path and before graph changes reach it.
+        host.ChangeDispatcher.ListenerDecorator = listener =>
+        {
+            host.ChangeDispatcher.ListenerDecorator = null;
+            basement.Children = new Dictionary<string, IInterceptorSubject> { ["Washer"] = washer };
+            host.Graph.Remove("Washer");
+            return listener;
+        };
+
+        // Act
+        await ((IHostedService)washer).StartAsync(CancellationToken.None);
+        await washer.FlushAsync();
+        await ((IHostedService)washer).StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Washer.json")));
+        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Washer.json")));
+    }
 }

@@ -188,6 +188,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         {
             runtime.Close();
             OnWorkerEnded(runtime);
+            runtime.Release();
             Status = ServiceStatus.Stopped;
         }
     }
@@ -218,6 +219,7 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         {
             Interlocked.CompareExchange(ref _runtime, null, runtime);
             OnWorkerEnded(runtime);
+            runtime.Release();
         }
 
         Status = finalStatus;
