@@ -100,4 +100,25 @@ public class AutomationTimeTests
         Assert.Equal([expectedEvening, expectedMorning], stateChanges.ToArray());
         Assert.Equal("Day", host.Automation.CurrentState);
     }
+
+    [Fact]
+    public async Task WhenTheClockFallsBackOverADailyTime_ThenTheRuleRunsOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation => automation.Rules = Keyed(("daily", On("Daily", When("time >= 2h30m"), Invoke("/Blinds/Close")))),
+            DateTimeOffset.Parse("2026-10-24T22:00:00Z", CultureInfo.InvariantCulture), // midnight in Zurich, the day daylight saving time ends
+            Zurich);
+
+        // Act
+        for (var minute = 0; minute < 6 * 60; minute++)
+        {
+            host.Time.Advance(TimeSpan.FromMinutes(1));
+            await host.FlushAsync();
+        }
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(DateTimeOffset.Parse("2026-10-25T00:30:00Z", CultureInfo.InvariantCulture), host.Rule("daily").LastTriggeredAt);
+    }
 }

@@ -12,6 +12,8 @@ namespace HomeBlaze.Automation.Expressions;
 internal sealed class AutomationEvaluation
 {
     private readonly List<string> _missingPaths = [];
+    private readonly TimeZoneInfo _timeZone;
+    private TimeSpan? _timeOfDay;
 
     public AutomationEvaluation(
         SubjectPathResolver resolver,
@@ -24,7 +26,7 @@ internal sealed class AutomationEvaluation
         Resolver = resolver;
         Rule = rule;
         Now = now;
-        TimeOfDay = TimeZoneInfo.ConvertTime(now, timeZone).TimeOfDay;
+        _timeZone = timeZone;
         Event = capturedEvent;
         Values = values;
     }
@@ -35,7 +37,8 @@ internal sealed class AutomationEvaluation
 
     public DateTimeOffset Now { get; }
 
-    public TimeSpan TimeOfDay { get; }
+    /// <summary>The local time of day of <see cref="Now"/>, as <see cref="LocalClock.GetTimeOfDay"/> reads it.</summary>
+    public TimeSpan TimeOfDay => _timeOfDay ??= LocalClock.GetTimeOfDay(Now, _timeZone);
 
     public CapturedEvent? Event { get; }
 
