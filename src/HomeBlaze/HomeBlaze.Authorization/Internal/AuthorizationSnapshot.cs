@@ -14,14 +14,13 @@ namespace HomeBlaze.Authorization.Internal;
 /// </summary>
 internal sealed class AuthorizationSnapshot
 {
-    private static readonly HomeBlazeMemberTagProvider TagProvider = new();
-
     private readonly PathProviderBase _pathProvider;
     private readonly ImmutableArray<AuthorizationRole> _roles;
     private readonly Dictionary<string, string> _unavailableRoles;
     private readonly string? _customRolesError;
     private readonly ConcurrentDictionary<RoleNameSet, AuthorizationResult> _policies = new();
     private readonly PreviewCache _previews = new();
+    private readonly RoleCompiler _compiler;
 
     // The error of each role with a path pattern the application refuses, see PathPatternChecks; null when there is none.
     private readonly Dictionary<string, string>? _leadingSeparatorErrors;
@@ -38,6 +37,7 @@ internal sealed class AuthorizationSnapshot
         _roles = roles;
         _unavailableRoles = unavailableRoles;
         _customRolesError = customRolesError;
+        _compiler = new RoleCompiler(roles, pathProvider);
         _leadingSeparatorErrors = PathPatternChecks.GetLeadingSeparatorErrors(roles, pathProvider.PathSeparator);
         RoleNames = ImmutableArray.CreateRange(roles, static role => role.Name);
     }
@@ -194,7 +194,9 @@ internal sealed class AuthorizationSnapshot
 
         var index = IndexOfRole(name);
         var roles = index >= 0 ? _roles.SetItem(index, editedRole) : _roles.Add(editedRole);
-        return Compile(roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator));
+        return Compile(
+            roles, [name], PathPatternChecks.GetLeadingSeparatorErrors(roles, _pathProvider.PathSeparator),
+            new RoleCompiler(roles, _pathProvider));
     }
 
     private AuthorizationResult Compile(string[] roleNames)
@@ -209,11 +211,14 @@ internal sealed class AuthorizationSnapshot
             }
         }
 
-        return Compile(_roles, roleNames, _leadingSeparatorErrors);
+        return Compile(_roles, roleNames, _leadingSeparatorErrors, _compiler);
     }
 
-    private AuthorizationResult Compile(
-        ImmutableArray<AuthorizationRole> roles, string[] roleNames, Dictionary<string, string>? leadingSeparatorErrors)
+    private static AuthorizationResult Compile(
+        ImmutableArray<AuthorizationRole> roles,
+        string[] roleNames,
+        Dictionary<string, string>? leadingSeparatorErrors,
+        RoleCompiler compiler)
     {
         if (leadingSeparatorErrors is not null &&
             PathPatternChecks.FindLeadingSeparatorError(roleNames, roles, leadingSeparatorErrors) is { } patternError)
@@ -221,16 +226,7 @@ internal sealed class AuthorizationSnapshot
             return new AuthorizationResult(AuthorizationPolicy.DenyAll, patternError);
         }
 
-        try
-        {
-            var policy = AuthorizationPolicy.Compile(
-                roles, roleNames, SystemRules.Rules, AuthorizationActions.All, TagProvider, _pathProvider);
-            return new AuthorizationResult(policy, null);
-        }
-        catch (AuthorizationException exception)
-        {
-            return new AuthorizationResult(AuthorizationPolicy.DenyAll, exception.Message);
-        }
+        return compiler.Compile(roleNames);
     }
 
     private int IndexOfRole(string name)

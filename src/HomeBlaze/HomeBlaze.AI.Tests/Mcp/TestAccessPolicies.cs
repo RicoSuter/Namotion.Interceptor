@@ -15,11 +15,10 @@ internal static class TestAccessPolicies
 
     /// <summary>Compiles the policy of the built-in roles and <paramref name="customRoles"/> for <paramref name="roleName"/>.</summary>
     public static AuthorizationMcpAccessPolicy Create(string roleName, params AuthorizationRole[] customRoles) =>
-        new(AuthorizationPolicy.Compile(
+        new(AuthorizationDefinition.Create(
             [.. BuiltInRoles.All, .. customRoles],
-            [roleName],
             SystemRules.Rules,
             AuthorizationActions.All,
-            new HomeBlazeMemberTagProvider(),
-            new StateAttributePathProvider()));
+            new StateAttributePathProvider(),
+            new HomeBlazeMemberTagProvider()).Compile([roleName]));
 }

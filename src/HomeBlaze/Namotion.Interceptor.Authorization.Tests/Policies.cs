@@ -18,7 +18,7 @@ internal static class Policies
 
     public static AuthorizationPolicy Compile(
         AuthorizationRole[] roles, string[] roleNames, ImmutableArray<PermissionRule> systemDeny, IMemberTagProvider? tags = null)
-        => AuthorizationPolicy.Compile(roles, roleNames, systemDeny, KnownActions, tags ?? TestTags.Default, Policies.SlashPaths);
+        => AuthorizationDefinition.Create(roles, systemDeny, KnownActions, Policies.SlashPaths, tags ?? TestTags.Default).Compile(roleNames);
 
     public static PermissionRule Rule(
         PermissionAction[] actions, string[]? paths = null, string[]? types = null, string[]? members = null, string[]? tags = null)

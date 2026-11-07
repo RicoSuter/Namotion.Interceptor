@@ -113,12 +113,38 @@ public class PermissionRuleJsonTests
 
     [Theory]
     [InlineData("""{ "path": ["/Home"], "actions": ["read"] }""", "path")]
-    [InlineData("""{ "actions": ["read"], "selectorWithAVeryLongNameThatDoesNotFitTheStackBufferOfTheConverterAtAll": [] }""", "selectorWithAVeryLongNameThatDoesNotFitTheStackBufferOfTheConverterAtAll")]
+    [InlineData("""{ "actions": ["read"], "selectorWithANameOfSixtyFourCharactersThatFillsTheStackBufferNow": [] }""", "selectorWithANameOfSixtyFourCharactersThatFillsTheStackBufferNow")]
     public void WhenPropertyIsUnknown_ThenReadingThrowsNamingIt(string json, string propertyName)
     {
         // Act & Assert
         var exception = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PermissionRule>(json));
         Assert.Contains($"'{propertyName}'", exception.Message);
+    }
+
+    [Fact]
+    public void WhenUnknownPropertyNameIsLongerThan64Characters_ThenReadingThrowsNamingItsStart()
+    {
+        // Arrange
+        var propertyName = new string('x', 64) + "TheRestOfAVeryLongName";
+        var json = $$"""{ "actions": ["read"], "{{propertyName}}": [] }""";
+
+        // Act & Assert
+        var exception = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PermissionRule>(json));
+        Assert.Contains($"'{new string('x', 64)}...'", exception.Message);
+        Assert.DoesNotContain("TheRestOfAVeryLongName", exception.Message);
+    }
+
+    [Fact]
+    public void WhenTheEchoLimitFallsInsideASurrogatePair_ThenTheMessageEndsBeforeThePair()
+    {
+        // Arrange
+        var propertyName = new string('x', 63) + "\U0001F600" + "TheRest";
+        var json = JsonSerializer.Serialize(new Dictionary<string, object> { ["actions"] = new[] { "read" }, [propertyName] = Array.Empty<string>() });
+
+        // Act & Assert
+        var exception = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PermissionRule>(json));
+        Assert.Contains($"'{new string('x', 63)}...'", exception.Message);
+        Assert.DoesNotContain('\uD83D', exception.Message);
     }
 
     [Fact]
@@ -214,6 +240,22 @@ public class PermissionRuleJsonTests
             """{"Rules":[{"tags":["state"],"actions":["read"]},{"paths":["/Home/Bedroom"],"types":["ILight"],"actions":["write"]}]}""",
             json);
         Assert.Equal(holder.Rules.AsEnumerable(), roundTrip.Rules.AsEnumerable());
+    }
+
+    [Fact]
+    public void WhenARuleIsCreatedWithDefaultLists_ThenTheListsAreEmpty()
+    {
+        // Act
+        var rule = new PermissionRule { Paths = default, Types = default, Members = default, Tags = default, Actions = default };
+        var copy = rule with { Tags = default };
+
+        // Assert
+        Assert.True(rule.Paths.IsEmpty);
+        Assert.True(rule.Types.IsEmpty);
+        Assert.True(rule.Members.IsEmpty);
+        Assert.True(rule.Tags.IsEmpty);
+        Assert.True(rule.Actions.IsEmpty);
+        Assert.True(copy.Tags.IsEmpty);
     }
 
     [AttributeUsage(AttributeTargets.Property)]
