@@ -1195,4 +1195,88 @@ public class MarkdownSegmentBuilderTests
     // What a browser shows for the HTML: character references are decoded.
     private static string VisibleText(IEnumerable<MarkdownSegment> segments) =>
         WebUtility.HtmlDecode(AllHtml(segments));
+
+    private static string BuildWithNewTabs(MarkdownPage page) =>
+        AllHtml(MarkdownSegmentBuilder.Build(
+            page,
+            linkRewriter: null,
+            markTextBlocks: false,
+            opensInNewTab: url => url.StartsWith("https:", StringComparison.Ordinal)));
+
+    private static string BuildWithNewTabs(string source) => BuildWithNewTabs(MarkdownPageParser.Parse(source));
+
+    [Fact]
+    public void WhenLinkOpensInANewTab_ThenItHasATargetAndARel()
+    {
+        // Act
+        var html = BuildWithNewTabs("[Web](https://example.com \"Example\")");
+
+        // Assert
+        Assert.Contains("<a href=\"https://example.com\" title=\"Example\" target=\"_blank\" rel=\"noopener noreferrer\">Web</a>", html);
+    }
+
+    [Fact]
+    public void WhenLinkDoesNotOpenInANewTab_ThenItHasNoTarget()
+    {
+        // Act
+        var html = BuildWithNewTabs("[Page](other.md)");
+
+        // Assert
+        Assert.Contains("<a href=\"other.md\">Page</a>", html);
+    }
+
+    [Fact]
+    public void WhenPictureHasAUrlThatWouldOpenInANewTab_ThenThePictureHasNoTarget()
+    {
+        // Act
+        var html = BuildWithNewTabs("![Picture](https://example.com/picture.png)");
+
+        // Assert
+        Assert.Contains("<img src=\"https://example.com/picture.png\"", html);
+        Assert.DoesNotContain("target", html);
+    }
+
+    [Fact]
+    public void WhenAutolinkOpensInANewTab_ThenItHasATargetAndARel()
+    {
+        // Act
+        var html = BuildWithNewTabs("<https://example.com>");
+
+        // Assert
+        Assert.Contains("<a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com</a>", html);
+    }
+
+    [Fact]
+    public void WhenAutolinkIsAnEmailAddress_ThenItHasNoTarget()
+    {
+        // Act
+        var html = BuildWithNewTabs("<someone@example.com>");
+
+        // Assert
+        Assert.Contains("<a href=\"mailto:someone@example.com\">someone@example.com</a>", html);
+    }
+
+    [Fact]
+    public void WhenNoNewTabRuleIsGiven_ThenLinksHaveNoTarget()
+    {
+        // Act
+        var html = AllHtml(Build("[Web](https://example.com) <https://example.com>"));
+
+        // Assert
+        Assert.DoesNotContain("target", html);
+    }
+
+    [Fact]
+    public void WhenPageIsRenderedWithNewTabsFirst_ThenALaterRenderWithoutTheRuleHasNoTarget()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse("[Web](https://example.com)");
+        _ = BuildWithNewTabs(page);
+
+        // Act
+        var html = AllHtml(MarkdownSegmentBuilder.Build(page));
+
+        // Assert
+        Assert.DoesNotContain("target", html);
+    }
 }

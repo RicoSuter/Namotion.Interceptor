@@ -135,10 +135,7 @@
     protected override async Task OnParametersSetAsync()
     {
         _model.Variables = Variables;
-        if (!string.Equals(Value ?? string.Empty, _model.Text, StringComparison.Ordinal))
-        {
-            _model.Load(Value);
-        }
+        _model.SetValue(Value);
 
         Refresh();
         if (Preview is not null)

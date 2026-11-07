@@ -191,6 +191,68 @@ public class AutomationEditorTests
         await SaveAsync(page, dialog);
     }
 
+    [Theory]
+    [InlineData("automation-trigger-condition", "/Demo/Motor/Temperature")]
+    [InlineData("automation-trigger-rearm", "/Demo/Motor/Temperature")]
+    [InlineData("automation-only-if-condition", "/Demo/Motor/Temperature")]
+    [InlineData("automation-event-filter", "event/NewState")]
+    public async Task WhenAFieldAndAnOperatorAreChosenInANewRow_ThenTheRowStaysSimpleWithAnEmptyValueUntilTheValueIsTyped(string testId, string path)
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        var field = await AddConditionRowAsync(dialog, testId);
+
+        // Act
+        await ChooseRowFieldAsync(page, field, testId, path);
+        await ChooseOperatorAsync(page, field, testId, "is above");
+
+        // Assert
+        await AssertSimpleRowAsync(field, testId);
+        var value = field.GetByLabel("Value", new() { Exact = true });
+        await Assertions.Expect(value).ToHaveValueAsync(string.Empty);
+        await value.FocusAsync();
+        await Assertions.Expect(value).ToBeFocusedAsync();
+        await TypeValueAsync(field, testId, "50");
+        await AssertExpressionAsync(field, testId, $"{path} > 50");
+    }
+
+    [Theory]
+    [InlineData("operator field value", "is below", "/Demo/Motor/Temperature < 50")]
+    [InlineData("value operator field", "at least", "/Demo/Motor/Temperature >= 50")]
+    [InlineData("field operator value", "is not", "/Demo/Motor/Temperature != 50")]
+    [InlineData("field value operator", "at most", "/Demo/Motor/Temperature <= 50")]
+    public async Task WhenTheFieldTheOperatorAndTheValueOfANewRowAreChosenInAnyOrder_ThenTheRowStaysSimpleAndHasTheExpression(
+        string order, string operatorText, string expected)
+    {
+        // Arrange
+        const string testId = "automation-trigger-condition";
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        var field = await AddConditionRowAsync(dialog, testId);
+
+        // Act & Assert
+        foreach (var step in order.Split(' '))
+        {
+            switch (step)
+            {
+                case "field":
+                    await ChooseRowFieldAsync(page, field, testId, "/Demo/Motor/Temperature");
+                    break;
+                case "operator":
+                    await ChooseOperatorAsync(page, field, testId, operatorText);
+                    break;
+                default:
+                    await TypeValueAsync(field, testId, "50");
+                    break;
+            }
+
+            await AssertSimpleRowAsync(field, testId);
+        }
+
+        await AssertExpressionAsync(field, testId, expected);
+    }
+
     [Fact]
     public async Task WhenARuleWithOnlyIfAndACooldownIsOpenedAndSaved_ThenItsOnlyIfTextIsUnchanged()
     {
@@ -851,6 +913,82 @@ public class AutomationEditorTests
         var stateName = dialog.GetByLabel("State name");
         await stateName.FillAsync(name);
         await stateName.PressAsync("Tab");
+    }
+
+    /// <summary>
+    /// Shows the condition field with the test id in the Rules tab, in a new property trigger, the rearm condition of the
+    /// first rule, its Only if or the filter of a new event of this automation, and adds a row to it.
+    /// </summary>
+    private static async Task<ILocator> AddConditionRowAsync(ILocator dialog, string testId)
+    {
+        switch (testId)
+        {
+            case "automation-trigger-condition":
+                await dialog.GetByTestId("automation-add-property-trigger").ClickAsync();
+                await Assertions.Expect(dialog.GetByTestId("automation-property-trigger")).ToHaveCountAsync(2, new() { Timeout = Timeout });
+                break;
+            case "automation-trigger-rearm":
+                await dialog.GetByTestId("automation-add-rearm").ClickAsync();
+                break;
+            case "automation-event-filter":
+                await dialog.GetByTestId("automation-add-event-trigger").ClickAsync();
+                await dialog.GetByTestId("automation-event-trigger").GetByTestId("automation-event-own").ClickAsync();
+                await Assertions.Expect(dialog.GetByTestId("automation-event-source")).ToHaveTextAsync("This automation", new() { Timeout = Timeout });
+                break;
+        }
+
+        var field = dialog.GetByTestId(testId).Last;
+        await field.GetByTestId($"{testId}-add-row").ClickAsync();
+        await Assertions.Expect(field.GetByTestId($"{testId}-row")).ToHaveCountAsync(1, new() { Timeout = Timeout });
+        return field;
+    }
+
+    /// <summary>Chooses the property of the only row, or the event field when the condition filters events.</summary>
+    private static async Task ChooseRowFieldAsync(IPage page, ILocator field, string testId, string path)
+    {
+        if (testId == "automation-event-filter")
+        {
+            await field.GetByLabel("Field", new() { Exact = true }).FillAsync(path);
+            await page.Locator(".mud-popover-open").GetByText(path, new() { Exact = true }).ClickAsync();
+            await Assertions.Expect(field.GetByLabel("Field", new() { Exact = true })).ToHaveValueAsync(path, new() { Timeout = Timeout });
+        }
+        else
+        {
+            await field.GetByLabel("Property", new() { Exact = true }).FillAsync(path);
+            await Assertions.Expect(field.GetByLabel("Property", new() { Exact = true })).ToHaveValueAsync(path, new() { Timeout = Timeout });
+        }
+    }
+
+    /// <summary>Chooses the operator of the only row from its list and waits until the row shows it.</summary>
+    private static async Task ChooseOperatorAsync(IPage page, ILocator field, string testId, string operatorText)
+    {
+        await field.GetByLabel("Operator").ClickAsync();
+        await page.Locator(".mud-popover-open").GetByText(operatorText, new() { Exact = true }).ClickAsync();
+        await Assertions.Expect(field.GetByTestId($"{testId}-row").GetByLabel("Operator")).ToHaveValueAsync(operatorText, new() { Timeout = Timeout });
+    }
+
+    /// <summary>Types the value of the only row and leaves the input, which applies the value.</summary>
+    private static async Task TypeValueAsync(ILocator field, string testId, string value)
+    {
+        var input = field.GetByTestId($"{testId}-row").GetByLabel("Value", new() { Exact = true });
+        await input.FillAsync(value);
+        await input.PressAsync("Tab");
+        await Assertions.Expect(input).ToHaveValueAsync(value, new() { Timeout = Timeout });
+    }
+
+    /// <summary>Asserts that the condition field shows its one row in simple mode with an editable value.</summary>
+    private static async Task AssertSimpleRowAsync(ILocator field, string testId)
+    {
+        await Assertions.Expect(field.GetByTestId($"{testId}-text")).ToHaveCountAsync(0);
+        await Assertions.Expect(field.GetByTestId($"{testId}-row")).ToHaveCountAsync(1);
+        await Assertions.Expect(field.GetByTestId($"{testId}-row").GetByLabel("Value", new() { Exact = true })).ToBeEditableAsync();
+    }
+
+    /// <summary>Switches the condition field to advanced mode and asserts the expression text it holds.</summary>
+    private static async Task AssertExpressionAsync(ILocator field, string testId, string expected)
+    {
+        await field.GetByTestId($"{testId}-advanced").ClickAsync();
+        await Assertions.Expect(field.GetByTestId($"{testId}-text")).ToHaveValueAsync(expected, new() { Timeout = Timeout });
     }
 
     private static ILocator SaveButton(ILocator dialog) => dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true });

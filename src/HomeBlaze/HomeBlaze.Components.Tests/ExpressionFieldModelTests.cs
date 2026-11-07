@@ -81,6 +81,77 @@ public class ExpressionFieldModelTests
     }
 
     [Fact]
+    public void WhenTheOwnerPassesItsValueFromBeforeAnEditOfAnUnfinishedRow_ThenTheRowStaysSimpleWithTheEdit()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel(string.Empty);
+        model.AddRow();
+        model.SetValue(model.Text);
+        model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", string.Empty));
+        model.SetValue(model.Text);
+        model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", ">", string.Empty));
+
+        // Act
+        model.SetValue("/a/B == ");
+        model.SetValue("/a/B > ");
+
+        // Assert
+        Assert.False(model.IsAdvanced);
+        Assert.Equal(new ExpressionRow(string.Empty, "/a/B", ">", string.Empty), Assert.Single(model.Rows));
+        Assert.Equal("/a/B > ", model.Text);
+    }
+
+    [Fact]
+    public void WhenTheOwnerPassesItsValueFromBeforeAnEditWhileARowIsPending_ThenThePendingEditIsKept()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B > 1");
+        model.AddRow();
+        model.SetValue(model.Text);
+        model.SetRow(1, new ExpressionRow("and", "/c/D", "<", "2"));
+        model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", ">", "1,5"));
+
+        // Act
+        model.SetValue("/a/B > 1 and  == ");
+
+        // Assert
+        Assert.True(model.HasPendingRow);
+        Assert.Equal("1,5", model.GetDisplayRow(0).Value);
+        Assert.Equal("/a/B > 1 and /c/D < 2", model.Text);
+    }
+
+    [Fact]
+    public void WhenTheOwnerPassesAnotherSimpleValue_ThenItsRowsAreShown()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B > 1");
+
+        // Act
+        model.SetValue("/c/D < 2");
+
+        // Assert
+        Assert.False(model.IsAdvanced);
+        Assert.Equal("/c/D < 2", Assert.Single(model.Rows).ToCondition());
+    }
+
+    [Theory]
+    [InlineData("(/a/B > 1)")]
+    [InlineData("/a/B > ")]
+    public void WhenTheOwnerPassesAValueTheRowsCannotWriteAgain_ThenItIsShownAdvancedAndUnchanged(string value)
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B > 1");
+
+        // Act
+        model.SetValue(value);
+
+        // Assert
+        Assert.True(model.IsAdvanced);
+        Assert.False(model.CanShowSimple);
+        Assert.Equal(value, model.Text);
+    }
+
+    [Fact]
     public void WhenTheTextIsEmpty_ThenTheFieldShowsNoRows()
     {
         // Act
