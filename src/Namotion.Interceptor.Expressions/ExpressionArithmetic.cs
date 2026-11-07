@@ -115,12 +115,9 @@ internal static class ExpressionArithmetic
     {
         try
         {
-            if (ExpressionComparer.TryGetInstant(left, out var leftInstant))
-            {
-                return ApplyToInstant(isSubtraction, leftInstant, right);
-            }
-
-            return left is TimeSpan leftDuration ? ApplyToDuration(isSubtraction, leftDuration, right) : null;
+            return ExpressionComparer.TryGetInstant(left, out var instant)
+                ? ApplyToInstant(isSubtraction, instant, right)
+                : ApplyToDuration(isSubtraction, left, right);
         }
         catch (Exception exception) when (exception is OverflowException or ArgumentOutOfRangeException)
         {
@@ -129,28 +126,17 @@ internal static class ExpressionArithmetic
         }
     }
 
-    private static object? ApplyToInstant(bool isSubtraction, DateTimeOffset instant, object right)
+    private static object? ApplyToInstant(bool isSubtraction, DateTimeOffset instant, object right) => right switch
     {
-        if (isSubtraction && ExpressionComparer.TryGetInstant(right, out var rightInstant))
-        {
-            return instant - rightInstant;
-        }
+        TimeSpan duration => isSubtraction ? instant - duration : instant + duration,
+        _ when isSubtraction && ExpressionComparer.TryGetInstant(right, out var other) => instant - other,
+        _ => null
+    };
 
-        if (right is TimeSpan duration)
-        {
-            return isSubtraction ? instant - duration : instant + duration;
-        }
-
-        return null;
-    }
-
-    private static object? ApplyToDuration(bool isSubtraction, TimeSpan duration, object right)
+    private static object? ApplyToDuration(bool isSubtraction, object left, object right) => (left, right) switch
     {
-        if (right is TimeSpan otherDuration)
-        {
-            return isSubtraction ? duration - otherDuration : duration + otherDuration;
-        }
-
-        return !isSubtraction && ExpressionComparer.TryGetInstant(right, out var instant) ? instant + duration : null;
-    }
+        (TimeSpan duration, TimeSpan other) => isSubtraction ? duration - other : duration + other,
+        (TimeSpan duration, _) when !isSubtraction && ExpressionComparer.TryGetInstant(right, out var instant) => instant + duration,
+        _ => null
+    };
 }
