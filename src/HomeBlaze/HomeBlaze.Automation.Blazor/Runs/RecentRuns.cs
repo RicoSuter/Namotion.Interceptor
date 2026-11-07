@@ -25,7 +25,12 @@ internal static class RecentRuns
         IHistoryStore[] stores = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
         if (stores.Length == 0)
         {
-            var lastRuns = RunHistory.GetLastRuns(automation.GetRulesInOrder().Select(pair => (pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage)));
+            IReadOnlyList<RunEntry> lastRuns =
+            [
+                .. automation.GetRulesInOrder()
+                    .Where(pair => pair.Value.LastRunOutcome is not null)
+                    .Select(pair => new RunEntry(null, pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage))
+            ];
             return new RecentRunsResult(false, lastRuns, null, false);
         }
 
