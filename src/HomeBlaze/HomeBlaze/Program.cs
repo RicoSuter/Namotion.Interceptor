@@ -47,7 +47,8 @@ using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
-var builder = WebApplication.CreateBuilder(args);
+var configurationArguments = AuthenticationServiceProviderExtensions.RemoveResetAdminSwitch(args, out var isResetAdminRequested);
+var builder = WebApplication.CreateBuilder(configurationArguments);
 builder.AddServiceDefaults();
 
 // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)
@@ -110,7 +111,7 @@ if (seededFileCount > 0)
 }
 
 // Resets the administrator and exits without starting the host, so that it can run while no one can sign in.
-if (args.Contains("--reset-admin", StringComparer.OrdinalIgnoreCase))
+if (isResetAdminRequested)
 {
     Environment.ExitCode = await app.Services.ResetAdminAsync() ? 0 : 1;
     return;

@@ -284,4 +284,30 @@ public class AdminSeedingTests
         services.AddHomeBlazeAuthentication(configuration);
         return services.BuildServiceProvider();
     }
+
+    [Fact]
+    public void WhenTheResetSwitchIsFollowedBySettings_ThenTheSettingsReachTheConfiguration()
+    {
+        // Arrange
+        string[] args = ["--Reset-Admin", "--Authentication:Database", "/data/auth.db"];
+
+        // Act
+        var remaining = AuthenticationServiceProviderExtensions.RemoveResetAdminSwitch(args, out var isResetRequested);
+        var configuration = new ConfigurationBuilder().AddCommandLine(remaining).Build();
+
+        // Assert
+        Assert.True(isResetRequested);
+        Assert.Equal("/data/auth.db", configuration["Authentication:Database"]);
+    }
+
+    [Fact]
+    public void WhenTheResetSwitchIsNotGiven_ThenTheArgumentsStayAsTheyAre()
+    {
+        // Act
+        var remaining = AuthenticationServiceProviderExtensions.RemoveResetAdminSwitch(["--urls", "http://+:80"], out var isResetRequested);
+
+        // Assert
+        Assert.False(isResetRequested);
+        Assert.Equal(["--urls", "http://+:80"], remaining);
+    }
 }

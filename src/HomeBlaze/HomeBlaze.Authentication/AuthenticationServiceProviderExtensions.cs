@@ -8,6 +8,22 @@ namespace HomeBlaze.Authentication;
 /// <summary>Runs authentication tasks on the services of <c>AddHomeBlazeAuthentication</c> without starting the host.</summary>
 public static class AuthenticationServiceProviderExtensions
 {
+    /// <summary>The command-line switch that resets the administrator with <see cref="ResetAdminAsync"/> instead of starting the host.</summary>
+    public const string ResetAdminSwitch = "--reset-admin";
+
+    /// <summary>
+    /// Gets <paramref name="args"/> without <see cref="ResetAdminSwitch"/>, compared ignoring case, for the configuration,
+    /// which would otherwise take the argument after the switch as its value, and whether the switch was given.
+    /// </summary>
+    public static string[] RemoveResetAdminSwitch(string[] args, out bool isResetRequested)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        var remaining = args.Where(argument => !string.Equals(argument, ResetAdminSwitch, StringComparison.OrdinalIgnoreCase)).ToArray();
+        isResetRequested = remaining.Length != args.Length;
+        return remaining;
+    }
+
     /// <summary>
     /// Initializes the authentication database and resets the administrator with <see cref="AdminSeeding.ResetAdminAsync"/>,
     /// logging the outcome; a failure, such as a database that is busy or cannot be opened, is logged, not thrown.
