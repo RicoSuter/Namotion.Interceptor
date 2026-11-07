@@ -368,13 +368,29 @@ internal sealed class AutomationEngine : IRuleRunHost
             return;
         }
 
-        var summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
-        if (summary.ChangedState)
+        DispatchSummary summary;
+        try
         {
-            ApplyScopeChange();
+            summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
+        }
+        finally
+        {
+            PublishStateChanges();
         }
 
         _status.Apply(summary, _hasConfigurationError);
+    }
+
+    // The rules of the entered state are activated first, so that they receive the event of entering it.
+    private void PublishStateChanges()
+    {
+        if (!_states.HasPendingChanges)
+        {
+            return;
+        }
+
+        ApplyScopeChange();
+        _states.PublishPendingChanges();
     }
 
     private bool IsActive(CompiledRule rule) => rule.IsActiveIn(_automation.Enabled, CurrentState);

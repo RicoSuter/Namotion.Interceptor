@@ -5,11 +5,21 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// Changes the state of an automation: writes the checkpoint with the new state first, and only when that succeeded sets
-/// the state, its entry time and publishes the state-change event.
+/// the state, its entry time and publishes the state-change event. The event of a rule's state change is held until
+/// <see cref="PublishPendingChanges"/>, which the engine calls once the rules of the new state are active, so that a
+/// rule active in the entered state receives it and a rule of the left state does not.
 /// </summary>
 internal sealed class StateTransitions(Automation automation, AutomationStateKeeper keeper, TimeProvider timeProvider, ILogger logger)
 {
-    /// <summary>Enters the state; returns why it did not, or null. Entering the current state does nothing.</summary>
+    private readonly List<AutomationStateChangedEvent> _pendingChanges = [];
+
+    /// <summary>Whether <see cref="ChangeState"/> entered a state whose event is not published yet.</summary>
+    public bool HasPendingChanges => _pendingChanges.Count > 0;
+
+    /// <summary>
+    /// Enters the state and holds its state-change event for <see cref="PublishPendingChanges"/>; returns why it did not,
+    /// or null. Entering the current state does nothing.
+    /// </summary>
     public string? ChangeState(CompiledAutomation snapshot, string targetState)
     {
         var previous = automation.CurrentState;
@@ -30,8 +40,24 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         }
 
         Enter(targetState, now);
-        Publish(previous, targetState, now);
+        _pendingChanges.Add(new AutomationStateChangedEvent { PreviousState = previous, NewState = targetState, Timestamp = now });
         return null;
+    }
+
+    /// <summary>Publishes the state-change events that <see cref="ChangeState"/> held, in the order the states were entered.</summary>
+    public void PublishPendingChanges()
+    {
+        if (_pendingChanges.Count == 0)
+        {
+            return;
+        }
+
+        var changes = _pendingChanges.ToArray();
+        _pendingChanges.Clear();
+        foreach (var change in changes)
+        {
+            Publish(change);
+        }
     }
 
     /// <summary>Enters the initial state of an automation that has states and is in none yet, without an event.</summary>
@@ -79,7 +105,7 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         restartRules();
         if (initialState is not null && !string.Equals(previous, initialState, StringComparison.Ordinal))
         {
-            Publish(previous, initialState, now);
+            Publish(new AutomationStateChangedEvent { PreviousState = previous, NewState = initialState, Timestamp = now });
         }
 
         return null;
@@ -97,12 +123,12 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         automation.StateEnteredAt = enteredAt;
     }
 
-    private void Publish(string? previous, string state, DateTimeOffset enteredAt)
+    private void Publish(AutomationStateChangedEvent change)
     {
-        logger.LogInformation("The automation {Automation} changed from state {Previous} to {State}.", automation.Title, previous, state);
+        logger.LogInformation("The automation {Automation} changed from state {Previous} to {State}.", automation.Title, change.PreviousState, change.NewState);
         try
         {
-            automation.PublishStateChanged(new AutomationStateChangedEvent { PreviousState = previous, NewState = state, Timestamp = enteredAt });
+            automation.PublishStateChanged(change);
         }
         catch (Exception exception)
         {

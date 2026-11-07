@@ -99,6 +99,40 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenARuleEntersAState_ThenARuleActiveInThatStateReceivesTheEntryEvent()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Idle", "Running"];
+            automation.InitialState = "Idle";
+            automation.RuleOrder = ["started", "onEntry", "onLeave"];
+            automation.Rules = Keyed(
+                ("started", Create("Started", AutomationRuleMode.On, [When("/Weather/Power > 500")], [Enter("Running")], inState: "Idle")),
+                ("onEntry", Create(
+                    "On entry",
+                    AutomationRuleMode.On,
+                    [OnEvent("..", "AutomationStateChangedEvent", "event/NewState == Running")],
+                    [Invoke("/Blinds/Close")],
+                    inState: "Running")),
+                ("onLeave", Create(
+                    "On leave",
+                    AutomationRuleMode.On,
+                    [OnEvent("..", "AutomationStateChangedEvent")],
+                    [Invoke("/Blinds/Open")],
+                    inState: "Idle")));
+        });
+
+        // Act
+        await SetPowerAsync(host, 600);
+
+        // Assert
+        Assert.Equal("Running", host.Automation.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, host.Blinds.OpenCount);
+    }
+
+    [Fact]
     public async Task WhenTheStateChanges_ThenAnotherAutomationCanReactToIt()
     {
         // Arrange
