@@ -106,6 +106,10 @@ Denied `execute` and `history` are logged at debug level with the agent and the 
 - The history of a path that does not resolve is not available, except with `AllowAllMcpAccessPolicy`, which queries every path as requested.
 - A subject whose only members other than attributes are secrets is empty for every policy and hidden from every agent and `/mcp` client.
 - A started OPC UA server (`HomeBlaze.OpcUa`) is an anonymous read-write gateway over what it exposes and ignores roles. Starting it needs only `execute` of **Start**, no `administer`; **Start** requires confirmation, so agents and `/mcp` clients cannot start it, while a person whose roles allow `execute` on it can.
+- `RoleStore` does not check who changes a role: the operations and dialogs that call it require a full administrator. Code that calls it directly, such as a plugin, is trusted.
+- `CanAdministerConfiguration` and `EditPermissions.CanEdit` allow a subject without configuration members, whose edit component must check each member it changes itself; a plugin edit component that does not lets every viewer who sees the subject change it.
+- That components run operations and queries only through `OperationInvoker` or `UserPermissionsExtensions` is checked by a test that scans the sources by method name (`WidgetOperationGuardTests`), not by the compiler, and plugins are not scanned.
+- The other limits of roles, sign-in and agents are listed in [Known Limits](../../administration/authorization.md#known-limits).
 
 ## Authentication [Implemented]
 
