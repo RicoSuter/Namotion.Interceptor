@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -23,86 +24,147 @@ public sealed partial class MarkdownContentParser
     internal const string HtmlKeyPrefix = "Html_";
     internal const string ExpressionKeyPrefix = "Expression_";
 
+    private const string PagesRoutePrefix = "/pages";
+    private const string BrowserRoutePrefix = "/browser";
+
+    private static readonly SearchValues<char> CharactersToEscapeForLink = SearchValues.Create("%#?");
+
+    /// <summary>The number of links that the widgets of one page keep resolved, see <see cref="ResolveLink"/>.</summary>
+    internal const int MaximumCachedLinks = 32;
+
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly TypeProvider _typeProvider;
     private readonly ILogger<MarkdownContentParser>? _logger;
 
     /// <summary>
-    /// Rewrites relative .md links to /pages/... route format with Children segments.
-    /// A fragment after the page stays on the link. A link that is only a fragment gets the route of the
-    /// page itself, which a link names with <paramref name="pageName"/>.
+    /// Rewrites a link of the page as <see cref="ClassifyLink"/> classifies it: a page gets its route under /pages, a file
+    /// its route under <see cref="StorageFileRoute.Prefix"/> and a folder its route in the subject browser. A query or a
+    /// fragment stays on the link. A link that is only a query or a fragment gets the route of the page itself, which a
+    /// link names with <paramref name="pageName"/>.
     /// </summary>
-    private static string RewriteLink(string url, string basePath, string pageName) =>
-        IsRelativePageLink(url, out var fragmentStart) ? RewritePageLink(url, fragmentStart, basePath, pageName) : url;
+    private static string RewriteLink(string url, string basePath, string pageName)
+    {
+        var kind = ClassifyLink(url, out var pathEnd);
+        return kind == LinkKind.AsWritten ? url : RewriteLink(url, kind, pathEnd, basePath, pageName);
+    }
+
+    private static string RewriteLink(string url, LinkKind kind, int pathEnd, string basePath, string pageName)
+    {
+        var routePrefix = kind switch
+        {
+            LinkKind.Page => PagesRoutePrefix,
+            LinkKind.Folder => BrowserRoutePrefix,
+            _ => StorageFileRoute.Prefix
+        };
+
+        // The browser resolves a link against the base address of the application and not against the
+        // address of the page, so a query or a fragment alone would lead to the start page.
+        var path = ResolvePath(basePath, kind == LinkKind.Page && pathEnd == 0 ? pageName : url[..pathEnd]);
+        var suffix = url.AsSpan(pathEnd);
+        return path.Length == 0 ? string.Concat(routePrefix, suffix) : string.Concat(routePrefix, "/", path, suffix);
+    }
+
+    private enum LinkKind
+    {
+        AsWritten,
+        Page,
+        Folder,
+        File
+    }
 
     /// <summary>
-    /// Whether a link is rewritten: a relative link to a markdown page or a fragment of the page itself.
-    /// Every other link stays as written. For a link that is rewritten, <paramref name="fragmentStart"/> is
-    /// where its fragment starts, or -1 without one.
+    /// Classifies a link. A link with a scheme or a leading slash, also one to another host that starts with two slashes,
+    /// stays as written. Every other link is relative, and its path ends at the first <c>?</c> or <c>#</c>. A path to a
+    /// <c>.md</c> or <c>.markdown</c> file, or an empty path as in a link that is only a query or a fragment, is a page.
+    /// A path that ends with a slash, or that is or ends with a segment <c>.</c> or <c>..</c>, is a folder. Any other path
+    /// is a file. <paramref name="pathEnd"/> is where the query or fragment starts, or the length of the link without one.
     /// </summary>
-    private static bool IsRelativePageLink(string url, out int fragmentStart)
+    private static LinkKind ClassifyLink(string url, out int pathEnd)
     {
-        fragmentStart = -1;
+        pathEnd = 0;
+        if (string.IsNullOrEmpty(url) || url[0] == '/' || HasScheme(url))
+        {
+            return LinkKind.AsWritten;
+        }
 
-        // Skip absolute URLs
-        if (string.IsNullOrEmpty(url) ||
-            url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-            url.StartsWith("/"))
+        pathEnd = url.AsSpan().IndexOfAny('?', '#');
+        if (pathEnd < 0)
+        {
+            pathEnd = url.Length;
+        }
+
+        var path = url.AsSpan(0, pathEnd);
+        if (path.IsEmpty || path.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase))
+        {
+            return LinkKind.Page;
+        }
+
+        if (path[^1] == '/')
+        {
+            return LinkKind.Folder;
+        }
+
+        var lastSegment = path[(path.LastIndexOf('/') + 1)..];
+        return lastSegment is "." or ".." ? LinkKind.Folder : LinkKind.File;
+    }
+
+    /// <summary>
+    /// Whether the link starts with a scheme as a URI defines one, such as <c>https:</c>, <c>mailto:</c> or <c>data:</c>.
+    /// </summary>
+    private static bool HasScheme(ReadOnlySpan<char> url)
+    {
+        if (url.IsEmpty || !char.IsAsciiLetter(url[0]))
         {
             return false;
         }
 
-        fragmentStart = url.IndexOf('#');
-        if (fragmentStart == 0)
+        foreach (var character in url[1..])
         {
-            return true;
+            if (character == ':')
+            {
+                return true;
+            }
+
+            if (!char.IsAsciiLetterOrDigit(character) && character is not ('+' or '-' or '.'))
+            {
+                return false;
+            }
         }
 
-        // Only process .md links
-        var pagePath = fragmentStart < 0 ? url.AsSpan() : url.AsSpan(0, fragmentStart);
-        return pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string RewritePageLink(string url, int fragmentStart, string basePath, string pageName)
-    {
-        // The browser resolves a link against the base address of the application and not against the
-        // address of the page, so a fragment alone would lead to the start page.
-        var pagePath = fragmentStart == 0 ? pageName : fragmentStart < 0 ? url : url[..fragmentStart];
-
-        // Resolve relative path against base path
-        var resolvedPath = ResolvePath(basePath, pagePath);
-
-        // Convert to /pages/... format with Children segments
-        // e.g., "foo/bar/baz.md" => "/pages/foo/bar/baz.md"
-        var segments = resolvedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var result = new StringBuilder("/pages");
-
-        foreach (var segment in segments)
-        {
-            result.Append("/");
-            result.Append(segment);
-        }
-
-        if (fragmentStart >= 0)
-        {
-            result.Append(url, fragmentStart, url.Length - fragmentStart);
-        }
-
-        return result.ToString();
+        return false;
     }
 
     /// <summary>
-    /// Gets a file name as a link has to write it: with the characters escaped that end the path of a URL
-    /// or start an escape. Spaces and other characters are escaped when the link is rendered, as for a
-    /// link that is written on the page.
+    /// Whether a link of the page opens in a new tab: a link with a scheme, such as a web address, a link to another host
+    /// that starts with two slashes, or a link to a file of the storage, also one written as an address under
+    /// <see cref="StorageFileRoute.Prefix"/>. A link to a file must, because the router of the application would take a
+    /// click on it as its own route.
     /// </summary>
-    private static string EscapeFileNameForLink(string fileName) =>
-        fileName.Replace("%", "%25").Replace("#", "%23").Replace("?", "%3F");
+    private static bool OpensInNewTab(string url) =>
+        ClassifyLink(url, out _) switch
+        {
+            LinkKind.File => true,
+            // The route of the files ignores case, as all routes do.
+            LinkKind.AsWritten => HasScheme(url) || url.StartsWith("//", StringComparison.Ordinal) ||
+                url.StartsWith(StorageFileRoute.Prefix + "/", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
 
     /// <summary>
-    /// Computes the base path used to resolve relative links in markdown.
+    /// Gets a name or a path of names as a link has to write it: with the characters escaped that end the path of a URL
+    /// or start an escape. Spaces and other characters are escaped when the link is rendered, as for a link that is
+    /// written on the page.
+    /// </summary>
+    private static string EscapeForLink(string path) =>
+        path.AsSpan().IndexOfAny(CharactersToEscapeForLink) < 0
+            ? path
+            : path.Replace("%", "%25").Replace("#", "%23").Replace("?", "%3F");
+
+    /// <summary>
+    /// Computes the base path used to resolve relative links in markdown, with its names escaped by
+    /// <see cref="EscapeForLink"/>: they come from the file system, while the relative part of a link is written as a URL.
     /// A markdown file is parsed before it is placed in the tree, so its own graph path is not available yet.
     /// The graph path of its storage container is, and is combined with the directory of the file within the
     /// storage.
@@ -114,24 +176,52 @@ public sealed partial class MarkdownContentParser
         if (parent.Storage is not IInterceptorSubject storageSubject
             || _pathResolver.GetPath(storageSubject, PathStyle.Route) is not { } storageGraphPath)
         {
-            return fileDirectory;
+            return EscapeForLink(fileDirectory);
         }
 
         var trimmedStorage = storageGraphPath.TrimEnd('/');
         var trimmedDirectory = fileDirectory.Trim('/');
-        return string.IsNullOrEmpty(trimmedDirectory)
+        return EscapeForLink(string.IsNullOrEmpty(trimmedDirectory)
             ? trimmedStorage
-            : $"{trimmedStorage}/{trimmedDirectory}";
+            : $"{trimmedStorage}/{trimmedDirectory}");
     }
 
     /// <summary>
     /// Resolves a link of a block on the page the way a link in the text of the page is rewritten.
     /// </summary>
-    public string ResolveLink(string link, MarkdownFile page) =>
-        // Asked first, because a widget resolves its link on every render and most links stay as written.
-        IsRelativePageLink(link, out var fragmentStart)
-            ? RewritePageLink(link, fragmentStart, GetLinkBasePath(page), EscapeFileNameForLink(Path.GetFileName(page.FullPath)))
-            : link;
+    public string ResolveLink(string link, MarkdownFile page)
+    {
+        // Classified first, because a widget resolves its link on every render and most links stay as written.
+        var kind = ClassifyLink(link, out var pathEnd);
+        if (kind == LinkKind.AsWritten)
+        {
+            return link;
+        }
+
+        // Both read on every call and before the base path is computed. The structure version keys the cache as the
+        // registry documents for anything computed from it, so links computed during a change carry a number from before
+        // the change ended and are not served after it. The paths version makes a component that renders the link render
+        // again when the paths change.
+        var structureVersion = ((IInterceptorSubject)page).Context.TryGetService<ISubjectRegistry>()?.StructureVersion ?? 0;
+        var pathsVersion = _pathResolver.PathsVersion;
+        var resolvedLinks = page.ResolvedLinks;
+        if (resolvedLinks is null || resolvedLinks.StructureVersion != structureVersion || resolvedLinks.PathsVersion != pathsVersion)
+        {
+            resolvedLinks = new ResolvedLinks(
+                structureVersion, pathsVersion, GetLinkBasePath(page), EscapeForLink(Path.GetFileName(page.FullPath)), MaximumCachedLinks);
+            page.ResolvedLinks = resolvedLinks;
+        }
+
+        if (resolvedLinks.TryGet(link, out var resolved))
+        {
+            return resolved;
+        }
+
+        resolved = RewriteLink(
+            link, kind, pathEnd, resolvedLinks.BasePath, kind == LinkKind.Page && pathEnd == 0 ? resolvedLinks.PageName : string.Empty);
+        resolvedLinks.TryAdd(link, resolved);
+        return resolved;
+    }
 
     /// <summary>
     /// Resolves a relative path against a base path, handling .. navigation.
@@ -289,8 +379,9 @@ public sealed partial class MarkdownContentParser
 
         var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
-        var pageName = EscapeFileNameForLink(Path.GetFileName(parent.FullPath));
-        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true);
+        var pageName = EscapeForLink(Path.GetFileName(parent.FullPath));
+        var segments = MarkdownSegmentBuilder.Build(
+            page, url => RewriteLink(url, basePath, pageName), markTextBlocks: true, opensInNewTab: OpensInNewTab);
 
         var state = new ParseState(parent, page, reusableSubjects);
         try
