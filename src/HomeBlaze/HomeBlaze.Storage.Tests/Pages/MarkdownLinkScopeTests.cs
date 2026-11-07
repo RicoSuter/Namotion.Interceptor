@@ -9,10 +9,10 @@ public class MarkdownLinkScopeTests
 {
     private static readonly string Namespace = typeof(TestLeaf).Namespace!;
 
-    private static async Task<(MarkdownPageFixture Fixture, IInterceptorSubject Leaf, string Html)> AddPageAsync()
+    private static async Task<(MarkdownPageFixture Fixture, IInterceptorSubject Leaf, string Html)> AddPageAsync(string pagePath = "page.md")
     {
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $$$"""
+        var page = await fixture.AddPageAsync(pagePath, $$$"""
             [Other](other.md)
 
             ![Picture](picture.png)
@@ -52,6 +52,21 @@ public class MarkdownLinkScopeTests
         // Assert
         Assert.Equal("/files/picture.png", link);
         Assert.Contains($"src=\"{link}\"", html);
+    }
+
+    [Fact]
+    public async Task WhenPageIsInAFolderWithSpecialCharacters_ThenAFileLinkEscapesTheFolderLikeThePictureInTheText()
+    {
+        // Arrange
+        var (_, leaf, html) = await AddPageAsync("Docs/C# notes/page.md");
+
+        // Act
+        var link = leaf.ResolveScopedLink("picture.png");
+
+        // Assert
+        // The browser escapes the space of a widget's attribute itself; Markdig escapes it in the text of the page.
+        Assert.Equal("/files/Docs/C%23 notes/picture.png", link);
+        Assert.Contains("src=\"/files/Docs/C%23%20notes/picture.png\"", html);
     }
 
     [Fact]

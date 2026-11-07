@@ -135,8 +135,8 @@ A picture can also be a file of the storage. Put the file next to the page, or i
 
 - **Address**: the picture is served under `/files/` with its path in the storage, here `/files/Docs/administration/images/sample-floor-plan.svg`. The `Image` of a [Card](widgets/card.md) takes a relative path in the same way.
 - **What is served**: any file that is not a subject of its own type, such as `.png`, `.jpg`, `.svg` or `.pdf`. Pages (`.md`), JSON files and hidden files, whose name starts with a dot, are never served. A text file is served as UTF-8.
-- **Who can read it**: until authorization is configured, every served file can be read by anyone who can reach the app. Do not keep secrets in such a file, for example a backup copy of a configuration.
-- **Names with `%`**: a file whose name contains a literal `%` followed by two hex digits, such as `50%25.png`, cannot be reached, as for pages.
+- **Who can read it**: HomeBlaze has no authorization yet (see [Security](../architecture/design/security.md)), so every served file can be read by anyone who can reach the app. Do not keep secrets in such a file, for example a backup copy of a configuration.
+- **Names with `%`**: a file, or any file in a folder, whose name contains a literal `%` followed by two hex digits, such as `50%25.png`, cannot be reached, by a picture or a link alike, as for pages.
 - **A changed file**: a picture that is replaced in the storage shows on the next view of the page.
 
 A picture is shown in a size that fits the page, and it always keeps its proportions:
