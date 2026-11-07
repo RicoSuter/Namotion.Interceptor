@@ -225,13 +225,29 @@ public class ParsedExpressionParseTests
     [InlineData("a == and", "expected a value after '==' at position 5")]
     [InlineData("a |", "expected a pipe name after '|' at position 3")]
     [InlineData("a | unit:", "expected an argument after ':' at position 9")]
-    [InlineData("Interval > 30m1h", "invalid number '30m1h' at position 11")]
-    [InlineData("Interval > 1h1h", "invalid number '1h1h' at position 11")]
-    [InlineData("Interval > 5x", "invalid number '5x' at position 11")]
-    [InlineData("Interval > 1e5m", "invalid number '1e5m' at position 11")]
+    [InlineData("Interval > 30m1h", "invalid duration '30m1h' at position 11")]
+    [InlineData("Interval > 1h1h", "invalid duration '1h1h' at position 11")]
+    [InlineData("Interval > 5x", "invalid duration '5x' at position 11")]
+    [InlineData("Interval > 1e5m", "invalid duration '1e5m' at position 11")]
+    [InlineData("Interval > 5M", "invalid duration '5M' at position 11")]
+    [InlineData("Interval > 1.5.5h", "invalid duration '1.5.5h' at position 11")]
+    [InlineData("Interval > 10675200d", "duration out of range '10675200d' at position 11")]
+    [InlineData("Interval > 10675199d2h48m5.4775808s", "duration out of range '10675199d2h48m5.4775808s' at position 11")]
+    [InlineData("Interval > 99999999999999999999999999d", "duration out of range '99999999999999999999999999d' at position 11")]
+    [InlineData("Interval > -99999999999999999999999999d9999999999999999999999999h", "duration out of range '-99999999999999999999999999d9999999999999999999999999h' at position 11")]
+    [InlineData("x < 1e999", "number out of range '1e999' at position 4")]
+    [InlineData("x < -1e999", "number out of range '-1e999' at position 4")]
+    [InlineData("a- b", "put a space before '-' at position 1")]
+    [InlineData("a-(b)", "put a space before '-' at position 1")]
+    [InlineData("a*(b)", "put a space before '*' at position 1")]
+    [InlineData("x > 5- 3", "put a space before '-' at position 5")]
+    [InlineData("(a -)", "expected a value after '-' at position 4")]
+    [InlineData("a -)", "expected a value after '-' at position 3")]
+    [InlineData("a -| raw", "expected a value after '-' at position 3")]
     [InlineData("a -", "expected a value after '-' at position 3")]
     [InlineData("a * ", "expected a value after '*' at position 4")]
-    [InlineData("a == - b", "expected a value after '==' at position 5")]
+    [InlineData("x > -", "expected a value after '-' at position 5")]
+    [InlineData("a -x", "put a space after '-' at position 2")]
     [InlineData("a -5", "put a space after '-' at position 2")]
     [InlineData("a +b", "put a space after '+' at position 2")]
     [InlineData("Now -5m", "put a space after '-' at position 4")]
@@ -386,6 +402,41 @@ public class ParsedExpressionParseTests
 
         // Assert
         Assert.Equal(expectedPaths, expression.Paths.ToArray());
+    }
+
+    [Theory]
+    [InlineData("-x > 0", new[] { "x" })]
+    [InlineData("x > -Limit", new[] { "x", "Limit" })]
+    [InlineData("a * -x", new[] { "a", "x" })]
+    [InlineData("-(a + b) > 0", new[] { "a", "b" })]
+    [InlineData("a == - b", new[] { "a", "b" })]
+    [InlineData("a - -x", new[] { "a", "x" })]
+    [InlineData("Interval > - 5m", new[] { "Interval" })]
+    [InlineData("/Room-1/Power > -/Room-1/Limit", new[] { "/Room-1/Power", "/Room-1/Limit" })]
+    [InlineData("Temperature > -5", new[] { "Temperature" })]
+    [InlineData("Power > -5/2", new[] { "Power", "-5/2" })]
+    public void WhenMinusPrecedesAnOperand_ThenItIsTheSignOfANumberOrANegation(string text, string[] expectedPaths)
+    {
+        // Act
+        var expression = Parse(text);
+
+        // Assert
+        Assert.Equal(expectedPaths, expression.Paths.ToArray());
+        Assert.Null(expression.SinglePath);
+    }
+
+    [Fact]
+    public void WhenMinusIsRepeatedBeyondLimit_ThenReturnsNestingError()
+    {
+        // Arrange
+        var text = new string('-', 40) + "a";
+
+        // Act
+        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Equal("expression is nested too deeply at position 32", error);
     }
 
     [Theory]

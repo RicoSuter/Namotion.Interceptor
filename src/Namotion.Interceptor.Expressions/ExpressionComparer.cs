@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Expressions;
 /// <summary>
 /// Compares two values that are not null: a boolean only for equality, an enum by its name without regard to case and
 /// only for equality, a text without regard to case for equality and ordinal for order, a date against ISO 8601 text,
-/// a duration against a duration, a float as a float, and NaN never. A null result means the pair has no order, so
+/// a duration against a duration, integers and decimals exactly, a float as a float, and NaN never. A null result means the pair has no order, so
 /// the comparison is unknown.
 /// </summary>
 internal static class ExpressionComparer
@@ -33,9 +33,8 @@ internal static class ExpressionComparer
         bool boolean => CompareBoolean(boolean, other, isEquality),
         Enum enumValue => CompareEnum(enumValue, other, isEquality),
         string text => CompareText(text, other, isEquality),
-        DateTimeOffset instant => CompareInstant(instant, other, otherInstant),
-        DateTime dateTime => CompareDateTime(dateTime, other, otherInstant),
         TimeSpan duration => other is TimeSpan otherDuration ? duration.CompareTo(otherDuration) : null,
+        _ when TryGetInstant(value, out var instant) => CompareInstant(instant, other, otherInstant),
         _ => CompareNumber(value, other)
     };
 
@@ -84,57 +83,47 @@ internal static class ExpressionComparer
             return otherInstant is { } literalInstant ? instant.CompareTo(literalInstant) : null;
         }
 
-        return other switch
-        {
-            DateTimeOffset otherDate => instant.CompareTo(otherDate),
-            DateTime otherDateTime => instant.CompareTo(ToInstant(otherDateTime)),
-            _ => null
-        };
-    }
-
-    private static int? CompareDateTime(DateTime dateTime, object other, DateTimeOffset? otherInstant)
-    {
-        if (other is string)
-        {
-            return otherInstant is { } literalInstant ? ToInstant(dateTime).CompareTo(literalInstant) : null;
-        }
-
-        return other switch
-        {
-            DateTime otherDateTime => ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)),
-            DateTimeOffset otherInstantValue => ToInstant(dateTime).CompareTo(otherInstantValue),
-            _ => null
-        };
+        return TryGetInstant(other, out var otherValue) ? instant.CompareTo(otherValue) : null;
     }
 
     private static int? CompareNumber(object value, object other)
     {
-        // Widening a float to double would make 0.1f differ from the literal 0.1.
-        if (value is float single && other is double floatNumber)
-        {
-            return single.CompareTo((float)floatNumber);
-        }
-
-        if (value is double number && other is float otherSingle)
-        {
-            return ((float)number).CompareTo(otherSingle);
-        }
-
         if (!IsNumber(value) || !IsNumber(other))
         {
             return null;
         }
 
-        return Convert.ToDouble(value, CultureInfo.InvariantCulture).CompareTo(Convert.ToDouble(other, CultureInfo.InvariantCulture));
+        if (value is float || other is float)
+        {
+            return CompareAsFloat(value, other);
+        }
+
+        return IsIntegerOrDecimal(value) && IsIntegerOrDecimal(other)
+            ? ToDecimal(value).CompareTo(ToDecimal(other))
+            : ToDouble(value).CompareTo(ToDouble(other));
     }
+
+    // Widening a float would make 0.1f differ from the literal 0.1, so a float compares with a double or decimal as a
+    // float, and with an integer or another float as a double.
+    private static int CompareAsFloat(object value, object other) => (value, other) switch
+    {
+        (float single, double or decimal) => single.CompareTo((float)ToDouble(other)),
+        (double or decimal, float otherSingle) => ((float)ToDouble(value)).CompareTo(otherSingle),
+        _ => ToDouble(value).CompareTo(ToDouble(other))
+    };
 
     // The cached name of a defined value, so a comparison does not allocate; ToString only for flag combinations and
     // undefined values.
     private static string GetEnumName(Enum enumValue) =>
         Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
 
-    internal static bool IsNumber(object value) =>
-        value is float or double or decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
+    internal static bool IsNumber(object value) => value is float or double || IsIntegerOrDecimal(value);
+
+    internal static bool IsIntegerOrDecimal(object value) => value is decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
+
+    internal static double ToDouble(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture);
+
+    internal static decimal ToDecimal(object value) => Convert.ToDecimal(value, CultureInfo.InvariantCulture);
 
     private static bool IsSignedInteger(object value) => value is sbyte or short or int or long;
 
@@ -143,9 +132,37 @@ internal static class ExpressionComparer
     private static bool IsNaN(object value) =>
         (value is double number && double.IsNaN(number)) || (value is float single && float.IsNaN(single));
 
-    // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
-    internal static DateTimeOffset ToInstant(DateTime dateTime) =>
-        dateTime.Kind == DateTimeKind.Unspecified
-            ? new DateTimeOffset(dateTime, TimeSpan.Zero)
-            : new DateTimeOffset(dateTime);
+    /// <summary>Gets the instant of a <see cref="DateTimeOffset"/> or <see cref="DateTime"/>.</summary>
+    /// <returns>False for another value, or a local time whose UTC is out of the range of <see cref="DateTime"/>.</returns>
+    internal static bool TryGetInstant(object value, out DateTimeOffset instant)
+    {
+        switch (value)
+        {
+            case DateTimeOffset dateTimeOffset:
+                instant = dateTimeOffset;
+                return true;
+            case DateTime dateTime:
+                // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
+                var offset = dateTime.Kind == DateTimeKind.Local ? TimeZoneInfo.Local.GetUtcOffset(dateTime) : TimeSpan.Zero;
+                return TryConvertToInstant(dateTime, offset, out instant);
+            default:
+                instant = default;
+                return false;
+        }
+    }
+
+    /// <summary>Gets the instant of a date and time at an offset from UTC.</summary>
+    /// <returns>False when its UTC is out of the range of <see cref="DateTime"/>.</returns>
+    internal static bool TryConvertToInstant(DateTime dateTime, TimeSpan offset, out DateTimeOffset instant)
+    {
+        var utcTicks = dateTime.Ticks - offset.Ticks;
+        if (utcTicks < DateTime.MinValue.Ticks || utcTicks > DateTime.MaxValue.Ticks)
+        {
+            instant = default;
+            return false;
+        }
+
+        instant = new DateTimeOffset(dateTime.Ticks, offset);
+        return true;
+    }
 }

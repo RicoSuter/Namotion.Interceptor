@@ -1,3 +1,4 @@
+using System.Globalization;
 using Namotion.Interceptor.Expressions;
 
 namespace Namotion.Interceptor.Expressions.Tests;
@@ -371,6 +372,24 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
+    [InlineData("10675199d2h48m5.4775807s", long.MaxValue)]
+    [InlineData("-10675199d2h48m5.4775808s", long.MinValue)]
+    [InlineData("10675199d2h48m5s", long.MaxValue - 4775807)]
+    [InlineData("0.0000001s", 1L)]
+    public void WhenDurationIsAtTheEdgeOfTheRange_ThenItIsExactToTheTick(string text, long expectedTicks)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext([]);
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromTicks(expectedTicks), result.Value);
+    }
+
+    [Theory]
     [InlineData("Interval == 90")]
     [InlineData("Interval > Name")]
     public void WhenDurationIsComparedWithAnotherType_ThenTheComparisonIsUnknown(string text)
@@ -436,19 +455,196 @@ public class ParsedExpressionEvaluationTests
         Assert.Null(result);
     }
 
-    [Fact]
-    public void WhenArithmeticIsEvaluatedAsValue_ThenItIsADouble()
+    [Theory]
+    [InlineData("Power - Offset", typeof(decimal), "7300")]
+    [InlineData("Count + Count", typeof(decimal), "6")]
+    [InlineData("Count / Four", typeof(decimal), "0.75")]
+    [InlineData("Big + One", typeof(decimal), "9007199254740994")]
+    [InlineData("Price + Price", typeof(decimal), "0.2")]
+    [InlineData("Power - 1000", typeof(decimal), "6400")]
+    [InlineData("Measured + 0.2", typeof(double), "0.30000000000000004")]
+    [InlineData("Offset * 1.10", typeof(decimal), "110")]
+    [InlineData("Amount * 2", typeof(decimal), "3")]
+    [InlineData("Amount + 0.50", typeof(decimal), "2")]
+    [InlineData("Amount / 0.5", typeof(decimal), "3")]
+    [InlineData("One / Count", typeof(double), "0.3333333333333333")]
+    [InlineData("Hundred / Seven", typeof(double), "14.285714285714286")]
+    [InlineData("Power / 3.6", typeof(double), "2055.5555555555557")]
+    [InlineData("10 / 3.7", typeof(double), "2.7027027027027026")]
+    [InlineData("Hundred / 0.3", typeof(double), "333.33333333333337")]
+    [InlineData("10 / 4", typeof(decimal), "2.5")]
+    [InlineData("Max + Max", typeof(double), "1.5845632502852868E+29")]
+    [InlineData("Tiny * Tiny", typeof(double), "1E-40")]
+    [InlineData("Ratio + 0", typeof(float), "0.1")]
+    [InlineData("Ratio * 3", typeof(float), "0.3")]
+    [InlineData("Ratio + Price", typeof(float), "0.2")]
+    [InlineData("Ratio + Ratio", typeof(float), "0.2")]
+    [InlineData("Ratio * Count", typeof(double), "0.30000000447034836")]
+    [InlineData("Ratio + Precise", typeof(double), "123456789.22299999")]
+    [InlineData("Stamp + Ratio", typeof(double), "1700000000123.1")]
+    [InlineData("Zero * -1", typeof(double), "0")]
+    public void WhenArithmeticIsEvaluatedAsValue_ThenItKeepsTheExactnessOfItsOperands(string text, Type expectedType, string expectedValue)
     {
         // Arrange
-        Assert.True(ParsedExpression.TryParse("Power - Offset", '/', out var expression, out var error), error);
-        var context = new TestExpressionContext(new Dictionary<string, object?> { ["Power"] = 7400m, ["Offset"] = 100 });
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?>
+        {
+            ["Power"] = 7400m,
+            ["Offset"] = 100,
+            ["Count"] = 3,
+            ["Four"] = (byte)4,
+            ["One"] = 1L,
+            ["Big"] = 9007199254740993L,
+            ["Price"] = 0.1m,
+            ["Max"] = decimal.MaxValue,
+            ["Tiny"] = 1e-20m,
+            ["Hundred"] = 100,
+            ["Seven"] = 7,
+            ["Precise"] = 123456789.123,
+            ["Stamp"] = 1700000000123L,
+            ["Ratio"] = 0.1f,
+            ["Zero"] = 0d,
+            ["Measured"] = 0.1,
+            ["Amount"] = 1.50m
+        });
 
         // Act
         var result = expression.Evaluate(ref context);
 
         // Assert
-        Assert.Equal(7300d, result.Value);
+        Assert.IsType(expectedType, result.Value);
+        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
         Assert.Null(result.Property);
+    }
+
+    [Theory]
+    [InlineData("-Power == -7400", true)]
+    [InlineData("-(Power - Offset) == -7300", true)]
+    [InlineData("Count * -Offset == -300", true)]
+    [InlineData("Zero > -Count", true)]
+    [InlineData("- -Power == 7400", true)]
+    [InlineData("-Count * 2 == -6", true)]
+    [InlineData("-Ratio == -0.1", true)]
+    [InlineData("-Interval == -90s", true)]
+    [InlineData("Interval > - 5m", true)]
+    [InlineData("Now - EnteredAt > -Interval", true)]
+    [InlineData("-Now == null", true)]
+    [InlineData("-Name == null", true)]
+    [InlineData("-IsOn == null", true)]
+    [InlineData("-Missing == null", true)]
+    [InlineData("-Smallest == null", true)]
+    [InlineData("-NotANumber == null", true)]
+    public void WhenOperandIsNegated_ThenNumbersAndDurationsChangeTheirSign(string text, bool expected)
+    {
+        // Arrange
+        var values = CreateTimeValues();
+        values["Power"] = 7400m;
+        values["Offset"] = 100;
+        values["Count"] = 3;
+        values["Zero"] = 0d;
+        values["Ratio"] = 0.1f;
+        values["Name"] = "Kitchen";
+        values["IsOn"] = true;
+        values["Smallest"] = TimeSpan.MinValue;
+        values["NotANumber"] = double.NaN;
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("-Count", typeof(decimal), "-3")]
+    [InlineData("-Ratio", typeof(float), "-0.1")]
+    [InlineData("-Zero", typeof(double), "0")]
+    [InlineData("-Interval", typeof(TimeSpan), "-00:01:30")]
+    [InlineData("-Amount", typeof(decimal), "-1.5")]
+    public void WhenNegationIsEvaluatedAsValue_ThenItKeepsTheTypeOfItsOperand(string text, Type expectedType, string expectedValue)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?>
+        {
+            ["Count"] = 3,
+            ["Ratio"] = 0.1f,
+            ["Zero"] = 0d,
+            ["Interval"] = TimeSpan.FromSeconds(90),
+            ["Amount"] = 1.50m
+        });
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.IsType(expectedType, result.Value);
+        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
+    [InlineData("First + Second == 0.3", true)]
+    [InlineData("Second - First == 0.1", true)]
+    [InlineData("First * Count == 0.3", true)]
+    [InlineData("Ratio + 0 == 0.1", true)]
+    [InlineData("Ratio * 10 == 1", true)]
+    [InlineData("Ratio - Ratio == 0", true)]
+    [InlineData("First * 3 == 0.3", true)]
+    [InlineData("0.1 + 0.2 == 0.3", true)]
+    [InlineData("Ratio == 0.1", true)]
+    [InlineData("Ratio < 0.1", false)]
+    [InlineData("Ratio + 0.2 == 0.3", true)]
+    [InlineData("Measured + 0.2 == 0.3", false)]
+    [InlineData("Measured + 0.2 == 0.30000000000000004", true)]
+    [InlineData("Measured == 0.1", true)]
+    [InlineData("Big == 9007199254740993", true)]
+    [InlineData("Big == 9007199254740992", false)]
+    [InlineData("Big > 9007199254740992", true)]
+    [InlineData("Count == 3", true)]
+    [InlineData("Count == 3.0", true)]
+    [InlineData("Count == 3e0", true)]
+    public void WhenOperandsAreExactOrFloats_ThenTheResultEqualsTheLiteral(string text, bool expected)
+    {
+        // Arrange
+        var values = new Dictionary<string, object?>
+        {
+            ["First"] = 0.1m,
+            ["Second"] = 0.2m,
+            ["Count"] = 3,
+            ["Ratio"] = 0.1f,
+            ["Measured"] = 0.1,
+            ["Big"] = 9007199254740993L
+        };
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("1.50", typeof(decimal), "1.5")]
+    [InlineData("11.000", typeof(decimal), "11")]
+    [InlineData("0.00", typeof(decimal), "0")]
+    [InlineData("-5", typeof(decimal), "-5")]
+    [InlineData(".5", typeof(decimal), "0.5")]
+    [InlineData("0.1 + 0.2", typeof(decimal), "0.3")]
+    [InlineData("1e3", typeof(double), "1000")]
+    [InlineData("1000000000000000000000000000000", typeof(double), "1E+30")]
+    [InlineData("0.12345678901234567890123456789", typeof(double), "0.12345678901234568")]
+    public void WhenNumberLiteralIsEvaluated_ThenItIsADecimalUnlessItHasAnExponentOrDoesNotFit(string text, Type expectedType, string expectedValue)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext([]);
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.IsType(expectedType, result.Value);
+        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
     }
 
     [Theory]
@@ -530,6 +726,58 @@ public class ParsedExpressionEvaluationTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData(true, 1, false)]
+    [InlineData(true, -1, true)]
+    [InlineData(true, 0, true)]
+    [InlineData(false, -1, false)]
+    [InlineData(false, 1, true)]
+    public void WhenDateTimeHasAnOffset_ThenItHasAnInstantOnlyWhenItsUtcIsInRange(bool isMinimum, int offsetHours, bool expected)
+    {
+        // Arrange
+        var dateTime = isMinimum ? DateTime.MinValue : DateTime.MaxValue;
+
+        // Act
+        var hasInstant = ExpressionComparer.TryConvertToInstant(dateTime, TimeSpan.FromHours(offsetHours), out var instant);
+
+        // Assert
+        Assert.Equal(expected, hasInstant);
+        if (hasInstant)
+        {
+            Assert.Equal(dateTime.Ticks, instant.Ticks);
+            Assert.Equal(TimeSpan.FromHours(offsetHours), instant.Offset);
+        }
+    }
+
+    // Which edge leaves the range depends on the offset of the local time zone; in UTC both stay in it.
+    [Theory]
+    [InlineData("Clock/Edge < Clock/Offset")]
+    [InlineData("Clock/Offset > Clock/Edge")]
+    [InlineData("Clock/Edge == Clock/Utc")]
+    [InlineData("Clock/Edge < '2026-01-01'")]
+    public void WhenLocalDateTimeHasNoInstantInRange_ThenTheComparisonIsUnknown(string text)
+    {
+        foreach (var edge in new[] { DateTime.MinValue, DateTime.MaxValue })
+        {
+            // Arrange
+            var local = DateTime.SpecifyKind(edge, DateTimeKind.Local);
+            var offset = TimeZoneInfo.Local.GetUtcOffset(local);
+            var isOutOfRange = edge == DateTime.MinValue ? offset > TimeSpan.Zero : offset < TimeSpan.Zero;
+            var values = new Dictionary<string, object?>
+            {
+                ["Clock/Edge"] = local,
+                ["Clock/Offset"] = new DateTimeOffset(2026, 11, 6, 14, 0, 0, TimeSpan.Zero),
+                ["Clock/Utc"] = new DateTime(2026, 11, 6, 13, 0, 0, DateTimeKind.Utc)
+            };
+
+            // Act
+            var result = EvaluateCondition(text, values);
+
+            // Assert
+            Assert.Equal(isOutOfRange, result is null);
+        }
     }
 
     [Fact]

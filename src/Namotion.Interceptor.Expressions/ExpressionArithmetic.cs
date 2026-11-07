@@ -1,13 +1,13 @@
-using System.Globalization;
-
 namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
-/// Applies an arithmetic operator to two values that are not null. Numbers of any numeric type compute as
-/// <see cref="double"/>. An instant minus an instant is a <see cref="TimeSpan"/>, an instant plus or minus a
-/// <see cref="TimeSpan"/> is an instant, and two <see cref="TimeSpan"/> values add and subtract. A
-/// <see cref="DateTime"/> without a kind is read as UTC. A null result means the pair has no arithmetic or the result is
-/// out of range, so the value is missing.
+/// Applies an arithmetic operator to two values that are not null. Two integers or decimals compute as
+/// <see cref="decimal"/> when the result is exact, and as <see cref="double"/> otherwise; a <see cref="float"/> with a
+/// <see cref="float"/> or a <see cref="decimal"/>, such as a number literal, computes as <see cref="float"/>; every other
+/// pair of numbers computes as <see cref="double"/>. An instant minus an instant is a <see cref="TimeSpan"/>, an instant
+/// plus or minus a <see cref="TimeSpan"/> is an instant, and two <see cref="TimeSpan"/> values add and subtract. A number
+/// or a <see cref="TimeSpan"/> negates. A <see cref="DateTime"/> without a kind is read as UTC. A null result means the
+/// pair has no arithmetic or the result is out of range, so the value is missing.
 /// </summary>
 internal static class ExpressionArithmetic
 {
@@ -17,7 +17,7 @@ internal static class ExpressionArithmetic
     {
         if (ExpressionComparer.IsNumber(left) && ExpressionComparer.IsNumber(right))
         {
-            return ApplyToNumbers(arithmeticOperator, ToDouble(left), ToDouble(right));
+            return ApplyToNumbers(arithmeticOperator, left, right);
         }
 
         return arithmeticOperator switch
@@ -28,25 +28,98 @@ internal static class ExpressionArithmetic
         };
     }
 
-    private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, double left, double right)
+    /// <summary>Negates a value that is not null.</summary>
+    /// <returns>The number or duration with the other sign, or null for another value or a result out of range.</returns>
+    public static object? Negate(object value) => value switch
     {
-        var result = arithmeticOperator switch
-        {
-            ArithmeticOperator.Add => left + right,
-            ArithmeticOperator.Subtract => left - right,
-            ArithmeticOperator.Multiply => left * right,
-            _ => left / right
-        };
+        float single => float.IsFinite(single) ? -single + 0f : null,
+        double number => double.IsFinite(number) ? -number + 0d : null,
+        TimeSpan duration => duration == TimeSpan.MinValue ? null : duration.Negate(),
+        _ when ExpressionComparer.IsIntegerOrDecimal(value) => -Normalize(ExpressionComparer.ToDecimal(value)),
+        _ => null
+    };
 
-        // A division by zero gives infinity or NaN, which is unknown like NaN in a comparison.
-        return double.IsFinite(result) ? result : null;
+    // Adding zero turns a negative zero into zero, which a host would otherwise write as "-0". A result that is no finite
+    // number, such as that of a division by zero, is missing like a result out of range.
+    private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, object left, object right)
+    {
+        // A float with a float or a literal keeps the precision of a float, so that its result compares with a literal as
+        // the float itself does. With a double or an integer it computes as double, which keeps the precision of both.
+        if (IsFloatPair(left, right))
+        {
+            var single = (float)Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
+            return float.IsFinite(single) ? single + 0f : null;
+        }
+
+        if (ExpressionComparer.IsIntegerOrDecimal(left) && ExpressionComparer.IsIntegerOrDecimal(right) &&
+            TryComputeExactly(arithmeticOperator, ExpressionComparer.ToDecimal(left), ExpressionComparer.ToDecimal(right), out var exact))
+        {
+            return Normalize(exact);
+        }
+
+        var result = Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
+        return double.IsFinite(result) ? result + 0d : null;
+    }
+
+    private static bool IsFloatPair(object left, object right) => (left, right) switch
+    {
+        (float, float or decimal) or (decimal, float) => true,
+        _ => false
+    };
+
+    /// <summary>Removes the trailing zeros of a decimal, so that 1.50 times 2 is written as 3 and not as 3.00.</summary>
+    // A division by one with the largest scale gives the smallest scale that keeps the value.
+    internal static decimal Normalize(decimal value) => value.Scale == 0 ? value : value / 1.0000000000000000000000000000m;
+
+    private static double Compute(ArithmeticOperator arithmeticOperator, double left, double right) => arithmeticOperator switch
+    {
+        ArithmeticOperator.Add => left + right,
+        ArithmeticOperator.Subtract => left - right,
+        ArithmeticOperator.Multiply => left * right,
+        _ => left / right
+    };
+
+    // Decimal arithmetic rounds instead of failing when a result has too many digits. It did not round when a sum keeps
+    // the larger scale of its operands, a product has the sum of their scales, and a quotient times the divisor gives the
+    // dividend back.
+    private static bool TryComputeExactly(ArithmeticOperator arithmeticOperator, decimal left, decimal right, out decimal result)
+    {
+        result = 0;
+        try
+        {
+            switch (arithmeticOperator)
+            {
+                case ArithmeticOperator.Add:
+                    result = left + right;
+                    return result.Scale == Math.Max(left.Scale, right.Scale);
+                case ArithmeticOperator.Subtract:
+                    result = left - right;
+                    return result.Scale == Math.Max(left.Scale, right.Scale);
+                case ArithmeticOperator.Multiply:
+                    result = left * right;
+                    return result.Scale == left.Scale + right.Scale;
+                default:
+                    if (right == 0)
+                    {
+                        return false;
+                    }
+
+                    // The product is checked as well, since a rounded quotient times the divisor can round back to the dividend.
+                    result = left / right;
+                    return TryComputeExactly(ArithmeticOperator.Multiply, result, right, out var product) && product == left;
+            }
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
     }
 
     private static object? ApplyToTimes(bool isSubtraction, object left, object right)
     {
         try
         {
-            if (TryGetInstant(left, out var leftInstant))
+            if (ExpressionComparer.TryGetInstant(left, out var leftInstant))
             {
                 return ApplyToInstant(isSubtraction, leftInstant, right);
             }
@@ -62,7 +135,7 @@ internal static class ExpressionArithmetic
 
     private static object? ApplyToInstant(bool isSubtraction, DateTimeOffset instant, object right)
     {
-        if (isSubtraction && TryGetInstant(right, out var rightInstant))
+        if (isSubtraction && ExpressionComparer.TryGetInstant(right, out var rightInstant))
         {
             return instant - rightInstant;
         }
@@ -82,24 +155,6 @@ internal static class ExpressionArithmetic
             return isSubtraction ? duration - otherDuration : duration + otherDuration;
         }
 
-        return !isSubtraction && TryGetInstant(right, out var instant) ? instant + duration : null;
+        return !isSubtraction && ExpressionComparer.TryGetInstant(right, out var instant) ? instant + duration : null;
     }
-
-    private static bool TryGetInstant(object value, out DateTimeOffset instant)
-    {
-        switch (value)
-        {
-            case DateTimeOffset dateTimeOffset:
-                instant = dateTimeOffset;
-                return true;
-            case DateTime dateTime:
-                instant = ExpressionComparer.ToInstant(dateTime);
-                return true;
-            default:
-                instant = default;
-                return false;
-        }
-    }
-
-    private static double ToDouble(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture);
 }

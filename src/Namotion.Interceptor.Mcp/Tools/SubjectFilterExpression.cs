@@ -8,8 +8,8 @@ namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
 /// A value filter over the properties of a subject, written in the expression language of
-/// <c>Namotion.Interceptor.Expressions</c>: comparisons, <c>and</c>, <c>or</c>, <c>not</c>, parentheses and bare booleans
-/// over paths that resolve from the subject through the path provider. <c>subject</c> is the subject itself. A filter
+/// <c>Namotion.Interceptor.Expressions</c>: arithmetic, comparisons, <c>and</c>, <c>or</c>, <c>not</c>, parentheses and
+/// bare booleans over paths that resolve from the subject through the path provider. <c>subject</c> is the subject itself. A filter
 /// matches only when it is true: a missing value makes a comparison unknown, and <c>== null</c> is true for it.
 /// </summary>
 internal sealed class SubjectFilterExpression
@@ -144,9 +144,38 @@ internal sealed class SubjectFilterExpression
             return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
         }
 
+        if (FindOperatorSymbol(memberPath, pathSeparator) is { } symbol)
+        {
+            return ErrorPrefix + $"put spaces around '{symbol}' in '{path}'";
+        }
+
         return memberPath[^1] == ']'
             ? ErrorPrefix + $"a path ends at a property, not at an entry such as '{path}'"
             : null;
+    }
+
+    // A property name holds no '+', '*' or '/', so one outside the brackets of an index is an operator without the spaces
+    // around it, which makes it part of the path.
+    private static char? FindOperatorSymbol(string memberPath, char pathSeparator)
+    {
+        var depth = 0;
+        foreach (var character in memberPath)
+        {
+            if (character == '[')
+            {
+                depth++;
+            }
+            else if (character == ']' && depth > 0)
+            {
+                depth--;
+            }
+            else if (depth == 0 && character is '+' or '*' or '/' && character != pathSeparator)
+            {
+                return character;
+            }
+        }
+
+        return null;
     }
 
     private static bool HasParentSegment(string memberPath, char pathSeparator)
