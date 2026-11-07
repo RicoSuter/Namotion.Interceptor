@@ -56,6 +56,7 @@
 
 @code {
     private SubjectEventTrigger _trigger = null!;
+    private string? _chosenEventType;
     private IReadOnlyList<string> _eventNames = [];
     private IReadOnlyList<string> _fields = [];
 
@@ -78,6 +79,7 @@
     protected override void OnParametersSet()
     {
         _trigger = Trigger;
+        _chosenEventType ??= Trigger.EventType;
         Refresh();
     }
 
@@ -98,14 +100,19 @@
         return TriggerChanged.InvokeAsync(trigger);
     }
 
-    // A source that is being typed leads nowhere for a while, so the event type is kept until the source publishes events.
+    // A source that is being typed leads nowhere or to other subjects for a while, so the event type that was chosen last is
+    // kept until the source publishes it.
     private Task SetSourceAsync(string? path)
     {
-        var eventType = AutomationEventNames.Choose(_trigger.EventType, [.. GetEventTypes(path).Select(type => type.Name)]);
+        var eventType = AutomationEventNames.Choose(_chosenEventType ?? string.Empty, _trigger.EventType, [.. GetEventTypes(path).Select(type => type.Name)]);
         return UpdateAsync(_trigger with { SubjectPath = path ?? string.Empty, EventType = eventType });
     }
 
-    private Task SetEventTypeAsync(string? eventType) => UpdateAsync(_trigger with { EventType = eventType ?? string.Empty });
+    private Task SetEventTypeAsync(string? eventType)
+    {
+        _chosenEventType = eventType ?? string.Empty;
+        return UpdateAsync(_trigger with { EventType = _chosenEventType });
+    }
 
     private Task SetFilterAsync(string? filter) => UpdateAsync(_trigger with { Filter = filter });
 

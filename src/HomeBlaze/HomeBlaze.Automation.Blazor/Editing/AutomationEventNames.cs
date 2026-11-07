@@ -27,9 +27,17 @@ internal static class AutomationEventNames
     }
 
     /// <summary>
-    /// The event type after the source changed: the current one while the source is unknown or still publishes it, otherwise
-    /// the first one of the source. A source that is being typed must not lose the event type.
+    /// The event type after the source changed: the one the user chose when the source publishes it, otherwise the current
+    /// one while the source is unknown or still publishes it, otherwise the first one of the source. A source that is being
+    /// typed passes through other subjects, which must not replace the chosen event type.
     /// </summary>
-    public static string Choose(string current, IReadOnlyList<string> available) =>
-        available.Count == 0 || available.Contains(current) ? current : available[0];
+    public static string Choose(string chosen, string current, IReadOnlyList<string> available)
+    {
+        if (available.Contains(chosen))
+        {
+            return chosen;
+        }
+
+        return available.Count == 0 || available.Contains(current) ? current : available[0];
+    }
 }

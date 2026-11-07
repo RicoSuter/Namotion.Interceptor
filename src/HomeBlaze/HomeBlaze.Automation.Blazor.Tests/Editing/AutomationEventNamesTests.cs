@@ -19,16 +19,19 @@ public class AutomationEventNamesTests
     }
 
     [Theory]
-    [InlineData("B", new[] { "A", "B" }, "B")]
-    [InlineData("C", new[] { "A", "B" }, "A")]
-    [InlineData("C", new string[0], "C")]
-    [InlineData("", new string[0], "")]
-    public void WhenTheSourceChanges_ThenTheEventTypeIsKeptWhileTheSourceIsUnknownOrStillPublishesIt(string current, string[] available, string expected)
+    [InlineData("B", "B", new[] { "A", "B" }, "B")]
+    [InlineData("C", "C", new[] { "A", "B" }, "A")]
+    [InlineData("C", "C", new string[0], "C")]
+    [InlineData("", "", new string[0], "")]
+    [InlineData("Pressed", "StateChanged", new[] { "Released", "Pressed" }, "Pressed")]
+    [InlineData("Pressed", "Released", new[] { "Released", "Tilted" }, "Released")]
+    public void WhenTheSourceChanges_ThenTheChosenEventTypeIsKeptWhileTheSourceIsUnknownOrStillPublishesIt(
+        string chosen, string current, string[] available, string expected)
     {
         // Act
-        var chosen = AutomationEventNames.Choose(current, available);
+        var eventType = AutomationEventNames.Choose(chosen, current, available);
 
         // Assert
-        Assert.Equal(expected, chosen);
+        Assert.Equal(expected, eventType);
     }
 }
