@@ -1,9 +1,11 @@
+using HomeBlaze.Authorization;
 using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Automation.Tests;
 
@@ -14,14 +16,16 @@ public class AutomationServiceCollectionExtensionsTests
         var services = new ServiceCollection();
         services.AddSingleton(new SubjectPathResolver(() => null));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton(new TestGraph().Context);
         return services;
     }
 
     [Fact]
-    public void WhenAutomationIsAdded_ThenAnAutomationCanBeCreatedFromTheServices()
+    public void WhenAutomationIsAdded_ThenTheRolesDecideAndAnAutomationCanBeCreatedFromTheServices()
     {
         // Arrange
         var services = CreateServices();
+        services.AddHomeBlazeAuthorization(new DefaultPathProvider('/'));
 
         // Act
         services.AddHomeBlazeAutomation();
@@ -29,9 +33,10 @@ public class AutomationServiceCollectionExtensionsTests
         using var automation = ActivatorUtilities.CreateInstance<Automation>(provider);
 
         // Assert
-        Assert.IsType<AllowAllAutomationAuthorizer>(automation.Authorizer);
+        Assert.IsType<RoleAutomationAuthorizer>(automation.Authorizer);
         Assert.Same(TimeProvider.System, automation.TimeProvider);
         Assert.True(automation.Enabled);
+        Assert.Empty(automation.Roles);
     }
 
     [Fact]
@@ -39,6 +44,7 @@ public class AutomationServiceCollectionExtensionsTests
     {
         // Arrange
         var services = CreateServices();
+        services.AddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
         services.AddHomeBlazeAutomation();
         using var provider = services.BuildServiceProvider();
 
@@ -70,7 +76,7 @@ public class AutomationServiceCollectionExtensionsTests
     {
         // Arrange
         var services = CreateServices();
-        services.AddSingleton<IAutomationAuthorizer, DenyingAuthorizer>();
+        services.AddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
 
         // Act
         services.AddHomeBlazeAutomation();
@@ -78,6 +84,6 @@ public class AutomationServiceCollectionExtensionsTests
         using var automation = ActivatorUtilities.CreateInstance<Automation>(provider);
 
         // Assert
-        Assert.IsType<DenyingAuthorizer>(automation.Authorizer);
+        Assert.IsType<AllowAllAutomationAuthorizer>(automation.Authorizer);
     }
 }

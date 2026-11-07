@@ -255,6 +255,11 @@ namespace HomeBlaze.Automation
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Rearm { get; init; }
     }
+    public sealed class RoleAutomationAuthorizer : HomeBlaze.Automation.IAutomationAuthorizer
+    {
+        public RoleAutomationAuthorizer(HomeBlaze.Authorization.AuthorizationService authorizationService) { }
+        public HomeBlaze.Automation.IAutomationPermissions GetPermissions(System.Collections.Generic.IReadOnlyList<string> roles) { }
+    }
     public sealed class SetPropertyAction : HomeBlaze.Automation.AutomationAction, System.IEquatable<HomeBlaze.Automation.SetPropertyAction>
     {
         public SetPropertyAction() { }

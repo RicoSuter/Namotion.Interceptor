@@ -95,11 +95,13 @@ public partial class SampleAutomationTests
         }
     }
 
+    // The samples are checked without the roles of an installation, which need its graph.
     private static ServiceProvider CreateServices()
     {
         var services = new ServiceCollection();
         services.AddSingleton(new SubjectPathResolver(() => null));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
         services.AddHomeBlazeAutomation();
         return services.BuildServiceProvider();
     }
