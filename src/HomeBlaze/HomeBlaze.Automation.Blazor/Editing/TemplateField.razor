@@ -18,6 +18,8 @@
     private string? _error;
     private string? _rendered;
     private bool _isInitialized;
+    private string? _evaluatedText;
+    private RuleExpressions? _evaluatedExpressions;
 
     private static readonly Func<IInterceptorSubject, bool> NoSubject = _ => false;
 
@@ -46,9 +48,17 @@
         Refresh();
     }
 
+    // Evaluated when the text or the expressions change, not on every render of the editor.
     private void Refresh()
     {
         var text = _text ?? string.Empty;
+        if (text == _evaluatedText && ReferenceEquals(Expressions, _evaluatedExpressions))
+        {
+            return;
+        }
+
+        _evaluatedText = text;
+        _evaluatedExpressions = Expressions;
         _error = ArgumentFields.Validate(text, typeof(string), IsRequired, Expressions);
         _rendered = _error is null && text.Contains("{{", StringComparison.Ordinal) ? Expressions.RenderTemplate(text) : null;
     }

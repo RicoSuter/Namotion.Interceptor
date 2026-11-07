@@ -1,4 +1,6 @@
 @using System.Collections.Immutable
+@implements IDisposable
+@inject TimeProvider TimeProvider
 @* One field for every condition: simple rows of path, comparison and value with the current value of each row, or
    the expression as text. The stored value is always the expression text. *@
 
@@ -70,7 +72,7 @@
                         <MudTextField T="string" Label="Value" Value="@row.Value" Error="@(valueError is not null)" ErrorText="@valueError"
                                       ValueChanged="@(value => SetRowAsync(rowIndex, row with { Value = value ?? string.Empty }))" />
                     </div>
-                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@($"{TestId}-row-now")">@DescribeRow(_model.Rows[rowIndex])</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="@($"{TestId}-row-now")">@GetRowText(rowIndex)</MudText>
                     <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove condition"
                                    OnClick="@(() => RemoveRowAsync(rowIndex))" />
                 </div>
@@ -78,26 +80,28 @@
         </MudStack>
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRowAsync" data-testid="@($"{TestId}-add-row")">Condition</MudButton>
     }
-    @if (_error is not null)
+    @if (_preview.Error is { } error)
     {
-        <MudText Typo="Typo.caption" Color="Color.Error" data-testid="@($"{TestId}-error")">@_error</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Error" data-testid="@($"{TestId}-error")">@error</MudText>
     }
-    @foreach (var hint in _hints)
+    @foreach (var hint in _preview.Hints)
     {
         <MudText Typo="Typo.caption" Color="Color.Warning" data-testid="@($"{TestId}-hint")">@hint</MudText>
     }
-    @if (_resultText is not null)
+    @if (_preview.ResultText is { } resultText)
     {
-        <MudText Typo="Typo.caption" data-testid="@($"{TestId}-result")">Result now: @_resultText</MudText>
+        <MudText Typo="Typo.caption" data-testid="@($"{TestId}-result")">Result now: @resultText</MudText>
     }
 </div>
 
 @code {
+    private static readonly TimeSpan PreviewInterval = TimeSpan.FromSeconds(1);
+
     private readonly ExpressionFieldModel _model = new(null);
-    private string? _error;
-    private IReadOnlyList<string> _hints = [];
-    private string? _resultText;
+    private readonly ExpressionFieldPreview _preview = new();
+    private ITimer? _previewTimer;
     private bool _hasPendingRow;
+    private bool _isDisposed;
 
     [Parameter] public string? Value { get; set; }
 
@@ -140,7 +144,34 @@
         }
 
         Refresh();
+        StartPreviewTimer();
         await NotifyPendingAsync();
+    }
+
+    // The previews read the current values once per interval, outside of a render, so that a value that changes often
+    // neither renders the field on every change nor makes a render evaluate the expression.
+    private void StartPreviewTimer()
+    {
+        if (Preview is null || _previewTimer is not null)
+        {
+            return;
+        }
+
+        _previewTimer = TimeProvider.CreateTimer(_ => _ = InvokeAsync(RefreshValues), null, PreviewInterval, PreviewInterval);
+    }
+
+    private void RefreshValues()
+    {
+        if (!_isDisposed && _preview.RefreshValues(_model.Rows))
+        {
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _previewTimer?.Dispose();
     }
 
     private void ShowSimple()
@@ -197,33 +228,9 @@
         }
     }
 
-    private void Refresh()
-    {
-        var text = _model.Text;
-        var hasText = !string.IsNullOrWhiteSpace(text);
-        _error = hasText ? Validate?.Invoke(text) : null;
-        _hints = ExpressionHints.GetBareWordHints(text, PathSeparator, _model.Variables, path => Preview?.Invoke(path)?.Value);
-        _resultText = hasText && _error is null && Preview?.Invoke(text) is { } preview ? FormatResult(preview.Result) : null;
-    }
+    private void Refresh() => _preview.Update(_model.Text, _model.Rows, PathSeparator, _model.Variables, Validate, Preview);
 
-    private string DescribeRow(ExpressionRow row)
-    {
-        if (Preview is null || string.IsNullOrWhiteSpace(row.Path))
-        {
-            return string.Empty;
-        }
-
-        var valueText = Preview(row.Path)?.Text is { Length: > 0 } text ? text : "no value";
-        var condition = string.IsNullOrWhiteSpace(row.Value) ? null : Preview(row.ToCondition());
-        return condition is null ? $"now {valueText}" : $"now {valueText}, {FormatResult(condition.Result)}";
-    }
-
-    private static string FormatResult(bool? result) => result switch
-    {
-        true => "true",
-        false => "false",
-        null => "unknown"
-    };
+    private string GetRowText(int index) => index < _preview.RowTexts.Count ? _preview.RowTexts[index] : string.Empty;
 
     private static string GetOperatorText(string? comparison) => comparison switch
     {

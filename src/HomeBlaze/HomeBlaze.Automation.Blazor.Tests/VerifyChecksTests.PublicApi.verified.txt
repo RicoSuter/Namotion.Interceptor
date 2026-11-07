@@ -374,6 +374,8 @@ namespace HomeBlaze.Automation.Blazor.Editing
     public sealed class RuleExpressions
     {
         public RuleExpressions(HomeBlaze.Automation.Automation automation, string ruleKey, bool allowsEvent, HomeBlaze.Components.Abstractions.TimeZones.ITimeZoneDisplay? timeZone = null) { }
+        public bool AllowsEvent { get; }
+        public HomeBlaze.Automation.Automation Automation { get; }
         public HomeBlaze.Components.Inputs.ExpressionPreview? Preview(string text) { }
         public string? RenderTemplate(string text) { }
         public string? Validate(string text) { }

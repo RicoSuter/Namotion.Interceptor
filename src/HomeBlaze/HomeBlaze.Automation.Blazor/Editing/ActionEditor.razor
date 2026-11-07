@@ -55,6 +55,8 @@
     private Type? _targetType;
     private bool _isTextTarget;
     private Dictionary<string, string> _errors = [];
+    private AutomationAction? _checkedValue;
+    private RuleExpressions? _checkedExpressions;
 
     [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
 
@@ -84,8 +86,16 @@
         Refresh();
     }
 
+    // The targets are resolved and the inputs checked when the action or the expressions change, not on every render of the editor.
     private void Refresh()
     {
+        if (ReferenceEquals(_value, _checkedValue) && ReferenceEquals(Expressions, _checkedExpressions))
+        {
+            return;
+        }
+
+        _checkedValue = _value;
+        _checkedExpressions = Expressions;
         _fields = _value is InvokeOperationAction invoke ? ActionInputs.GetFields(Automation, RuleKey, invoke.OperationPath) : null;
         _targetType = _value is SetPropertyAction write ? ActionInputs.GetTargetType(Automation, RuleKey, write.PropertyPath) : null;
         _isTextTarget = _targetType is not null && (Nullable.GetUnderlyingType(_targetType) ?? _targetType) == typeof(string);

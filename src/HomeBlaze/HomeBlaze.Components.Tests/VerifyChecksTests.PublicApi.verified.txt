@@ -1807,7 +1807,7 @@ namespace HomeBlaze.Components.Editors
 }
 namespace HomeBlaze.Components.Inputs
 {
-    public class ExpressionField : Microsoft.AspNetCore.Components.ComponentBase
+    public class ExpressionField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public ExpressionField() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1833,6 +1833,7 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Immutable.ImmutableArray<string> Variables { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     public sealed class ExpressionPreview : System.IEquatable<HomeBlaze.Components.Inputs.ExpressionPreview>

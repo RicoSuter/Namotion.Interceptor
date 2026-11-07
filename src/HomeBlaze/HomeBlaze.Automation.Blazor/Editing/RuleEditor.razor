@@ -44,7 +44,7 @@
                 @switch (item.Value)
                 {
                     case PropertyTrigger propertyTrigger:
-                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions" Draft="Draft" RuleKey="@Rule.Key"
+                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions!" Draft="Draft" RuleKey="@Rule.Key"
                                                TriggerChanged="@(trigger => EditAsync(() => item.Value = trigger))" Removed="@(() => EditAsync(() => Rule.Triggers.Remove(item)))" />
                         break;
                     case SubjectEventTrigger eventTrigger:
@@ -65,7 +65,7 @@
     <section>
         <MudText Typo="Typo.h6">Only if</MudText>
         <div class="mt-2">
-            <GuardEditor Rule="Rule" Draft="Draft" Expressions="_expressions" LastTriggeredAt="@SavedRule?.LastTriggeredAt" Changed="Changed" />
+            <GuardEditor Rule="Rule" Draft="Draft" Expressions="_expressions!" LastTriggeredAt="@SavedRule?.LastTriggeredAt" Changed="Changed" />
         </div>
     </section>
 
@@ -76,7 +76,7 @@
             {
                 var item = Rule.Actions[index];
                 <ActionEditor @key="item" Value="item.Value" Index="index" Count="Rule.Actions.Count" States="Draft.States"
-                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions"
+                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions!"
                               ValueChanged="@(action => EditAsync(() => SetAction(item, action)))" Moved="@(offset => EditAsync(() => Rule.MoveAction(item, offset)))"
                               Removed="@(() => EditAsync(() => Rule.Actions.Remove(item)))" />
             }
@@ -96,7 +96,7 @@
     private const string AnyState = "";
     private static readonly AutomationRuleMode[] Modes = [AutomationRuleMode.Off, AutomationRuleMode.DryRun, AutomationRuleMode.On];
 
-    private RuleExpressions _expressions = null!;
+    private RuleExpressions? _expressions;
 
     [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
 
@@ -112,7 +112,15 @@
 
     private AutomationRule? SavedRule => Automation.Rules.GetValueOrDefault(Rule.Key);
 
-    protected override void OnParametersSet() => _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone);
+    // The fields evaluate their expressions again only when the expressions change, so they are created again only when
+    // what they check changes.
+    protected override void OnParametersSet()
+    {
+        if (_expressions is null || _expressions.AllowsEvent != Rule.AllowsEvent || !ReferenceEquals(_expressions.Automation, Automation))
+        {
+            _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone);
+        }
+    }
 
     // Every edit of the rule changes the draft, which the editor validates again.
     private Task EditAsync(Action edit)

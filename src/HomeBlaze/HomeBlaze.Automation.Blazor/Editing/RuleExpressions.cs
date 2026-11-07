@@ -9,6 +9,11 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 /// </summary>
 public sealed class RuleExpressions(Automation automation, string ruleKey, bool allowsEvent, ITimeZoneDisplay? timeZone = null)
 {
+    public Automation Automation => automation;
+
+    /// <summary>Whether the rule has an event trigger, so that its expressions may read <c>event</c> and <c>subject</c>.</summary>
+    public bool AllowsEvent => allowsEvent;
+
     public string? Validate(string text) => AutomationValidator.ValidateExpression(text, allowsEvent);
 
     /// <summary>Validates an event filter, which always sees the captured event.</summary>
