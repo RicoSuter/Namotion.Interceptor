@@ -5,8 +5,8 @@ internal static class Limits
 {
     // An evaluation tries this many times to read the graph between two equal even structure versions. Between
     // attempts it waits with SpinWait, which spins first and later also yields the thread, so a burst of registry
-    // changes usually ends before the evaluation fails closed; a registry that changes without pause can still make it fail closed,
-    // which only a read under the registry's lock would avoid.
+    // changes usually ends before the evaluation fails closed; a registry that changes without pause can still make
+    // it fail closed, which only a read under the registry's lock would avoid.
     public const int MaxConsistencyAttempts = 40;
 
     // The visibility walk tracks every subject from this depth on, so a deep single-parent chain reached from several branches is explored once.

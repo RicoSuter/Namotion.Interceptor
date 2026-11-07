@@ -416,7 +416,7 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void WhenASubjectIsEvaluatedThroughAnotherGraphsRegistry_ThenPathRulesFailClosed()
+    public void WhenASubjectIsEvaluatedThroughAnotherGraphsRegistry_ThenAPathAllowDoesNotApplyAndItIsHidden()
     {
         // Arrange: S is held by two graphs; its context reaches only the first graph's registry.
         var context1 = CreateContext();
