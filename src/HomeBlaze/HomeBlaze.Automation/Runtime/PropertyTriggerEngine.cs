@@ -16,7 +16,7 @@ internal sealed class PropertyTriggerEngine(
     TimeProvider timeProvider,
     ILogger logger,
     Func<string> getAutomationName,
-    Action<FrozenSet<PropertyReference>>? publishWatched = null)
+    Action<FrozenSet<PropertyReference>> publishWatched)
 {
     private readonly ObservedValues _values = new();
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
@@ -172,7 +172,7 @@ internal sealed class PropertyTriggerEngine(
     {
         var watched = ActiveTriggers(rules).Concat(activating).SelectMany(trigger => trigger.Dependencies).ToFrozenSet();
         _watched = watched;
-        publishWatched?.Invoke(watched);
+        publishWatched(watched);
         _values.Retain(watched);
     }
 

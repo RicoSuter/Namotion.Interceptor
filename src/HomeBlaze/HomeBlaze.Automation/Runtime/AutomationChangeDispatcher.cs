@@ -17,7 +17,7 @@ internal sealed class AutomationChangeDispatcher
     private readonly Lock _lock = new();
     private readonly Dictionary<PropertyChangeInterceptor, ChangeSource> _sources = [];
 
-    /// <summary>The number of change streams with a subscription.</summary>
+    // White-box test hook: the number of change streams with a subscription.
     internal int SourceCount
     {
         get
@@ -28,6 +28,9 @@ internal sealed class AutomationChangeDispatcher
             }
         }
     }
+
+    // White-box test hook: wraps each listener when it registers, so that a test can observe what is routed to it.
+    internal Func<IAutomationChangeListener, IAutomationChangeListener>? ListenerDecorator { get; set; }
 
     /// <summary>Registers the listener for the changes of the context, watching no property until it publishes a watched set.</summary>
     public Registration Register(IInterceptorSubjectContext context, IAutomationChangeListener listener)
@@ -42,13 +45,13 @@ internal sealed class AutomationChangeDispatcher
                 _sources.Add(interceptor, source);
             }
 
-            var registration = new Registration(this, source, listener);
+            var registration = new Registration(this, source, ListenerDecorator?.Invoke(listener) ?? listener);
             source.Add(registration);
             return registration;
         }
     }
 
-    /// <summary>The number of listeners that a change of the property in the context is routed to as a watched change.</summary>
+    // White-box test hook: the number of listeners that a change of the property in the context is routed to as a watched change.
     internal int CountWatchers(IInterceptorSubjectContext context, PropertyReference property)
     {
         var interceptor = context.GetService<PropertyChangeInterceptor>();
@@ -82,6 +85,7 @@ internal sealed class AutomationChangeDispatcher
             registration.IsDisposed = true;
             var source = registration.Source;
             source.Remove(registration);
+            registration.Watched = FrozenSet<PropertyReference>.Empty;
             if (source.IsEmpty)
             {
                 _sources.Remove(source.Interceptor);
@@ -148,9 +152,10 @@ internal sealed class AutomationChangeDispatcher
         {
             _registrations.Remove(registration);
             var routes = _routes;
-            Publish(new Routes(
-                UpdateWatchers(routes.Watchers, registration.Listener, registration.Watched, FrozenSet<PropertyReference>.Empty),
-                Without(routes.Listeners, registration.Listener)));
+            var watchers = registration.Watched.Count == 0
+                ? routes.Watchers
+                : UpdateWatchers(routes.Watchers, registration.Listener, registration.Watched, FrozenSet<PropertyReference>.Empty);
+            Publish(new Routes(watchers, Without(routes.Listeners, registration.Listener)));
         }
 
         public void SetWatched(Registration registration, FrozenSet<PropertyReference> watched)
@@ -214,8 +219,8 @@ internal sealed class AutomationChangeDispatcher
             Interlocked.MemoryBarrier();
         }
 
-        private static FrozenDictionary<PropertyReference, IAutomationChangeListener[]> UpdateWatchers(
-            FrozenDictionary<PropertyReference, IAutomationChangeListener[]> watchers,
+        private static Dictionary<PropertyReference, IAutomationChangeListener[]> UpdateWatchers(
+            Dictionary<PropertyReference, IAutomationChangeListener[]> watchers,
             IAutomationChangeListener listener,
             FrozenSet<PropertyReference> previous,
             FrozenSet<PropertyReference> current)
@@ -245,7 +250,7 @@ internal sealed class AutomationChangeDispatcher
                 }
             }
 
-            return updated.ToFrozenDictionary();
+            return updated;
         }
 
         private static IAutomationChangeListener[] Without(IAutomationChangeListener[] listeners, IAutomationChangeListener listener)
@@ -263,12 +268,15 @@ internal sealed class AutomationChangeDispatcher
         }
     }
 
-    private sealed class Routes(FrozenDictionary<PropertyReference, IAutomationChangeListener[]> watchers, IAutomationChangeListener[] listeners)
+    private sealed class Routes(Dictionary<PropertyReference, IAutomationChangeListener[]> watchers, IAutomationChangeListener[] listeners)
     {
-        public static Routes Empty { get; } = new(FrozenDictionary<PropertyReference, IAutomationChangeListener[]>.Empty, []);
+        public static Routes Empty { get; } = new([], []);
 
-        /// <summary>The listeners of each watched property, in the order they registered.</summary>
-        public FrozenDictionary<PropertyReference, IAutomationChangeListener[]> Watchers { get; } = watchers;
+        /// <summary>
+        /// The listeners of each watched property, in the order they registered. Never changed once published, so that
+        /// writers read it without a lock; an update publishes a copy.
+        /// </summary>
+        public Dictionary<PropertyReference, IAutomationChangeListener[]> Watchers { get; } = watchers;
 
         /// <summary>Every registered listener, in the order they registered.</summary>
         public IAutomationChangeListener[] Listeners { get; } = listeners;
