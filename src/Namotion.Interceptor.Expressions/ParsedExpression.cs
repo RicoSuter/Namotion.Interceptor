@@ -7,8 +7,8 @@ namespace Namotion.Interceptor.Expressions;
 /// An expression parsed once: paths and literals, computed with <c>+ - * /</c> and negated with <c>-</c>, compared with
 /// <c>== != &lt; &lt;= &gt; &gt;=</c> and combined with <c>and</c> (<c>&amp;&amp;</c>), <c>or</c> (<c>||</c>),
 /// <c>not</c> (<c>!</c>) and parentheses, followed by pipes such as <c>| raw</c>. A bare word after a comparison operator
-/// is text, such as the name of an enum value, unless it holds the path separator or an index, is a variable of
-/// <see cref="Variables"/>, or is an operand of arithmetic.
+/// is text, such as the name of an enum value, unless it holds the path separator or an index, is a variable, or is an
+/// operand of arithmetic.
 /// </summary>
 public sealed class ParsedExpression
 {
@@ -34,11 +34,8 @@ public sealed class ParsedExpression
     /// <summary>The character between the segments of the paths of the expression.</summary>
     public char PathSeparator { get; }
 
-    /// <summary>
-    /// The names that are variables of the expression: those the host declared when it parsed the expression, or
-    /// <see cref="ExpressionVariables.Value"/> and <see cref="ExpressionVariables.Subject"/>.
-    /// </summary>
-    public ImmutableArray<string> Variables { get; }
+    // The variables the host declared when it parsed the expression, or those of ExpressionVariables.
+    internal ImmutableArray<string> Variables { get; }
 
     /// <summary>The distinct paths the expression reads, in order of first appearance.</summary>
     public ImmutableArray<string> Paths { get; }
@@ -99,8 +96,8 @@ public sealed class ParsedExpression
     }
 
     /// <summary>
-    /// Gets whether the first segment of a path of the expression is one of its <see cref="Variables"/>, and which one, with
-    /// the rest of the path.
+    /// Gets whether the first segment of a path of the expression is one of its variables, those the host declared when it
+    /// parsed the expression or those of <see cref="ExpressionVariables"/>, and which one, with the rest of the path.
     /// </summary>
     /// <param name="path">The path, such as one of <see cref="Paths"/>.</param>
     /// <param name="variable">The variable, or null.</param>
