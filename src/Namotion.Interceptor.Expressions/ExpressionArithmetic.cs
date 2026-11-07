@@ -1,23 +1,17 @@
 namespace Namotion.Interceptor.Expressions;
 
-/// <summary>
-/// Applies an arithmetic operator to two values that are not null. Two integers or decimals compute as
-/// <see cref="decimal"/> when the result is exact, and as <see cref="double"/> otherwise; a <see cref="float"/> with a
-/// <see cref="float"/> or a <see cref="decimal"/>, such as a number literal, computes as <see cref="float"/>; every other
-/// pair of numbers computes as <see cref="double"/>. An instant minus an instant is a <see cref="TimeSpan"/>, an instant
-/// plus or minus a <see cref="TimeSpan"/> is an instant, and two <see cref="TimeSpan"/> values add and subtract. A number
-/// or a <see cref="TimeSpan"/> negates. A <see cref="DateTime"/> without a kind is read as UTC. A null result means the
-/// pair has no arithmetic or the result is out of range, so the value is missing.
-/// </summary>
+/// <summary>Applies arithmetic and negation to values that are not null, as docs/expressions.md#arithmetic describes; a null result is missing.</summary>
 internal static class ExpressionArithmetic
 {
     /// <summary>Applies the operator to two values that are not null.</summary>
     /// <returns>The result, or null when the values have no arithmetic or the result is out of range.</returns>
     public static object? Apply(ArithmeticOperator arithmeticOperator, object left, object right)
     {
-        if (ExpressionComparer.IsNumber(left) && ExpressionComparer.IsNumber(right))
+        var leftKind = ExpressionComparer.GetNumberKind(left);
+        var rightKind = ExpressionComparer.GetNumberKind(right);
+        if (leftKind != NumberKind.None && rightKind != NumberKind.None)
         {
-            return ApplyToNumbers(arithmeticOperator, left, right);
+            return ApplyToNumbers(arithmeticOperator, left, right, leftKind | rightKind);
         }
 
         return arithmeticOperator switch
@@ -35,23 +29,23 @@ internal static class ExpressionArithmetic
         float single => float.IsFinite(single) ? -single + 0f : null,
         double number => double.IsFinite(number) ? -number + 0d : null,
         TimeSpan duration => duration == TimeSpan.MinValue ? null : duration.Negate(),
-        _ when ExpressionComparer.IsIntegerOrDecimal(value) => -Normalize(ExpressionComparer.ToDecimal(value)),
+        _ when ExpressionComparer.GetNumberKind(value) != NumberKind.None => -Normalize(ExpressionComparer.ToDecimal(value)),
         _ => null
     };
 
     // Adding zero turns a negative zero into zero, which a host would otherwise write as "-0". A result that is no finite
     // number, such as that of a division by zero, is missing like a result out of range.
-    private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, object left, object right)
+    private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, object left, object right, NumberKind kinds)
     {
         // A float with a float or a literal keeps the precision of a float, so that its result compares with a literal as
         // the float itself does. With a double or an integer it computes as double, which keeps the precision of both.
-        if (IsFloatPair(left, right))
+        if (kinds is NumberKind.Float or (NumberKind.Float | NumberKind.Decimal))
         {
             var single = (float)Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
             return float.IsFinite(single) ? single + 0f : null;
         }
 
-        if (ExpressionComparer.IsIntegerOrDecimal(left) && ExpressionComparer.IsIntegerOrDecimal(right) &&
+        if (ExpressionComparer.IsExact(kinds) &&
             TryComputeExactly(arithmeticOperator, ExpressionComparer.ToDecimal(left), ExpressionComparer.ToDecimal(right), out var exact))
         {
             return Normalize(exact);
@@ -60,12 +54,6 @@ internal static class ExpressionArithmetic
         var result = Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
         return double.IsFinite(result) ? result + 0d : null;
     }
-
-    private static bool IsFloatPair(object left, object right) => (left, right) switch
-    {
-        (float, float or decimal) or (decimal, float) => true,
-        _ => false
-    };
 
     /// <summary>Removes the trailing zeros of a decimal, so that 1.50 times 2 is written as 3 and not as 3.00.</summary>
     // A division by one with the largest scale gives the smallest scale that keeps the value.
@@ -119,12 +107,9 @@ internal static class ExpressionArithmetic
     {
         try
         {
-            if (ExpressionComparer.TryGetInstant(left, out var leftInstant))
-            {
-                return ApplyToInstant(isSubtraction, leftInstant, right);
-            }
-
-            return left is TimeSpan leftDuration ? ApplyToDuration(isSubtraction, leftDuration, right) : null;
+            return ExpressionComparer.TryGetInstant(left, out var instant)
+                ? ApplyToInstant(isSubtraction, instant, right)
+                : ApplyToDuration(isSubtraction, left, right);
         }
         catch (Exception exception) when (exception is OverflowException or ArgumentOutOfRangeException)
         {
@@ -133,28 +118,17 @@ internal static class ExpressionArithmetic
         }
     }
 
-    private static object? ApplyToInstant(bool isSubtraction, DateTimeOffset instant, object right)
+    private static object? ApplyToInstant(bool isSubtraction, DateTimeOffset instant, object right) => right switch
     {
-        if (isSubtraction && ExpressionComparer.TryGetInstant(right, out var rightInstant))
-        {
-            return instant - rightInstant;
-        }
+        TimeSpan duration => isSubtraction ? instant - duration : instant + duration,
+        _ when isSubtraction && ExpressionComparer.TryGetInstant(right, out var other) => instant - other,
+        _ => null
+    };
 
-        if (right is TimeSpan duration)
-        {
-            return isSubtraction ? instant - duration : instant + duration;
-        }
-
-        return null;
-    }
-
-    private static object? ApplyToDuration(bool isSubtraction, TimeSpan duration, object right)
+    private static object? ApplyToDuration(bool isSubtraction, object left, object right) => (left, right) switch
     {
-        if (right is TimeSpan otherDuration)
-        {
-            return isSubtraction ? duration - otherDuration : duration + otherDuration;
-        }
-
-        return !isSubtraction && ExpressionComparer.TryGetInstant(right, out var instant) ? instant + duration : null;
-    }
+        (TimeSpan duration, TimeSpan other) => isSubtraction ? duration - other : duration + other,
+        (TimeSpan duration, _) when !isSubtraction && ExpressionComparer.TryGetInstant(right, out var instant) => instant + duration,
+        _ => null
+    };
 }

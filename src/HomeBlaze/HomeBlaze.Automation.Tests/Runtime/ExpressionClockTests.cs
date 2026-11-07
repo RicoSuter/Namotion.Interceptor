@@ -10,9 +10,9 @@ public class ExpressionClockTests
 
     private static readonly TimeZoneInfo Zurich = TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich");
 
-    private static ExpressionClock? Create(string guard)
+    private static ExpressionClock? Create(string text)
     {
-        Assert.True(AutomationExpressionCheck.TryParseExpression(guard, allowsEvent: false, out var expression, out var error), error);
+        Assert.True(AutomationExpressionCheck.TryParseExpression(text, allowsEvent: false, out var expression, out var error), error);
         return ExpressionClock.Create(expression);
     }
 
@@ -20,10 +20,10 @@ public class ExpressionClockTests
     [InlineData("./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m", "./LastTriggeredAt", 600, 1)]
     [InlineData("not /Blinds/IsMoving and (./LastTriggeredAt == null or now - ./LastTriggeredAt >= 1h30m)", "./LastTriggeredAt", 5400, 0)]
     [InlineData("now - /Weather/LastUpdated < 15m && /Weather/Gust > 8", "/Weather/LastUpdated", 900, 0)]
-    public void WhenTheGuardComparesElapsedTime_ThenItChangesOnlyAtTheDerivedInstant(string guard, string path, int seconds, int ticks)
+    public void WhenAnExpressionComparesElapsedTime_ThenItChangesOnlyAtTheDerivedInstant(string text, string path, int seconds, int ticks)
     {
         // Act
-        var clock = Create(guard);
+        var clock = Create(text);
 
         // Assert
         Assert.NotNull(clock);
@@ -39,10 +39,10 @@ public class ExpressionClockTests
     [InlineData("now > ../StateEnteredAt + 5m")]
     [InlineData("now - ./LastTriggeredAt > 10m or now == ../StateEnteredAt")]
     [InlineData("now - ./LastTriggeredAt > 600")]
-    public void WhenTheGuardReadsTheClockOtherwise_ThenItIsEvaluatedEverySecond(string guard)
+    public void WhenAnExpressionReadsTheClockOtherwise_ThenItIsEvaluatedEverySecond(string text)
     {
         // Act
-        var clock = Create(guard);
+        var clock = Create(text);
 
         // Assert
         Assert.NotNull(clock);
@@ -50,7 +50,7 @@ public class ExpressionClockTests
     }
 
     [Fact]
-    public void WhenTheGuardDoesNotReadTheClock_ThenItHasNoClock()
+    public void WhenAnExpressionDoesNotReadTheClock_ThenItHasNoClock()
     {
         // Act
         var clock = Create("not /Blinds/IsMoving");
@@ -72,7 +72,7 @@ public class ExpressionClockTests
         };
 
         // Act
-        var isDerived = clock.TryGetNextChange(path => instants[path], Now, TimeZoneInfo.Utc, out var nextChange);
+        var isDerived = clock.TryGetNextChange(path => instants[path], Now, TimeZoneInfo.Utc, out var nextChange, out _);
 
         // Assert
         Assert.True(isDerived);
@@ -86,9 +86,9 @@ public class ExpressionClockTests
         var clock = Create("./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m")!;
 
         // Act
-        var isDerivedWithoutValue = clock.TryGetNextChange(_ => null, Now, TimeZoneInfo.Utc, out var withoutValue);
-        var isDerivedWhenPast = clock.TryGetNextChange(_ => Now.AddHours(-1), Now, TimeZoneInfo.Utc, out var whenPast);
-        var isDerivedForANumber = clock.TryGetNextChange(_ => 5.0, Now, TimeZoneInfo.Utc, out _);
+        var isDerivedWithoutValue = clock.TryGetNextChange(_ => null, Now, TimeZoneInfo.Utc, out var withoutValue, out _);
+        var isDerivedWhenPast = clock.TryGetNextChange(_ => Now.AddHours(-1), Now, TimeZoneInfo.Utc, out var whenPast, out _);
+        var isDerivedForANumber = clock.TryGetNextChange(_ => 5.0, Now, TimeZoneInfo.Utc, out _, out _);
 
         // Assert
         Assert.True(isDerivedWithoutValue);
@@ -114,7 +114,7 @@ public class ExpressionClockTests
         var clock = Create(expression)!;
 
         // Act
-        var isDerived = clock.TryGetNextChange(_ => null, DateTimeOffset.Parse(now, CultureInfo.InvariantCulture), Zurich, out var nextChange);
+        var isDerived = clock.TryGetNextChange(_ => null, DateTimeOffset.Parse(now, CultureInfo.InvariantCulture), Zurich, out var nextChange, out _);
 
         // Assert
         Assert.False(clock.IsEverySecond);

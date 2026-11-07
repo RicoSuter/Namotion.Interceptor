@@ -73,23 +73,30 @@ internal sealed class EventTriggerEngine(SubjectPathResolver resolver, TimeProvi
     private IInterceptorSubject? ResolveSource(CompiledEventTrigger trigger) =>
         AutomationPaths.ResolveSubject(resolver, trigger.Configuration.SubjectPath, trigger.Rule.Rule);
 
-    private void Subscribe(CompiledEventTrigger trigger)
+    /// <summary>Resolves the source of the trigger and the type of its event; returns why the trigger receives no events, or null.</summary>
+    public static string? FindSource(SubjectPathResolver resolver, CompiledEventTrigger trigger, out IInterceptorSubject? source, out Type? eventType)
     {
-        var source = ResolveSource(trigger);
-        trigger.Source = source;
+        var configuration = trigger.Configuration;
+        eventType = null;
+        source = AutomationPaths.ResolveSubject(resolver, configuration.SubjectPath, trigger.Rule.Rule);
         if (source is null)
         {
-            trigger.SourceError = $"No subject at {trigger.Configuration.SubjectPath}";
-            return;
+            return $"No subject at {configuration.SubjectPath}";
         }
 
-        if (EventSources.FindEventType(source.GetType(), trigger.Configuration.EventType) is not { } eventType)
+        eventType = EventSources.FindEventType(source.GetType(), configuration.EventType);
+        return eventType is null ? $"{configuration.SubjectPath} publishes no {configuration.EventType}" : null;
+    }
+
+    private void Subscribe(CompiledEventTrigger trigger)
+    {
+        var error = FindSource(resolver, trigger, out var source, out var eventType);
+        trigger.Source = source;
+        trigger.SourceError = error;
+        if (source is null || eventType is null)
         {
-            trigger.SourceError = $"{trigger.Configuration.SubjectPath} publishes no {trigger.Configuration.EventType}";
             return;
         }
-
-        trigger.SourceError = null;
 
         // Assigned before the source is subscribed, so that an event it publishes at once is not taken for a stale one.
         var subscription = new EventTriggerSubscription(trigger);

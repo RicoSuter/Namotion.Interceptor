@@ -82,7 +82,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, triggers, TimeZoneInfo.Utc, "Only if is false");
 
         // Assert
-        Assert.Equal("On: Waiting since 12:00:00: Only if is false", text);
+        Assert.Equal("On: Waiting since 2026-11-06 12:00:00: Only if is false", text);
     }
 
     [Fact]

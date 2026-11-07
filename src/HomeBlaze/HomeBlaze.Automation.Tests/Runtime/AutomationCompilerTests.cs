@@ -10,12 +10,12 @@ public class AutomationCompilerTests
         string? name = "Storm",
         AutomationTrigger[]? triggers = null,
         AutomationAction[]? actions = null,
-        string? guard = null,
+        string? onlyIf = null,
         string? inState = null) => new()
     {
         Name = name,
         Mode = AutomationRuleMode.On,
-        Guard = guard,
+        OnlyIf = onlyIf,
         InState = inState,
         Triggers = triggers ?? [new PropertyTrigger { Expression = "/Weather/Gust > 8" }],
         Actions = actions ?? [new InvokeOperationAction { Id = "close", OperationPath = "/Blinds/Close" }]
@@ -64,8 +64,18 @@ public class AutomationCompilerTests
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "event/Gesture == Release" }]), "Rule 'Storm': trigger 1: " + EventOnly },
         { [], null, Rule(triggers: [new PropertyTrigger { Expression = "/Weather/Gust > 8", For = TimeSpan.FromSeconds(-1) }]), "Rule 'Storm': trigger 1: the hold cannot be negative" },
         { [], null, Rule(triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }]), "Rule 'Storm': trigger 1: the event type is missing" },
-        { [], null, Rule(guard: "event/Gesture == Release"), "Rule 'Storm': guard: " + EventOnly },
+        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "" }]), "Rule 'Storm': trigger 1: the condition is empty" },
+        { [], null, Rule(triggers: [new PropertyTrigger { Expression = "   " }]), "Rule 'Storm': trigger 1: the condition is empty" },
+        { [], null, Rule(onlyIf: "event/Gesture == Release"), "Rule 'Storm': Only if: " + EventOnly },
         { [], null, Rule(actions: [new InvokeOperationAction { OperationPath = "" }]), "Rule 'Storm': action 1: the operation path is missing" },
+        { [], null, Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "", Value = "1" }]), "Rule 'Storm': action 'set': the property path is missing" },
+        {
+            [], null,
+            Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "/Blinds/Level", Value = "{{ /Weather/Gust" }]),
+            "Rule 'Storm': action 'set': value: '{{' is not closed at position 0"
+        },
+        { [], null, Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = "/Blinds/Level", Value = null! }]), "Rule 'Storm': action 'set': the value is missing" },
+        { [], null, Rule(actions: [EventArgumentAction()]), "Rule 'Storm': action 'notify': argument 'Message': " + EventOnly },
         {
             [], null,
             Rule(actions: [new InvokeOperationAction
@@ -163,11 +173,11 @@ public class AutomationCompilerTests
     }
 
     [Fact]
-    public void WhenOneRuleHasSeveralErrors_ThenGuardTriggerAndActionErrorsAreReportedInOrder()
+    public void WhenOneRuleHasSeveralErrors_ThenOnlyIfTriggerAndActionErrorsAreReportedInOrder()
     {
         // Arrange
         var rule = Rule(
-            guard: "event/Gesture == Release",
+            onlyIf: "event/Gesture == Release",
             triggers: [new SubjectEventTrigger { SubjectPath = "/Button" }],
             actions: [new InvokeOperationAction { OperationPath = "" }]);
 
@@ -178,25 +188,8 @@ public class AutomationCompilerTests
         Assert.False(isCompiled);
         Assert.Null(compiled);
         Assert.Equal(
-            "Rule 'Storm': guard: " + EventOnly + "; trigger 1: the event type is missing; action 1: the operation path is missing",
+            "Rule 'Storm': Only if: " + EventOnly + "; trigger 1: the event type is missing; action 1: the operation path is missing",
             error);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void WhenAPropertyTriggerExpressionIsBlank_ThenItIsRejected(string expression)
-    {
-        // Arrange
-        var rule = Rule(triggers: [new PropertyTrigger { Expression = expression }]);
-
-        // Act
-        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
-
-        // Assert
-        Assert.False(isCompiled);
-        Assert.Null(compiled);
-        Assert.Equal("Rule 'Storm': trigger 1: the condition is empty", error);
     }
 
     [Fact]
@@ -230,24 +223,6 @@ public class AutomationCompilerTests
         Assert.Equal("A state needs a name", error);
     }
 
-    [Theory]
-    [InlineData("", "1", "the property path is missing")]
-    [InlineData("/Blinds/Level", "{{ /Weather/Gust", "value: '{{' is not closed at position 0")]
-    [InlineData("/Blinds/Level", null, "the value is missing")]
-    public void WhenASetPropertyActionIsInvalid_ThenItIsRejected(string path, string? value, string expected)
-    {
-        // Arrange
-        var rule = Rule(actions: [new SetPropertyAction { Id = "set", PropertyPath = path, Value = value! }]);
-
-        // Act
-        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
-
-        // Assert
-        Assert.False(isCompiled);
-        Assert.Null(compiled);
-        Assert.Equal($"Rule 'Storm': action 'set': {expected}", error);
-    }
-
     [Fact]
     public void WhenTheRuleHasAnEventTrigger_ThenAnActionArgumentMayReadTheEvent()
     {
@@ -262,21 +237,6 @@ public class AutomationCompilerTests
         // Assert
         Assert.True(isCompiled, error);
         Assert.NotNull(compiled);
-    }
-
-    [Fact]
-    public void WhenTheRuleHasNoEventTrigger_ThenAnActionArgumentCannotReadTheEvent()
-    {
-        // Arrange
-        var rule = Rule(actions: [EventArgumentAction()]);
-
-        // Act
-        var isCompiled = AutomationCompiler.TryCompileRule("storm", rule, [], out var compiled, out var error);
-
-        // Assert
-        Assert.False(isCompiled);
-        Assert.Null(compiled);
-        Assert.Equal("Rule 'Storm': action 'notify': argument 'Message': " + EventOnly, error);
     }
 
     private static InvokeOperationAction EventArgumentAction() => new()

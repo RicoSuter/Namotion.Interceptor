@@ -31,6 +31,9 @@ internal sealed class AutomationEngine : IRuleRunHost
     private string? _runWriteError;
     private readonly RuleStatusPublisher _statusPublisher = new();
 
+    // Created once, since the worker publishes the rule statuses after every input.
+    private readonly Action _publishRuleStatuses;
+
     /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
     public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
@@ -41,6 +44,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _dispatcher = new RunDispatcher(this, automation, keeper, logger);
         _states = new StateTransitions(automation, keeper, automation.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
+        _publishRuleStatuses = PublishRuleStatuses;
     }
 
     public string Name => _automation.Title ?? "Automation";
@@ -143,7 +147,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     }
 
     /// <summary>
-    /// Gets when the next tick is due: for a trigger or a guard that is due, to write the runs or to log drops; null when nothing is,
+    /// Gets when the next tick is due: for a trigger or an Only if that is due, to write the runs or to log drops; null when nothing is,
     /// so that an automation without holds, clock reads, waiting rules or unwritten runs is never woken up.
     /// </summary>
     public DateTimeOffset? GetNextDueAt(DateTimeOffset now)
@@ -236,6 +240,8 @@ internal sealed class AutomationEngine : IRuleRunHost
         if (stopped.Count > 0)
         {
             _dispatcher.Skip(stopped, $"a feedback chain of more than {AutomationInputQueue.MaxChainDepth} inputs was stopped");
+
+            // No recheck of their Only if follows, since a recheck would run them and continue the chain.
             _triggers.TrackPending(_snapshot.Rules, stopped);
         }
 
@@ -248,13 +254,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void ReportUnexpectedError(Exception exception)
     {
         _logger.LogError(exception, "The automation {Automation} failed to process an input.", Name);
-        lock (_status)
-        {
-            if (!_isAbandoned)
-            {
-                _status.SetError(exception.Message);
-            }
-        }
+        RunUnlessAbandoned(() => _status.SetError(exception.Message));
     }
 
     /// <summary>
@@ -270,16 +270,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    public void RefreshRuleStatuses()
-    {
-        lock (_status)
-        {
-            if (!_isAbandoned)
-            {
-                PublishRuleStatuses();
-            }
-        }
-    }
+    public void RefreshRuleStatuses() => RunUnlessAbandoned(_publishRuleStatuses);
 
     private void PublishRuleStatuses()
     {
@@ -301,20 +292,15 @@ internal sealed class AutomationEngine : IRuleRunHost
     public void End()
     {
         Stop();
-        lock (_status)
+        RunUnlessAbandoned(() =>
         {
-            if (_isAbandoned)
-            {
-                return;
-            }
-
             if (_keeper.WriteRuns() is { } error)
             {
                 _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
             }
 
             RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.TimeProvider.LocalTimeZone);
-        }
+        });
     }
 
     public string? ChangeState(string targetState) => _states.ChangeState(_snapshot, targetState);
@@ -350,11 +336,7 @@ internal sealed class AutomationEngine : IRuleRunHost
     private void Replace(CompiledAutomation compiled)
     {
         CarryOver(_snapshot, compiled);
-        foreach (var rule in _snapshot.Rules)
-        {
-            Deactivate(rule);
-        }
-
+        Stop();
         _snapshot = compiled;
         PruneCheckpoint();
 
@@ -374,6 +356,12 @@ internal sealed class AutomationEngine : IRuleRunHost
         _hasCheckpointError = refusesWrites;
         _status.ApplyEnabled();
         ActivateRules();
+
+        // A trigger that waits keeps waiting across a Save, whose new Only if may let it run now.
+        if (_triggers.HasPending)
+        {
+            _triggers.RequestPendingRecheck();
+        }
     }
 
     private void KeepPrevious(IReadOnlyDictionary<string, AutomationRule> rules, string error)
@@ -473,6 +461,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
 
         DispatchSummary summary;
+        var hasNewPending = false;
         try
         {
             summary = await _dispatcher.DispatchAsync(requests, IsActive, cancellationToken);
@@ -482,14 +471,15 @@ internal sealed class AutomationEngine : IRuleRunHost
             RunUnlessAbandoned(() =>
             {
                 PublishStateChanges();
-                _triggers.TrackPending(_snapshot.Rules, requests);
+                hasNewPending = _triggers.TrackPending(_snapshot.Rules, requests);
             });
         }
 
         RunUnlessAbandoned(() =>
         {
-            // A skipped trigger of a rule that stays active runs in a later input, after the state change.
-            if (summary.SkippedForStateChange)
+            // A skipped trigger of a rule that stays active runs in a later input, after the state change, and a trigger
+            // that started to wait checks Only if again once the properties of Only if are watched.
+            if (hasNewPending || summary.SkippedForStateChange)
             {
                 _triggers.RequestPendingRecheck();
             }

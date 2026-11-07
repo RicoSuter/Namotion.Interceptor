@@ -92,15 +92,9 @@ internal sealed partial class ExpressionClock
     /// <summary>
     /// Gets the next instant after <paramref name="now"/> at which a comparison can change, with the instants the paths
     /// lead to now and the local time of <paramref name="timeZone"/>; null when none can change before one of the
-    /// instants does. False when a path leads to a value that is no instant, so that the expression is evaluated every
+    /// instants does. Also gets whether a comparison changed already before <paramref name="now"/>, which a wall clock set
+    /// back can undo. False when a path leads to a value that is no instant, so that the expression is evaluated every
     /// second.
-    /// </summary>
-    public bool TryGetNextChange(Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange) =>
-        TryGetNextChange(readInstant, now, timeZone, out nextChange, out _);
-
-    /// <summary>
-    /// Gets the next change as the other overload does, and whether a comparison changed already before
-    /// <paramref name="now"/>, which a wall clock set back can undo.
     /// </summary>
     public bool TryGetNextChange(
         Func<string, object?> readInstant, DateTimeOffset now, TimeZoneInfo timeZone, out DateTimeOffset? nextChange, out bool hasChanged)
@@ -132,7 +126,8 @@ internal sealed partial class ExpressionClock
 
     // The time of day changes linearly with the instant while the offset of the time zone stays, so each comparison and
     // midnight are derived with the current offset; a change of the offset before them, such as for daylight saving
-    // time, is a change of its own, after which they are derived again with the new offset.
+    // time, is a change of its own, after which they are derived again with the new offset. In the hour that repeats
+    // when the clocks go back, time stays as LocalClock reads it, so an instant derived in that hour changes nothing.
     private DateTimeOffset? GetNextTimeOfDayChange(DateTimeOffset now, TimeZoneInfo timeZone, DateTimeOffset? nextChange)
     {
         var offset = timeZone.GetUtcOffset(now);
@@ -143,40 +138,13 @@ internal sealed partial class ExpressionClock
             nextChange = Earliest(nextChange, NextOccurrence(localDay, comparison.TimeOfDay, now), now);
         }
 
-        return GetOffsetChange(timeZone, offset, now, nextChange!.Value) ?? nextChange;
+        return LocalClock.GetOffsetChange(timeZone, offset, now, nextChange!.Value) ?? nextChange;
     }
 
     private static DateTimeOffset NextOccurrence(DateTimeOffset localDay, TimeSpan timeOfDay, DateTimeOffset now)
     {
         var occurrence = localDay + timeOfDay;
         return occurrence > now ? occurrence : occurrence.AddDays(1);
-    }
-
-    // The first instant after now with another offset, at the latest at the limit; null without one. A time zone changes
-    // its offset at most once within the day this is called for.
-    private static DateTimeOffset? GetOffsetChange(TimeZoneInfo timeZone, TimeSpan offset, DateTimeOffset now, DateTimeOffset limit)
-    {
-        if (timeZone.GetUtcOffset(limit) == offset)
-        {
-            return null;
-        }
-
-        var unchanged = now.UtcTicks;
-        var changed = limit.UtcTicks;
-        while (changed - unchanged > 1)
-        {
-            var middle = unchanged + ((changed - unchanged) / 2);
-            if (timeZone.GetUtcOffset(new DateTimeOffset(middle, TimeSpan.Zero)) == offset)
-            {
-                unchanged = middle;
-            }
-            else
-            {
-                changed = middle;
-            }
-        }
-
-        return new DateTimeOffset(changed, TimeSpan.Zero);
     }
 
     private static DateTimeOffset? Earliest(DateTimeOffset? current, DateTimeOffset candidate, DateTimeOffset now) =>

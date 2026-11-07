@@ -99,6 +99,39 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public Task FlushAsync() => Automation.FlushAsync();
 
+    /// <summary>Advances the fake time and waits until the automation processed what that caused.</summary>
+    public async Task AdvanceAsync(TimeSpan time)
+    {
+        Time.Advance(time);
+        await FlushAsync();
+    }
+
+    /// <summary>Resets the state of the automation and waits until it processed the reset.</summary>
+    public Task ResetAsync()
+    {
+        Automation.ResetState();
+        return FlushAsync();
+    }
+
+    /// <summary>Saves the configuration of the automation, with <paramref name="rules"/> when given, and waits until it applied it.</summary>
+    public async Task SaveAsync(Dictionary<string, AutomationRule>? rules = null)
+    {
+        if (rules is not null)
+        {
+            Automation.Rules = rules;
+        }
+
+        await Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await FlushAsync();
+    }
+
+    /// <summary>Replaces the checkpoint file by a directory, so that the automation cannot write its checkpoint.</summary>
+    public void BreakCheckpointWrites()
+    {
+        File.Delete(CheckpointPath);
+        Directory.CreateDirectory(CheckpointPath);
+    }
+
     public Task StopAsync() => ((IHostedService)Automation).StopAsync(CancellationToken.None);
 
     /// <summary>

@@ -110,8 +110,6 @@ namespace HomeBlaze.Automation
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Automation.AutomationAction[] Actions { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
-        public string? Guard { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? InState { get; set; }
         [HomeBlaze.Abstractions.Attributes.State("Last Message", Position=5)]
         public string? LastRunMessage { get; }
@@ -123,6 +121,8 @@ namespace HomeBlaze.Automation
         public HomeBlaze.Automation.AutomationRuleMode Mode { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? OnlyIf { get; set; }
         [HomeBlaze.Abstractions.Attributes.State("Runs", IsCumulative=true, Position=3)]
         public long? RunCount { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=1)]
@@ -139,8 +139,8 @@ namespace HomeBlaze.Automation
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        [HomeBlaze.Abstractions.Attributes.Query(Description="Evaluates the triggers and the guard against the current values and shows the act" +
-            "ions with their arguments. Executes and records nothing.", Icon="Science", Position=1, Title="Test Now")]
+        [HomeBlaze.Abstractions.Attributes.Query(Description="Evaluates the triggers and Only if against the current values and shows the actio" +
+            "ns with their arguments. Executes and records nothing.", Icon="Science", Position=1, Title="Test Now")]
         public HomeBlaze.Automation.AutomationRuleTestResult TestNow() { }
     }
     public enum AutomationRuleMode
@@ -158,10 +158,10 @@ namespace HomeBlaze.Automation
         public AutomationRuleTestResult() { }
         public System.Collections.Generic.IReadOnlyList<string> Actions { get; init; }
         public string? Error { get; init; }
-        public System.Collections.Generic.IReadOnlyList<string> GuardMissingPaths { get; init; }
-        public bool? GuardResult { get; init; }
-        public bool HasGuard { get; init; }
+        public bool HasOnlyIf { get; init; }
         public bool IsActive { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> OnlyIfMissingPaths { get; init; }
+        public bool? OnlyIfResult { get; init; }
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationTriggerTestResult> Triggers { get; init; }
     }
     public enum AutomationRunOutcome
@@ -236,6 +236,7 @@ namespace HomeBlaze.Automation
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string Expression { get; init; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
+        [System.Text.Json.Serialization.JsonConverter(typeof(HomeBlaze.Automation.DurationJsonConverter))]
         public System.TimeSpan? For { get; init; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public HomeBlaze.Automation.TriggerActivation OnActivation { get; init; }

@@ -9,29 +9,14 @@ public class ActionExecutorTests
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
 
-    private readonly TestGraph _graph = new();
-    private readonly TestSensor _sensor = new();
-    private readonly TestBlinds _blinds = new();
-    private readonly TestNotifier _notifier = new();
-    private readonly AutomationRule _rule = new();
-    private readonly TestRuleHost _host = new();
+    private readonly RuleGraph _graph = new();
     private readonly FakeTimeProvider _time = new(Now);
-
-    public ActionExecutorTests()
-    {
-        _host.Rules = new Dictionary<string, AutomationRule> { ["r1"] = _rule };
-        _graph.Add("Weather", _sensor);
-        _graph.Add("Blinds", _blinds);
-        _graph.Add("Notifier", _notifier);
-        _graph.Add("Host", _host);
-        _sensor.Gust = 9;
-    }
 
     private ActionExecutor CreateExecutor(IAutomationAuthorizer? authorizer = null) =>
         new(_graph.Resolver, authorizer ?? new AllowAllAutomationAuthorizer(), serviceProvider: null, _time);
 
     private ActionScope CreateScope() =>
-        new(_host, _rule, new AutomationEvaluation(_graph.Resolver, _rule, Now, TimeZoneInfo.Utc), AllowsEvent: false);
+        new(_graph.Host, _graph.Rule, new AutomationEvaluation(_graph.Resolver, _graph.Rule, Now, TimeZoneInfo.Utc), AllowsEvent: false);
 
     private static InvokeOperationAction Invoke(string path, Dictionary<string, string>? arguments = null) =>
         new() { OperationPath = path, Arguments = arguments ?? new Dictionary<string, string>() };
@@ -48,7 +33,7 @@ public class ActionExecutorTests
         // Assert
         Assert.True(result.IsSuccess, result.Message);
         Assert.Equal("/Blinds/MoveTo(position: 40)", result.Message);
-        Assert.Equal(40, _blinds.Position);
+        Assert.Equal(40, _graph.Blinds.Position);
     }
 
     [Fact]
@@ -63,7 +48,7 @@ public class ActionExecutorTests
 
         // Assert
         Assert.True(result.IsSuccess, result.Message);
-        Assert.Equal("Gust 9 m/s", Assert.Single(_notifier.Sent).Message);
+        Assert.Equal("Gust 9 m/s", Assert.Single(_graph.Notifier.Sent).Message);
     }
 
     [Theory]
@@ -89,14 +74,14 @@ public class ActionExecutorTests
     {
         // Arrange
         var executor = CreateExecutor();
-        _blinds.IsLocked = true;
+        _graph.Blinds.IsLocked = true;
 
         // Act
         var result = await executor.InvokeOperationAsync(Invoke("/Blinds/Open"), CreateScope(), CancellationToken.None);
 
         // Assert
         Assert.Equal("/Blinds/Open is disabled", result.Message);
-        Assert.Equal(0, _blinds.OpenCount);
+        Assert.Equal(0, _graph.Blinds.OpenCount);
     }
 
     [Fact]
@@ -112,8 +97,8 @@ public class ActionExecutorTests
         // Assert
         Assert.Equal("The automation may not call Close", call.Message);
         Assert.Equal("The automation may not write Position", write.Message);
-        Assert.Equal(0, _blinds.CloseCount);
-        Assert.Equal(0, _blinds.Position);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.Position);
     }
 
     [Fact]
@@ -133,8 +118,8 @@ public class ActionExecutorTests
         Assert.Equal("/Blinds/Close: the authorization failed: The policy store is offline", call.Message);
         Assert.Equal("/Blinds/Position: the authorization failed: The policy store is offline", written.Message);
         Assert.Equal("/Blinds/Position: the authorization failed: The policy store is offline", described);
-        Assert.Equal(0, _blinds.CloseCount);
-        Assert.Equal(0, _blinds.Position);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.Position);
     }
 
     [Fact]
@@ -165,7 +150,7 @@ public class ActionExecutorTests
         // Assert
         Assert.True(result.IsSuccess, result.Message);
         Assert.Equal("/Blinds/Position = 18", result.Message);
-        Assert.Equal(18, _blinds.Position);
+        Assert.Equal(18, _graph.Blinds.Position);
     }
 
     [Theory]
@@ -200,6 +185,6 @@ public class ActionExecutorTests
         // Assert
         Assert.Equal("/Blinds/MoveTo(position: 9)", call);
         Assert.Equal("/Blinds/Position = 3", write);
-        Assert.Equal(0, _blinds.Position);
+        Assert.Equal(0, _graph.Blinds.Position);
     }
 }

@@ -162,7 +162,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
     }
 
     // A pending trigger keeps waiting while the expression is true, and a value that is not true ends the wait without a
-    // run. Its run is requested again by the guard, not by the expression, so it fires no second time here.
+    // run. Its run is requested again by Only if, not by the expression, so it fires no second time here.
     private bool ObservePending(bool? value)
     {
         if (value != true)

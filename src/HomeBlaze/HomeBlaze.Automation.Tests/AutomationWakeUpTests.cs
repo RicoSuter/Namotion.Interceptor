@@ -11,8 +11,7 @@ public class AutomationWakeUpTests
     {
         for (var elapsed = TimeSpan.Zero; elapsed < time; elapsed += step)
         {
-            host.Time.Advance(step);
-            await host.FlushAsync();
+            await host.AdvanceAsync(step);
         }
     }
 
@@ -81,6 +80,28 @@ public class AutomationWakeUpTests
         // Assert
         Assert.Equal(AutomationTestHost.Start.AddMinutes(5).AddSeconds(1), host.Rule("stale").LastTriggeredAt);
         Assert.InRange(host.Clock.WakeUps - wakeUpsAtStart, 1, 12);
+    }
+
+    [Fact]
+    public async Task WhenTheTimeAdvancesRightAfterAFlush_ThenATriggerThatWaitsForTimeSinceAnInstantFiresOnTime()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("stale", On("Stale", When("now - /Weather/LastUpdated > 5m"), Invoke("/Blinds/Close")))));
+        host.Weather.LastUpdated = AutomationTestHost.Start;
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromSeconds(299), TimeSpan.FromSeconds(1));
+
+        // Act
+        host.Clock.PauseNextRead();
+        await host.FlushAsync();
+        host.Time.Advance(TimeSpan.FromSeconds(1));
+        host.Clock.ResumeRead();
+        await host.FlushAsync();
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
+
+        // Assert
+        Assert.Equal(AutomationTestHost.Start.AddMinutes(5).AddSeconds(1), host.Rule("stale").LastTriggeredAt);
     }
 
     [Fact]

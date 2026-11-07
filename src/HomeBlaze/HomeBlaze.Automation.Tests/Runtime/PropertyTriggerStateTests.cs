@@ -109,35 +109,17 @@ public class PropertyTriggerStateTests
         Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
     }
 
-    [Fact]
-    public void WhenTheExpressionIsFalseDuringTheHold_ThenTheHoldStartsAgain()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(null)]
+    public void WhenTheExpressionIsNotTrueDuringTheHold_ThenTheHoldStartsAgain(bool? interruption)
     {
         // Arrange
         var state = new PropertyTriggerState(Hold, hasRearm: false);
         state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
 
         // Act
-        Run(state, FalseValue, Start.AddSeconds(10));
-        Run(state, TrueValue, Start.AddSeconds(15));
-        var atOriginalHoldEnd = Run(state, TrueValue, Start.AddSeconds(20));
-        var beforeHold = Run(state, TrueValue, Start.AddSeconds(34));
-        var afterHold = Run(state, TrueValue, Start.AddSeconds(35));
-
-        // Assert
-        Assert.False(atOriginalHoldEnd);
-        Assert.False(beforeHold);
-        Assert.True(afterHold);
-    }
-
-    [Fact]
-    public void WhenTheExpressionIsUnknownDuringTheHold_ThenTheHoldStartsAgain()
-    {
-        // Arrange
-        var state = new PropertyTriggerState(Hold, hasRearm: false);
-        state.Activate(TriggerActivation.EvaluateImmediately, TrueValue, Start);
-
-        // Act
-        Run(state, Unknown("/Weather/Gust"), Start.AddSeconds(10));
+        Run(state, interruption is null ? Unknown("/Weather/Gust") : FalseValue, Start.AddSeconds(10));
         Run(state, TrueValue, Start.AddSeconds(15));
         var atOriginalHoldEnd = Run(state, TrueValue, Start.AddSeconds(20));
         var beforeHold = Run(state, TrueValue, Start.AddSeconds(34));

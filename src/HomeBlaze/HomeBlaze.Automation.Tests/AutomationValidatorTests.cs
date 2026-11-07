@@ -16,7 +16,7 @@ public class AutomationValidatorTests
     {
         Name = name,
         Mode = AutomationRuleMode.On,
-        Guard = guard,
+        OnlyIf = guard,
         Triggers = [new PropertyTrigger { Expression = expression }],
         Actions = actions ?? [new InvokeOperationAction { Id = "close", OperationPath = "/Blinds/Close" }]
     };
@@ -62,7 +62,7 @@ public class AutomationValidatorTests
         // Assert
         Assert.Equal(2, errors.Count);
         Assert.All(errors, error => Assert.Equal("a", error.RuleKey));
-        Assert.StartsWith("guard: ", errors[0].Message);
+        Assert.StartsWith("Only if: ", errors[0].Message);
         Assert.Equal("it has no action", errors[1].Message);
     }
 

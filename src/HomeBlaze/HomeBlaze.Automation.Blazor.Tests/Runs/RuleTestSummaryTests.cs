@@ -8,9 +8,9 @@ public class RuleTestSummaryTests
     {
         IsActive = isActive,
         Triggers = [new AutomationTriggerTestResult { Number = 1, Result = trigger }],
-        HasGuard = true,
-        GuardResult = guard,
-        GuardMissingPaths = guardMissingPaths
+        HasOnlyIf = true,
+        OnlyIfResult = guard,
+        OnlyIfMissingPaths = guardMissingPaths
     };
 
     public static TheoryData<AutomationRuleTestResult, bool, bool, string> Verdicts => new()

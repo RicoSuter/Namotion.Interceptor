@@ -160,7 +160,7 @@ public class AutomationEditorTests
         await using var washer = await _fixture.AddStoredAutomationAsync(configured =>
         {
             WasherAutomation.Configure(configured);
-            configured.Rules["started"].Guard = guard;
+            configured.Rules["started"].OnlyIf = guard;
         });
         var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
 
@@ -535,7 +535,7 @@ public class AutomationEditorTests
         await using var washer = await _fixture.AddStoredAutomationAsync(configured =>
         {
             WasherAutomation.Configure(configured);
-            configured.Rules["started"].Guard = cooldown;
+            configured.Rules["started"].OnlyIf = cooldown;
         });
         var (page, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
         await Assertions.Expect(dialog.GetByLabel("At most once every")).ToHaveValueAsync("30m", new() { Timeout = Timeout });

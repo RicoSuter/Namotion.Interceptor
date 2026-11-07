@@ -200,7 +200,7 @@ public class AutomationDraftTests
                 ["trigger"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idle" }] },
                 ["rearm"] = new() { Triggers = [new PropertyTrigger { Expression = "/a/B", Rearm = "/a/C == Idle" }] },
                 ["filter"] = new() { Triggers = [new SubjectEventTrigger { Filter = "event/NewState == Idle" }] },
-                ["guard"] = new() { Guard = "../CurrentState != Idle" },
+                ["guard"] = new() { OnlyIf = "../CurrentState != Idle" },
                 ["argument"] = new() { Actions = [new InvokeOperationAction { Arguments = new Dictionary<string, string> { ["Message"] = "Was Idle" } }] },
                 ["value"] = new() { Actions = [new SetPropertyAction { Value = "Idle" }] },
                 ["longer"] = new() { Triggers = [new PropertyTrigger { Expression = "../CurrentState == Idleness" }] },
@@ -334,7 +334,7 @@ public class AutomationDraftTests
         Assert.Equal(["Idle", "Running"], automation.States.ToArray());
         Assert.Equal("Finished", source.Name);
         Assert.Equal("Running", source.InState);
-        Assert.Null(source.Guard);
+        Assert.Null(source.OnlyIf);
         var sourceCall = Assert.IsType<InvokeOperationAction>(source.Actions[0]);
         Assert.Equal("/Notify/Send", sourceCall.OperationPath);
         Assert.Equal("Done", sourceCall.Arguments["notification.Message"]);

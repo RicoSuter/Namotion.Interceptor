@@ -20,7 +20,7 @@ public class AutomationTriggersTests
         var publishes = 0;
         var triggers = new AutomationTriggers(
             graph.Resolver, new FakeTimeProvider(AutomationTestHost.Start), new AutomationInputQueue(), NullLogger.Instance, () => "Storm", _ => publishes++, () => registry.StructureVersion);
-        Assert.True(AutomationCompiler.TryCompileRule("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")), [], out var rule, out var error), error);
+        var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
         triggers.Activate([rule], [rule]);
         triggers.OnGraphChanged([rule]);
@@ -36,5 +36,25 @@ public class AutomationTriggersTests
         // Assert
         Assert.Equal(publishesAfterTheFirstGraphChange, publishesAfterTheSameChildren);
         Assert.Equal(publishesAfterTheFirstGraphChange + 1, publishes);
+    }
+
+    [Fact]
+    public void WhenEqualTriggersAreCarriedOver_ThenTheyPairUpInOrderWhereverTheyMoved()
+    {
+        // Arrange
+        static CompiledRule Compile(params AutomationTrigger[] triggers) =>
+            RuleBuilder.Compile("retract", Create("Retract", AutomationRuleMode.On, triggers, [Invoke("/Blinds/Close")]));
+
+        var old = Compile(When("/Weather/Rain > 0"), When("/Weather/Gust > 8"), When("/Weather/Rain > 0"));
+        var first = old.PropertyTriggers[0].State;
+        var third = old.PropertyTriggers[2].State;
+        var rule = Compile(When("/Weather/Rain > 0"), When("/Weather/Rain > 0"));
+
+        // Act
+        AutomationTriggers.CarryOver(old, rule);
+
+        // Assert
+        Assert.Same(first, rule.PropertyTriggers[0].State);
+        Assert.Same(third, rule.PropertyTriggers[1].State);
     }
 }

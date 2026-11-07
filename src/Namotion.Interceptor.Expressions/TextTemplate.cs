@@ -46,13 +46,12 @@ public sealed class TextTemplate
     }
 
     /// <summary>
-    /// Parses the text with the variables the host declares, which replace those of <see cref="ExpressionVariables"/>. On
-    /// failure the error is that of the first expression that does not parse, with the position inside its braces, or
-    /// <c>'{{' is not closed at position &lt;n&gt;</c>.
+    /// Parses the text as <see cref="TryParse(string, char, out TextTemplate?, out string?)"/> does, with the variables the
+    /// host declares, which replace those of <see cref="ExpressionVariables"/>.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="pathSeparator">The character between the segments of the paths of its expressions.</param>
-    /// <param name="variables">The names that are variables of its expressions, see <see cref="ParsedExpression.Variables"/>.</param>
+    /// <param name="variables">The names that are variables of its expressions, see <see cref="ParsedExpression.TryParse(string, char, ImmutableArray{string}, out ParsedExpression?, out string?)"/>.</param>
     /// <param name="template">The template, or null.</param>
     /// <param name="error">The error, or null.</param>
     /// <exception cref="ArgumentException">The separator cannot be used in an expression, or a variable is no word an

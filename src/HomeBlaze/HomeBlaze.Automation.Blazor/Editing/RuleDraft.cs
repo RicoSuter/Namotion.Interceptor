@@ -49,7 +49,7 @@ public sealed class RuleDraft
 
     public static RuleDraft From(string key, AutomationRule rule)
     {
-        var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, Guard = rule.Guard };
+        var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, Guard = rule.OnlyIf };
         draft.Triggers.AddRange((rule.Triggers ?? []).OfType<AutomationTrigger>().Select(trigger => new DraftItem<AutomationTrigger>(WithoutNulls(trigger))));
         draft.Actions.AddRange((rule.Actions ?? []).OfType<AutomationAction>().Select(action => new DraftItem<AutomationAction>(WithoutNulls(action))));
         return draft;
@@ -83,7 +83,7 @@ public sealed class RuleDraft
         Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim(),
         Mode = Mode,
         InState = InState,
-        Guard = string.IsNullOrWhiteSpace(Guard) ? null : Guard,
+        OnlyIf = string.IsNullOrWhiteSpace(Guard) ? null : Guard,
         Triggers = [.. Triggers.Select(trigger => Normalize(trigger.Value))],
         Actions = [.. Actions.Select(action => action.IsOperationChanged ? Prune(action.Value, getMethod) : action.Value)]
     };

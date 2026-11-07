@@ -357,38 +357,6 @@ public class ParsedExpressionEvaluationTests
         Assert.Equal(expected, result);
     }
 
-    [Fact]
-    public void WhenDurationHasEveryUnit_ThenTheyAddUp()
-    {
-        // Arrange
-        Assert.True(ParsedExpression.TryParse("1d2h3m4s5ms", '/', out var expression, out var error), error);
-        var context = new TestExpressionContext([]);
-
-        // Act
-        var result = expression.Evaluate(ref context);
-
-        // Assert
-        Assert.Equal(new TimeSpan(1, 2, 3, 4, 5), result.Value);
-    }
-
-    [Theory]
-    [InlineData("10675199d2h48m5.4775807s", long.MaxValue)]
-    [InlineData("-10675199d2h48m5.4775808s", long.MinValue)]
-    [InlineData("10675199d2h48m5s", long.MaxValue - 4775807)]
-    [InlineData("0.0000001s", 1L)]
-    public void WhenDurationIsAtTheEdgeOfTheRange_ThenItIsExactToTheTick(string text, long expectedTicks)
-    {
-        // Arrange
-        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
-        var context = new TestExpressionContext([]);
-
-        // Act
-        var result = expression.Evaluate(ref context);
-
-        // Assert
-        Assert.Equal(TimeSpan.FromTicks(expectedTicks), result.Value);
-    }
-
     [Theory]
     [InlineData("Interval == 90")]
     [InlineData("Interval > Name")]
@@ -405,6 +373,7 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
+    // Numbers
     [InlineData("Power - 1000 > 6000", true)]
     [InlineData("Power + Offset == 7500", true)]
     [InlineData("Power * 2 == 14800", true)]
@@ -418,17 +387,61 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Total < Phase1 + Phase2", false)]
     [InlineData("Power - (Offset) == 7300", true)]
     [InlineData("Power * (Offset + 1) == 747400", true)]
-    public void WhenOperandsAreNumbers_ThenArithmeticComputes(string text, bool expected)
+    [InlineData("Power / 0 == null", true)]
+    // Negation
+    [InlineData("-Power == -7400", true)]
+    [InlineData("-(Power - Offset) == -7300", true)]
+    [InlineData("Count * -Offset == -300", true)]
+    [InlineData("Zero > -Count", true)]
+    [InlineData("- -Power == 7400", true)]
+    [InlineData("-Count * 2 == -6", true)]
+    [InlineData("-Ratio == -0.1", true)]
+    [InlineData("-Interval == -90s", true)]
+    [InlineData("Interval > - 5m", true)]
+    [InlineData("Now - EnteredAt > -Interval", true)]
+    [InlineData("-Now == null", true)]
+    [InlineData("-Name == null", true)]
+    [InlineData("-IsOn == null", true)]
+    [InlineData("-Missing == null", true)]
+    [InlineData("-Smallest == null", true)]
+    [InlineData("-NotANumber == null", true)]
+    // Exact numbers and floats
+    [InlineData("First + Second == 0.3", true)]
+    [InlineData("Second - First == 0.1", true)]
+    [InlineData("First * Count == 0.3", true)]
+    [InlineData("Ratio + 0 == 0.1", true)]
+    [InlineData("Ratio * 10 == 1", true)]
+    [InlineData("Ratio - Ratio == 0", true)]
+    [InlineData("First * 3 == 0.3", true)]
+    [InlineData("0.1 + 0.2 == 0.3", true)]
+    [InlineData("Ratio == 0.1", true)]
+    [InlineData("Ratio < 0.1", false)]
+    [InlineData("Ratio + 0.2 == 0.3", true)]
+    [InlineData("Measured + 0.2 == 0.3", false)]
+    [InlineData("Measured + 0.2 == 0.30000000000000004", true)]
+    [InlineData("Measured == 0.1", true)]
+    [InlineData("Big == 9007199254740993", true)]
+    [InlineData("Big == 9007199254740992", false)]
+    [InlineData("Big > 9007199254740992", true)]
+    [InlineData("Count == 3", true)]
+    [InlineData("Count == 3.0", true)]
+    [InlineData("Count == 3e0", true)]
+    // Instants and durations
+    [InlineData("Now - EnteredAt > 30m", true)]
+    [InlineData("Now - EnteredAt == 38m", true)]
+    [InlineData("Now - EnteredAt < 1h", true)]
+    [InlineData("Now == EnteredAt + 38m", true)]
+    [InlineData("Now == 38m + EnteredAt", true)]
+    [InlineData("EnteredAt == Now - 38m", true)]
+    [InlineData("EnteredAt + 10m == '2026-11-06T14:12:00Z'", true)]
+    [InlineData("Now - Created == 40m", true)]
+    [InlineData("Interval + 30s == 2m", true)]
+    [InlineData("Interval - 30s == 1m", true)]
+    [InlineData("Now - EnteredAt - Interval == 36m30s", true)]
+    public void WhenValuesAreComputedAndCompared_ThenTheConditionHasTheExpectedTruth(string text, bool expected)
     {
         // Arrange
-        var values = new Dictionary<string, object?>
-        {
-            ["Power"] = 7400m,
-            ["Offset"] = 100,
-            ["Total"] = 10,
-            ["Phase1"] = 3.0,
-            ["Phase2"] = 4L
-        };
+        var values = CreateValues();
 
         // Act
         var result = EvaluateCondition(text, values);
@@ -438,24 +451,28 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
-    [InlineData("Missing + 1 > 0")]
-    [InlineData("1 + Missing > 0")]
-    [InlineData("Power / 0 > 0")]
-    [InlineData("Name + 1 > 0")]
-    [InlineData("IsOn * 2 > 0")]
-    public void WhenArithmeticHasNoNumber_ThenTheComparisonIsUnknown(string text)
-    {
-        // Arrange
-        var values = new Dictionary<string, object?> { ["Power"] = 7400m, ["Name"] = "Kitchen", ["IsOn"] = true };
-
-        // Act
-        var result = EvaluateCondition(text, values);
-
-        // Assert
-        Assert.Null(result);
-    }
-
-    [Theory]
+    // Literals
+    [InlineData("1.50", typeof(decimal), "1.5")]
+    [InlineData("11.000", typeof(decimal), "11")]
+    [InlineData("0.00", typeof(decimal), "0")]
+    [InlineData("-5", typeof(decimal), "-5")]
+    [InlineData(".5", typeof(decimal), "0.5")]
+    [InlineData("0.1 + 0.2", typeof(decimal), "0.3")]
+    [InlineData("1e3", typeof(double), "1000")]
+    [InlineData("1000000000000000000000000000000", typeof(double), "1E+30")]
+    [InlineData("0.12345678901234567890123456789", typeof(double), "0.12345678901234568")]
+    [InlineData("1d2h3m4s5ms", typeof(TimeSpan), "1.02:03:04.0050000")]
+    [InlineData("10675199d2h48m5.4775807s", typeof(TimeSpan), "10675199.02:48:05.4775807")]
+    [InlineData("-10675199d2h48m5.4775808s", typeof(TimeSpan), "-10675199.02:48:05.4775808")]
+    [InlineData("10675199d2h48m5s", typeof(TimeSpan), "10675199.02:48:05")]
+    [InlineData("0.0000001s", typeof(TimeSpan), "00:00:00.0000001")]
+    // Negation
+    [InlineData("-Count", typeof(decimal), "-3")]
+    [InlineData("-Ratio", typeof(float), "-0.1")]
+    [InlineData("-Zero", typeof(double), "0")]
+    [InlineData("-Interval", typeof(TimeSpan), "-00:01:30")]
+    [InlineData("-Amount", typeof(decimal), "-1.5")]
+    // Arithmetic
     [InlineData("Power - Offset", typeof(decimal), "7300")]
     [InlineData("Count + Count", typeof(decimal), "6")]
     [InlineData("Count / Four", typeof(decimal), "0.75")]
@@ -483,30 +500,12 @@ public class ParsedExpressionEvaluationTests
     [InlineData("Ratio + Precise", typeof(double), "123456789.22299999")]
     [InlineData("Stamp + Ratio", typeof(double), "1700000000123.1")]
     [InlineData("Zero * -1", typeof(double), "0")]
-    public void WhenArithmeticIsEvaluatedAsValue_ThenItKeepsTheExactnessOfItsOperands(string text, Type expectedType, string expectedValue)
+    [InlineData("Now - EnteredAt", typeof(TimeSpan), "00:38:00")]
+    public void WhenExpressionIsEvaluatedAsValue_ThenItHasTheTypeAndTextOfItsResult(string text, Type expectedType, string expectedValue)
     {
         // Arrange
         Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
-        var context = new TestExpressionContext(new Dictionary<string, object?>
-        {
-            ["Power"] = 7400m,
-            ["Offset"] = 100,
-            ["Count"] = 3,
-            ["Four"] = (byte)4,
-            ["One"] = 1L,
-            ["Big"] = 9007199254740993L,
-            ["Price"] = 0.1m,
-            ["Max"] = decimal.MaxValue,
-            ["Tiny"] = 1e-20m,
-            ["Hundred"] = 100,
-            ["Seven"] = 7,
-            ["Precise"] = 123456789.123,
-            ["Stamp"] = 1700000000123L,
-            ["Ratio"] = 0.1f,
-            ["Zero"] = 0d,
-            ["Measured"] = 0.1,
-            ["Amount"] = 1.50m
-        });
+        var context = new TestExpressionContext(CreateValues());
 
         // Act
         var result = expression.Evaluate(ref context);
@@ -518,190 +517,28 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
-    [InlineData("-Power == -7400", true)]
-    [InlineData("-(Power - Offset) == -7300", true)]
-    [InlineData("Count * -Offset == -300", true)]
-    [InlineData("Zero > -Count", true)]
-    [InlineData("- -Power == 7400", true)]
-    [InlineData("-Count * 2 == -6", true)]
-    [InlineData("-Ratio == -0.1", true)]
-    [InlineData("-Interval == -90s", true)]
-    [InlineData("Interval > - 5m", true)]
-    [InlineData("Now - EnteredAt > -Interval", true)]
-    [InlineData("-Now == null", true)]
-    [InlineData("-Name == null", true)]
-    [InlineData("-IsOn == null", true)]
-    [InlineData("-Missing == null", true)]
-    [InlineData("-Smallest == null", true)]
-    [InlineData("-NotANumber == null", true)]
-    public void WhenOperandIsNegated_ThenNumbersAndDurationsChangeTheirSign(string text, bool expected)
-    {
-        // Arrange
-        var values = CreateTimeValues();
-        values["Power"] = 7400m;
-        values["Offset"] = 100;
-        values["Count"] = 3;
-        values["Zero"] = 0d;
-        values["Ratio"] = 0.1f;
-        values["Name"] = "Kitchen";
-        values["IsOn"] = true;
-        values["Smallest"] = TimeSpan.MinValue;
-        values["NotANumber"] = double.NaN;
-
-        // Act
-        var result = EvaluateCondition(text, values);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
-    [InlineData("-Count", typeof(decimal), "-3")]
-    [InlineData("-Ratio", typeof(float), "-0.1")]
-    [InlineData("-Zero", typeof(double), "0")]
-    [InlineData("-Interval", typeof(TimeSpan), "-00:01:30")]
-    [InlineData("-Amount", typeof(decimal), "-1.5")]
-    public void WhenNegationIsEvaluatedAsValue_ThenItKeepsTheTypeOfItsOperand(string text, Type expectedType, string expectedValue)
-    {
-        // Arrange
-        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
-        var context = new TestExpressionContext(new Dictionary<string, object?>
-        {
-            ["Count"] = 3,
-            ["Ratio"] = 0.1f,
-            ["Zero"] = 0d,
-            ["Interval"] = TimeSpan.FromSeconds(90),
-            ["Amount"] = 1.50m
-        });
-
-        // Act
-        var result = expression.Evaluate(ref context);
-
-        // Assert
-        Assert.IsType(expectedType, result.Value);
-        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
-    }
-
-    [Theory]
-    [InlineData("First + Second == 0.3", true)]
-    [InlineData("Second - First == 0.1", true)]
-    [InlineData("First * Count == 0.3", true)]
-    [InlineData("Ratio + 0 == 0.1", true)]
-    [InlineData("Ratio * 10 == 1", true)]
-    [InlineData("Ratio - Ratio == 0", true)]
-    [InlineData("First * 3 == 0.3", true)]
-    [InlineData("0.1 + 0.2 == 0.3", true)]
-    [InlineData("Ratio == 0.1", true)]
-    [InlineData("Ratio < 0.1", false)]
-    [InlineData("Ratio + 0.2 == 0.3", true)]
-    [InlineData("Measured + 0.2 == 0.3", false)]
-    [InlineData("Measured + 0.2 == 0.30000000000000004", true)]
-    [InlineData("Measured == 0.1", true)]
-    [InlineData("Big == 9007199254740993", true)]
-    [InlineData("Big == 9007199254740992", false)]
-    [InlineData("Big > 9007199254740992", true)]
-    [InlineData("Count == 3", true)]
-    [InlineData("Count == 3.0", true)]
-    [InlineData("Count == 3e0", true)]
-    public void WhenOperandsAreExactOrFloats_ThenTheResultEqualsTheLiteral(string text, bool expected)
-    {
-        // Arrange
-        var values = new Dictionary<string, object?>
-        {
-            ["First"] = 0.1m,
-            ["Second"] = 0.2m,
-            ["Count"] = 3,
-            ["Ratio"] = 0.1f,
-            ["Measured"] = 0.1,
-            ["Big"] = 9007199254740993L
-        };
-
-        // Act
-        var result = EvaluateCondition(text, values);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
-    [InlineData("1.50", typeof(decimal), "1.5")]
-    [InlineData("11.000", typeof(decimal), "11")]
-    [InlineData("0.00", typeof(decimal), "0")]
-    [InlineData("-5", typeof(decimal), "-5")]
-    [InlineData(".5", typeof(decimal), "0.5")]
-    [InlineData("0.1 + 0.2", typeof(decimal), "0.3")]
-    [InlineData("1e3", typeof(double), "1000")]
-    [InlineData("1000000000000000000000000000000", typeof(double), "1E+30")]
-    [InlineData("0.12345678901234567890123456789", typeof(double), "0.12345678901234568")]
-    public void WhenNumberLiteralIsEvaluated_ThenItIsADecimalUnlessItHasAnExponentOrDoesNotFit(string text, Type expectedType, string expectedValue)
-    {
-        // Arrange
-        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
-        var context = new TestExpressionContext([]);
-
-        // Act
-        var result = expression.Evaluate(ref context);
-
-        // Assert
-        Assert.IsType(expectedType, result.Value);
-        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
-    }
-
-    [Theory]
-    [InlineData("Now - EnteredAt > 30m", true)]
-    [InlineData("Now - EnteredAt == 38m", true)]
-    [InlineData("Now - EnteredAt < 1h", true)]
-    [InlineData("Now == EnteredAt + 38m", true)]
-    [InlineData("Now == 38m + EnteredAt", true)]
-    [InlineData("EnteredAt == Now - 38m", true)]
-    [InlineData("EnteredAt + 10m == '2026-11-06T14:12:00Z'", true)]
-    [InlineData("Now - Created == 40m", true)]
-    [InlineData("Interval + 30s == 2m", true)]
-    [InlineData("Interval - 30s == 1m", true)]
-    [InlineData("Now - EnteredAt - Interval == 36m30s", true)]
-    public void WhenOperandsAreInstantsOrDurations_ThenArithmeticGivesInstantsAndDurations(string text, bool expected)
-    {
-        // Arrange
-        var values = CreateTimeValues();
-
-        // Act
-        var result = EvaluateCondition(text, values);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
+    [InlineData("Missing + 1 > 0")]
+    [InlineData("1 + Missing > 0")]
+    [InlineData("Power / 0 > 0")]
+    [InlineData("Name + 1 > 0")]
+    [InlineData("IsOn * 2 > 0")]
     [InlineData("Now + EnteredAt > 0m")]
     [InlineData("Interval - EnteredAt > 0m")]
     [InlineData("Now - 5 > 0m")]
     [InlineData("Interval * 2 > 1m")]
     [InlineData("Interval / 2 > 1m")]
     [InlineData("EnteredAt + 3000000d > Now")]
-    public void WhenTimeArithmeticHasNoMeaning_ThenTheComparisonIsUnknown(string text)
+    [InlineData("10675198d + 10675198d > 0m")]
+    public void WhenArithmeticHasNoMeaningOrOverflows_ThenTheComparisonIsUnknown(string text)
     {
         // Arrange
-        var values = CreateTimeValues();
+        var values = CreateValues();
 
         // Act
         var result = EvaluateCondition(text, values);
 
         // Assert
         Assert.Null(result);
-    }
-
-    [Fact]
-    public void WhenInstantIsSubtractedFromInstant_ThenTheValueIsATimeSpan()
-    {
-        // Arrange
-        Assert.True(ParsedExpression.TryParse("Now - EnteredAt", '/', out var expression, out var error), error);
-        var context = new TestExpressionContext(CreateTimeValues());
-
-        // Act
-        var result = expression.Evaluate(ref context);
-
-        // Assert
-        Assert.Equal(TimeSpan.FromMinutes(38), result.Value);
     }
 
     [Theory]
@@ -780,37 +617,38 @@ public class ParsedExpressionEvaluationTests
         }
     }
 
-    [Fact]
-    public void WhenDurationOverflows_ThenTheComparisonIsUnknown()
-    {
-        // Arrange
-        var values = new Dictionary<string, object?> { ["Interval"] = TimeSpan.FromDays(10675198) };
-
-        // Act
-        var result = EvaluateCondition("Interval + 10675198d > 0m", values);
-
-        // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void WhenNumberIsDividedByZero_ThenTheResultIsMissing()
-    {
-        // Arrange
-        var values = new Dictionary<string, object?> { ["Power"] = 7400m };
-
-        // Act
-        var result = EvaluateCondition("Power / 0 == null", values);
-
-        // Assert
-        Assert.True(result);
-    }
-
-    private static Dictionary<string, object?> CreateTimeValues() => new()
+    // The values the theories that compute read; "Missing" stays absent, so that a path to it leads nowhere.
+    private static Dictionary<string, object?> CreateValues() => new()
     {
         ["Now"] = new DateTimeOffset(2026, 11, 6, 14, 40, 0, TimeSpan.Zero),
         ["EnteredAt"] = new DateTimeOffset(2026, 11, 6, 15, 2, 0, TimeSpan.FromHours(1)),
         ["Created"] = new DateTime(2026, 11, 6, 14, 0, 0, DateTimeKind.Unspecified),
-        ["Interval"] = TimeSpan.FromSeconds(90)
+        ["Interval"] = TimeSpan.FromSeconds(90),
+        ["Smallest"] = TimeSpan.MinValue,
+        ["Power"] = 7400m,
+        ["Offset"] = 100,
+        ["Total"] = 10,
+        ["Phase1"] = 3.0,
+        ["Phase2"] = 4L,
+        ["Count"] = 3,
+        ["Four"] = (byte)4,
+        ["One"] = 1L,
+        ["Big"] = 9007199254740993L,
+        ["Price"] = 0.1m,
+        ["Max"] = decimal.MaxValue,
+        ["Tiny"] = 1e-20m,
+        ["Hundred"] = 100,
+        ["Seven"] = 7,
+        ["Precise"] = 123456789.123,
+        ["Stamp"] = 1700000000123L,
+        ["Ratio"] = 0.1f,
+        ["Zero"] = 0d,
+        ["Measured"] = 0.1,
+        ["NotANumber"] = double.NaN,
+        ["Amount"] = 1.50m,
+        ["First"] = 0.1m,
+        ["Second"] = 0.2m,
+        ["Name"] = "Kitchen",
+        ["IsOn"] = true
     };
 }

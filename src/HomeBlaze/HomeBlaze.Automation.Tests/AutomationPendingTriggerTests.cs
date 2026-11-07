@@ -8,13 +8,13 @@ public class AutomationPendingTriggerTests
 {
     private const string Cooldown = "./LastTriggeredAt == null or now - ./LastTriggeredAt > 10m";
 
-    private static Action<Automation> ConveyorGuard(string guard = Cooldown) => automation => automation.Rules = Keyed(
+    private static Action<Automation> ConveyorGuard(string onlyIf = Cooldown) => automation => automation.Rules = Keyed(
         ("overheat", Create(
             "Slow down when hot",
             AutomationRuleMode.On,
             [When("/Weather/Power > 40", TimeSpan.FromSeconds(30), rearm: "/Weather/Power < 38")],
             [Invoke("/Blinds/Close")],
-            guard)));
+            onlyIf)));
 
     private static async Task SetAsync(AutomationTestHost host, double power)
     {
@@ -22,19 +22,14 @@ public class AutomationPendingTriggerTests
         await host.FlushAsync();
     }
 
-    private static async Task AdvanceAsync(AutomationTestHost host, TimeSpan time)
-    {
-        host.Time.Advance(time);
-        await host.FlushAsync();
-    }
 
     private static async Task RunOnceAndTriggerWithinTheCooldownAsync(AutomationTestHost host)
     {
         await SetAsync(host, 41);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(30));
         await SetAsync(host, 37);
         await SetAsync(host, 41);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(30));
     }
 
     [Fact]
@@ -47,14 +42,14 @@ public class AutomationPendingTriggerTests
         var statusWhileWaiting = rule.Status;
 
         // Act
-        await AdvanceAsync(host, TimeSpan.FromSeconds(9 * 60 + 30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(9 * 60 + 30));
         var runsBeforeTheCooldownEnds = host.Blinds.CloseCount;
-        await AdvanceAsync(host, TimeSpan.FromSeconds(1));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(1));
         var runsWhenTheCooldownEnded = host.Blinds.CloseCount;
-        await AdvanceAsync(host, TimeSpan.FromMinutes(15));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
 
         // Assert
-        Assert.Equal("On: Waiting since 12:01:00: Only if is false", statusWhileWaiting);
+        Assert.Equal("On: Waiting since 2026-11-06 12:01:00: Only if is false", statusWhileWaiting);
         Assert.Equal(1, runsBeforeTheCooldownEnds);
         Assert.Equal(2, runsWhenTheCooldownEnded);
         Assert.Equal(2, host.Blinds.CloseCount);
@@ -72,7 +67,7 @@ public class AutomationPendingTriggerTests
 
         // Act
         await SetAsync(host, 39);
-        await AdvanceAsync(host, TimeSpan.FromMinutes(15));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(15));
 
         // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
@@ -86,7 +81,7 @@ public class AutomationPendingTriggerTests
         await using var host = await AutomationTestHost.StartAsync(ConveyorGuard("not /Blinds/IsMoving"));
         host.Blinds.IsMoving = true;
         await SetAsync(host, 41);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(30));
         var runsWhileMoving = host.Blinds.CloseCount;
 
         // Act
@@ -109,7 +104,7 @@ public class AutomationPendingTriggerTests
         host.Blinds.IsMoving = true;
         var watchersWhileIdle = dispatcher.CountWatchers(host.Graph.Context, isMoving);
         await SetAsync(host, 41);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(30));
         var watchersWhileWaiting = dispatcher.CountWatchers(host.Graph.Context, isMoving);
 
         // Act
@@ -127,17 +122,75 @@ public class AutomationPendingTriggerTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(ConveyorGuard("time > 12h5m"));
         await SetAsync(host, 41);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(30));
         var runsBefore = host.Blinds.CloseCount;
 
         // Act
         for (var second = 0; second < 5 * 60; second++)
         {
-            await AdvanceAsync(host, TimeSpan.FromSeconds(1));
+            await host.AdvanceAsync(TimeSpan.FromSeconds(1));
         }
 
         // Assert
         Assert.Equal(0, runsBefore);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenOnlyIfBecomesTrueLaterInTheSameInput_ThenTheWaitingTriggerRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.RuleOrder = ["retract", "stop"];
+            automation.Rules = Keyed(
+                ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "not /Blinds/IsMoving")),
+                ("stop", Create("Stop", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Set("/Blinds/IsMoving", "false")])));
+        });
+        host.Blinds.IsMoving = true;
+        await host.FlushAsync();
+
+        // Act
+        await SetAsync(host, 41);
+        await host.AdvanceAsync(TimeSpan.FromMinutes(5));
+
+        // Assert
+        Assert.False(host.Blinds.IsMoving);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenOnlyIfIsRemovedWhileATriggerWaits_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "not /Blinds/IsMoving"))));
+        host.Blinds.IsMoving = true;
+        await SetAsync(host, 41);
+        var statusWhileWaiting = host.Rule("retract").Status;
+
+        // Act
+        await host.SaveAsync(Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")]))));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(5));
+
+        // Assert
+        Assert.StartsWith("On: Waiting since", statusWhileWaiting);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenOnlyIfIsRelaxedWhileATriggerWaits_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "/Blinds/Position > 50"))));
+        await SetAsync(host, 41);
+
+        // Act
+        await host.SaveAsync(Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "/Blinds/Position >= 0"))));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(5));
+
+        // Assert
         Assert.Equal(1, host.Blinds.CloseCount);
     }
 
@@ -174,7 +227,7 @@ public class AutomationPendingTriggerTests
         // Act
         await SetAsync(host, 50);
         var status = host.Rule("storm").Status;
-        await AdvanceAsync(host, TimeSpan.FromMinutes(11));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(11));
 
         // Assert
         Assert.Equal("On: Triggered, waiting to rearm", status);
@@ -198,7 +251,7 @@ public class AutomationPendingTriggerTests
         // Act
         host.Blinds.IsMoving = false;
         await host.FlushAsync();
-        await AdvanceAsync(host, TimeSpan.FromMinutes(11));
+        await host.AdvanceAsync(TimeSpan.FromMinutes(11));
 
         // Assert
         Assert.Equal(0, runsWhileMoving);
@@ -218,12 +271,12 @@ public class AutomationPendingTriggerTests
         await SetAsync(host, 37);
         var statusAfterTheWait = host.Rule("overheat").Status;
         await SetAsync(host, 41);
-        await AdvanceAsync(host, TimeSpan.FromSeconds(30));
+        await host.AdvanceAsync(TimeSpan.FromSeconds(30));
 
         // Assert
-        Assert.Equal("On: Waiting since 12:01:00: Only if is false", statusWhileWaiting);
+        Assert.Equal("On: Waiting since 2026-11-06 12:01:00: Only if is false", statusWhileWaiting);
         Assert.Equal("On: Armed", statusAfterTheWait);
-        Assert.Equal("On: Waiting since 12:01:30: Only if is false", host.Rule("overheat").Status);
+        Assert.Equal("On: Waiting since 2026-11-06 12:01:30: Only if is false", host.Rule("overheat").Status);
         Assert.Equal(2, host.Logger.Messages.Count(message => message.EndsWith("did not run: Only if is false.", StringComparison.Ordinal)));
     }
 }

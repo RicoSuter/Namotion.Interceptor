@@ -8,15 +8,15 @@ namespace HomeBlaze.Automation.Tests;
 
 public class AutomationRuleTestNowTests
 {
-    private static AutomationRule Retract(string guard = "not /Blinds/IsMoving", AutomationRuleMode mode = AutomationRuleMode.On) => Create(
+    private static AutomationRule Retract(string onlyIf = "not /Blinds/IsMoving", AutomationRuleMode mode = AutomationRuleMode.On) => Create(
         "Retract",
         mode,
         [When("/Weather/Gust > 8", TimeSpan.FromSeconds(20)), OnEvent("/Button", "TestPressEvent", "event/Gesture == Release")],
         [Invoke("/Blinds/MoveTo", ("position", "/Weather/Gust * 2")), Invoke("/Notifier/SendNotification", ("notification.Message", "Gust {{ /Weather/Gust | raw }}"))],
-        guard);
+        onlyIf);
 
     [Fact]
-    public async Task WhenARuleIsTested_ThenItShowsTriggersGuardAndRenderedActionsAndChangesNothing()
+    public async Task WhenARuleIsTested_ThenItShowsTriggersOnlyIfAndRenderedActionsAndChangesNothing()
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract())));
@@ -36,8 +36,8 @@ public class AutomationRuleTestNowTests
         Assert.Equal("Fires when true for 20s", result.Triggers[0].Note);
         Assert.Null(result.Triggers[1].Result);
         Assert.Equal("Runs on each TestPressEvent of /Button that passes the filter", result.Triggers[1].Note);
-        Assert.True(result.HasGuard);
-        Assert.False(result.GuardResult);
+        Assert.True(result.HasOnlyIf);
+        Assert.False(result.OnlyIfResult);
         Assert.Equal(["/Blinds/MoveTo(position: 18)", "/Notifier/SendNotification(notification.Message: \"Gust 9\")"], result.Actions.ToArray());
         Assert.Equal(0, host.Blinds.Position);
         Assert.Empty(host.Notifier.Sent);
@@ -49,7 +49,7 @@ public class AutomationRuleTestNowTests
     public async Task WhenValuesAreMissing_ThenTheTestNamesThePaths()
     {
         // Arrange
-        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract(guard: "/Weather/Rain > 0"))));
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(("retract", Retract(onlyIf: "/Weather/Rain > 0"))));
 
         // Act
         var result = host.Rule("retract").TestNow();
@@ -57,8 +57,8 @@ public class AutomationRuleTestNowTests
         // Assert
         Assert.Null(result.Triggers[0].Result);
         Assert.Equal(["/Weather/Gust"], result.Triggers[0].MissingPaths.ToArray());
-        Assert.Null(result.GuardResult);
-        Assert.Equal(["/Weather/Rain"], result.GuardMissingPaths.ToArray());
+        Assert.Null(result.OnlyIfResult);
+        Assert.Equal(["/Weather/Rain"], result.OnlyIfMissingPaths.ToArray());
     }
 
     [Fact]

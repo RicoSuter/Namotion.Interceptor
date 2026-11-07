@@ -354,7 +354,7 @@ A gust held for 20 seconds or rain for a minute retracts the blinds, at most onc
         { "$type": "PropertyTrigger", "expression": "/Weather/WS90/WindGust > 8", "for": "00:00:20", "rearm": "/Weather/WS90/WindGust < 6" },
         { "$type": "PropertyTrigger", "expression": "/Weather/WS90/RainRate > 0", "for": "00:01:00" }
       ],
-      "guard": "not /Living/Blinds/IsMoving and not /Living/Blinds/IsCalibrating and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)",
+      "onlyIf": "not /Living/Blinds/IsMoving and not /Living/Blinds/IsCalibrating and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)",
       "actions": [
         { "$type": "InvokeOperation", "id": "call-1", "operationPath": "/Living/Blinds/Close" },
         {

@@ -21,7 +21,7 @@ public class PropertyTriggerEngineTests
         graph.Add("Weather", weather);
         weather.Gust = 3;
         var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), NullLogger.Instance, () => "Storm", _ => { });
-        Assert.True(AutomationCompiler.TryCompileRule("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")), [], out var rule, out var error), error);
+        var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         var staleChange = new PropertyChangedInput(new PropertyReference(weather, nameof(TestSensor.Gust)), 9.0, 0, 0);
 
         // Act
@@ -46,7 +46,7 @@ public class PropertyTriggerEngineTests
         graph.Add("Weather", weather);
         var logger = new MessageLogger();
         var engine = new PropertyTriggerEngine(graph.Resolver, new FakeTimeProvider(Now), logger, () => "Storm", _ => { });
-        Assert.True(AutomationCompiler.TryCompileRule("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")), [], out var rule, out var error), error);
+        var rule = Compile("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")));
         rule.IsActivated = true;
 
         // Act
