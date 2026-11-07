@@ -54,7 +54,7 @@ public class AutomationPendingTriggerTests
         await AdvanceAsync(host, TimeSpan.FromMinutes(15));
 
         // Assert
-        Assert.Equal("On: Waiting since 12:01:00: Only if is false", statusWhileWaiting);
+        Assert.Equal("On: Waiting since 2026-11-06 12:01:00: Only if is false", statusWhileWaiting);
         Assert.Equal(1, runsBeforeTheCooldownEnds);
         Assert.Equal(2, runsWhenTheCooldownEnded);
         Assert.Equal(2, host.Blinds.CloseCount);
@@ -283,9 +283,9 @@ public class AutomationPendingTriggerTests
         await AdvanceAsync(host, TimeSpan.FromSeconds(30));
 
         // Assert
-        Assert.Equal("On: Waiting since 12:01:00: Only if is false", statusWhileWaiting);
+        Assert.Equal("On: Waiting since 2026-11-06 12:01:00: Only if is false", statusWhileWaiting);
         Assert.Equal("On: Armed", statusAfterTheWait);
-        Assert.Equal("On: Waiting since 12:01:30: Only if is false", host.Rule("overheat").Status);
+        Assert.Equal("On: Waiting since 2026-11-06 12:01:30: Only if is false", host.Rule("overheat").Status);
         Assert.Equal(2, host.Logger.Messages.Count(message => message.EndsWith("did not run: Only if is false.", StringComparison.Ordinal)));
     }
 }

@@ -52,7 +52,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, triggers, TimeZoneInfo.Utc);
 
         // Assert
-        Assert.Equal("On: Unknown since 12:00:00, missing /Weather/Gust, /Weather/Rain", text);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust, /Weather/Rain", text);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, [TriggerStatus.FromProperty(state, null)], TimeZoneInfo.Utc);
 
         // Assert
-        Assert.Equal("On: Unknown since 12:00:05, missing /Weather/Threshold", text);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:05, missing /Weather/Threshold", text);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class RuleStatusTextTests
         var text = RuleStatusText.Format(AutomationRuleMode.On, null, triggers, TimeZoneInfo.Utc, "Only if is false");
 
         // Assert
-        Assert.Equal("On: Waiting since 12:00:00: Only if is false", text);
+        Assert.Equal("On: Waiting since 2026-11-06 12:00:00: Only if is false", text);
     }
 
     [Fact]
