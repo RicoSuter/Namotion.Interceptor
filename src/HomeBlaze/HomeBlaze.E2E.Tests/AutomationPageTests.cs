@@ -49,6 +49,8 @@ public class AutomationPageTests
         await Assertions.Expect(rows.First).ToContainTextAsync("Started");
         await Assertions.Expect(rows.First).ToContainTextAsync("Dry run");
         await Assertions.Expect(rows.Nth(1)).ToContainTextAsync("Active in state Running");
+        await Assertions.Expect(rows.First.GetByTestId("automation-dry-run-hint"))
+            .ToHaveTextAsync("Dry runs do not change the state, so the rules of Running do not run until this rule is On.");
     }
 
     [Fact]

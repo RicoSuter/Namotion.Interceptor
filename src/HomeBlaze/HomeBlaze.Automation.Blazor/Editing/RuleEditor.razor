@@ -31,6 +31,10 @@
     {
         <MudText Typo="Typo.caption" Class="mud-text-secondary">This automation has no states, so the rule is active all the time. "Active in state" appears once states exist.</MudText>
     }
+    @if (AutomationSummary.GetDryRunHint(Rule.Mode, Rule.InState, Rule.TargetStates) is { } dryRunHint)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" data-testid="automation-rule-dry-run-hint">@dryRunHint</MudAlert>
+    }
     @foreach (var error in Errors)
     {
         <MudAlert Severity="Severity.Warning" Dense="true" data-testid="automation-rule-error">@error.Message</MudAlert>

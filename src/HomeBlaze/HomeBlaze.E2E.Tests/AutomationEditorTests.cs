@@ -112,6 +112,24 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenARuleInDryRunChangesTheState_ThenTheEditorSaysTheRulesOfThatStateDoNotRunUntilItIsOn()
+    {
+        // Arrange
+        await using var washer = await _fixture.AddStoredAutomationAsync(WasherAutomation.Configure);
+        var (_, dialog) = await OpenEditorAsync(washer.Name, tab: RulesTab);
+        await SelectRuleAsync(dialog, "Started");
+        var hint = dialog.GetByTestId("automation-rule-dry-run-hint");
+        await Assertions.Expect(hint).ToHaveTextAsync(
+            "Dry runs do not change the state, so the rules of Running do not run until this rule is On.", new() { Timeout = Timeout });
+
+        // Act
+        await dialog.GetByTestId("automation-rule-mode-On").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(hint).ToHaveCountAsync(0, new() { Timeout = Timeout });
+    }
+
+    [Fact]
     public async Task WhenAHoldIsNoSingleDuration_ThenItShowsAnErrorAndSaveIsDisabledUntilItIsFixed()
     {
         // Arrange

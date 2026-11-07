@@ -20,6 +20,24 @@ public class AutomationSummaryTests
         Assert.Equal(expected, text);
     }
 
+    [Theory]
+    [InlineData(AutomationRuleMode.DryRun, null, new[] { "Running" }, "Dry runs do not change the state, so the rules of Running do not run until this rule is On.")]
+    [InlineData(AutomationRuleMode.DryRun, "Idle", new[] { "Running", "Idle", "Running", "" }, "Dry runs do not change the state, so the rules of Running do not run until this rule is On.")]
+    [InlineData(AutomationRuleMode.DryRun, null, new[] { "Running", "Done" }, "Dry runs do not change the state, so the rules of Running and Done do not run until this rule is On.")]
+    [InlineData(AutomationRuleMode.DryRun, "Idle", new[] { "Idle" }, null)]
+    [InlineData(AutomationRuleMode.DryRun, null, new string[0], null)]
+    [InlineData(AutomationRuleMode.On, null, new[] { "Running" }, null)]
+    [InlineData(AutomationRuleMode.Off, null, new[] { "Running" }, null)]
+    public void WhenARuleInDryRunChangesTheState_ThenTheHintNamesTheStatesWhoseRulesDoNotRun(
+        AutomationRuleMode mode, string? inState, string[] targetStates, string? expected)
+    {
+        // Act
+        var hint = AutomationSummary.GetDryRunHint(mode, inState, targetStates);
+
+        // Assert
+        Assert.Equal(expected, hint);
+    }
+
     [Fact]
     public void WhenTheAutomationHasAnError_ThenTheHeadlineIsTheError()
     {

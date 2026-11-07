@@ -31,6 +31,26 @@ internal static class AutomationSummary
     };
 
     /// <summary>
+    /// Why a rule in dry run keeps the rules of the states it changes to from running, since a dry run changes no state; null
+    /// for a rule in another mode or without a Change state action to another state.
+    /// </summary>
+    public static string? GetDryRunHint(AutomationRuleMode mode, string? inState, IEnumerable<string?> targetStates)
+    {
+        if (mode != AutomationRuleMode.DryRun)
+        {
+            return null;
+        }
+
+        var states = targetStates
+            .Where(state => !string.IsNullOrEmpty(state) && state != inState)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return states.Length == 0
+            ? null
+            : $"Dry runs do not change the state, so the rules of {JoinWithAnd(states!)} do not run until this rule is On.";
+    }
+
+    /// <summary>
     /// The line a widget shows below the state: the error of the automation, otherwise the first rule that waits for Only
     /// if, holds a condition, misses values or did not run its last request, otherwise nothing.
     /// </summary>
@@ -57,4 +77,7 @@ internal static class AutomationSummary
         statusText.StartsWith("Holding", StringComparison.Ordinal) ||
         statusText.StartsWith("Unknown", StringComparison.Ordinal) ||
         statusText.Contains("; not run: ", StringComparison.Ordinal);
+
+    private static string JoinWithAnd(string[] items) =>
+        items.Length == 1 ? items[0] : $"{string.Join(", ", items[..^1])} and {items[^1]}";
 }

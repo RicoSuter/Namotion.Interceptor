@@ -76,6 +76,10 @@
                                     <td>
                                         <MudText Typo="Typo.body2" Style="font-weight: 500;">@(rule.Name ?? key)</MudText>
                                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@DescribeScope(automation, rule)</MudText>
+                                        @if (GetDryRunHint(rule) is { } dryRunHint)
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Info" Class="d-block" data-testid="automation-dry-run-hint">@dryRunHint</MudText>
+                                        }
                                     </td>
                                     <td>@AutomationSummary.FormatMode(rule.Mode)</td>
                                     <td style="overflow-wrap: anywhere;">@AutomationSummary.GetStatusText(rule.Status)</td>
@@ -198,6 +202,9 @@
             // The page was closed.
         }
     }
+
+    private static string? GetDryRunHint(AutomationRule rule) =>
+        AutomationSummary.GetDryRunHint(rule.Mode, rule.InState, (rule.Actions ?? []).OfType<ChangeStateAction>().Select(action => action.TargetState));
 
     private async Task TestAsync(string key, AutomationRule rule)
     {
