@@ -130,24 +130,24 @@
 @code {
     private const int MaxRuns = 20;
     private static readonly TimeSpan RunWindow = TimeSpan.FromDays(7);
-    private static readonly TimeSpan HistoryRetryDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ReloadInterval = TimeSpan.FromSeconds(5);
 
     private readonly StateDiagramLayoutCache _layouts = new();
+    private readonly RunReloadSchedule _reloads = new(ReloadInterval);
+    private readonly CancellationTokenSource _disposal = new();
     private StateDiagramLayout? _layout;
     private (string[]? States, string? InitialState, Dictionary<string, AutomationRule>? Rules, string[]? RuleOrder) _layoutConfiguration;
     private IReadOnlyList<RunEntry> _runs = [];
     private bool _hasHistory;
     private string? _runsError;
-    private string? _loadedRunsKey;
-    private CancellationTokenSource? _loadCancellation;
+    private int? _loadedRunsKey;
     private int _loadVersion;
-    private bool _isDisposed;
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
-    // The run counts are rendered, so a run or a saved configuration renders the page again, and the runs are read once
-    // per change of the counts.
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    // The run counts are rendered, so a run or a saved configuration renders the page again. The runs are read at most once
+    // per interval, and once more after it while the history lags behind the counts.
+    protected override void OnAfterRender(bool firstRender)
     {
         if (Subject is not Automation automation)
         {
@@ -155,58 +155,57 @@
         }
 
         var runsKey = GetRunsKey(automation);
-        if (runsKey == _loadedRunsKey)
+        if (runsKey != _loadedRunsKey)
         {
-            return;
-        }
-
-        _loadedRunsKey = runsKey;
-
-        // Every load disposes its own source when it ends, so a superseded load that is still running keeps a usable token.
-        if (_loadCancellation is { } previous)
-        {
-            await previous.CancelAsync();
-        }
-
-        using var cancellation = new CancellationTokenSource();
-        _loadCancellation = cancellation;
-        var version = ++_loadVersion;
-        var cancellationToken = cancellation.Token;
-        try
-        {
-            var isBehind = await LoadRunsAsync(automation, version, cancellationToken);
-            Refresh(version);
-            if (isBehind)
-            {
-                // History stores buffer their writes, so the run that changed the count may not be stored yet.
-                await Task.Delay(HistoryRetryDelay, TimeProvider, cancellationToken);
-                await LoadRunsAsync(automation, version, cancellationToken);
-                Refresh(version);
-            }
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException && IsStale(version, cancellationToken))
-        {
-            // Superseded by a newer load or disposed: the newer load or nobody shows the runs.
-        }
-        finally
-        {
-            if (ReferenceEquals(_loadCancellation, cancellation))
-            {
-                _loadCancellation = null;
-            }
+            _loadedRunsKey = runsKey;
+            RequestLoad();
         }
     }
 
-    private void Refresh(int version)
+    private void RequestLoad()
     {
-        if (!_isDisposed && version == _loadVersion)
+        if (_reloads.Request(TimeProvider.GetUtcNow()) is { } delay)
         {
-            StateHasChanged();
+            _ = LoadAfterAsync(delay);
+        }
+    }
+
+    private async Task LoadAfterAsync(TimeSpan delay)
+    {
+        var cancellationToken = _disposal.Token;
+        try
+        {
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, TimeProvider, cancellationToken);
+            }
+
+            _reloads.Start(TimeProvider.GetUtcNow());
+            if (Subject is not Automation automation || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var version = ++_loadVersion;
+            var isBehind = await LoadRunsAsync(automation, version, cancellationToken);
+            if (!IsStale(version, cancellationToken))
+            {
+                StateHasChanged();
+            }
+
+            if (isBehind && !cancellationToken.IsCancellationRequested)
+            {
+                RequestLoad();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The page was closed.
         }
     }
 
     private bool IsStale(int version, CancellationToken cancellationToken) =>
-        _isDisposed || version != _loadVersion || cancellationToken.IsCancellationRequested;
+        version != _loadVersion || cancellationToken.IsCancellationRequested;
 
     // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs. Returns
     // whether the history lags behind the live run counts.
@@ -224,22 +223,25 @@
         try
         {
             var now = TimeProvider.GetUtcNow();
-            var sources = GetRunSources(automation);
-            var runs = await RunHistory.LoadAsync(stores, sources, now - RunWindow, now, MaxRuns, cancellationToken);
-            var isBehind = await RunHistory.IsBehindAsync(stores, sources, now, cancellationToken);
+            var result = await RunHistory.LoadAsync(stores, GetRunSources(automation), now - RunWindow, now, MaxRuns, cancellationToken);
             if (!IsStale(version, cancellationToken))
             {
                 _hasHistory = true;
-                _runs = runs;
+                _runs = result.Runs;
                 _runsError = null;
             }
 
-            return isBehind;
+            return result.IsBehind;
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException && !IsStale(version, cancellationToken))
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            _hasHistory = true;
-            _runsError = $"The runs could not be read from history: {exception.Message}";
+            // A load that a newer one superseded or that the closed page canceled shows nothing.
+            if (!IsStale(version, cancellationToken))
+            {
+                _hasHistory = true;
+                _runsError = $"The runs could not be read from history: {exception.Message}";
+            }
+
             return false;
         }
     }
@@ -332,8 +334,19 @@
         return automation.States.Length > 0 ? "Any state" : null;
     }
 
-    private static string GetRunsKey(Automation automation) =>
-        string.Join(",", automation.Rules.Select(pair => $"{pair.Key}:{pair.Value.Name}:{pair.Value.RunCount}"));
+    // A hash instead of a text, because the page renders on every change of a status.
+    private static int GetRunsKey(Automation automation)
+    {
+        var hash = new HashCode();
+        foreach (var (key, rule) in automation.Rules)
+        {
+            hash.Add(key);
+            hash.Add(rule.Name);
+            hash.Add(rule.RunCount);
+        }
+
+        return hash.ToHashCode();
+    }
 
     private static IReadOnlyList<RunEntry> GetLastRuns(Automation automation) =>
     [
@@ -344,7 +357,7 @@
 
     public void Dispose()
     {
-        _isDisposed = true;
-        _loadCancellation?.Cancel();
+        _disposal.Cancel();
+        _disposal.Dispose();
     }
 }
