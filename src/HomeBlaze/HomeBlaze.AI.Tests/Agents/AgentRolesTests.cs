@@ -7,6 +7,7 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.AI.Tests.Mcp;
+using HomeBlaze.Components;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -470,6 +471,34 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.Equal("Kitchen: [Yes], cellar: [], temperature: [18]", evaluated);
     }
 
+    [Theory]
+    [InlineData(false, "State: [warm]")]
+    [InlineData(true, "State: [Cannot resolve map: busy]")]
+    public async Task WhenARoleHidesAValueMap_ThenAPageExpressionCannotApplyIt(bool hidesMap, string expected)
+    {
+        // Arrange
+        var graph = await CreateGraphAsync($$$"""
+            :: {{{typeof(ValueMap).FullName}}}#busy
+            ::: Case When="value > 20" Text="warm"
+            ::
+
+            State: [{{ /Temperature | map:busy }}]
+            """);
+        var role = new AuthorizationRole
+        {
+            Name = "NoMap",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = hidesMap ? [new PermissionRule { Paths = ["/Storage/Notes.md/busy/**"], Actions = [PermissionAction.Read] }] : []
+        };
+        var tools = CreateClientTools(graph, TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var evaluated = await ReadEvaluatedContentAsync(tools, includeSourcePaths: false);
+
+        // Assert
+        Assert.Equal(expected, evaluated?.Split('\n')[^1]);
+    }
+
     [Fact]
     public async Task WhenAnOperationChangesAProperty_ThenItsChangeHandlersDoNotRunUnderTheReadCheckOfTheCaller()
     {
@@ -625,6 +654,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
 
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(ValueMap).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();
