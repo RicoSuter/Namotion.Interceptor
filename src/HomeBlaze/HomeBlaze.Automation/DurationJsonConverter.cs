@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -24,7 +25,8 @@ internal sealed class DurationJsonConverter : JsonConverter<TimeSpan?>
             return duration;
         }
 
-        throw new JsonException("A duration is a text such as 10m, 1h30m or 00:10:00.");
+        var given = text ?? (reader.TokenType == JsonTokenType.Number ? Encoding.UTF8.GetString(reader.ValueSpan) : reader.TokenType.ToString());
+        throw new JsonException($"'{given}' is not a duration: use a text such as 10m, 1h30m or 00:10:00.");
     }
 
     public override void Write(Utf8JsonWriter writer, TimeSpan? value, JsonSerializerOptions options)
