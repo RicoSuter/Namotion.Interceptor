@@ -181,20 +181,25 @@ internal sealed class PropertyTriggerEngine(
     public IReadOnlyList<RunRequest> RequestPendingRuns(IReadOnlyList<CompiledRule> rules) =>
         _pending.Count == 0 ? [] : AddPendingRequests(rules, [], _ => true);
 
+    /// <summary>Whether a trigger is pending.</summary>
+    public bool HasPending => _pending.Count > 0;
+
     /// <summary>
     /// Keeps track of the pending triggers after the requests were dispatched: a trigger whose request did not run
     /// becomes pending and the properties of its guard are watched, and one that ran, turned false or whose rule was
     /// deactivated is no longer pending. Sets when the guard of a rule with a pending trigger is evaluated again for the
-    /// clock. Does nothing while no trigger is pending and nothing was requested.
+    /// clock. Does nothing while no trigger is pending and nothing was requested. Returns whether a trigger became
+    /// pending, whose guard may have changed before its properties were watched.
     /// </summary>
-    public void TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests)
+    public bool TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests)
     {
         if (_pending.Count == 0 && requests.Count == 0)
         {
-            return;
+            return false;
         }
 
-        var hasChanged = _pending.RemoveAll(trigger => !IsPending(trigger)) > 0;
+        var hasRemoved = _pending.RemoveAll(trigger => !IsPending(trigger)) > 0;
+        var hasAdded = false;
         var now = timeProvider.GetUtcNow();
         foreach (var request in requests)
         {
@@ -207,16 +212,18 @@ internal sealed class PropertyTriggerEngine(
             {
                 ResolveGuardDependencies(trigger.Rule);
                 _pending.Add(trigger);
-                hasChanged = true;
+                hasAdded = true;
             }
 
             ScheduleGuardRecheck(trigger.Rule, now);
         }
 
-        if (hasChanged)
+        if (hasRemoved || hasAdded)
         {
             PublishWatched(rules, []);
         }
+
+        return hasAdded;
     }
 
     /// <summary>Observes the changes of watched properties that are newer than the observed values and returns their properties.</summary>

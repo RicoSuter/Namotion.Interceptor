@@ -142,6 +142,68 @@ public class AutomationPendingTriggerTests
     }
 
     [Fact]
+    public async Task WhenOnlyIfBecomesTrueLaterInTheSameInput_ThenTheWaitingTriggerRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.RuleOrder = ["retract", "stop"];
+            automation.Rules = Keyed(
+                ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "not /Blinds/IsMoving")),
+                ("stop", Create("Stop", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Set("/Blinds/IsMoving", "false")])));
+        });
+        host.Blinds.IsMoving = true;
+        await host.FlushAsync();
+
+        // Act
+        await SetAsync(host, 41);
+        await AdvanceAsync(host, TimeSpan.FromMinutes(5));
+
+        // Assert
+        Assert.False(host.Blinds.IsMoving);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenOnlyIfIsRemovedWhileATriggerWaits_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "not /Blinds/IsMoving"))));
+        host.Blinds.IsMoving = true;
+        await SetAsync(host, 41);
+        var statusWhileWaiting = host.Rule("retract").Status;
+
+        // Act
+        host.Automation.Rules = Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")])));
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromMinutes(5));
+
+        // Assert
+        Assert.StartsWith("On: Waiting since", statusWhileWaiting);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenOnlyIfIsRelaxedWhileATriggerWaits_ThenTheRuleRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "/Blinds/Position > 50"))));
+        await SetAsync(host, 41);
+
+        // Act
+        host.Automation.Rules = Keyed(("retract", Create("Retract", AutomationRuleMode.On, [When("/Weather/Power > 40")], [Invoke("/Blinds/Close")], "/Blinds/Position >= 0")));
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        await host.FlushAsync();
+        await AdvanceAsync(host, TimeSpan.FromMinutes(5));
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenARuleWithoutOnlyIfIsSkippedByAStateChange_ThenItRunsAfterTheStateChange()
     {
         // Arrange

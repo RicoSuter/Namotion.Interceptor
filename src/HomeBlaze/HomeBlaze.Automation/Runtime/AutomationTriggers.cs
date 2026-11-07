@@ -190,8 +190,15 @@ internal sealed class AutomationTriggers
     /// <summary>Gets when the next property trigger or guard is due for a tick, or null when none is.</summary>
     public DateTimeOffset? GetNextDueAt(IReadOnlyList<CompiledRule> rules, DateTimeOffset now) => _propertyTriggers.GetNextDueAt(rules, now);
 
-    /// <summary>Keeps track of the pending property triggers after the requests were dispatched.</summary>
-    public void TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
+    /// <summary>Whether a property trigger is pending.</summary>
+    public bool HasPending => _propertyTriggers.HasPending;
+
+    /// <summary>
+    /// Keeps track of the pending property triggers after the requests were dispatched. Returns whether a trigger became
+    /// pending, whose guard is to be checked again in a later input: a property it reads may have changed before it was
+    /// watched.
+    /// </summary>
+    public bool TrackPending(IReadOnlyList<CompiledRule> rules, IReadOnlyList<RunRequest> requests) =>
         _propertyTriggers.TrackPending(rules, requests);
 
     /// <summary>The position of the rule in rule order; the number of rules for a rule that is not one of them.</summary>
