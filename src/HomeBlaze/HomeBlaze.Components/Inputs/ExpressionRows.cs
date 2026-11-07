@@ -75,8 +75,9 @@ internal static class ExpressionRows
     private static bool IsStructuralKeyword(string token) =>
         Combinators.Contains(token, StringComparer.OrdinalIgnoreCase) || token.Equals("not", StringComparison.OrdinalIgnoreCase);
 
+    // A leading minus negates what follows, so a token that starts with one is no path.
     public static bool IsPath(string token) =>
-        IsPlainToken(token) && !IsKeyword(token) && !StartsLikeNumber(token);
+        IsPlainToken(token) && token[0] != '-' && !IsKeyword(token) && !StartsLikeNumber(token);
 
     // A token without a delimiter outside brackets is one word for the parser, with no operator or symbol glued to it.
     private static bool IsPlainToken(string token)

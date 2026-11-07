@@ -213,6 +213,7 @@ namespace HomeBlaze.Automation
     }
     public static class AutomationValidator
     {
+        public static System.Collections.Immutable.ImmutableArray<string> Variables { get; }
         public static System.Collections.Generic.IReadOnlyList<HomeBlaze.Automation.AutomationValidationError> Validate(System.Collections.Generic.IReadOnlyList<string> states, string? initialState, System.Collections.Generic.IReadOnlyDictionary<string, HomeBlaze.Automation.AutomationRule> rules, System.Collections.Generic.IReadOnlyList<string> ruleOrder) { }
         public static string? ValidateExpression(string? text, bool allowsEvent) { }
         public static string? ValidateTemplate(string? text, bool allowsEvent) { }

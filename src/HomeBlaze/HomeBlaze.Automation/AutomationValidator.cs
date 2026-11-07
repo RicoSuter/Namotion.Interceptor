@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Automation.Runtime;
 
@@ -11,6 +12,9 @@ namespace HomeBlaze.Automation;
 /// </summary>
 public static class AutomationValidator
 {
+    /// <summary>The variables that the expressions and templates of automations declare: <c>now</c>, <c>time</c>, <c>event</c>, <c>subject</c> and <c>value</c>.</summary>
+    public static ImmutableArray<string> Variables => AutomationVariables.All;
+
     /// <summary>Gets the errors of the configuration, those of the automation first and then those of each rule in run order.</summary>
     public static IReadOnlyList<AutomationValidationError> Validate(
         IReadOnlyList<string> states,

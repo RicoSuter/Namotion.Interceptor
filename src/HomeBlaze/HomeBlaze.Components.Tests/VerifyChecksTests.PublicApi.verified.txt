@@ -1830,6 +1830,8 @@ namespace HomeBlaze.Components.Inputs
         public string? Value { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Immutable.ImmutableArray<string> Variables { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }

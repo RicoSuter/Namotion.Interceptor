@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using Namotion.Interceptor.Expressions;
 
@@ -9,17 +10,30 @@ namespace HomeBlaze.Components.Inputs;
 /// </summary>
 internal sealed class ExpressionFieldModel
 {
+    private static readonly ImmutableArray<string> DefaultVariables = [ExpressionVariables.Value, ExpressionVariables.Subject];
+
     private List<ExpressionRow> _rows = [];
     private List<PendingRow?> _pending = [];
 
-    public ExpressionFieldModel(string? text, char pathSeparator = '/')
+    /// <param name="text">The expression text.</param>
+    /// <param name="pathSeparator">The separator of the paths of the host.</param>
+    /// <param name="variables">The variables the host declares, or default for <c>value</c> and <c>subject</c>.</param>
+    public ExpressionFieldModel(string? text, char pathSeparator = '/', ImmutableArray<string> variables = default)
     {
         PathSeparator = pathSeparator;
+        Variables = variables;
         Load(text);
         IsAdvanced = !CanShowSimple;
     }
 
     public char PathSeparator { get; set; }
+
+    /// <summary>The variables the host declares; default stands for <c>value</c> and <c>subject</c>.</summary>
+    public ImmutableArray<string> Variables
+    {
+        get;
+        set => field = value.IsDefault ? DefaultVariables : value;
+    }
 
     public string Text { get; private set; } = string.Empty;
 
@@ -175,9 +189,15 @@ internal sealed class ExpressionFieldModel
         !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
         !StartsLikePath(value);
 
-    private bool StartsLikePath(string value) =>
-        value.StartsWith(PathSeparator) || value.StartsWith("." + PathSeparator) || value.StartsWith(".." + PathSeparator) ||
-        ExpressionVariables.TryGetVariable(value, PathSeparator, out _);
+    // A leading minus negates the path after it.
+    private bool StartsLikePath(string value)
+    {
+        var path = value.StartsWith('-') ? value[1..] : value;
+        return path.StartsWith(PathSeparator) || path.StartsWith("." + PathSeparator) || path.StartsWith(".." + PathSeparator) ||
+            (ParsedExpression.TryParse(path, PathSeparator, Variables, out var expression, out _) &&
+             expression.SinglePath is { } singlePath &&
+             expression.TryGetVariable(singlePath, out _, out _));
+    }
 
     private (string Value, string? Error) Quote(string value)
     {
@@ -192,7 +212,7 @@ internal sealed class ExpressionFieldModel
 
     private bool Parses(string operand) => ParsesText($"x == {operand}");
 
-    private bool ParsesText(string text) => ParsedExpression.TryParse(text, PathSeparator, out _, out _);
+    private bool ParsesText(string text) => ParsedExpression.TryParse(text, PathSeparator, Variables, out _, out _);
 
     private static bool StartsLikeNumber(string value) =>
         char.IsDigit(value[0]) || (value[0] is '-' or '+' or '.' && value.Length > 1);

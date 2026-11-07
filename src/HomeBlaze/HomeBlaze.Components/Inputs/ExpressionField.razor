@@ -1,3 +1,4 @@
+@using System.Collections.Immutable
 @* One field for every condition: simple rows of path, comparison and value with the current value of each row, or
    the expression as text. The stored value is always the expression text. *@
 
@@ -124,11 +125,15 @@
 
     [Parameter] public char PathSeparator { get; set; } = '/';
 
+    /// <summary>The variables the host declares for its expressions; default stands for <c>value</c> and <c>subject</c>.</summary>
+    [Parameter] public ImmutableArray<string> Variables { get; set; }
+
     [Parameter] public string TestId { get; set; } = "expression-field";
 
     protected override async Task OnParametersSetAsync()
     {
         _model.PathSeparator = PathSeparator;
+        _model.Variables = Variables;
         if (!string.Equals(Value ?? string.Empty, _model.Text, StringComparison.Ordinal))
         {
             _model.Load(Value);
@@ -197,7 +202,7 @@
         var text = _model.Text;
         var hasText = !string.IsNullOrWhiteSpace(text);
         _error = hasText ? Validate?.Invoke(text) : null;
-        _hints = ExpressionHints.GetBareWordHints(text, PathSeparator, path => Preview?.Invoke(path)?.Value);
+        _hints = ExpressionHints.GetBareWordHints(text, PathSeparator, _model.Variables, path => Preview?.Invoke(path)?.Value);
         _resultText = hasText && _error is null && Preview?.Invoke(text) is { } preview ? FormatResult(preview.Result) : null;
     }
 

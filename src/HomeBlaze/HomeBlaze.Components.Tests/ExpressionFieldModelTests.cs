@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Components.Inputs;
 using Namotion.Interceptor.Expressions;
 using Xunit;
@@ -6,6 +7,8 @@ namespace HomeBlaze.Components.Tests;
 
 public class ExpressionFieldModelTests
 {
+    private static readonly ImmutableArray<string> Variables = ["now", "time", "event", "subject", "value"];
+
     [Fact]
     public void WhenTheExpressionIsSimple_ThenItStartsWithRows()
     {
@@ -145,10 +148,14 @@ public class ExpressionFieldModelTests
     [InlineData("subject/Name")]
     [InlineData("now")]
     [InlineData("\"two words\"")]
+    [InlineData("-5")]
+    [InlineData("-x")]
+    [InlineData("-/c/D")]
+    [InlineData("1.50")]
     public void WhenAValueIsTypedThatIsOneToken_ThenItIsWrittenAsItIs(string typed)
     {
         // Arrange
-        var model = new ExpressionFieldModel("/a/B == 1");
+        var model = new ExpressionFieldModel("/a/B == 1", '/', Variables);
 
         // Act
         model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", typed));
@@ -184,6 +191,8 @@ public class ExpressionFieldModelTests
     [InlineData("/a == /b")]
     [InlineData("and")]
     [InlineData("5")]
+    [InlineData("-x")]
+    [InlineData("-/a/B")]
     public void WhenAPathIsTypedThatIsNoPath_ThenTheRowKeepsItAsPendingWithItsError(string typed)
     {
         // Arrange
@@ -282,6 +291,20 @@ public class ExpressionFieldModelTests
         Assert.False(model.HasPendingRow);
         Assert.Equal(2, model.Rows.Count);
         Assert.Equal("/c/D", model.Rows[1].Path);
+    }
+
+    [Fact]
+    public void WhenAValueStartsWithAVariableTheHostDoesNotDeclare_ThenItIsQuotedAsText()
+    {
+        // Arrange
+        var model = new ExpressionFieldModel("/a/B == 1");
+
+        // Act
+        model.SetRow(0, new ExpressionRow(string.Empty, "/a/B", "==", "event/State"));
+
+        // Assert
+        Assert.Equal("/a/B == \"event/State\"", model.Text);
+        AssertTextParsesToTheRows(model);
     }
 
     private static void AssertTextParsesToTheRows(ExpressionFieldModel model)

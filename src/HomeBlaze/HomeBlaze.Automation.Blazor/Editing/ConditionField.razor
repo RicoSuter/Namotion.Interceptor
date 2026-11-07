@@ -2,7 +2,7 @@
 
 @* An ExpressionField that tells the editor while a row holds an unapplied invalid edit, and stops doing so when it goes away. *@
 <ExpressionField Value="@Value" ValueChanged="ValueChanged" Label="@Label" Lead="@Lead" Validate="@Validate" Preview="@Preview"
-                 Fields="@Fields" PathSeparator="@PathSeparator" TestId="@TestId" HasPendingRowChanged="@ReportPending" />
+                 Fields="@Fields" PathSeparator="@PathSeparator" Variables="@AutomationValidator.Variables" TestId="@TestId" HasPendingRowChanged="@ReportPending" />
 
 @code {
     private PendingRowTracker? _tracker;

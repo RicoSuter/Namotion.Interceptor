@@ -26,6 +26,9 @@ public class ExpressionRowsTests
     [InlineData("Devices[a | b == (c)]/IsOn == true")]
     [InlineData("/a/B > 30m")]
     [InlineData("Devices[it's]/IsOn == true")]
+    [InlineData("/a/B > -/c/D")]
+    [InlineData("/a/B > -5")]
+    [InlineData("/a/B > -0.5 and /c/D == 1.50")]
     public void WhenRowsAreFormattedAgain_ThenTheTextIsTheSame(string text)
     {
         // Act
@@ -57,6 +60,9 @@ public class ExpressionRowsTests
     [InlineData("/a/B > 1 and /c/D")]
     [InlineData("-.5 > /a/B")]
     [InlineData("+.5 > /a/B")]
+    [InlineData("-x > 1")]
+    [InlineData("-/a/B > 1")]
+    [InlineData("/a/B > 1 and -c == 2")]
     public void WhenTheExpressionHasAnotherForm_ThenItIsNotSimple(string text)
     {
         // Act
