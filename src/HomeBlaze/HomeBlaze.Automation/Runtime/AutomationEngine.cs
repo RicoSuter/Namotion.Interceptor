@@ -23,13 +23,14 @@ internal sealed class AutomationEngine : IRuleRunHost
     private int _appliedConfigurationVersion = -1;
     private bool _hasConfigurationError;
 
-    public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger)
+    /// <summary>Creates the engine, whose property triggers publish their watched set to <paramref name="changes"/>.</summary>
+    public AutomationEngine(Automation automation, AutomationInputQueue queue, AutomationStateKeeper keeper, ILogger logger, AutomationChangeReceiver changes)
     {
         var services = automation.Services;
         _automation = automation;
         _keeper = keeper;
         _logger = logger;
-        _triggers = new AutomationTriggers(services, queue, logger, () => Name);
+        _triggers = new AutomationTriggers(services, queue, logger, () => Name, changes.PublishWatched);
         _dispatcher = new RunDispatcher(this, services, keeper, logger);
         _states = new StateTransitions(automation, keeper, services.TimeProvider, logger);
         _status = new AutomationStatusReporter(automation, logger);
@@ -40,8 +41,6 @@ internal sealed class AutomationEngine : IRuleRunHost
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
-
-    public bool IsWatched(PropertyReference property) => _triggers.IsWatched(property);
 
     /// <summary>Restores the checkpoint without a state-change event and applies the configuration.</summary>
     public void Start()

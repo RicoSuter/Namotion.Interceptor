@@ -1,4 +1,6 @@
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Automation;
 
@@ -18,4 +20,8 @@ public sealed class AutomationServices(
 
     /// <summary>Resolves the services that operations take with <c>[FromServices]</c>.</summary>
     public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+    /// <summary>Routes the property changes to the automations: the registered dispatcher, or one of these services without one.</summary>
+    internal AutomationChangeDispatcher ChangeDispatcher { get; } =
+        serviceProvider.GetService<AutomationChangeDispatcher>() ?? new AutomationChangeDispatcher();
 }

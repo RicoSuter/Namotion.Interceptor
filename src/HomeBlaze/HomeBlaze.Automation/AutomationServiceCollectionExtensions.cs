@@ -1,3 +1,4 @@
+using HomeBlaze.Automation.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -14,6 +15,7 @@ public static class AutomationServiceCollectionExtensions
     {
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
+        services.TryAddSingleton<AutomationChangeDispatcher>();
         services.TryAddSingleton<AutomationServices>();
         return services;
     }

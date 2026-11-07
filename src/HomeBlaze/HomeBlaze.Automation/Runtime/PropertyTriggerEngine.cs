@@ -7,16 +7,19 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The property triggers of active rules: resolves the properties they read and publishes them as the watched set,
-/// evaluates them against the observed values on changes, ticks and graph changes, and returns the run requests of the
-/// triggers that fire. Used by the worker only, except <see cref="IsWatched"/>, which writer threads call.
+/// The property triggers of active rules: resolves the properties they read and publishes them as the watched set to
+/// <paramref name="publishWatched"/>, evaluates them against the observed values on changes, ticks and graph changes,
+/// and returns the run requests of the triggers that fire. Used by the worker only.
 /// </summary>
-internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimeProvider timeProvider, ILogger logger, Func<string> getAutomationName)
+internal sealed class PropertyTriggerEngine(
+    SubjectPathResolver resolver,
+    TimeProvider timeProvider,
+    ILogger logger,
+    Func<string> getAutomationName,
+    Action<FrozenSet<PropertyReference>>? publishWatched = null)
 {
     private readonly ObservedValues _values = new();
     private FrozenSet<PropertyReference> _watched = FrozenSet<PropertyReference>.Empty;
-
-    public bool IsWatched(PropertyReference property) => Volatile.Read(ref _watched).Contains(property);
 
     /// <summary>Activates the inactive triggers of the rules and returns the runs they request at once.</summary>
     public IReadOnlyList<RunRequest> Activate(IReadOnlyList<CompiledRule> rules, IReadOnlyList<CompiledRule> allRules)
@@ -103,7 +106,7 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
     // A change queued while its property was watched may arrive after it no longer is; kept, it would hide the current
     // value from a trigger that reads the property again later.
     private bool TryObserve(PropertyChangedInput change) =>
-        IsWatched(change.Property) && _values.TryApply(change.Property, change.Value, change.Revision);
+        _watched.Contains(change.Property) && _values.TryApply(change.Property, change.Value, change.Revision);
 
     private static IEnumerable<CompiledPropertyTrigger> ActiveTriggers(IReadOnlyList<CompiledRule> rules) =>
         rules.Where(rule => rule.IsActivated)
@@ -168,7 +171,8 @@ internal sealed class PropertyTriggerEngine(SubjectPathResolver resolver, TimePr
     private void PublishWatched(IReadOnlyList<CompiledRule> rules, IEnumerable<CompiledPropertyTrigger> activating)
     {
         var watched = ActiveTriggers(rules).Concat(activating).SelectMany(trigger => trigger.Dependencies).ToFrozenSet();
-        Volatile.Write(ref _watched, watched);
+        _watched = watched;
+        publishWatched?.Invoke(watched);
         _values.Retain(watched);
     }
 

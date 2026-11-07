@@ -1,17 +1,14 @@
-using System.Reactive.Concurrency;
 using HomeBlaze.Automation.Persistence;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property, a change of
-/// a property that holds subjects (coalesced), and a tick every wall-clock second (coalesced). The worker processes one
-/// input at a time with <see cref="AutomationEngine"/>, so no rule runs inside a property setter.
+/// The worker of one automation. Callbacks on writing threads only enqueue: a change of a watched property and a change
+/// of a property that holds subjects (coalesced), both routed by <see cref="AutomationChangeDispatcher"/>, and a tick
+/// every wall-clock second (coalesced). The worker processes one input at a time with <see cref="AutomationEngine"/>, so
+/// no rule runs inside a property setter.
 /// </summary>
 internal sealed class AutomationRuntime
 {
@@ -22,8 +19,8 @@ internal sealed class AutomationRuntime
     private readonly AutomationStateKeeper _keeper;
     private readonly AutomationInputQueue _queue = new();
     private readonly AutomationEngine _engine;
+    private readonly AutomationChangeReceiver _changes;
     private int _isTickPending;
-    private int _isGraphChangePending;
 
     /// <summary>Creates the worker of the automation, whose checkpoint is at <paramref name="location"/>.</summary>
     public AutomationRuntime(Automation automation, CheckpointLocation location, ILogger logger)
@@ -32,7 +29,8 @@ internal sealed class AutomationRuntime
         _logger = logger;
         Location = location;
         _keeper = new AutomationStateKeeper(location.Store);
-        _engine = new AutomationEngine(automation, _queue, _keeper, logger);
+        _changes = new AutomationChangeReceiver(_queue);
+        _engine = new AutomationEngine(automation, _queue, _keeper, logger, _changes);
     }
 
     /// <summary>The checkpoint of the automation: where it started, or where it moved to later. Changed by the worker only.</summary>
@@ -68,7 +66,7 @@ internal sealed class AutomationRuntime
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         var context = ((IInterceptorSubject)_automation).Context;
-        using var changes = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(OnPropertyChanged);
+        using var registration = _changes.Register(_automation.Services.ChangeDispatcher, context);
         try
         {
             _engine.Start();
@@ -194,22 +192,7 @@ internal sealed class AutomationRuntime
         }
         else if (input is GraphChangedInput)
         {
-            Volatile.Write(ref _isGraphChangePending, 0);
-        }
-    }
-
-    private void OnPropertyChanged(SubjectPropertyChange change)
-    {
-        if (_engine.IsWatched(change.Property))
-        {
-            _queue.TryEnqueue(new PropertyChangedInput(
-                change.Property, change.GetNewValue<object?>(), change.Revision, AutomationInputQueue.CausedChainDepth));
-        }
-
-        // Also for a watched property, since paths through it may lead elsewhere now.
-        if (change.Property.TryGetRegisteredProperty() is { CanContainSubjects: true })
-        {
-            EnqueueOnce(ref _isGraphChangePending, new GraphChangedInput(AutomationInputQueue.CausedChainDepth));
+            _changes.OnGraphChangeTaken();
         }
     }
 

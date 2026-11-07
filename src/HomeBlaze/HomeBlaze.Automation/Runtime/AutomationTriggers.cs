@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -6,8 +7,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// The property and event triggers of the rules of an automation: subscribes the triggers of rules that became active
 /// and queues the activation of their property triggers, binds them again when paths may lead elsewhere, and turns the
-/// inputs of the worker into run requests. Used by the worker only, except <see cref="IsWatched"/>, which writer threads
-/// call.
+/// inputs of the worker into run requests. Used by the worker only.
 /// </summary>
 internal sealed class AutomationTriggers
 {
@@ -15,14 +15,17 @@ internal sealed class AutomationTriggers
     private readonly PropertyTriggerEngine _propertyTriggers;
     private readonly EventTriggerEngine _eventTriggers;
 
-    public AutomationTriggers(AutomationServices services, AutomationInputQueue queue, ILogger logger, Func<string> getAutomationName)
+    public AutomationTriggers(
+        AutomationServices services,
+        AutomationInputQueue queue,
+        ILogger logger,
+        Func<string> getAutomationName,
+        Action<FrozenSet<PropertyReference>> publishWatched)
     {
         _queue = queue;
-        _propertyTriggers = new PropertyTriggerEngine(services.PathResolver, services.TimeProvider, logger, getAutomationName);
+        _propertyTriggers = new PropertyTriggerEngine(services.PathResolver, services.TimeProvider, logger, getAutomationName, publishWatched);
         _eventTriggers = new EventTriggerEngine(services.PathResolver, services.TimeProvider, queue);
     }
-
-    public bool IsWatched(PropertyReference property) => _propertyTriggers.IsWatched(property);
 
     /// <summary>
     /// Subscribes the event triggers of the rules that became active, publishes the watched set of all active rules and
