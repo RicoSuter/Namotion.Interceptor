@@ -1,4 +1,3 @@
-using HomeBlaze.Automation.Events;
 using HomeBlaze.Automation.Expressions;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -53,21 +52,7 @@ internal static class RuleTester
     private static AutomationTriggerTestResult TestEventTrigger(CompiledEventTrigger trigger, Automation automation) => new()
     {
         Number = trigger.Index + 1,
-        Note = DescribeEventSource(trigger, automation)
+        Note = EventTriggerEngine.FindSource(automation.PathResolver, trigger, out _, out _) ??
+            $"Runs on each {trigger.Configuration.EventType} of {trigger.Configuration.SubjectPath} that passes the filter"
     };
-
-    private static string DescribeEventSource(CompiledEventTrigger trigger, Automation automation)
-    {
-        var path = trigger.Configuration.SubjectPath;
-        var eventType = trigger.Configuration.EventType;
-        var source = AutomationPaths.ResolveSubject(automation.PathResolver, path, trigger.Rule.Rule);
-        if (source is null)
-        {
-            return $"No subject at {path}";
-        }
-
-        return EventSources.FindEventType(source.GetType(), eventType) is null
-            ? $"{path} publishes no {eventType}"
-            : $"Runs on each {eventType} of {path} that passes the filter";
-    }
 }
