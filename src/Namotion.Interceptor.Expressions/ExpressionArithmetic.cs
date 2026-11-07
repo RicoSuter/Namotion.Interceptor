@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Expressions;
 /// <see cref="decimal"/> when the result is exact, and as <see cref="double"/> otherwise; a <see cref="float"/> with any
 /// number computes as <see cref="float"/>; every other pair of numbers computes as <see cref="double"/>. An instant minus
 /// an instant is a <see cref="TimeSpan"/>, an instant plus or minus a <see cref="TimeSpan"/> is an instant, and two
-/// <see cref="TimeSpan"/> values add and subtract. A <see cref="DateTime"/> without a kind is read as UTC. A null result
+/// <see cref="TimeSpan"/> values add and subtract. A number or a <see cref="TimeSpan"/> negates. A <see cref="DateTime"/> without a kind is read as UTC. A null result
 /// means the pair has no arithmetic or the result is out of range, so the value is missing.
 /// </summary>
 internal static class ExpressionArithmetic
@@ -26,6 +26,17 @@ internal static class ExpressionArithmetic
             _ => null
         };
     }
+
+    /// <summary>Negates a value that is not null.</summary>
+    /// <returns>The number or duration with the other sign, or null for another value or a result out of range.</returns>
+    public static object? Negate(object value) => value switch
+    {
+        float single => float.IsFinite(single) ? -single + 0f : null,
+        double number => double.IsFinite(number) ? -number + 0d : null,
+        TimeSpan duration => duration == TimeSpan.MinValue ? null : duration.Negate(),
+        _ when ExpressionComparer.IsIntegerOrDecimal(value) => -ExpressionComparer.ToDecimal(value),
+        _ => null
+    };
 
     // Adding zero turns a negative zero into zero, which a host would otherwise write as "-0". A result that is no finite
     // number, such as that of a division by zero, is missing like a result out of range.

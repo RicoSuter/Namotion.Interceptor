@@ -157,12 +157,28 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
             return ParseGroup(start);
         }
 
+        if (character == '-' && !StartsWithNumber(text.AsSpan(_position + 1)))
+        {
+            return ParseNegation(start);
+        }
+
         if (character is '"' or '\'')
         {
             return new LiteralNode(ReadString(character));
         }
 
         return ParseWord(start, operatorText, bareWordIsText);
+    }
+
+    // A minus that is no sign of a number negates the operand after it and binds tighter than '*' and '/'. A chain of '-'
+    // recurses once per character, so it counts against the nesting limit like a parenthesis.
+    private NegationNode ParseNegation(int start)
+    {
+        EnterNesting(start);
+        _position++;
+        var operand = ParseOperand("-", bareWordIsText: false);
+        _nestingDepth--;
+        return new NegationNode(operand);
     }
 
     private ExpressionNode ParseGroup(int start)
@@ -570,11 +586,15 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     private static bool IsNumberStart(string token)
     {
         var unsigned = token[0] is '-' or '+' ? token.AsSpan(1) : token.AsSpan();
-        return unsigned.Length > 0 && StartsWithNumber(unsigned);
+        return StartsWithNumber(unsigned);
     }
 
-    private static bool StartsWithNumber(ReadOnlySpan<char> value) =>
-        char.IsAsciiDigit(value[0]) || (value[0] == '.' && value.Length > 1 && char.IsAsciiDigit(value[1]));
+    private static bool StartsWithNumber(ReadOnlySpan<char> value) => value switch
+    {
+        [var first, ..] when char.IsAsciiDigit(first) => true,
+        ['.', var second, ..] => char.IsAsciiDigit(second),
+        _ => false
+    };
 
     private static string ExpectedValue(string? operatorText) =>
         operatorText is null ? "expected a value" : $"expected a value after '{operatorText}'";

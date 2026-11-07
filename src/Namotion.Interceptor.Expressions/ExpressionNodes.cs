@@ -36,6 +36,11 @@ internal sealed class PathNode : ExpressionNode
     public string? MemberPath { get; }
 }
 
+internal sealed class NegationNode(ExpressionNode operand) : ExpressionNode
+{
+    public ExpressionNode Operand { get; } = operand;
+}
+
 internal sealed class NotNode(ExpressionNode operand) : ExpressionNode
 {
     public ExpressionNode Operand { get; } = operand;

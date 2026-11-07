@@ -231,7 +231,8 @@ public class ParsedExpressionParseTests
     [InlineData("Interval > 1e5m", "invalid number '1e5m' at position 11")]
     [InlineData("a -", "expected a value after '-' at position 3")]
     [InlineData("a * ", "expected a value after '*' at position 4")]
-    [InlineData("a == - b", "expected a value after '==' at position 5")]
+    [InlineData("x > -", "expected a value after '-' at position 5")]
+    [InlineData("a -x", "put a space after '-' at position 2")]
     [InlineData("a -5", "put a space after '-' at position 2")]
     [InlineData("a +b", "put a space after '+' at position 2")]
     [InlineData("Now -5m", "put a space after '-' at position 4")]
@@ -386,6 +387,41 @@ public class ParsedExpressionParseTests
 
         // Assert
         Assert.Equal(expectedPaths, expression.Paths.ToArray());
+    }
+
+    [Theory]
+    [InlineData("-x > 0", new[] { "x" })]
+    [InlineData("x > -Limit", new[] { "x", "Limit" })]
+    [InlineData("a * -x", new[] { "a", "x" })]
+    [InlineData("-(a + b) > 0", new[] { "a", "b" })]
+    [InlineData("a == - b", new[] { "a", "b" })]
+    [InlineData("a - -x", new[] { "a", "x" })]
+    [InlineData("Interval > - 5m", new[] { "Interval" })]
+    [InlineData("/Room-1/Power > -/Room-1/Limit", new[] { "/Room-1/Power", "/Room-1/Limit" })]
+    [InlineData("Temperature > -5", new[] { "Temperature" })]
+    [InlineData("Power > -5/2", new[] { "Power", "-5/2" })]
+    public void WhenMinusPrecedesAnOperand_ThenItIsTheSignOfANumberOrANegation(string text, string[] expectedPaths)
+    {
+        // Act
+        var expression = Parse(text);
+
+        // Assert
+        Assert.Equal(expectedPaths, expression.Paths.ToArray());
+        Assert.Null(expression.SinglePath);
+    }
+
+    [Fact]
+    public void WhenMinusIsRepeatedBeyondLimit_ThenReturnsNestingError()
+    {
+        // Arrange
+        var text = new string('-', 40) + "a";
+
+        // Act
+        var success = ParsedExpression.TryParse(text, '/', out _, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Equal("expression is nested too deeply at position 32", error);
     }
 
     [Theory]

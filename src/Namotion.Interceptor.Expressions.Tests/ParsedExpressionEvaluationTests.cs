@@ -480,6 +480,69 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
+    [InlineData("-Power == -7400", true)]
+    [InlineData("-(Power - Offset) == -7300", true)]
+    [InlineData("Count * -Offset == -300", true)]
+    [InlineData("Zero > -Count", true)]
+    [InlineData("- -Power == 7400", true)]
+    [InlineData("-Count * 2 == -6", true)]
+    [InlineData("-Ratio == -0.1", true)]
+    [InlineData("-Interval == -90s", true)]
+    [InlineData("Interval > - 5m", true)]
+    [InlineData("Now - EnteredAt > -Interval", true)]
+    [InlineData("-Now == null", true)]
+    [InlineData("-Name == null", true)]
+    [InlineData("-IsOn == null", true)]
+    [InlineData("-Missing == null", true)]
+    [InlineData("-Smallest == null", true)]
+    [InlineData("-NotANumber == null", true)]
+    public void WhenOperandIsNegated_ThenNumbersAndDurationsChangeTheirSign(string text, bool expected)
+    {
+        // Arrange
+        var values = CreateTimeValues();
+        values["Power"] = 7400m;
+        values["Offset"] = 100;
+        values["Count"] = 3;
+        values["Zero"] = 0d;
+        values["Ratio"] = 0.1f;
+        values["Name"] = "Kitchen";
+        values["IsOn"] = true;
+        values["Smallest"] = TimeSpan.MinValue;
+        values["NotANumber"] = double.NaN;
+
+        // Act
+        var result = EvaluateCondition(text, values);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("-Count", typeof(decimal), "-3")]
+    [InlineData("-Ratio", typeof(float), "-0.1")]
+    [InlineData("-Zero", typeof(double), "0")]
+    [InlineData("-Interval", typeof(TimeSpan), "-00:01:30")]
+    public void WhenNegationIsEvaluatedAsValue_ThenItKeepsTheTypeOfItsOperand(string text, Type expectedType, string expectedValue)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext(new Dictionary<string, object?>
+        {
+            ["Count"] = 3,
+            ["Ratio"] = 0.1f,
+            ["Zero"] = 0d,
+            ["Interval"] = TimeSpan.FromSeconds(90)
+        });
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.IsType(expectedType, result.Value);
+        Assert.Equal(expectedValue, Convert.ToString(result.Value, CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
     [InlineData("First + Second == 0.3", true)]
     [InlineData("Second - First == 0.1", true)]
     [InlineData("First * Count == 0.3", true)]
