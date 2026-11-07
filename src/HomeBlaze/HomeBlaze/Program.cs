@@ -196,6 +196,7 @@ if (mcpEnabled)
 
 app.MapDefaultEndpoints();
 app.MapStaticAssets();
+app.MapStorageFiles();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
