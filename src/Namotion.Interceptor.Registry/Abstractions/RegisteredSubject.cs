@@ -48,8 +48,9 @@ public class RegisteredSubject
     /// </summary>
     /// <remarks>
     /// A reader that combines it with <see cref="Parents"/> must read <see cref="Parents"/> first and this property
-    /// second: the registry clears it before it removes the last parent, so a reader that sees the parents empty after
-    /// a removal then sees it false, while the opposite order can see it true and then the parents empty.
+    /// second: the registry clears it no later than the removal of the last parent becomes visible, so a reader that
+    /// sees the parents empty after a removal then sees it false, while the opposite order can see it true and then the
+    /// parents empty.
     /// </remarks>
     public bool IsAttached => Volatile.Read(ref _isAttached);
 
@@ -195,7 +196,7 @@ public class RegisteredSubject
             {
                 if (_additionalParents is null || _additionalParents.Count == 0)
                 {
-                    // Before the parents change, see IsAttached.
+                    // Inside the critical section that changes the parents, or before it, see IsAttached.
                     MarkDetached();
                 }
 

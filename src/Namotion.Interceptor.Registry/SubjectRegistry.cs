@@ -213,7 +213,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             {
                 if (change.IsContextDetach)
                 {
-                    // Before the parents change, see RegisteredSubject.IsAttached.
+                    // Before the critical section that changes its parents, see RegisteredSubject.IsAttached.
                     registeredSubject.MarkDetached();
                 }
 
