@@ -9,7 +9,7 @@ public class AutomationSummaryTests
     [InlineData("On: Armed", "Armed")]
     [InlineData("DryRun: Holding since 13:00:00 for 10m", "Holding since 13:00:00 for 10m")]
     [InlineData("Off", "Off")]
-    [InlineData("On: Waiting since 12:01:00: Only if is false", "Waiting since 12:01:00: Only if is false")]
+    [InlineData("On: Waiting since 2026-11-06 12:01:00: Only if is false", "Waiting since 2026-11-06 12:01:00: Only if is false")]
     [InlineData(null, null)]
     public void WhenTheStatusOfARuleIsShown_ThenItsModeIsLeftOut(string? status, string? expected)
     {
@@ -44,7 +44,7 @@ public class AutomationSummaryTests
     }
 
     [Theory]
-    [InlineData("On: Waiting since 12:01:00: Only if is false", "Retract: Waiting since 12:01:00: Only if is false")]
+    [InlineData("On: Waiting since 2026-11-06 12:01:00: Only if is false", "Retract: Waiting since 2026-11-06 12:01:00: Only if is false")]
     [InlineData("On: Armed; not run: Only if is false", "Retract: Armed; not run: Only if is false")]
     public void WhenARuleWaitsOrDidNotRun_ThenTheHeadlineSaysWhy(string status, string expected)
     {
