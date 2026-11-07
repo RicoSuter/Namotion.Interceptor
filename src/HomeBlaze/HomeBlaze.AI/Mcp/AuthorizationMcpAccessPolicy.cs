@@ -41,27 +41,27 @@ public sealed class AuthorizationMcpAccessPolicy : IMcpAccessPolicy
         _clientName = clientName;
     }
 
-    private AuthorizationMcpAccessPolicy(
-        AuthorizationPolicy policy, Func<AuthorizationPolicy> getCallPolicy, ILogger? logger, string? clientName)
-        : this(policy, logger, clientName)
+    private AuthorizationMcpAccessPolicy(Func<AuthorizationPolicy> getCallPolicy, ILogger? logger, string? clientName)
+        : this(AuthorizationPolicy.DenyAll, logger, clientName)
     {
         _getCallPolicy = getCallPolicy;
         _callPolicy = new AsyncLocal<AuthorizationPolicy?>();
     }
 
     /// <summary>
-    /// Gets the policy that decides: within a call that <see cref="BeginCall"/> started, the policy fetched for it, and
-    /// otherwise the policy the instance was created with.
+    /// Gets the policy that decides: within a call that <see cref="BeginCall"/> started, the policy fetched for it; for an
+    /// instance of <see cref="CreatePerCall"/> outside a call, such as a result that is enumerated after its call ended,
+    /// the current one; otherwise the policy the instance was created with.
     /// </summary>
-    public AuthorizationPolicy Policy => _callPolicy?.Value ?? _policy;
+    public AuthorizationPolicy Policy => _callPolicy?.Value ?? _getCallPolicy?.Invoke() ?? _policy;
 
     /// <summary>
-    /// Creates an access policy that decides with <paramref name="policy"/> until <see cref="BeginCall"/> fetches the
-    /// current one from <paramref name="getCallPolicy"/> for a call, so that a change of roles applies from the next call.
+    /// Creates an access policy that decides with the current policy of <paramref name="getCallPolicy"/>: fetched once for
+    /// a call that <see cref="BeginCall"/> starts, so that a change of roles applies from the next call and a call stays
+    /// consistent, and fetched for every question outside a call.
     /// </summary>
-    internal static AuthorizationMcpAccessPolicy CreatePerCall(
-        AuthorizationPolicy policy, Func<AuthorizationPolicy> getCallPolicy, ILogger? logger, string? clientName)
-        => new(policy, getCallPolicy, logger, clientName);
+    internal static AuthorizationMcpAccessPolicy CreatePerCall(Func<AuthorizationPolicy> getCallPolicy, ILogger? logger, string? clientName)
+        => new(getCallPolicy, logger, clientName);
 
     /// <summary>
     /// Starts a tool call on the current async flow: a policy created with <see cref="CreatePerCall"/> fetches the current

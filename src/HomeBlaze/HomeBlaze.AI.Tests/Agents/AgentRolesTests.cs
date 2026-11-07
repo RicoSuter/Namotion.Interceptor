@@ -357,6 +357,49 @@ public sealed class AgentRolesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenARoleHidesAMethodDuringATurn_ThenTheNextListMethodsLeavesItOutAlsoWhenItsResultIsReadLater()
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes", ("Custom", new Role { Includes = [BuiltInRoles.ReaderName] }));
+        var authorization = Assert.IsType<Authorization.Authorization>(graph.Root.Children["Authorization"]);
+        var results = new List<string>();
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            Roles = ["Custom"],
+            AllowedTools = ["list_methods"],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var listMethods = request.Tools.Tools.First(tool => tool.Name == "list_methods");
+                var input = JsonSerializer.SerializeToElement(new { path = "/Storage" });
+                results.Add(JsonSerializer.Serialize(await listMethods.Handler(input, cancellationToken)));
+                authorization.Roles = new Dictionary<string, Role>
+                {
+                    ["Custom"] = new()
+                    {
+                        Includes = [BuiltInRoles.ReaderName],
+                        Deny = [new PermissionRule { Members = [nameof(FluentStorageContainer.GetOrder)], Actions = [PermissionAction.Read] }]
+                    }
+                };
+
+                // Serialized after the call returned, as a backend serializes a result.
+                var result = await listMethods.Handler(input, cancellationToken);
+                results.Add(JsonSerializer.Serialize(result));
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("List the methods twice.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Contains("\"GetOrder\"", results[0]);
+        Assert.DoesNotContain("\"GetOrder\"", results[1]);
+        Assert.Contains("\"SearchMetadata\"", results[1]);
+    }
+
+    [Fact]
     public async Task WhenAUsedRoleIsRemovedFromTheAuthorization_ThenTheAgentShowsTheErrorWithoutATurn()
     {
         // Arrange
