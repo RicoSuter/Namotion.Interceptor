@@ -245,8 +245,8 @@ public partial class Automation : BackgroundService, IConfigurable, IMonitoredSe
         Status = error is null ? ServiceStatus.Stopped : ServiceStatus.Error;
     }
 
-    // Runs after the worker ended, so that nothing writes the file anymore, and when the graph no longer holds this
-    // automation at the path it started with, so that the path resolves to what took its place.
+    // Runs once the worker ended or a stop abandoned it, which then no longer owns the file, and only when the graph no
+    // longer holds this automation at the path it started with, so that the path resolves to what took its place.
     private void OnWorkerEnded(AutomationRuntime runtime)
     {
         if (_isDetached || runtime.Location.HasMoved(this))
