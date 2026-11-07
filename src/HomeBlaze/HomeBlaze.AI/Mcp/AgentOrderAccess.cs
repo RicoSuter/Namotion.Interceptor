@@ -29,15 +29,14 @@ internal static class AgentOrderAccess
     /// list, in their order; any other result is returned unchanged.
     /// </summary>
     public static object? FilterGetOrderResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration,
-        PathProviderBase pathProvider, IInterceptorSubject root)
+        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration, IInterceptorSubject root)
     {
         if (method.PropertyName != nameof(FluentStorageContainer.GetOrder) || subject.Subject is not IMetadataContainer || result is not string[] names)
         {
             return result;
         }
 
-        var listedNames = GetListedChildNames(subject, configuration, pathProvider, root);
+        var listedNames = GetListedChildNames(subject, configuration, root);
         return names.Where(listedNames.Contains).ToArray();
     }
 
@@ -56,20 +55,19 @@ internal static class AgentOrderAccess
     /// <param name="folder">The folder or storage.</param>
     /// <param name="arguments">The input arguments of SetOrder, empty when they could not be read.</param>
     /// <param name="configuration">The configuration of the tools.</param>
-    /// <param name="pathProvider">The path provider of the tools.</param>
     /// <param name="root">The root of the tools.</param>
     public static string? GetSetOrderError(
-        RegisteredSubject folder, object?[] arguments, McpServerConfiguration configuration, PathProviderBase pathProvider, IInterceptorSubject root)
+        RegisteredSubject folder, object?[] arguments, McpServerConfiguration configuration, IInterceptorSubject root)
     {
         // A member that is added here and then refused keeps null, which is the same as no metadata.
         if (FluentStorageContainer.GetOrAddMetadataMember(folder, null) is not { } member || !configuration.IsAllowed(member, McpAccessActions.Write))
         {
-            return AgentMetadataAccess.GetNotWritableMessage(GetToolPath(folder, pathProvider, root), null);
+            return AgentMetadataAccess.GetNotWritableMessage(GetToolPath(folder, configuration, root), null);
         }
 
         // Names of another shape are refused by the method.
         return arguments is [string[] names, ..] && Array.TrueForAll(names, static name => name is not null)
-            ? FluentStorageContainer.GetOrderNamesError(names, GetListedChildNames(folder, configuration, pathProvider, root))
+            ? FluentStorageContainer.GetOrderNamesError(names, GetListedChildNames(folder, configuration, root))
             : null;
     }
 
@@ -79,7 +77,7 @@ internal static class AgentOrderAccess
     /// or the values have no order of names, which the method checks itself.
     /// </summary>
     public static string? GetMetadataOrderError(
-        IInterceptorSubject target, JsonElement values, McpServerConfiguration configuration, PathProviderBase pathProvider, IInterceptorSubject root)
+        IInterceptorSubject target, JsonElement values, McpServerConfiguration configuration, IInterceptorSubject root)
     {
         if (target is not IMetadataContainer ||
             target.TryGetRegisteredSubject() is not { } folder ||
@@ -100,12 +98,12 @@ internal static class AgentOrderAccess
             names.Add(item.GetString()!);
         }
 
-        return FluentStorageContainer.GetOrderNamesError(names, GetListedChildNames(folder, configuration, pathProvider, root));
+        return FluentStorageContainer.GetOrderNamesError(names, GetListedChildNames(folder, configuration, root));
     }
 
     // The names of the children that the tools resolve at their path and list, as browse lists them.
     private static HashSet<string> GetListedChildNames(
-        RegisteredSubject folder, McpServerConfiguration configuration, PathProviderBase pathProvider, IInterceptorSubject root)
+        RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         if (folder.TryGetProperty(IMetadataContainer.ChildrenPropertyName) is not { } childrenProperty ||
@@ -116,7 +114,7 @@ internal static class AgentOrderAccess
 
         foreach (var child in childrenProperty.Children)
         {
-            if (child.Index is { } index && IsListed(child.Subject, childrenProperty.TryGetPath(pathProvider, root, index), folder, registeredRoot, configuration))
+            if (child.Index is { } index && IsListed(child.Subject, childrenProperty.TryGetPath(configuration.PathProvider, root, index), folder, registeredRoot, configuration))
             {
                 names.Add(index.ToString() ?? string.Empty);
             }
@@ -133,14 +131,8 @@ internal static class AgentOrderAccess
             !AgentMetadataAccess.IsOfExcludedType(listed, folder.Subject, configuration.ExcludeTypes);
 
     // The path that the tools build for the folder.
-    private static string GetToolPath(RegisteredSubject folder, PathProviderBase pathProvider, IInterceptorSubject root)
-    {
-        var parents = folder.Parents;
-        var path = ReferenceEquals(folder.Subject, root) || parents.Length == 0
-            ? null
-            : parents[0].Property.TryGetPath(pathProvider, root, parents[0].Index);
-        return "/" + path;
-    }
+    private static string GetToolPath(RegisteredSubject folder, McpServerConfiguration configuration, IInterceptorSubject root)
+        => (root.TryGetRegisteredSubject() is { } registeredRoot ? configuration.TryGetSubjectPath(registeredRoot, folder) : null) ?? "/";
 
     private sealed class MetadataOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider) : IMcpValueFilter
     {
@@ -152,7 +144,7 @@ internal static class AgentOrderAccess
                 return value;
             }
 
-            var listedNames = GetListedChildNames(member.Parent, configuration, configuration.PathProvider, rootSubjectProvider());
+            var listedNames = GetListedChildNames(member.Parent, configuration, rootSubjectProvider());
             var names = order.EnumerateArray()
                 .Where(item => item.ValueKind == JsonValueKind.String && listedNames.Contains(item.GetString()!))
                 .Select(item => item.GetString()!)

@@ -89,10 +89,10 @@ internal static class HomeBlazeMcpConfigurationFactory
             serviceProvider,
             serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpMethodInvoker>(),
             isReadOnly,
-            (subject, method, arguments) => AgentMetadataAccess.GetOperationError(subject, method, arguments, configuration, pathProvider, rootSubjectProvider()),
+            (subject, method, arguments) => AgentMetadataAccess.GetOperationError(subject, method, arguments, configuration, rootSubjectProvider()),
             (subject, method, result) => AgentOrderAccess.FilterGetOrderResult(
-                subject, method, AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, configuration, pathProvider),
-                configuration, pathProvider, rootSubjectProvider()));
+                subject, method, AgentMetadataAccess.FilterSearchMetadataResult(subject, method, result, configuration),
+                configuration, rootSubjectProvider()));
         configuration.ToolProviders.Add(new HomeBlazeMcpToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownToolProvider(invoker, isReadOnly));
         configuration.ToolProviders.Add(new HomeBlazeMarkdownSearchToolProvider(rootSubjectProvider, configuration));

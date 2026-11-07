@@ -673,9 +673,8 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         var method = subject.TryGetProperty(nameof(FluentStorageContainer.SearchMetadata))!.TryGetMethodMetadata()!;
 
         // Act
-        var pathProvider = new StateAttributePathProvider();
         var result = AgentMetadataAccess.FilterSearchMetadataResult(
-            subject, method, new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = pathProvider }, pathProvider);
+            subject, method, new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() });
 
         // Assert
         Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));
