@@ -64,7 +64,7 @@ public class PathPatternTests
         var (links, member) = ToMemberPath(provider, memberPath);
 
         // Act
-        var result = compiled.Matches(links, member);
+        var result = compiled.Matches(links, member, isDeny: false);
 
         // Assert
         Assert.Equal(expected, result);
@@ -84,44 +84,52 @@ public class PathPatternTests
     {
         // Arrange
         var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
-        PathLink[] links = [new("Security", null, null), new("Roles", "FullReader", "FullReader")];
+        PathLink[] links = [new("Security", null), new("Roles", "FullReader", "FullReader", "Roles", "FullReader")];
 
         // Act
-        var result = compiled.Matches(links, Name);
+        var allowResult = compiled.Matches(links, Name, isDeny: false);
+        var denyResult = compiled.Matches(links, Name, isDeny: true);
+
+        // Assert
+        Assert.Equal(expected, allowResult);
+        Assert.Equal(expected, denyResult);
+    }
+
+    [Theory]
+    [InlineData("/Security/Roles[Wifi]/Name", false, true)]
+    [InlineData("/Security/Roles/**", false, true)]
+    [InlineData("/Security/Wifi/Name", false, false)]
+    [InlineData("/Security/Roles[Wifi]/Name", true, true)]
+    [InlineData("/Security/Roles/**", true, true)]
+    [InlineData("/Security/Wifi/Name", true, true)]
+    public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyShadowedByAProperty_ThenAnAllowMatchesOnlyTheExplicitSpellingAndADenyBoth(string pattern, bool isDeny, bool expected)
+    {
+        // Arrange
+        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
+        PathLink[] links = [new("Security", null), new("Roles", "Wifi", null, "Roles", "Wifi")];
+
+        // Act
+        var result = compiled.Matches(links, Name, isDeny);
 
         // Assert
         Assert.Equal(expected, result);
     }
 
     [Theory]
-    [InlineData("/Security/Roles[Wifi]/Name", true)]
-    [InlineData("/Security/Roles/**", true)]
-    [InlineData("/Security/Wifi/Name", false)]
-    public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyShadowedByAProperty_ThenOnlyTheExplicitSpellingMatches(string pattern, bool expected)
+    [InlineData("/Security/FullReader/Name", false, true)]
+    [InlineData("/Security/Roles[FullReader]/Name", false, false)]
+    [InlineData("/Security/Roles/**", false, false)]
+    [InlineData("/Security/FullReader/Name", true, true)]
+    [InlineData("/Security/Roles[FullReader]/Name", true, true)]
+    [InlineData("/Security/Roles/**", true, true)]
+    public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyWhoseExplicitFormIsShadowed_ThenAnAllowMatchesOnlyTheBareSpellingAndADenyBoth(string pattern, bool isDeny, bool expected)
     {
         // Arrange
         var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
-        PathLink[] links = [new("Security", null, null), new("Roles", "Wifi", null)];
+        PathLink[] links = [new("Security", null), new(null, "FullReader", "FullReader", "Roles", "FullReader")];
 
         // Act
-        var result = compiled.Matches(links, Name);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
-    [InlineData("/Security/FullReader/Name", true)]
-    [InlineData("/Security/Roles[FullReader]/Name", false)]
-    [InlineData("/Security/Roles/**", false)]
-    public void WhenPatternIsMatchedAgainstAMemberBelowAnInlineKeyWhoseExplicitFormIsShadowed_ThenOnlyTheBareSpellingMatches(string pattern, bool expected)
-    {
-        // Arrange
-        var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
-        PathLink[] links = [new("Security", null, null), new(null, "FullReader", "FullReader")];
-
-        // Act
-        var result = compiled.Matches(links, Name);
+        var result = compiled.Matches(links, Name, isDeny);
 
         // Assert
         Assert.Equal(expected, result);
@@ -133,10 +141,10 @@ public class PathPatternTests
         // Arrange
         var pattern = "/" + string.Join("/", Enumerable.Repeat("**/A", 30)) + "/Missing";
         var compiled = PathPattern.Parse(pattern, Policies.SlashPaths, "Test");
-        var links = Enumerable.Range(0, 60).Select(_ => new PathLink("A", null, null)).ToArray();
+        var links = Enumerable.Range(0, 60).Select(_ => new PathLink("A", null)).ToArray();
 
         // Act
-        var result = compiled.Matches(links, new PathLink("A", null, null));
+        var result = compiled.Matches(links, new PathLink("A", null), isDeny: false);
 
         // Assert
         Assert.False(result);
@@ -159,11 +167,11 @@ public class PathPatternTests
         var (links, member) = ToMemberPath(provider, memberPath);
 
         // Act
-        var result = withoutSeparator.Matches(links, member);
+        var result = withoutSeparator.Matches(links, member, isDeny: false);
 
         // Assert
         Assert.Equal(expected, result);
-        Assert.Equal(withSeparator.Matches(links, member), result);
+        Assert.Equal(withSeparator.Matches(links, member, isDeny: false), result);
     }
 
     [Fact]
@@ -173,17 +181,18 @@ public class PathPatternTests
         var home = TestGraph.Create();
         var brightness = TestGraph.Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Models.Light.Brightness));
         var path = brightness.TryGetPath(DefaultPathProvider.Instance, null)!;
-        var policy = AuthorizationPolicy.Compile(
-            [Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [path])])], ["Reader"], [],
-            Policies.KnownActions, TestTags.Default, DefaultPathProvider.Instance);
+        var policy = AuthorizationDefinition.Create(
+            [Policies.Role("Reader", allow: [Policies.Rule([PermissionAction.Read], paths: [path])])], [],
+            Policies.KnownActions, DefaultPathProvider.Instance, TestTags.Default).Compile(["Reader"]);
 
         // Act
         var result = policy.CanRead(brightness);
+        var canReadKitchenCounter = policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Models.Light.Brightness)));
 
         // Assert
         Assert.Equal("Rooms[Kitchen].Lights[Ceiling].Brightness", path);
         Assert.True(result);
-        Assert.False(policy.CanRead(TestGraph.Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Models.Light.Brightness))));
+        Assert.False(canReadKitchenCounter);
     }
 
     [Theory]
@@ -261,14 +270,14 @@ public class PathPatternTests
         Assert.NotNull(compiled);
     }
 
-    private static readonly PathLink Name = new("Name", null, null);
+    private static readonly PathLink Name = new("Name", null);
 
     // The last segment of the member path is the member, the segments before it the path of its subject.
     private static (PathLink[] Links, PathLink Member) ToMemberPath(PathProviderBase provider, string memberPath)
     {
         Assert.True(provider.TryParsePath(memberPath, out var segments, out _));
-        var links = segments.Take(segments.Count - 1).Select(segment => new PathLink(segment.segment, segment.index, null)).ToArray();
+        var links = segments.Take(segments.Count - 1).Select(segment => new PathLink(segment.segment, segment.index)).ToArray();
         Assert.Null(segments[^1].index);
-        return (links, new PathLink(segments[^1].segment, null, null));
+        return (links, new PathLink(segments[^1].segment, null));
     }
 }

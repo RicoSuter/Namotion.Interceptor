@@ -28,8 +28,6 @@ param(
     [string]$Project = "src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj"
 )
 
-$BenchmarkProject = $Project
-
 $ErrorActionPreference = "Stop"
 $ExtraArgs = @()
 if ($Short) { $ExtraArgs += "--job"; $ExtraArgs += "short" }
@@ -94,7 +92,7 @@ function Run-Benchmark {
 
     Write-Host "Running benchmark on $Label (filter: $script:FilterDisplay)..."
     # Leaves no MSBuild node or compiler server behind to exit on its own timer mid-arm
-    dotnet run --disable-build-servers --project $BenchmarkProject -c Release -- @script:FilterArgs --exporters markdown --join @script:ExtraArgs | Out-Host
+    dotnet run --disable-build-servers --project $Project -c Release -- @script:FilterArgs --exporters markdown --join @script:ExtraArgs | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Benchmark failed on $Label"
         return $false
@@ -173,11 +171,11 @@ if (-not $LocalOnly) {
         exit 1
     }
 
-    if (-not (Test-Path $BenchmarkProject)) {
+    if (-not (Test-Path $Project)) {
         # Restore first: under $ErrorActionPreference = "Stop", Write-Error ends the script before the restore would run.
         Restore-OriginalBranch
         Restore-Stash
-        Write-Error "$BenchmarkProject does not exist on $BaseBranch, so there is nothing to compare against. Run with -LocalOnly, or put the project on the base branch first."
+        Write-Error "$Project does not exist on $BaseBranch, so there is nothing to compare against. Run with -LocalOnly, or put the project on the base branch first."
         exit 1
     }
 

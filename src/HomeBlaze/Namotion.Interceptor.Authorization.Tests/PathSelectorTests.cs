@@ -20,10 +20,15 @@ public class PathSelectorTests
         var kitchen = home.Rooms["Kitchen"];
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(kitchen, nameof(Room.Sensor))));
-        Assert.False(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
-        Assert.False(policy.CanRead(Member(kitchen, nameof(Room.Lights))));
+        // Act
+        var canReadKitchenSensor = policy.CanRead(Member(kitchen, nameof(Room.Sensor)));
+        var canReadKitchenTemperature = policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature)));
+        var canReadKitchenLights = policy.CanRead(Member(kitchen, nameof(Room.Lights)));
+
+        // Assert
+        Assert.True(canReadKitchenSensor);
+        Assert.False(canReadKitchenTemperature);
+        Assert.False(canReadKitchenLights);
     }
 
     [Fact]
@@ -34,10 +39,15 @@ public class PathSelectorTests
         var sensor = home.Rooms["Kitchen"].Sensor!;
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Temperature"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-        Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
-        Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor))));
+        // Act
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+        var canReadTemperatureUnit = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit"));
+        var canReadKitchenSensor = policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor)));
+
+        // Assert
+        Assert.True(canReadSensorTemperature);
+        Assert.False(canReadTemperatureUnit);
+        Assert.False(canReadKitchenSensor);
     }
 
     [Fact]
@@ -48,14 +58,23 @@ public class PathSelectorTests
         var kitchen = home.Rooms["Kitchen"];
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/*"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(kitchen, nameof(Room.Lights))));
-        Assert.True(policy.CanRead(Member(kitchen, nameof(Room.Sensor))));
-        Assert.True(policy.CanRead(Member(kitchen, nameof(Room.Neighbor))));
-        Assert.False(policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.IsOn))));
-        Assert.False(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
-        Assert.False(policy.CanRead(Member(home.Rooms["Bedroom"], nameof(Room.Lights))));
-        Assert.False(policy.CanRead(Member(home, nameof(Home.Rooms))));
+        // Act
+        var canReadKitchenLights = policy.CanRead(Member(kitchen, nameof(Room.Lights)));
+        var canReadKitchenSensor = policy.CanRead(Member(kitchen, nameof(Room.Sensor)));
+        var canReadKitchenNeighbor = policy.CanRead(Member(kitchen, nameof(Room.Neighbor)));
+        var canReadCeilingIsOn = policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.IsOn)));
+        var canReadKitchenTemperature = policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature)));
+        var canReadBedroomLights = policy.CanRead(Member(home.Rooms["Bedroom"], nameof(Room.Lights)));
+        var canReadRooms = policy.CanRead(Member(home, nameof(Home.Rooms)));
+
+        // Assert
+        Assert.True(canReadKitchenLights);
+        Assert.True(canReadKitchenSensor);
+        Assert.True(canReadKitchenNeighbor);
+        Assert.False(canReadCeilingIsOn);
+        Assert.False(canReadKitchenTemperature);
+        Assert.False(canReadBedroomLights);
+        Assert.False(canReadRooms);
     }
 
     [Fact]
@@ -66,13 +85,21 @@ public class PathSelectorTests
         var kitchen = home.Rooms["Kitchen"];
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/**"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(kitchen, nameof(Room.Lights))));
-        Assert.True(policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.IsOn))));
-        Assert.True(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
-        Assert.True(policy.CanRead(Attribute(kitchen.Sensor!, nameof(Sensor.Temperature), "Unit")));
-        Assert.False(policy.CanRead(Member(home.Rooms["Bedroom"].Lights["Lamp"], nameof(Light.IsOn))));
-        Assert.False(policy.CanRead(Member(home, nameof(Home.Rooms))));
+        // Act
+        var canReadKitchenLights = policy.CanRead(Member(kitchen, nameof(Room.Lights)));
+        var canReadCeilingIsOn = policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.IsOn)));
+        var canReadKitchenTemperature = policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature)));
+        var canReadTemperatureUnit = policy.CanRead(Attribute(kitchen.Sensor!, nameof(Sensor.Temperature), "Unit"));
+        var canReadLampIsOn = policy.CanRead(Member(home.Rooms["Bedroom"].Lights["Lamp"], nameof(Light.IsOn)));
+        var canReadRooms = policy.CanRead(Member(home, nameof(Home.Rooms)));
+
+        // Assert
+        Assert.True(canReadKitchenLights);
+        Assert.True(canReadCeilingIsOn);
+        Assert.True(canReadKitchenTemperature);
+        Assert.True(canReadTemperatureUnit);
+        Assert.False(canReadLampIsOn);
+        Assert.False(canReadRooms);
     }
 
     [Fact]
@@ -82,11 +109,17 @@ public class PathSelectorTests
         var home = Create();
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Wifi/**", "/**/Sensor"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(home, nameof(Home.Wifi))));
-        Assert.True(policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.True(policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor))));
-        Assert.False(policy.CanRead(Member(home, nameof(Home.Rooms))));
+        // Act
+        var canReadWifi = policy.CanRead(Member(home, nameof(Home.Wifi)));
+        var canReadSsid = policy.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var canReadKitchenSensor = policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor)));
+        var canReadRooms = policy.CanRead(Member(home, nameof(Home.Rooms)));
+
+        // Assert
+        Assert.True(canReadWifi);
+        Assert.True(canReadSsid);
+        Assert.True(canReadKitchenSensor);
+        Assert.False(canReadRooms);
     }
 
     [Fact]
@@ -98,12 +131,19 @@ public class PathSelectorTests
         var ceiling = home.Rooms["Kitchen"].Lights["Ceiling"];
         var lamp = home.Rooms["Bedroom"].Lights["Lamp"];
 
-        // Act & Assert
-        Assert.True(policy.CanWrite(Member(ceiling, nameof(Light.IsOn))));
-        Assert.True(policy.CanWrite(Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Light.IsOn))));
-        Assert.False(policy.CanWrite(Member(lamp, nameof(Light.IsOn))));
-        Assert.True(policy.CanWrite(Member(lamp, nameof(Light.Brightness))));
-        Assert.True(policy.CanWrite(Member(ceiling, nameof(Light.Brightness))));
+        // Act
+        var canWriteCeilingIsOn = policy.CanWrite(Member(ceiling, nameof(Light.IsOn)));
+        var canWriteCounterIsOn = policy.CanWrite(Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Light.IsOn)));
+        var canWriteLampIsOn = policy.CanWrite(Member(lamp, nameof(Light.IsOn)));
+        var canWriteLampBrightness = policy.CanWrite(Member(lamp, nameof(Light.Brightness)));
+        var canWriteCeilingBrightness = policy.CanWrite(Member(ceiling, nameof(Light.Brightness)));
+
+        // Assert
+        Assert.True(canWriteCeilingIsOn);
+        Assert.True(canWriteCounterIsOn);
+        Assert.False(canWriteLampIsOn);
+        Assert.True(canWriteLampBrightness);
+        Assert.True(canWriteCeilingBrightness);
     }
 
     [Fact]
@@ -113,10 +153,15 @@ public class PathSelectorTests
         var home = Create();
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(home, nameof(Home.Rooms))));
-        Assert.False(policy.CanRead(Member(home, nameof(Home.Wifi))));
-        Assert.False(policy.CanRead(Member(home.Rooms["Bedroom"], nameof(Room.Lights))));
+        // Act
+        var canReadRooms = policy.CanRead(Member(home, nameof(Home.Rooms)));
+        var canReadWifi = policy.CanRead(Member(home, nameof(Home.Wifi)));
+        var canReadBedroomLights = policy.CanRead(Member(home.Rooms["Bedroom"], nameof(Room.Lights)));
+
+        // Assert
+        Assert.True(canReadRooms);
+        Assert.False(canReadWifi);
+        Assert.False(canReadBedroomLights);
     }
 
     [Fact]
@@ -127,11 +172,17 @@ public class PathSelectorTests
         var rootMembers = Compile(Role("Reader", allow: [Rule(Read, paths: ["/*"])]));
         var everything = Compile(Role("Reader", allow: [Rule(Read, paths: ["/**"])]));
 
-        // Act & Assert
-        Assert.True(rootMembers.CanRead(Member(home, nameof(Home.Rooms))));
-        Assert.False(rootMembers.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.True(everything.CanRead(Member(home, nameof(Home.Rooms))));
-        Assert.True(everything.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        // Act
+        var rootMembersCanReadRooms = rootMembers.CanRead(Member(home, nameof(Home.Rooms)));
+        var rootMembersCanReadSsid = rootMembers.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var everythingCanReadRooms = everything.CanRead(Member(home, nameof(Home.Rooms)));
+        var everythingCanReadSsid = everything.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+
+        // Assert
+        Assert.True(rootMembersCanReadRooms);
+        Assert.False(rootMembersCanReadSsid);
+        Assert.True(everythingCanReadRooms);
+        Assert.True(everythingCanReadSsid);
     }
 
     [Theory]
@@ -157,14 +208,23 @@ public class PathSelectorTests
         var holdingProperty = Compile(Role("Operator", allow: [Rule(Write)], deny: [Rule(Write, paths: ["/Rooms[Bedroom]/Lights", "/Wifi"])]));
         var branch = Compile(Role("Operator", allow: [Rule(Write)], deny: [Rule(Write, paths: ["/Rooms[Bedroom]/**"])]));
 
-        // Act & Assert
-        Assert.False(holdingProperty.CanWrite(Member(home.Rooms["Bedroom"], nameof(Room.Lights))));
-        Assert.True(holdingProperty.CanWrite(Member(lamp, nameof(Light.IsOn))));
-        Assert.False(holdingProperty.CanWrite(Member(home, nameof(Home.Wifi))));
-        Assert.True(holdingProperty.CanWrite(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.False(branch.CanWrite(Member(lamp, nameof(Light.IsOn))));
-        Assert.False(branch.CanWrite(Member(home.Rooms["Bedroom"], nameof(Room.Lights))));
-        Assert.True(branch.CanWrite(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.IsOn))));
+        // Act
+        var holdingPropertyCanWriteBedroomLights = holdingProperty.CanWrite(Member(home.Rooms["Bedroom"], nameof(Room.Lights)));
+        var holdingPropertyCanWriteLampIsOn = holdingProperty.CanWrite(Member(lamp, nameof(Light.IsOn)));
+        var holdingPropertyCanWriteWifi = holdingProperty.CanWrite(Member(home, nameof(Home.Wifi)));
+        var holdingPropertyCanWriteSsid = holdingProperty.CanWrite(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var branchCanWriteLampIsOn = branch.CanWrite(Member(lamp, nameof(Light.IsOn)));
+        var branchCanWriteBedroomLights = branch.CanWrite(Member(home.Rooms["Bedroom"], nameof(Room.Lights)));
+        var branchCanWriteCeilingIsOn = branch.CanWrite(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.IsOn)));
+
+        // Assert
+        Assert.False(holdingPropertyCanWriteBedroomLights);
+        Assert.True(holdingPropertyCanWriteLampIsOn);
+        Assert.False(holdingPropertyCanWriteWifi);
+        Assert.True(holdingPropertyCanWriteSsid);
+        Assert.False(branchCanWriteLampIsOn);
+        Assert.False(branchCanWriteBedroomLights);
+        Assert.True(branchCanWriteCeilingIsOn);
     }
 
     [Fact]
@@ -177,11 +237,16 @@ public class PathSelectorTests
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Spare/**"])]));
         var otherBranch = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Bedroom]/**"])]));
 
-        // Act & Assert
+        // Act
+        var canReadCeiling = policy.CanRead(Member(ceiling, nameof(Light.Brightness)));
+        var canReadCounter = policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Light.Brightness)));
+        var otherBranchCanReadCeiling = otherBranch.CanRead(Member(ceiling, nameof(Light.Brightness)));
+
+        // Assert
         Assert.Equal(2, Registered(ceiling).Parents.Length);
-        Assert.False(policy.CanRead(Member(ceiling, nameof(Light.Brightness))));
-        Assert.True(policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Light.Brightness))));
-        Assert.True(otherBranch.CanRead(Member(ceiling, nameof(Light.Brightness))));
+        Assert.False(canReadCeiling);
+        Assert.True(canReadCounter);
+        Assert.True(otherBranchCanReadCeiling);
     }
 
     [Fact]
@@ -193,9 +258,13 @@ public class PathSelectorTests
         home.Spare = ceiling;
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Spare/*"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(ceiling, nameof(Light.Brightness))));
-        Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Light.Brightness))));
+        // Act
+        var canReadCeilingBrightness = policy.CanRead(Member(ceiling, nameof(Light.Brightness)));
+        var canReadCounterBrightness = policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Counter"], nameof(Light.Brightness)));
+
+        // Assert
+        Assert.True(canReadCeilingBrightness);
+        Assert.False(canReadCounterBrightness);
     }
 
     [Fact]
@@ -206,11 +275,17 @@ public class PathSelectorTests
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/**"], types: ["ILight"], members: ["IsOn"])]));
         var kitchen = home.Rooms["Kitchen"];
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.IsOn))));
-        Assert.False(policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.Brightness))));
-        Assert.False(policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature))));
-        Assert.False(policy.CanRead(Member(home.Rooms["Bedroom"].Lights["Lamp"], nameof(Light.IsOn))));
+        // Act
+        var canReadCeilingIsOn = policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.IsOn)));
+        var canReadCeilingBrightness = policy.CanRead(Member(kitchen.Lights["Ceiling"], nameof(Light.Brightness)));
+        var canReadKitchenTemperature = policy.CanRead(Member(kitchen.Sensor!, nameof(Sensor.Temperature)));
+        var canReadLampIsOn = policy.CanRead(Member(home.Rooms["Bedroom"].Lights["Lamp"], nameof(Light.IsOn)));
+
+        // Assert
+        Assert.True(canReadCeilingIsOn);
+        Assert.False(canReadCeilingBrightness);
+        Assert.False(canReadKitchenTemperature);
+        Assert.False(canReadLampIsOn);
     }
 
     [Theory]
@@ -226,9 +301,34 @@ public class PathSelectorTests
         var door = AddArea(home, "Garage");
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: [deniedPath])]));
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Member(door, nameof(Light.Brightness))));
-        Assert.True(policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness))));
+        // Act
+        var canReadDoorBrightness = policy.CanRead(Member(door, nameof(Light.Brightness)));
+        var canReadCeilingBrightness = policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness)));
+
+        // Assert
+        Assert.False(canReadDoorBrightness);
+        Assert.True(canReadCeilingBrightness);
+    }
+
+    [Theory]
+    [InlineData("", "/Areas['']/**")]
+    [InlineData("'quoted", "/Areas['''quoted']/**")]
+    [InlineData("it's", "/Areas[it's]/**")]
+    [InlineData("a]b", "/Areas['a]b']/**")]
+    public void WhenDenyNamesAKeyThatNeedsQuoting_ThenTheMembersBelowAreDenied(string key, string deniedPath)
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, key);
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: [deniedPath])]));
+
+        // Act
+        var canReadDoorBrightness = policy.CanRead(Member(door, nameof(Light.Brightness)));
+        var canReadCeilingBrightness = policy.CanRead(Member(home.Rooms["Kitchen"].Lights["Ceiling"], nameof(Light.Brightness)));
+
+        // Assert
+        Assert.False(canReadDoorBrightness);
+        Assert.True(canReadCeilingBrightness);
     }
 
     [Fact]
@@ -239,26 +339,124 @@ public class PathSelectorTests
         var door = AddArea(home, "Garage");
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Garage/Lights"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(home.Areas["Garage"], nameof(Room.Lights))));
-        Assert.False(policy.CanRead(Member(door, nameof(Light.Brightness))));
-        Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Lights))));
+        // Act
+        var canReadGarageLights = policy.CanRead(Member(home.Areas["Garage"], nameof(Room.Lights)));
+        var canReadDoorBrightness = policy.CanRead(Member(door, nameof(Light.Brightness)));
+        var canReadKitchenLights = policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Lights)));
+
+        // Assert
+        Assert.True(canReadGarageLights);
+        Assert.False(canReadDoorBrightness);
+        Assert.False(canReadKitchenLights);
     }
 
     [Fact]
-    public void WhenAnInlineKeyIsShadowedByAProperty_ThenTheBareSpellingNamesTheProperty()
+    public void WhenAnInlineKeyIsShadowedByAProperty_ThenAnAllowInTheBareSpellingNamesOnlyThePropertyAndADenyBoth()
     {
         // Arrange
         var home = Create();
         var door = AddArea(home, "Wifi");
+        var bareAllow = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Wifi/**"])]));
         var bare = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Wifi/**"])]));
         var explicitForm = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Areas[Wifi]/**"])]));
 
-        // Act & Assert
-        Assert.False(bare.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
-        Assert.True(bare.CanRead(Member(door, nameof(Light.Brightness))));
-        Assert.False(explicitForm.CanRead(Member(door, nameof(Light.Brightness))));
-        Assert.True(explicitForm.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid))));
+        // Act
+        var bareAllowCanReadSsid = bareAllow.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var bareAllowCanReadDoorBrightness = bareAllow.CanRead(Member(door, nameof(Light.Brightness)));
+        var bareCanReadSsid = bare.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+        var bareCanReadDoorBrightness = bare.CanRead(Member(door, nameof(Light.Brightness)));
+        var explicitFormCanReadDoorBrightness = explicitForm.CanRead(Member(door, nameof(Light.Brightness)));
+        var explicitFormCanReadSsid = explicitForm.CanRead(Member(home.Wifi!, nameof(Wifi.Ssid)));
+
+        // Assert
+        Assert.True(bareAllowCanReadSsid);
+        Assert.False(bareAllowCanReadDoorBrightness);
+        Assert.False(bareCanReadSsid);
+        Assert.False(bareCanReadDoorBrightness);
+        Assert.False(explicitFormCanReadDoorBrightness);
+        Assert.True(explicitFormCanReadSsid);
+    }
+
+    [Fact]
+    public void WhenAnAttributeAddedLaterShadowsTheBareSpellingOfAnInlineKey_ThenADenyInThatSpellingStillApplies()
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Garage/**"])]));
+        var member = Member(door, nameof(Light.Brightness));
+
+        // Act
+        var canReadBefore = policy.CanRead(member);
+        Member(home, nameof(Home.Wifi)).AddAttribute("Garage", typeof(string), _ => "x", null);
+        var canReadAfter = policy.CanRead(member);
+
+        // Assert
+        Assert.False(canReadBefore);
+        Assert.False(canReadAfter);
+    }
+
+    [Theory]
+    [InlineData("/Areas[Garage]/**")]
+    [InlineData("/Areas/**")]
+    public void WhenAnAttributeAddedLaterShadowsTheOwnSegmentOfAnInlineProperty_ThenADenyInTheExplicitSpellingStillApplies(string deniedPath)
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: [deniedPath])]));
+        var member = Member(door, nameof(Light.Brightness));
+
+        // Act
+        var canReadBefore = policy.CanRead(member);
+        Member(home, nameof(Home.Wifi)).AddAttribute("Areas", typeof(string), _ => "x", null);
+        var canReadAfter = policy.CanRead(member);
+
+        // Assert
+        Assert.False(canReadBefore);
+        Assert.False(canReadAfter);
+    }
+
+    [Fact]
+    public void WhenAnAttributeAddedLaterShadowsTheBareSpellingOfAnInlineKey_ThenAnAllowInThatSpellingStopsMatching()
+    {
+        // Arrange
+        var home = Create();
+        var door = AddArea(home, "Garage");
+        var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Garage/**"])]));
+        var member = Member(door, nameof(Light.Brightness));
+
+        // Act
+        var canReadBefore = policy.CanRead(member);
+        Member(home, nameof(Home.Wifi)).AddAttribute("Garage", typeof(string), _ => "x", null);
+        var canReadAfter = policy.CanRead(member);
+
+        // Assert
+        Assert.True(canReadBefore);
+        Assert.False(canReadAfter);
+    }
+
+    [Fact]
+    public void WhenTheOwnSegmentOfAnInlinePropertyWithoutAnIndexIsShadowed_ThenADenyWithPathsAppliesAndAnAllowWithPathsDoesNot()
+    {
+        // Arrange
+        var light = new Light();
+        _ = new TestShadowedInlineReference(CreateContext()) { Label = "label", Child = light };
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var deny = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["Other.**"])])], [],
+            KnownActions, pathProvider, TestTags.Default).Compile(["Reader"]);
+        var allow = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read, paths: ["Child.**"])])], [],
+            KnownActions, pathProvider, TestTags.Default).Compile(["Reader"]);
+
+        // Act
+        var denyPolicyAllows = deny.CanRead(Member(light, nameof(Light.IsOn)));
+        var allowPolicyAllows = allow.CanRead(Member(light, nameof(Light.IsOn)));
+
+        // Assert
+        Assert.False(denyPolicyAllows);
+        Assert.False(allowPolicyAllows);
     }
 
     [Fact]
@@ -266,13 +464,17 @@ public class PathSelectorTests
     {
         // Arrange
         var home = Create();
-        var policy = AuthorizationPolicy.Compile(
-            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Spare"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, new SpareExcludingPathProvider());
+        var policy = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Spare"])])], [],
+            KnownActions, new SpareExcludingPathProvider(), TestTags.Default).Compile(["Reader"]);
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Member(home, nameof(Home.Spare))));
-        Assert.True(policy.CanRead(Member(home, nameof(Home.Wifi))));
+        // Act
+        var canReadSpare = policy.CanRead(Member(home, nameof(Home.Spare)));
+        var canReadWifi = policy.CanRead(Member(home, nameof(Home.Wifi)));
+
+        // Assert
+        Assert.False(canReadSpare);
+        Assert.True(canReadWifi);
     }
 
     [Fact]
@@ -281,14 +483,19 @@ public class PathSelectorTests
         // Arrange
         var home = Create();
         var sensor = home.Rooms["Kitchen"].Sensor!;
-        var policy = AuthorizationPolicy.Compile(
-            [Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/temp*"])])], ["Reader"], [],
-            KnownActions, TestTags.Default, new TemperatureRenamingPathProvider());
+        var policy = AuthorizationDefinition.Create(
+            [Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/temp*"])])], [],
+            KnownActions, new TemperatureRenamingPathProvider(), TestTags.Default).Compile(["Reader"]);
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-        Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
-        Assert.False(policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor))));
+        // Act
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+        var canReadTemperatureUnit = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit"));
+        var canReadKitchenSensor = policy.CanRead(Member(home.Rooms["Kitchen"], nameof(Room.Sensor)));
+
+        // Assert
+        Assert.True(canReadSensorTemperature);
+        Assert.False(canReadTemperatureUnit);
+        Assert.False(canReadKitchenSensor);
     }
 
     // Attribute paths follow the registry's path syntax, which spells an attribute by its name alone.
@@ -302,10 +509,15 @@ public class PathSelectorTests
         var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Unit"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(unit));
-        Assert.False(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-        Assert.False(policy.CanRead(unit.TryGetAttribute("Source")!));
+        // Act
+        var canReadUnit = policy.CanRead(unit);
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+        var canReadUnitSource = policy.CanRead(unit.TryGetAttribute("Source")!);
+
+        // Assert
+        Assert.True(canReadUnit);
+        Assert.False(canReadSensorTemperature);
+        Assert.False(canReadUnitSource);
     }
 
     [Fact]
@@ -317,10 +529,15 @@ public class PathSelectorTests
         var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Source"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(unit.TryGetAttribute("Source")!));
-        Assert.False(policy.CanRead(unit));
-        Assert.False(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
+        // Act
+        var canReadUnitSource = policy.CanRead(unit.TryGetAttribute("Source")!);
+        var canReadUnit = policy.CanRead(unit);
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+
+        // Assert
+        Assert.True(canReadUnitSource);
+        Assert.False(canReadUnit);
+        Assert.False(canReadSensorTemperature);
     }
 
     [Fact]
@@ -332,10 +549,15 @@ public class PathSelectorTests
         var unit = Attribute(sensor, nameof(Sensor.Temperature), "Unit");
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/*"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-        Assert.True(policy.CanRead(unit));
-        Assert.True(policy.CanRead(unit.TryGetAttribute("Source")!));
+        // Act
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+        var canReadUnit = policy.CanRead(unit);
+        var canReadUnitSource = policy.CanRead(unit.TryGetAttribute("Source")!);
+
+        // Assert
+        Assert.True(canReadSensorTemperature);
+        Assert.True(canReadUnit);
+        Assert.True(canReadUnitSource);
     }
 
     [Fact]
@@ -348,10 +570,15 @@ public class PathSelectorTests
         sensor.Temperature_Probe = probe;
         var policy = Compile(Role("Reader", allow: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe/IsOn"])]));
 
-        // Act & Assert
-        Assert.True(policy.CanRead(Member(probe, nameof(Light.IsOn))));
-        Assert.False(policy.CanRead(Member(probe, nameof(Light.Brightness))));
-        Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Probe")));
+        // Act
+        var canReadProbeIsOn = policy.CanRead(Member(probe, nameof(Light.IsOn)));
+        var canReadProbeBrightness = policy.CanRead(Member(probe, nameof(Light.Brightness)));
+        var canReadTemperatureProbe = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Probe"));
+
+        // Assert
+        Assert.True(canReadProbeIsOn);
+        Assert.False(canReadProbeBrightness);
+        Assert.False(canReadTemperatureProbe);
     }
 
     [Fact]
@@ -364,11 +591,17 @@ public class PathSelectorTests
         sensor.Temperature_Probe = probe;
         var policy = Compile(Role("Reader", allow: [Rule(Read)], deny: [Rule(Read, paths: ["/Rooms[Kitchen]/Sensor/Probe/**"])]));
 
-        // Act & Assert
-        Assert.False(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Probe")));
-        Assert.False(policy.CanRead(Member(probe, nameof(Light.IsOn))));
-        Assert.True(policy.CanRead(Member(sensor, nameof(Sensor.Temperature))));
-        Assert.True(policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit")));
+        // Act
+        var canReadTemperatureProbe = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Probe"));
+        var canReadProbeIsOn = policy.CanRead(Member(probe, nameof(Light.IsOn)));
+        var canReadSensorTemperature = policy.CanRead(Member(sensor, nameof(Sensor.Temperature)));
+        var canReadTemperatureUnit = policy.CanRead(Attribute(sensor, nameof(Sensor.Temperature), "Unit"));
+
+        // Assert
+        Assert.False(canReadTemperatureProbe);
+        Assert.False(canReadProbeIsOn);
+        Assert.True(canReadSensorTemperature);
+        Assert.True(canReadTemperatureUnit);
     }
 
     // Adds a room with a Door light to Home.Areas under the key and returns the light.

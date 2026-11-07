@@ -13,10 +13,15 @@ public class PermissionActionTests
         var lower = new PermissionAction("history");
         var upper = new PermissionAction("HISTORY");
 
-        // Act & Assert
+        // Act
+        var lowerHashCode = lower.GetHashCode();
+        var upperHashCode = upper.GetHashCode();
+        var areEqualByOperator = lower == upper;
+
+        // Assert
         Assert.Equal(lower, upper);
-        Assert.Equal(lower.GetHashCode(), upper.GetHashCode());
-        Assert.True(lower == upper);
+        Assert.Equal(lowerHashCode, upperHashCode);
+        Assert.True(areEqualByOperator);
     }
 
     [Fact]
@@ -26,7 +31,11 @@ public class PermissionActionTests
         var read = PermissionAction.Read;
         var write = PermissionAction.Write;
 
-        // Act & Assert
+        // Act
+        var areEqual = read.Equals(write);
+
+        // Assert
+        Assert.False(areEqual);
         Assert.NotEqual(read, write);
     }
 
@@ -67,8 +76,11 @@ public class PermissionActionTests
     [Fact]
     public void WhenConvertedToString_ThenItIsTheName()
     {
-        // Act & Assert
-        Assert.Equal("read", PermissionAction.Read.ToString());
+        // Act
+        var text = PermissionAction.Read.ToString();
+
+        // Assert
+        Assert.Equal("read", text);
     }
 
     [Fact]
@@ -77,10 +89,15 @@ public class PermissionActionTests
         // Arrange
         var action = default(PermissionAction);
 
-        // Act & Assert
-        Assert.Equal(string.Empty, action.Name);
-        Assert.Equal(string.Empty, action.ToString());
-        Assert.Equal(action.GetHashCode(), default(PermissionAction).GetHashCode());
+        // Act
+        var name = action.Name;
+        var text = action.ToString();
+        var hashCode = action.GetHashCode();
+
+        // Assert
+        Assert.Equal(string.Empty, name);
+        Assert.Equal(string.Empty, text);
+        Assert.Equal(hashCode, default(PermissionAction).GetHashCode());
         Assert.Throws<JsonException>(() => JsonSerializer.Serialize(action));
     }
 
@@ -91,11 +108,14 @@ public class PermissionActionTests
         var member = Member(Create().Wifi!, nameof(Wifi.Ssid));
         var policy = Policies.Compile(Policies.Role("Reader"));
 
-        // Act & Assert
+        // Act
+        var isAllowedByDenyAll = AuthorizationPolicy.DenyAll.IsAllowed(member, default);
+
+        // Assert
+        Assert.False(isAllowedByDenyAll);
         Assert.Throws<ArgumentException>(() => policy.IsAllowed(member, default));
-        Assert.False(AuthorizationPolicy.DenyAll.IsAllowed(member, default));
         var exception = Assert.Throws<AuthorizationException>(
-            () => AuthorizationPolicy.Compile([], [], [], [default], TestTags.Default, Policies.SlashPaths));
+            () => AuthorizationDefinition.Create([], [], [default], Policies.SlashPaths, TestTags.Default));
         Assert.Equal("A known action has no name.", exception.Message);
     }
 }
