@@ -126,6 +126,14 @@ public class PlaywrightFixture : IAsyncLifetime
             throw new TimeoutException($"Authentication was not ready before the tests started: {database.UnavailableReason}", exception);
         }
 
+        // The user operations act on the members of the Authorization subject, which the startup adds to the root
+        // storage in the background after its scan; until the users are written to it, every user change is refused.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetRoot().Children.Values.OfType<Authorization.Authorization>().Any(
+                authorization => authorization.Users.ContainsKey(AdminSeeding.AdminUserName)),
+            TimeSpan.FromSeconds(60),
+            message: "The Authorization subject did not show the users before the tests started");
+
         if (ClaimsAdministrator)
         {
             await SetPasswordAsync(AdminSeeding.AdminUserName);
