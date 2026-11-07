@@ -169,6 +169,7 @@ internal sealed class AutomationTriggers
         var version = _getStructureVersion();
         if (version >= 0 && version == _boundStructureVersion)
         {
+            _propertyTriggers.ForgetRebound();
             return [];
         }
 

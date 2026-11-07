@@ -163,9 +163,18 @@ internal sealed class PropertyTriggerEngine(
         }
         finally
         {
-            _rebound.Clear();
-            _reboundGuards.Clear();
+            ForgetRebound();
         }
+    }
+
+    /// <summary>
+    /// Forgets the triggers that a refresh resolved differently, for a graph change that leaves the structure as it was,
+    /// so that triggers of replaced rules are not kept.
+    /// </summary>
+    public void ForgetRebound()
+    {
+        _rebound.Clear();
+        _reboundGuards.Clear();
     }
 
     /// <summary>Requests the runs of every pending trigger, such as after a state change skipped them.</summary>
