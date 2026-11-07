@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Authorization.Tests.Subjects;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
@@ -213,6 +214,34 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(goodResult.Error);
     }
 
+    [Theory]
+    [InlineData("kitchen ")]
+    [InlineData(" kitchen")]
+    [InlineData("kit\u200Bchen")]
+    [InlineData("kit\u200Cchen")]
+    [InlineData("kit\u200Dchen")]
+    [InlineData("kit\u0007chen")]
+    [InlineData("kit\U000E0041chen")]
+    public async Task WhenACustomRoleNameHasOuterWhitespaceOrAnInvisibleCharacter_ThenOnlyThatRoleIsUnavailable(string name)
+    {
+        // Arrange
+        var badlyNamed = new Role { Allow = [ReadPlain()] };
+        AddAuthorization((name, badlyNamed), ("good", new Role { Allow = [ReadPlain()] }));
+
+        // Act
+        var badlyNamedResult = _service.GetPolicy([name]);
+        var goodResult = _service.GetPolicy(["good"]);
+        var readerResult = _service.GetPolicy([BuiltInRoles.ReaderName]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, badlyNamedResult.Policy);
+        Assert.Null(goodResult.Error);
+        Assert.True(goodResult.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Null(readerResult.Error);
+        Assert.Contains(name, _service.GetUnavailableRoles().Keys);
+        await StatusAssert.NotNullAsync(() => badlyNamed.Status);
+    }
+
     [Fact]
     public async Task WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
     {
@@ -302,6 +331,24 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.False(before.CanRead(Member(nameof(TagTestSubject.Temperature))));
         Assert.False(after.CanRead(Member(nameof(TagTestSubject.Plain))));
         Assert.True(after.CanRead(Member(nameof(TagTestSubject.Temperature))));
+    }
+
+    // The service notices only a replaced collection, so a collection changed in place would keep the earlier policy.
+    [Theory]
+    [InlineData(typeof(Role), nameof(Role.Includes))]
+    [InlineData(typeof(Role), nameof(Role.Allow))]
+    [InlineData(typeof(Role), nameof(Role.Deny))]
+    [InlineData(typeof(Authorization), nameof(Authorization.Roles))]
+    public void WhenTheRolesAreExposed_ThenTheirCollectionsCannotBeChangedInPlace(Type type, string propertyName)
+    {
+        // Arrange
+        var propertyType = type.GetProperty(propertyName)!.PropertyType;
+
+        // Act
+        Type[] interfaces = [propertyType, .. propertyType.GetInterfaces()];
+
+        // Assert
+        Assert.DoesNotContain(interfaces, candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(ICollection<>));
     }
 
     [Fact]
@@ -404,6 +451,18 @@ public sealed class AuthorizationServiceTests : IDisposable
         // Assert
         Assert.Equal(["Twin"], unavailable.Keys);
         Assert.Equal("The name 'Twin' is used by more than one role, ignoring case.", unavailable["twin"]);
+    }
+
+    [Fact]
+    public void WhenTheUnavailableRolesAreChangedThroughACast_ThenItThrowsAndTheRoleStaysUsable()
+    {
+        // Arrange
+        AddAuthorization(("good", new Role { Allow = [ReadPlain()] }));
+        var unavailable = (IDictionary<string, string>)_service.GetUnavailableRoles();
+
+        // Act & Assert
+        Assert.Throws<NotSupportedException>(() => unavailable.Add("good", "Changed by a caller."));
+        Assert.Null(_service.GetPolicy(["good"]).Error);
     }
 
     [Fact]
@@ -582,6 +641,35 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.True(result.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
         await StatusAssert.EqualAsync(null, () => role.Status);
         await StatusAssert.EqualAsync(null, () => role.Warning);
+    }
+
+    [Fact]
+    public async Task WhenTheServiceIsDisposed_ThenItsContextNoLongerHoldsIt()
+    {
+        // Arrange
+        var context = TestContext.Create();
+
+        // Act
+        var service = CreateAndDisposeService(context);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                return !service.IsAlive;
+            },
+            message: "The disposed service is still reachable.");
+        GC.KeepAlive(context);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CreateAndDisposeService(IInterceptorSubjectContext context)
+    {
+        var service = new AuthorizationService(context, new DefaultPathProvider('/'));
+        service.Dispose();
+        return new WeakReference(service);
     }
 
     private Authorization AddAuthorization(params (string Name, Role Role)[] roles)

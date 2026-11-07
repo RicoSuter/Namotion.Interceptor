@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Globalization;
+using System.Text;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Authorization;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -34,6 +36,7 @@ internal sealed class AuthorizationSnapshot
         _pathProvider = pathProvider;
         _roles = roles;
         _unavailableRoles = unavailableRoles;
+        UnavailableRoles = unavailableRoles.AsReadOnly();
         _customRolesError = customRolesError;
         _compiler = new RoleCompiler(roles, pathProvider);
         _leadingSeparatorErrors = PathPatternChecks.GetLeadingSeparatorErrors(roles, pathProvider.PathSeparator);
@@ -47,7 +50,7 @@ internal sealed class AuthorizationSnapshot
     public IReadOnlyList<string> RoleNames { get; }
 
     /// <summary>The custom roles that exist but cannot be used, by name ignoring case, with the reason.</summary>
-    public IReadOnlyDictionary<string, string> UnavailableRoles => _unavailableRoles;
+    public IReadOnlyDictionary<string, string> UnavailableRoles { get; }
 
     /// <summary>The status of each <see cref="Authorization"/> subject.</summary>
     public ImmutableArray<(Authorization Authorization, string? Status)> AuthorizationStatuses { get; private set; } = [];
@@ -228,6 +231,11 @@ internal sealed class AuthorizationSnapshot
             return "A role needs a name.";
         }
 
+        if (HasOuterWhitespaceOrInvisibleCharacter(name))
+        {
+            return $"The name '{name}' cannot start or end with whitespace or contain an invisible character, such as a zero-width space or a control character.";
+        }
+
         if (BuiltInRoles.IsBuiltIn(name))
         {
             return $"The name '{name}' is reserved for a built-in role.";
@@ -239,6 +247,26 @@ internal sealed class AuthorizationSnapshot
         }
 
         return count > 1 ? $"The name '{name}' is used by more than one role, ignoring case." : null;
+    }
+
+    // The authorization library refuses such a name for the whole definition, which would deny every role. Checked per
+    // code point, which also refuses format characters outside the BMP, such as tag characters, that the library accepts.
+    private static bool HasOuterWhitespaceOrInvisibleCharacter(string name)
+    {
+        if (char.IsWhiteSpace(name[0]) || char.IsWhiteSpace(name[^1]))
+        {
+            return true;
+        }
+
+        foreach (var rune in name.EnumerateRunes())
+        {
+            if (Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static AuthorizationRole ToAuthorizationRole(string name, Role role) =>
