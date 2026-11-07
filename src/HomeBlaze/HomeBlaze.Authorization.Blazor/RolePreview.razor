@@ -33,8 +33,8 @@
     }
     else
     {
-        <MudAlert Severity="@(_subjectDecision.IsReadable ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-4"
-                  data-testid="role-preview-readable" data-readable="@(_subjectDecision.IsReadable ? "true" : "false")">@_subjectText</MudAlert>
+        <MudAlert Severity="@(_subjectDecision.IsVisible ? Severity.Success : Severity.Warning)" Dense="true" Class="mt-4"
+                  data-testid="role-preview-readable" data-readable="@(_subjectDecision.IsVisible ? "true" : "false")">@_subjectText</MudAlert>
 
         <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Class="role-preview-matrix mt-4" data-testid="role-preview-matrix">
             <thead>
@@ -155,7 +155,7 @@
     private IReadOnlyList<string>? _previewedRoleNames;
     private string? _error;
     private IInterceptorSubject? _subject;
-    private SubjectReadDecision _subjectDecision;
+    private VisibilityDecision _subjectDecision;
     private string? _subjectText;
     private IReadOnlyList<MemberRow> _rows = [];
     private string? _selectedMember;
@@ -237,14 +237,14 @@
         }
 
         var policy = result.Policy;
-        _subjectDecision = policy.Explain(subject);
+        _subjectDecision = policy.ExplainVisibility(subject);
         _subjectText = DescribeSubject(_subjectDecision);
         _rows = CreateRows(subject, policy, AuthorizationService.PathProvider);
     }
 
-    private string DescribeSubject(SubjectReadDecision decision)
+    private string DescribeSubject(VisibilityDecision decision)
     {
-        if (decision.IsReadable)
+        if (decision.IsVisible)
         {
             return "Readable: the subject has a readable member and a chain of readable links from the root.";
         }

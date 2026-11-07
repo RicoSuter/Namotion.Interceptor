@@ -114,7 +114,7 @@ public sealed class AuthorizationServicePreviewTests : IDisposable
     [InlineData(" ")]
     [InlineData(BuiltInRoles.ReaderName)]
     [InlineData("everything")]
-    [InlineData(AuthorizationPolicy.SystemRoleName)]
+    [InlineData("System")]
     public void WhenTheEditedRoleHasAnUnusableName_ThenThePreviewReturnsTheReason(string name)
     {
         // Act
