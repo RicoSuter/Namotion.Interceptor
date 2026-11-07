@@ -7,9 +7,6 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 public sealed class DraftItem<T>(T value)
     where T : class
 {
-    /// <summary>A key of the entry that does not change when the list is reordered; the key of its fields in <see cref="PendingRows"/>.</summary>
-    public string Id { get; } = Guid.NewGuid().ToString("N");
-
     public T Value { get; set; } = value;
 
     /// <summary>Whether the operation of the action was changed while editing, so that the arguments of the previous operation may be stale.</summary>

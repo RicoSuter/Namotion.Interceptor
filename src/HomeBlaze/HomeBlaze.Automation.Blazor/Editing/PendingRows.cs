@@ -14,24 +14,11 @@ public sealed class PendingRows
 
     public bool Any => _fieldIds.Count > 0;
 
-    /// <summary>Marks or unmarks a field, identified by an id that is unique in the editor, see <see cref="PendingRowIds"/>.</summary>
+    /// <summary>Marks or unmarks a field, identified by an id that is unique in the editor.</summary>
     /// <returns>True when the state of the field changed.</returns>
     public bool Set(string fieldId, bool hasPendingRow)
     {
         var isChanged = hasPendingRow ? _fieldIds.Add(fieldId) : _fieldIds.Remove(fieldId);
-        if (isChanged)
-        {
-            Changed?.Invoke();
-        }
-
-        return isChanged;
-    }
-
-    /// <summary>Forgets the fields whose id starts with the prefix, such as those of a removed rule.</summary>
-    /// <returns>True when a field was removed.</returns>
-    public bool Clear(string idPrefix)
-    {
-        var isChanged = _fieldIds.RemoveWhere(id => id.StartsWith(idPrefix, StringComparison.Ordinal)) > 0;
         if (isChanged)
         {
             Changed?.Invoke();

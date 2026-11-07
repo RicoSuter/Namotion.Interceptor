@@ -9,9 +9,6 @@
 
     [CascadingParameter] private PendingRows? Registry { get; set; }
 
-    /// <summary>The id of the field in the editor, built with <see cref="PendingRowIds"/>.</summary>
-    [Parameter, EditorRequired] public string FieldId { get; set; } = null!;
-
     [Parameter] public string? Value { get; set; }
 
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
@@ -30,7 +27,7 @@
 
     [Parameter] public string TestId { get; set; } = "expression-field";
 
-    protected override void OnInitialized() => _tracker = new PendingRowTracker(Registry, FieldId);
+    protected override void OnInitialized() => _tracker = new PendingRowTracker(Registry, Guid.NewGuid().ToString("N"));
 
     private void ReportPending(bool hasPendingRow) => _tracker?.Report(hasPendingRow);
 

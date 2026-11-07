@@ -38,25 +38,6 @@ public class PendingRowsTests
         Assert.False(unmarked);
         Assert.True(pending.Any);
     }
-
-    [Fact]
-    public void WhenAPrefixIsCleared_ThenOnlyTheFieldsOfThatPrefixAreForgotten()
-    {
-        // Arrange
-        var pending = new PendingRows();
-        pending.Set("rule-1/trigger", true);
-        pending.Set("rule-1/guard", true);
-        pending.Set("rule-2/trigger", true);
-
-        // Act
-        var cleared = pending.Clear("rule-1/");
-
-        // Assert
-        Assert.True(cleared);
-        Assert.True(pending.Any);
-        Assert.True(pending.Clear("rule-2/"));
-        Assert.False(pending.Any);
-    }
 }
 
 public class PendingRowsLifecycleTests
@@ -77,47 +58,6 @@ public class PendingRowsLifecycleTests
 
         // Assert
         Assert.Equal(2, raised);
-    }
-
-    [Fact]
-    public void WhenARuleIsRemoved_ThenClearingItsPrefixForgetsItsFieldsAndNotThoseOfARuleWithTheSameStart()
-    {
-        // Arrange
-        var pending = new PendingRows();
-        pending.Set(PendingRowIds.For("rule-1", "trigger", "t1", "condition"), true);
-        pending.Set(PendingRowIds.For("rule-1", "guard", "g1", "condition"), true);
-        pending.Set(PendingRowIds.For("rule-10", "trigger", "t1", "condition"), true);
-        var raised = 0;
-        pending.Changed += () => raised++;
-
-        // Act
-        pending.Clear(PendingRowIds.ForRule("rule-1"));
-
-        // Assert
-        Assert.True(pending.Any);
-        Assert.Equal(1, raised);
-        pending.Clear(PendingRowIds.ForRule("rule-10"));
-        Assert.False(pending.Any);
-    }
-
-    [Fact]
-    public void WhenItemsAreReordered_ThenTheirFieldIdsStayTheSame()
-    {
-        // Arrange
-        var first = new DraftItem<string>("first");
-        var second = new DraftItem<string>("second");
-        var items = new List<DraftItem<string>> { first, second };
-        var before = items.Select(item => PendingRowIds.For("rule-1", "trigger", item.Id, "condition")).ToList();
-
-        // Act
-        DraftLists.Move(items, second, -1);
-        var after = items.Select(item => PendingRowIds.For("rule-1", "trigger", item.Id, "condition")).ToList();
-
-        // Assert
-        Assert.Equal(first, items[1]);
-        Assert.Equal(before[0], after[1]);
-        Assert.Equal(before[1], after[0]);
-        Assert.NotEqual(before[0], before[1]);
     }
 
     [Fact]

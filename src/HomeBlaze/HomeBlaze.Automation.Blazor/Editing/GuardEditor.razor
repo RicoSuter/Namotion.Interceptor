@@ -2,7 +2,7 @@
 @inject TimeProvider TimeProvider
 
 <MudPaper Outlined="true" Class="pa-3" data-testid="automation-guard">
-    <ConditionField @key="@GuardFieldId" FieldId="@GuardFieldId" Label="Checked when a trigger fires" Lead="Check" Value="@_condition"
+    <ConditionField Label="Checked when a trigger fires" Lead="Check" Value="@_condition"
                     ValueChanged="@(value => SetGuardAsync(value, _cooldown))"
                     Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-guard-condition" />
     <div class="d-flex flex-wrap align-center gap-3 mt-2">
@@ -31,8 +31,6 @@
     [Parameter] public DateTimeOffset? LastTriggeredAt { get; set; }
 
     [Parameter] public EventCallback Changed { get; set; }
-
-    private string GuardFieldId => PendingRowIds.For(Rule.Key, RulesSection.Guard, RulesSection.Guard, "condition");
 
     // The two inputs keep what the user typed: a half-typed condition such as "(" does not split back out of the guard,
     // so they are read from the guard only when it was changed by someone else.

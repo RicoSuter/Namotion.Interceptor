@@ -211,9 +211,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
     public class ConditionField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public ConditionField() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string FieldId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string>? Fields { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -240,7 +237,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         where T :  class
     {
         public DraftItem(T value) { }
-        public string Id { get; }
         public bool IsOperationChanged { get; set; }
         public T Value { get; set; }
     }
@@ -274,9 +270,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Automation Automation { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string ItemId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -319,12 +312,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
-    public static class PendingRowIds
-    {
-        public static string For(string ruleKey, string section, string itemId, string field) { }
-        public static string ForItem(string ruleKey, string section, string itemId) { }
-        public static string ForRule(string ruleKey) { }
-    }
     public sealed class PendingRowTracker : System.IDisposable
     {
         public PendingRowTracker(HomeBlaze.Automation.Blazor.Editing.PendingRows? registry, string fieldId) { }
@@ -336,7 +323,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         public PendingRows() { }
         public bool Any { get; }
         public event System.Action? Changed;
-        public bool Clear(string idPrefix) { }
         public bool Set(string fieldId, bool hasPendingRow) { }
     }
     public class PropertyTriggerEditor : Microsoft.AspNetCore.Components.ComponentBase
@@ -348,9 +334,6 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string ItemId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback Removed { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]

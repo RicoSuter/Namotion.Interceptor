@@ -4,7 +4,7 @@
         <MudSpacer />
         <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" aria-label="Remove trigger" OnClick="@(() => Removed.InvokeAsync())" />
     </div>
-    <ConditionField @key="@ConditionFieldId" FieldId="@ConditionFieldId" Label="Fires when" Lead="" Value="@_trigger.Expression" ValueChanged="SetExpressionAsync"
+    <ConditionField Label="Fires when" Lead="" Value="@_trigger.Expression" ValueChanged="SetExpressionAsync"
                     Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-trigger-condition" />
     <div class="d-flex flex-wrap gap-3 mt-2">
         <div style="flex: 1 1 160px;">
@@ -28,7 +28,7 @@
     {
         <div class="d-flex align-start gap-1 mt-3">
             <div class="flex-grow-1" style="min-width: 0;">
-                <ConditionField @key="@RearmFieldId" FieldId="@RearmFieldId" Label="Fires again only once" Lead="" Value="@_trigger.Rearm" ValueChanged="SetRearmAsync"
+                <ConditionField Label="Fires again only once" Lead="" Value="@_trigger.Rearm" ValueChanged="SetRearmAsync"
                                 Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-trigger-rearm" />
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Default: once the condition above is false again</MudText>
             </div>
@@ -48,9 +48,6 @@
 
     [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
 
-    /// <summary>The <see cref="DraftItem{T}.Id"/> of the trigger, which keys its fields in the pending rows of the editor.</summary>
-    [Parameter, EditorRequired] public string ItemId { get; set; } = string.Empty;
-
     [Parameter] public EventCallback<AutomationTrigger> TriggerChanged { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
@@ -64,10 +61,6 @@
         _trigger = trigger;
         return TriggerChanged.InvokeAsync(trigger);
     }
-
-    private string ConditionFieldId => PendingRowIds.For(RuleKey, RulesSection.Triggers, ItemId, "condition");
-
-    private string RearmFieldId => PendingRowIds.For(RuleKey, RulesSection.Triggers, ItemId, "rearm");
 
     private Task SetExpressionAsync(string? expression) => UpdateAsync(_trigger with { Expression = expression ?? string.Empty });
 

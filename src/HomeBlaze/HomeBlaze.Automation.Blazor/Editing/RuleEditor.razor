@@ -44,11 +44,11 @@
                 @switch (item.Value)
                 {
                     case PropertyTrigger propertyTrigger:
-                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions" Draft="Draft" RuleKey="@Rule.Key" ItemId="@item.Id"
+                        <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions" Draft="Draft" RuleKey="@Rule.Key"
                                                TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
                         break;
                     case SubjectEventTrigger eventTrigger:
-                        <EventTriggerEditor @key="item" Trigger="eventTrigger" Automation="Automation" RuleKey="@Rule.Key" ItemId="@item.Id"
+                        <EventTriggerEditor @key="item" Trigger="eventTrigger" Automation="Automation" RuleKey="@Rule.Key"
                                             TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
                         break;
                 }
@@ -98,8 +98,6 @@
 
     private RuleExpressions _expressions = null!;
 
-    [CascadingParameter] private PendingRows? PendingRows { get; set; }
-
     [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
 
     [Parameter, EditorRequired] public AutomationDraft Draft { get; set; } = null!;
@@ -143,7 +141,6 @@
     private Task RemoveTriggerAsync(DraftItem<AutomationTrigger> item)
     {
         Rule.Triggers.Remove(item);
-        PendingRows?.Clear(PendingRowIds.ForItem(Rule.Key, RulesSection.Triggers, item.Id));
         return Changed.InvokeAsync();
     }
 
@@ -175,7 +172,6 @@
     private Task RemoveActionAsync(DraftItem<AutomationAction> item)
     {
         Rule.Actions.Remove(item);
-        PendingRows?.Clear(PendingRowIds.ForItem(Rule.Key, RulesSection.Actions, item.Id));
         return Changed.InvokeAsync();
     }
 
