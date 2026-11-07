@@ -98,6 +98,12 @@ public class AuthorizationRoleTests
             await allowTab.ClickAsync();
             await Assertions.Expect(roleDialog.GetByTestId("role-edit-allow-empty")).ToBeVisibleAsync(new() { Timeout = Timeout });
             var editor = roleDialog.GetByTestId("role-edit");
+
+            // The dialog scales while it opens, and an editor that is measured meanwhile is smaller than the final one.
+            await roleDialog.Page.WaitForFunctionAsync(
+                "() => [...document.querySelectorAll('.mud-dialog')].every(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished'))",
+                null,
+                new() { Timeout = Timeout });
             var editorHeight = (await editor.BoundingBoxAsync())!.Height;
             await roleDialog.GetByTestId("role-edit-add-allow").ClickAsync();
 
