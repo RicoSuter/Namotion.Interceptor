@@ -1,12 +1,12 @@
 namespace HomeBlaze.Automation.Blazor.Runs;
 
 /// <summary>
-/// Sums up the result of Test now: whether the rule would run with the current values, and the first reason why not. A true
-/// condition that Only if rejects waits, so the rule would run once Only if is true.
+/// Sums up the result of Test now: whether the rule would run with the current values, and the first reason why not. Test now
+/// evaluates the expressions, not whether a condition fired already, so the verdict on Only if says what happens to a condition
+/// that becomes true, not that one waits now.
 /// </summary>
 internal static class RuleTestSummary
 {
-    private const string WaitText = "The rule runs once Only if is true while the condition stays true.";
 
     public static RuleTestVerdict Describe(AutomationRuleTestResult result, bool hasEventTrigger)
     {
@@ -29,9 +29,14 @@ internal static class RuleTestSummary
 
         return result.GuardResult switch
         {
-            false => new RuleTestVerdict(false, $"Would wait now: Only if is false. {WaitText}"),
-            null => new RuleTestVerdict(false, $"Would wait now: Only if is unknown, missing {string.Join(", ", result.GuardMissingPaths)}. {WaitText}"),
+            false => new RuleTestVerdict(false, $"Would not run now: Only if is false. {GetWaitText("false")}"),
+            null when result.GuardMissingPaths.Count > 0 => new RuleTestVerdict(
+                false, $"Would not run now: Only if is unknown, missing {string.Join(", ", result.GuardMissingPaths)}. {GetWaitText("unknown")}"),
+            null => new RuleTestVerdict(false, $"Would not run now: Only if is unknown. {GetWaitText("unknown")}"),
             _ => new RuleTestVerdict(true, "Would run now.")
         };
     }
+
+    private static string GetWaitText(string guardResult) =>
+        $"A condition that becomes true while Only if is {guardResult} waits until Only if is true.";
 }
