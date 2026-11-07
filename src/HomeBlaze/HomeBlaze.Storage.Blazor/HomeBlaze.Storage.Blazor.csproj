@@ -11,5 +11,8 @@
         <PackageReference Include="BlazorMonaco" />
         <PackageReference Include="Markdig" />
     </ItemGroup>
+    <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.Storage.Blazor.Tests" />
+    </ItemGroup>
 
 </Project>

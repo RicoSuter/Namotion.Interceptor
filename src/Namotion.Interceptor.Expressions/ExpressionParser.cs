@@ -52,11 +52,19 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
         SkipWhitespace();
         if (_position < text.Length)
         {
-            ThrowIfArithmetic();
-            throw CreateError($"unexpected '{text[_position]}'");
+            throw CreateError(DescribeUnexpectedCharacter());
         }
 
         return new ParsedExpression(text, pathSeparator, body, pipes, [.. _paths]);
+    }
+
+    private string DescribeUnexpectedCharacter()
+    {
+        var character = text[_position];
+        var next = _position + 1;
+        var isGluedOperator = character is '+' or '-' or '*' or '/' &&
+            next < text.Length && !char.IsWhiteSpace(text[next]) && text[next] != '(';
+        return isGluedOperator ? $"put a space after '{character}'" : $"unexpected '{character}'";
     }
 
     private ExpressionNode ParseOr()
@@ -99,17 +107,44 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
 
     private ExpressionNode ParseComparison()
     {
-        var left = ParseOperand(operatorText: null);
+        var left = ParseSum(operatorText: null, bareWordIsText: false);
         if (ReadOperator() is not { } comparison)
         {
             return left;
         }
 
-        return new ComparisonNode(left, comparison.Operator, ParseOperand(comparison.Text));
+        return new ComparisonNode(left, comparison.Operator, ParseSum(comparison.Text, bareWordIsText: true));
     }
 
+    // '+' and '-' bind tighter than comparisons and looser than '*' and '/'.
+    private ExpressionNode ParseSum(string? operatorText, bool bareWordIsText)
+    {
+        var node = ParseProduct(operatorText, bareWordIsText);
+        while (TryConsumeArithmeticOperator(isAdditive: true) is { } arithmetic)
+        {
+            node = new ArithmeticNode(ToArithmeticOperand(node), arithmetic.Operator, ParseProduct(arithmetic.Symbol, bareWordIsText: false));
+        }
+
+        return node;
+    }
+
+    private ExpressionNode ParseProduct(string? operatorText, bool bareWordIsText)
+    {
+        var node = ParseOperand(operatorText, bareWordIsText);
+        while (TryConsumeArithmeticOperator(isAdditive: false) is { } arithmetic)
+        {
+            node = new ArithmeticNode(ToArithmeticOperand(node), arithmetic.Operator, ParseOperand(arithmetic.Symbol, bareWordIsText: false));
+        }
+
+        return node;
+    }
+
+    // An operand of arithmetic is a value, so a bare word that was read as text after a comparison operator is a path.
+    private ExpressionNode ToArithmeticOperand(ExpressionNode node) =>
+        node is LiteralNode { BareWord: { } word } ? CreatePathNode(word) : node;
+
     // The operator before a right operand, or null for an operand that no operator precedes.
-    private ExpressionNode ParseOperand(string? operatorText)
+    private ExpressionNode ParseOperand(string? operatorText, bool bareWordIsText)
     {
         SkipWhitespace();
         var start = _position;
@@ -129,7 +164,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
             return new LiteralNode(ReadString(character));
         }
 
-        return ParseWord(start, operatorText);
+        return ParseWord(start, operatorText, bareWordIsText);
     }
 
     private ExpressionNode ParseGroup(int start)
@@ -146,23 +181,18 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
         return node;
     }
 
-    private ExpressionNode ParseWord(int start, string? operatorText)
+    private ExpressionNode ParseWord(int start, string? operatorText, bool bareWordIsText)
     {
         var token = ReadToken();
-        if (token.Length == 0)
-        {
-            throw CreateError(ExpectedValue(operatorText));
-        }
-
-        if (IsArithmeticToken(token))
+        if (token.Length == 0 || IsArithmeticToken(token))
         {
             _position = start;
-            throw CreateError("arithmetic is not supported");
+            throw CreateError(ExpectedValue(operatorText));
         }
 
         if (IsNumber(token))
         {
-            return ParseNumber(token, start);
+            return TryParseDuration(token, out var duration) ? new LiteralNode(duration) : ParseNumber(token, start);
         }
 
         if (TryCreateKeywordLiteral(token) is { } literal)
@@ -176,17 +206,22 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
             throw CreateError(ExpectedValue(operatorText));
         }
 
-        return CreateWordNode(token, operatorText);
+        return CreateWordNode(token, bareWordIsText);
     }
 
-    private ExpressionNode CreateWordNode(string token, string? operatorText)
+    private ExpressionNode CreateWordNode(string token, bool bareWordIsText)
     {
-        // A bare word after an operator is text, such as the name of an enum value.
-        if (operatorText is not null && IsBareWord(token))
+        // A bare word after a comparison operator is text, such as the name of an enum value.
+        if (bareWordIsText && IsBareWord(token))
         {
-            return new LiteralNode(token);
+            return new LiteralNode(token, bareWord: token);
         }
 
+        return CreatePathNode(token);
+    }
+
+    private PathNode CreatePathNode(string token)
+    {
         if (!_paths.Contains(token))
         {
             _paths.Add(token);
@@ -204,6 +239,90 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
         }
 
         return new LiteralNode(number);
+    }
+
+    // A duration is one or more pairs of a number and a unit, from the largest unit to the smallest and each unit at most
+    // once, with an optional sign before the first pair: 90s, 1h30m, 1.5d, -5m. A unit letter never parses as a double, so
+    // a duration never takes the place of a number.
+    private static bool TryParseDuration(string token, out TimeSpan duration)
+    {
+        duration = TimeSpan.Zero;
+        var rest = token.AsSpan();
+        var isNegative = rest[0] == '-';
+        if (rest[0] is '-' or '+')
+        {
+            rest = rest[1..];
+        }
+
+        var ticks = 0d;
+        var previousRank = int.MaxValue;
+        while (rest.Length > 0)
+        {
+            if (!TryReadDurationPart(ref rest, previousRank, out var rank, out var partTicks))
+            {
+                return false;
+            }
+
+            previousRank = rank;
+            ticks += partTicks;
+        }
+
+        if (ticks >= TimeSpan.MaxValue.Ticks)
+        {
+            return false;
+        }
+
+        duration = TimeSpan.FromTicks((long)Math.Round(ticks));
+        if (isNegative)
+        {
+            duration = duration.Negate();
+        }
+
+        return true;
+    }
+
+    // Reads one number and its unit from the front of the text, and fails unless the unit is smaller than the previous one.
+    private static bool TryReadDurationPart(ref ReadOnlySpan<char> rest, int previousRank, out int rank, out double ticks)
+    {
+        rank = -1;
+        ticks = 0;
+        var numberLength = 0;
+        while (numberLength < rest.Length && (char.IsAsciiDigit(rest[numberLength]) || rest[numberLength] == '.'))
+        {
+            numberLength++;
+        }
+
+        if (numberLength == 0 ||
+            !double.TryParse(rest[..numberLength], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
+        {
+            return false;
+        }
+
+        var remaining = rest[numberLength..];
+        if (!TryReadUnit(remaining, out rank, out var unitLength, out var ticksPerUnit) || rank >= previousRank)
+        {
+            return false;
+        }
+
+        ticks = amount * ticksPerUnit;
+        rest = remaining[unitLength..];
+        return true;
+    }
+
+    // "ms" before "m", so that milliseconds are not read as minutes.
+    private static bool TryReadUnit(ReadOnlySpan<char> text, out int rank, out int length, out long ticksPerUnit)
+    {
+        (rank, length, ticksPerUnit) = text switch
+        {
+            ['m', 's', ..] => (0, 2, TimeSpan.TicksPerMillisecond),
+            ['s', ..] => (1, 1, TimeSpan.TicksPerSecond),
+            ['m', ..] => (2, 1, TimeSpan.TicksPerMinute),
+            ['h', ..] => (3, 1, TimeSpan.TicksPerHour),
+            ['d', ..] => (4, 1, TimeSpan.TicksPerDay),
+            _ => (-1, 0, 0L)
+        };
+
+        return rank >= 0;
     }
 
     private static LiteralNode? TryCreateKeywordLiteral(string token)
@@ -251,9 +370,39 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
             throw CreateError("use '==' for equality");
         }
 
-        ThrowIfArithmetic();
         return null;
     }
+
+    // An arithmetic operator stands alone: white space, an opening parenthesis or the end follows it. Inside a token such
+    // as "notes-v2.md" it is part of a name, and directly before a digit, as in "-5", it is the sign of a number.
+    private (ArithmeticOperator Operator, string Symbol)? TryConsumeArithmeticOperator(bool isAdditive)
+    {
+        SkipWhitespace();
+        if (_position >= text.Length)
+        {
+            return null;
+        }
+
+        var arithmetic = ReadArithmeticSymbol(isAdditive);
+        var next = _position + 1;
+        if (arithmetic is null || (next < text.Length && !char.IsWhiteSpace(text[next]) && text[next] != '('))
+        {
+            return null;
+        }
+
+        _position = next;
+        return arithmetic;
+    }
+
+    private (ArithmeticOperator Operator, string Symbol)? ReadArithmeticSymbol(bool isAdditive) =>
+        (isAdditive, text[_position]) switch
+        {
+            (true, '+') => (ArithmeticOperator.Add, "+"),
+            (true, '-') => (ArithmeticOperator.Subtract, "-"),
+            (false, '*') => (ArithmeticOperator.Multiply, "*"),
+            (false, '/') => (ArithmeticOperator.Divide, "/"),
+            _ => null
+        };
 
     private ExpressionPipe ParsePipe()
     {
@@ -340,17 +489,6 @@ internal sealed class ExpressionParser(string text, char pathSeparator)
 
         _position = end + 1;
         return text.Substring(start + 1, end - start - 1);
-    }
-
-    // An operator of arithmetic stands alone between operands. Inside a token such as "notes-v2.md" it is part of a name.
-    private void ThrowIfArithmetic()
-    {
-        if (_position < text.Length &&
-            text[_position] is '+' or '-' or '*' or '/' &&
-            (_position + 1 == text.Length || char.IsWhiteSpace(text[_position + 1])))
-        {
-            throw CreateError("arithmetic is not supported");
-        }
     }
 
     private bool TryConsumePipeSeparator()

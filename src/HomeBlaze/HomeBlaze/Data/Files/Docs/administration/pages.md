@@ -100,13 +100,18 @@ Check the [installation guide](../administration/installation.md) for examples.
 | `[Link](../../root.md)` | Two levels up |
 | `[Link](sibling.md#section)` | A section of a page in the same folder |
 | `[Link](#section)` | A section of the page itself |
+| `![Picture](images/plan.png)` | A picture of the storage, see [Pictures](#pictures) |
+| `[Link](manual.pdf)` | A file of the storage, opens in a new tab |
+| `[Link](subfolder/)` | A folder, opens in the subject browser |
+| `[Link](..)` | The parent folder, opens in the subject browser |
 
-A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
+A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on. A link that is only a query, starting with `?`, leads to the page it stands on as well.
 
 ### Link Targets
 
-- **Links on a page open in the same tab**: a relative link to a page, an address of the application such as `/browser/Demo`, and a web address alike. So does the `Href` of a [Card](widgets/card.md).
-- **A new tab**: write the link as an HTML element with a target, `<a href="https://example.com" target="_blank" rel="noopener">Example</a>`. The page keeps the attribute as written.
+- **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. The `Href` of a [Card](widgets/card.md) opens in the same tab as well, so it should not point at a file.
+- **Links that open in a new tab**: a link with a scheme, such as a web address or `mailto:`, a link to another host that starts with `//`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
+- **A page in a new tab**: write the link as an HTML element with a target, `<a href="/pages/Docs/home.md" target="_blank" rel="noopener">Home</a>`. The page keeps the attribute as written.
 - **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
 - **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
 
@@ -120,11 +125,25 @@ A picture is written as in any markdown text, with the address of a picture on t
 ![The heat pump](https://example.com/heat-pump.jpg)
 ~~~~
 
+A picture can also be a file of the storage. Put the file next to the page, or in a folder next to it, and write its path relative to the page:
+
+~~~~markdown
+![Sample floor plan](images/sample-floor-plan.svg)
+~~~~
+
+![Sample floor plan](images/sample-floor-plan.svg)
+
+- **Address**: the picture is served under `/files/` with its path in the storage, here `/files/Docs/administration/images/sample-floor-plan.svg`. The `Image` of a [Card](widgets/card.md) takes a relative path in the same way.
+- **What is served**: any file that is not a subject of its own type, such as `.png`, `.jpg`, `.svg` or `.pdf`. Pages (`.md`), JSON files and hidden files, whose name starts with a dot, are never served. A text file is served as UTF-8.
+- **Who can read it**: HomeBlaze has no authorization yet (see [Security](../architecture/design/security.md)), so every served file can be read by anyone who can reach the app. Do not keep secrets in such a file, for example a backup copy of a configuration.
+- **Names with `%`**: a file, or any file in a folder, whose name contains a literal `%` followed by two hex digits, such as `50%25.png`, cannot be reached, by a picture or a link alike, as for pages.
+- **A changed file**: a picture that is replaced in the storage shows on the next view of the page.
+
 A picture is shown in a size that fits the page, and it always keeps its proportions:
 
 - **Width**: never wider than the place it stands in, such as the text of the page, a narrow screen or a card.
 - **Height**: at most four fifths of the height of the browser window.
-- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height.
+- **Your own width**: write the picture as HTML with a `width` to give it a size of its own, as in `<img src="https://example.com/heat-pump.jpg" width="300">`. Such a picture is still never wider than its place, and it has no limit of its height. A picture of the storage written as HTML needs its address, as in `<img src="/files/Docs/administration/images/sample-floor-plan.svg" width="300">`, because the path in an HTML element is not rewritten.
 - **Not available**: a picture that cannot be loaded is replaced by a placeholder with its text. The address of the picture is the tooltip of the placeholder.
 
 ---
@@ -219,11 +238,11 @@ The conveyor runs fast: {{ /Demo/Conveyor/CurrentSpeed > 500 }}.
 
 With the pipe `map` a condition shows the text of a case instead, such as `{{ /Demo/Conveyor/CurrentSpeed > 500 | map:fastslow }}` with a map whose cases have `Value=True` and `Value=False`.
 
-- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`.
+- **Comparisons**: `==`, `!=`, `<`, `<=`, `>` and `>=` compare a value with a number, `true`, `false`, `null`, a text in quotes, or another path. A word after an operator is a path when it holds a slash or an index in brackets, such as `mymotor/Speed`, `../Pump/Speed`, `/Demo/Pump/Speed` or `/Devices[0]`. Any other word is a text, such as the name of an enum value: `{{ mymotor/Status == Running }}`. A word in arithmetic is a path, so `mymotor/Speed > Limit + 5` reads `Limit` as a path.
 - **Missing values and `null`**: `== null` is true for a missing value and `!= null` is false, so neither is ever unknown. Any other operator with `null` is unknown.
 - **Logic**: `and` (`&&`), `or` (`||`), `not` (`!`) and parentheses combine comparisons. A missing value makes a comparison unknown, and an unknown part makes the whole unknown unless the rest decides it: `false and unknown` is `false`.
 - **Texts and enums** compare without regard to upper and lower case. A date compares with a text in ISO 8601, such as `'2026-10-01'`.
-- **No arithmetic**: `+`, `-`, `*` and `/` between values show an error. They are reserved, so that a later version can add arithmetic without changing what a page shows.
+- **Arithmetic**: `+`, `-`, `*` and `/` compute with numbers, dates and durations, with a space after the operator: `{{ /Demo/Meter/Import - /Demo/Meter/Export }}`. A duration is written like `90s`, `15m` or `1h30m`, a date minus a date is a duration, and a date plus or minus a duration is a date. A computed value is shown without the unit of a property.
 - **Errors**: A mistake shows its message and where it is, such as `expected ')' at position 16`, in place of the value. See [Page Errors](page-errors.md#expression-errors).
 
 ### Where an Expression Works
@@ -248,7 +267,7 @@ The reader sees "Speed: 600 RPM", and the tooltip of the text shows the target s
 ### Expression Limits
 
 - **Length and depth**: An expression is at most 1000 characters long and nests at most 32 levels. Each parenthesis counts as a level, and so does each `not` or `!`, so a chain of them reaches the limit. A longer or deeper expression shows an error in place of the value.
-- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit, another number of decimals and arithmetic are not supported.
+- **Pipes**: An expression has the pipes `display`, `raw` and `map`. Another unit and another number of decimals are not supported.
 - **Single values**: An expression is made for text, numbers, yes or no, durations and times. For a property that holds a subject or a list of subjects, it shows a technical type name. A list of plain values is shown on one line with a space between the values. The form `raw` shows a technical type name for every list.
 - **No error for a wrong path**: An expression whose path leads to nothing shows nothing. Check the spelling of the path when a value is missing.
 - **Special characters in a name are percent-encoded**: A name with an operator character, a quote, a brace or a space is written percent-encoded in an expression. [Paths](paths.md) has the characters and examples. Inside HTML that you write, write `<` as `&lt;`.
@@ -1044,7 +1063,7 @@ Known limits:
 
 ## Not Supported
 
-- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals, and arithmetic in expressions.
+- More pipes for expressions than `display`, `raw` and `map`, like another unit or another number of decimals.
 - Expressions in arguments. The value of an argument is fixed text, except the `Text` and the `When` of a `Case` of a value map, see [ValueMap](widgets/value-map.md#conditions).
 - Short names for types. A block always has the full type name.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.

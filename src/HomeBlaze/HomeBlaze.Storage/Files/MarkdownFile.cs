@@ -81,6 +81,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // configuration within the write.
     private readonly AsyncLocal<WriteOfFlow?> _writeOfFlow = new();
 
+    // The links that widgets of the page resolved, kept by MarkdownContentParser.ResolveLink. A field and not a property,
+    // so that it is no property of the subject.
+    internal ResolvedLinks? ResolvedLinks;
+
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
     private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;

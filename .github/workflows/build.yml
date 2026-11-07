@@ -444,6 +444,20 @@ jobs:
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke-arm64 `
             -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze-arm64.tar.gz
 
+  # The one check that the branch rules require. A skipped job passes it, because a job is skipped when its files did not
+  # change, and a skipped matrix job reports under another name than one that runs, so a rule cannot name those jobs.
+  ci:
+    timeout-minutes: 5
+    if: always()
+    needs: [ changes, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when a needed job failed or was canceled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          Write-Output '${{ toJSON(needs) }}'
+          exit 1
+
   container-publish:
     timeout-minutes: 30
     # Forks cannot push to this package.
