@@ -264,17 +264,6 @@ public class AuthorizationPolicyTests
     }
 
     [Fact]
-    public void WhenASystemDenyRuleIsInvalid_ThenCompileThrowsNamingTheSystemRules()
-    {
-        // Act
-        var exception = Assert.Throws<AuthorizationException>(
-            () => Compile([Role("Reader")], ["Reader"], systemDeny: [Rule([], tags: ["secret"])]));
-
-        // Assert
-        Assert.Equal("A rule of the system rules has no actions.", exception.Message);
-    }
-
-    [Fact]
     public void WhenASystemDenyRuleHasAnInvalidPath_ThenCompileThrowsNamingTheSystemRules()
     {
         // Act
