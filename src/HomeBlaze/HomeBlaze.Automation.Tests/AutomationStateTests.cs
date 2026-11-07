@@ -157,6 +157,54 @@ public class AutomationStateTests
     }
 
     [Fact]
+    public async Task WhenARuleChangesTheStateForAnEvent_ThenALaterRuleOfThatEventWithoutAStateStillRuns()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["toggle", "notify"];
+            automation.Rules = Keyed(
+                ("toggle", Create("Toggle", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On")], inState: "Off")),
+                ("notify", Create("Notify", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")])));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("On", host.Automation.CurrentState);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(1L, host.Rule("notify").RunCount);
+    }
+
+    [Fact]
+    public async Task WhenARuleChangesTheStateForAnEvent_ThenALaterRuleOfThatEventInAStateDoesNotRun()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+        {
+            automation.States = ["Off", "On"];
+            automation.InitialState = "Off";
+            automation.RuleOrder = ["toggle", "offOnly"];
+            automation.Rules = Keyed(
+                ("toggle", Create("Toggle", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Enter("On")], inState: "Off")),
+                ("offOnly", Create("Off only", AutomationRuleMode.On, [OnEvent("/Button", "TestPressEvent")], [Invoke("/Blinds/Close")], inState: "Off")));
+        });
+
+        // Act
+        host.Button.Press("Release");
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("On", host.Automation.CurrentState);
+        Assert.Equal(0, host.Blinds.CloseCount);
+        Assert.Equal(0L, host.Rule("offOnly").RunCount);
+    }
+
+    [Fact]
     public async Task WhenTheStateChanges_ThenAnotherAutomationCanReactToIt()
     {
         // Arrange
