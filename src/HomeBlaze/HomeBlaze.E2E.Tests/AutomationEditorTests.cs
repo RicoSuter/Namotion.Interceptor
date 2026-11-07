@@ -83,7 +83,7 @@ public class AutomationEditorTests
         var json = await _fixture.ReadFileAsync(washer.FilePath);
         Assert.Contains("\"name\": \"Done\"", json);
         Assert.Contains("/Demo/Motor/Temperature == 3", json);
-        Assert.Contains("\"for\": \"00:05:00\"", json);
+        Assert.Contains("\"for\": \"5m\"", json);
         var (_, reopened) = await OpenEditorAsync(washer.Name, page, RulesTab);
         await SelectRuleAsync(reopened, "Done");
         await Assertions.Expect(reopened.GetByLabel("For at least")).ToHaveValueAsync("5m");
