@@ -22,13 +22,13 @@
     @if (_trigger.Rearm is null)
     {
         <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddRearmAsync" Class="mt-2"
-                   data-testid="automation-add-rearm">Fires again only once</MudButton>
+                   data-testid="automation-add-rearm">Fires again only after</MudButton>
     }
     else
     {
         <div class="d-flex align-start gap-1 mt-3">
             <div class="flex-grow-1" style="min-width: 0;">
-                <ConditionField Label="Fires again only once" Lead="" Value="@_trigger.Rearm" ValueChanged="SetRearmAsync"
+                <ConditionField Label="Fires again only after" Lead="" Value="@_trigger.Rearm" ValueChanged="SetRearmAsync"
                                 Validate="@Expressions.Validate" Preview="@Expressions.Preview" TestId="automation-trigger-rearm" />
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">Default: once the condition above is false again</MudText>
             </div>
