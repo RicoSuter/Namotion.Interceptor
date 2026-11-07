@@ -1,6 +1,9 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -53,6 +56,35 @@ public class MarkdownLinkCacheTests
         Assert.Equal("/files/Docs/plan.png", after);
         Assert.Equal(before, after);
         Assert.NotSame(before, after);
+    }
+
+    [Fact]
+    public async Task WhenTheStorageMoves_ThenALinkLeadsToItsNewPath()
+    {
+        // Arrange
+        FluentStorageContainer? parent = null;
+        var fixture = await MarkdownPageFixture.CreateAsync(services =>
+            services.AddSingleton(_ => new SubjectPathResolver(() => parent)));
+        parent = new FluentStorageContainer(
+            fixture.Services.GetRequiredService<SubjectTypeRegistry>(),
+            fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>(),
+            fixture.Services)
+        {
+            StorageType = "inmemory"
+        };
+        ((IInterceptorSubject)parent).Context.AddFallbackContext(fixture.Services.GetRequiredService<IInterceptorSubjectContext>());
+        parent.Children = new Dictionary<string, IInterceptorSubject> { ["Nested"] = fixture.Storage };
+        var page = await fixture.AddPageAsync("Docs/page.md", "# Page");
+        var linkScope = (ILinkScope)page;
+        var before = linkScope.ResolveLink("plan.png");
+
+        // Act
+        parent.Children = new Dictionary<string, IInterceptorSubject> { ["Moved"] = fixture.Storage };
+        var after = linkScope.ResolveLink("plan.png");
+
+        // Assert
+        Assert.Equal("/files/Nested/Docs/plan.png", before);
+        Assert.Equal("/files/Moved/Docs/plan.png", after);
     }
 
     [Fact]

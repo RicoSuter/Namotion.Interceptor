@@ -198,14 +198,17 @@ public sealed partial class MarkdownContentParser
             return link;
         }
 
-        // Read on every call and before the base path is computed: a component that renders the link then renders again
-        // when the paths change, and a cache built during a change carries the version from before it.
+        // Both read on every call and before the base path is computed. The structure version keys the cache as the
+        // registry documents for anything computed from it, so links computed during a change carry a number from before
+        // the change ended and are not served after it. The paths version makes a component that renders the link render
+        // again when the paths change.
+        var structureVersion = ((IInterceptorSubject)page).Context.TryGetService<ISubjectRegistry>()?.StructureVersion ?? 0;
         var pathsVersion = _pathResolver.PathsVersion;
         var resolvedLinks = page.ResolvedLinks;
-        if (resolvedLinks is null || resolvedLinks.PathsVersion != pathsVersion)
+        if (resolvedLinks is null || resolvedLinks.StructureVersion != structureVersion || resolvedLinks.PathsVersion != pathsVersion)
         {
             resolvedLinks = new ResolvedLinks(
-                pathsVersion, GetLinkBasePath(page), EscapeForLink(Path.GetFileName(page.FullPath)), MaximumCachedLinks);
+                structureVersion, pathsVersion, GetLinkBasePath(page), EscapeForLink(Path.GetFileName(page.FullPath)), MaximumCachedLinks);
             page.ResolvedLinks = resolvedLinks;
         }
 
