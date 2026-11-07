@@ -48,6 +48,11 @@ public class MarkdownFileLinkTests
     [InlineData("Readme.md", "[Demo](Demo/)", "<a href=\"/browser/Demo\">Demo</a>")]
     [InlineData("Docs/home.md", "[Design](architecture/design/)", "<a href=\"/browser/Docs/architecture/design\">Design</a>")]
     [InlineData("Docs/architecture/overview.md", "[Up](../)", "<a href=\"/browser/Docs\">Up</a>")]
+    [InlineData("Docs/sub/page.md", "[Up](..)", "<a href=\"/browser/Docs\">Up</a>")]
+    [InlineData("Docs/page.md", "[Here](.)", "<a href=\"/browser/Docs\">Here</a>")]
+    [InlineData("Docs/a/b/page.md", "[Up](../..)", "<a href=\"/browser/Docs\">Up</a>")]
+    [InlineData("Docs/sub/page.md", "[Here](./.)", "<a href=\"/browser/Docs/sub\">Here</a>")]
+    [InlineData("Docs/sub/page.md", "[Up](..?view=list)", "<a href=\"/browser/Docs?view=list\">Up</a>")]
     public async Task WhenLinkIsARelativeFolder_ThenItOpensTheFolderInTheBrowserInTheSameTab(string pagePath, string source, string expected)
     {
         // Act
@@ -65,6 +70,12 @@ public class MarkdownFileLinkTests
     [InlineData("[App](/browser/Demo)", "<a href=\"/browser/Demo\">App</a>")]
     [InlineData("[Manual](/files/Docs/manual.pdf)", "<a href=\"/files/Docs/manual.pdf\" target=\"_blank\" rel=\"noopener noreferrer\">Manual</a>")]
     [InlineData("[Notes](notes.markdown)", "<a href=\"/pages/Docs/notes.markdown\">Notes</a>")]
+    [InlineData("[Other](other.md?v=1)", "<a href=\"/pages/Docs/other.md?v=1\">Other</a>")]
+    [InlineData("[Other](other.md?v=1#a)", "<a href=\"/pages/Docs/other.md?v=1#a\">Other</a>")]
+    [InlineData("[Edit](?view=edit)", "<a href=\"/pages/Docs/page.md?view=edit\">Edit</a>")]
+    [InlineData("[Other host](//example.com/x)", "<a href=\"//example.com/x\" target=\"_blank\" rel=\"noopener noreferrer\">Other host</a>")]
+    [InlineData("[Manual](/FILES/Docs/manual.pdf)", "<a href=\"/FILES/Docs/manual.pdf\" target=\"_blank\" rel=\"noopener noreferrer\">Manual</a>")]
+    [InlineData("[Dots](...)", "<a href=\"/files/Docs/...\" target=\"_blank\" rel=\"noopener noreferrer\">Dots</a>")]
     public async Task WhenPageHasALink_ThenOnlyFileAndExternalLinksOpenInANewTab(string source, string expected)
     {
         // Act

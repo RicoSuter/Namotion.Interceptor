@@ -34,8 +34,9 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Rewrites a link of the page as <see cref="ClassifyLink"/> classifies it: a page gets its route under /pages, a file
-    /// its route under <see cref="StorageFileRoute.Prefix"/> and a folder its route in the subject browser. A link that is
-    /// only a fragment gets the route of the page itself, which a link names with <paramref name="pageName"/>.
+    /// its route under <see cref="StorageFileRoute.Prefix"/> and a folder its route in the subject browser. A query or a
+    /// fragment stays on the link. A link that is only a query or a fragment gets the route of the page itself, which a
+    /// link names with <paramref name="pageName"/>.
     /// </summary>
     private static string RewriteLink(string url, string basePath, string pageName)
     {
@@ -53,7 +54,7 @@ public sealed partial class MarkdownContentParser
         };
 
         // The browser resolves a link against the base address of the application and not against the
-        // address of the page, so a fragment alone would lead to the start page.
+        // address of the page, so a query or a fragment alone would lead to the start page.
         var path = ResolvePath(basePath, kind == LinkKind.Page && pathEnd == 0 ? pageName : url[..pathEnd]);
         var suffix = url.AsSpan(pathEnd);
         return path.Length == 0 ? string.Concat(routePrefix, suffix) : string.Concat(routePrefix, "/", path, suffix);
@@ -69,10 +70,10 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Classifies a link. A link with a scheme or a leading slash, also one to another host that starts with two slashes,
-    /// stays as written. A relative link to a <c>.md</c> or <c>.markdown</c> file, or one that is only a fragment, is a
-    /// page. A relative link whose path ends with a slash is a folder, and any other relative link is a file.
-    /// <paramref name="pathEnd"/> is where the part after the path starts, or the length of the link without one: the
-    /// fragment of a page link, and the query or fragment of a folder or file link.
+    /// stays as written. Every other link is relative, and its path ends at the first <c>?</c> or <c>#</c>. A path to a
+    /// <c>.md</c> or <c>.markdown</c> file, or an empty path as in a link that is only a query or a fragment, is a page.
+    /// A path that ends with a slash, or that is or ends with a segment <c>.</c> or <c>..</c>, is a folder. Any other path
+    /// is a file. <paramref name="pathEnd"/> is where the query or fragment starts, or the length of the link without one.
     /// </summary>
     private static LinkKind ClassifyLink(string url, out int pathEnd)
     {
@@ -82,22 +83,26 @@ public sealed partial class MarkdownContentParser
             return LinkKind.AsWritten;
         }
 
-        var fragmentStart = url.IndexOf('#');
-        pathEnd = fragmentStart < 0 ? url.Length : fragmentStart;
-        var pagePath = url.AsSpan(0, pathEnd);
-        if (pathEnd == 0 || pagePath.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
-            pagePath.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase))
+        pathEnd = url.AsSpan().IndexOfAny('?', '#');
+        if (pathEnd < 0)
+        {
+            pathEnd = url.Length;
+        }
+
+        var path = url.AsSpan(0, pathEnd);
+        if (path.IsEmpty || path.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase))
         {
             return LinkKind.Page;
         }
 
-        var queryStart = pagePath.IndexOf('?');
-        if (queryStart >= 0)
+        if (path[^1] == '/')
         {
-            pathEnd = queryStart;
+            return LinkKind.Folder;
         }
 
-        return url.AsSpan(0, pathEnd).EndsWith("/") ? LinkKind.Folder : LinkKind.File;
+        var lastSegment = path[(path.LastIndexOf('/') + 1)..];
+        return lastSegment is "." or ".." ? LinkKind.Folder : LinkKind.File;
     }
 
     /// <summary>
@@ -127,15 +132,18 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Whether a link of the page opens in a new tab: a link with a scheme, such as a web address, or a link to a file of
-    /// the storage, also one written as an address under <see cref="StorageFileRoute.Prefix"/>. A link to a file must,
-    /// because the router of the application would take a click on it as its own route.
+    /// Whether a link of the page opens in a new tab: a link with a scheme, such as a web address, a link to another host
+    /// that starts with two slashes, or a link to a file of the storage, also one written as an address under
+    /// <see cref="StorageFileRoute.Prefix"/>. A link to a file must, because the router of the application would take a
+    /// click on it as its own route.
     /// </summary>
     private static bool OpensInNewTab(string url) =>
         ClassifyLink(url, out _) switch
         {
             LinkKind.File => true,
-            LinkKind.AsWritten => HasScheme(url) || url.StartsWith(StorageFileRoute.Prefix + "/", StringComparison.Ordinal),
+            // The route of the files ignores case, as all routes do.
+            LinkKind.AsWritten => HasScheme(url) || url.StartsWith("//", StringComparison.Ordinal) ||
+                url.StartsWith(StorageFileRoute.Prefix + "/", StringComparison.OrdinalIgnoreCase),
             _ => false
         };
 

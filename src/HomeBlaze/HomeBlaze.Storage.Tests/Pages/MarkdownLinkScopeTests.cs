@@ -67,6 +67,19 @@ public class MarkdownLinkScopeTests
         Assert.Equal("/browser/sub", link);
     }
 
+    [Fact]
+    public async Task WhenLinkIsOnlyAQuery_ThenItResolvesToThePageItselfWithTheQuery()
+    {
+        // Arrange
+        var (_, leaf, _) = await AddPageAsync();
+
+        // Act
+        var link = leaf.ResolveScopedLink("?view=edit");
+
+        // Assert
+        Assert.Equal("/pages/page.md?view=edit", link);
+    }
+
     [Theory]
     [InlineData("/pages/Demo/Blocks.md")]
     [InlineData("https://example.com/a.md")]

@@ -103,13 +103,14 @@ Check the [installation guide](../administration/installation.md) for examples.
 | `![Picture](images/plan.png)` | A picture of the storage, see [Pictures](#pictures) |
 | `[Link](manual.pdf)` | A file of the storage, opens in a new tab |
 | `[Link](subfolder/)` | A folder, opens in the subject browser |
+| `[Link](..)` | The parent folder, opens in the subject browser |
 
-A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on.
+A section is addressed by the id of its heading. Every heading gets its id from its text: the letters in lower case, the digits, a hyphen for the spaces between two words, and no other punctuation than `-`, `_` and `.`. The id starts at the first letter of the heading, and the second heading with the same text gets `-1` at its end. `## Live Expressions` gets the id `live-expressions`. A link that is only `#` and an id, like `[Link](#live-expressions)`, leads to that section of the page it stands on. A link that is only a query, starting with `?`, leads to the page it stands on as well.
 
 ### Link Targets
 
 - **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. The `Href` of a [Card](widgets/card.md) opens in the same tab as well, so it should not point at a file.
-- **Links that open in a new tab**: a link with a scheme, such as a web address or `mailto:`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
+- **Links that open in a new tab**: a link with a scheme, such as a web address or `mailto:`, a link to another host that starts with `//`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
 - **A page in a new tab**: write the link as an HTML element with a target, `<a href="/pages/Docs/home.md" target="_blank" rel="noopener">Home</a>`. The page keeps the attribute as written.
 - **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
 - **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
