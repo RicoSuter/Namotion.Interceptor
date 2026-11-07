@@ -47,7 +47,7 @@ public sealed partial class WidgetReadAccessTests : BunitContext, IAsyncLifetime
         [typeof(ExpansionPanels)] = LayoutReason + " The titles of its panels are plain text.",
         [typeof(FlowLayout)] = LayoutReason,
         [typeof(GridLayout)] = LayoutReason,
-        [typeof(HostSystem)] = "Shows the states of its own subject: read granularity inside a widget whose subject is shown is per subject (spec known limit); whether the subject is shown is decided by CanShow, which the sweep of hidden subjects covers.",
+        [typeof(HostSystem)] = "Shows the states of its own subject: read granularity inside a widget whose subject is shown is per subject (a known limit of the authorization documentation); whether the subject is shown is decided by CanShow, which the sweep of hidden subjects covers.",
         [typeof(Responsive)] = LayoutReason,
         [typeof(TabLayout)] = LayoutReason,
         [typeof(ValueList)] = "Lists value rows, which the sweep covers as ValueRow.",

@@ -348,29 +348,6 @@ A value can name what the policy hides, such as a list of the names of hidden su
 
 `list_types` is not filtered, because types are schema rather than data. Enrichments such as `$methods` come from the `IMcpSubjectEnricher` of the application, which filters them itself. A custom tool resolves paths the way the tools do with `configuration.TryGetReadableProperty(root, path)` and `configuration.TryGetReadableSubject(root, path)`, which return null for what is hidden. It builds the path `search` lists for a subject, which is also the `$path` `browse` returns for a subject it lists, with `configuration.TryGetSubjectPath(root, subject)`, which returns null for a subject that has no path, is not readable or is of a type in `ExcludeTypes`, so it lists exactly the subjects `search` can list. `TryGetReadableSubject` resolves a path it returns, for any subject but the root, back to that subject when the path provider resolves the path with the `PathPrefix`, as without a prefix or with the prefix `/` and the separator `/`. The three helpers take the tool root as `root`: it is readable, and paths are resolved and built from it.
 
-#### Migrating from `IsReadOnly`
-
-`McpServerConfiguration.IsReadOnly` was removed, and `AccessPolicy` is no longer nullable; the policy alone decides what a client may change.
-
-- **A policy of its own without setting `IsReadOnly`: the server becomes writable.** `IsReadOnly` defaulted to true, so such a server was read-only whatever the policy allowed. After the upgrade, `set_property` writes every property the policy allows `write` on. To stay read-only, deny `write` in the policy:
-
-  ```csharp
-  // Before: read-only through IsReadOnly; after the upgrade, every property but Password is writable.
-  public bool IsAllowed(RegisteredSubjectProperty member, string action) =>
-      member.Name != "Password";
-
-  // Read-only after the upgrade.
-  public bool IsAllowed(RegisteredSubjectProperty member, string action) =>
-      action != McpAccessActions.Write && member.Name != "Password";
-  ```
-
-  The same holds for a policy combined with an explicit `IsReadOnly = true`.
-- Without a policy and with the default `IsReadOnly = true`: nothing to change, the default policy is read-only. `configuration.IsAllowed` now denies every action but `read`, so a custom tool that asks for an action of its own, such as `execute`, is refused.
-- Without a policy and with `IsReadOnly = false`: set `AccessPolicy = AllowAllMcpAccessPolicy.Instance`.
-- A custom tool that read `configuration.IsReadOnly` before a mutating operation calls `configuration.IsAllowed(member, action)` instead, with `McpAccessActions.Write` or an action of its own.
-
-`set_property` refuses a property the policy does not allow to write with `Property is not writable: <path>. The access policy does not allow it.` and no longer returns `Server is in read-only mode.`.
-
 ## Extension Points
 
 ### IMcpSubjectEnricher
