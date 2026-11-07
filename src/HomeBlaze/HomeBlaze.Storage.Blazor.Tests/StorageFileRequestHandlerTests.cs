@@ -1,6 +1,9 @@
+using HomeBlaze.Components.Tests.Access;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Microsoft.AspNetCore.Http;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Blazor.Tests;
 
@@ -12,8 +15,18 @@ public class StorageFileRequestHandlerTests
 
     private static readonly DateTime Modified = new(2026, 11, 7, 8, 30, 0, DateTimeKind.Utc);
 
+    private static readonly TestUserPermissions Viewer = new();
+
     private static GenericFile CreateFile(FakeStorageContainer storage, string path, long size) =>
-        new(storage, path) { FileSize = size, LastModified = Modified };
+        Register(new GenericFile(storage, path) { FileSize = size, LastModified = Modified });
+
+    // Registered as in the graph, where every file the endpoint resolves is.
+    private static TSubject Register<TSubject>(TSubject subject)
+        where TSubject : IInterceptorSubject
+    {
+        subject.Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry());
+        return subject;
+    }
 
     private static DefaultHttpContext CreateContext(string? ifNoneMatch = null)
     {
@@ -38,7 +51,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         var response = context.Response;
@@ -62,7 +75,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         var response = context.Response;
@@ -84,7 +97,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(expected, context.Response.ContentType);
@@ -122,11 +135,11 @@ public class StorageFileRequestHandlerTests
     {
         // Arrange
         var storage = new FakeStorageContainer(PngContent);
-        var file = new GenericFile(storage, "plan.png") { FileSize = PngContent.Length };
+        var file = Register(new GenericFile(storage, "plan.png") { FileSize = PngContent.Length });
         var context = CreateContext(ifNoneMatch: "*");
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         var response = context.Response;
@@ -146,11 +159,11 @@ public class StorageFileRequestHandlerTests
         var storage = new FakeStorageContainer(PngContent);
         var file = CreateFile(storage, "plan.png", PngContent.Length);
         var first = CreateContext();
-        await StorageFileRequestHandler.HandleAsync(first, file);
+        await StorageFileRequestHandler.HandleAsync(first, file, Viewer);
         var context = CreateContext(ifNoneMatch: first.Response.Headers.ETag.ToString());
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status304NotModified, context.Response.StatusCode);
@@ -168,7 +181,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext(ifNoneMatch: "W/\"other\"");
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
@@ -182,12 +195,12 @@ public class StorageFileRequestHandlerTests
         var storage = new FakeStorageContainer(PngContent);
         var file = CreateFile(storage, "plan.png", PngContent.Length);
         var before = CreateContext();
-        await StorageFileRequestHandler.HandleAsync(before, file);
+        await StorageFileRequestHandler.HandleAsync(before, file, Viewer);
         file.FileSize = PngContent.Length + 1;
         var after = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(after, file);
+        await StorageFileRequestHandler.HandleAsync(after, file, Viewer);
 
         // Assert
         Assert.NotEqual(before.Response.Headers.ETag.ToString(), after.Response.Headers.ETag.ToString());
@@ -202,7 +215,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal("application/octet-stream", context.Response.ContentType);
@@ -215,7 +228,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, null);
+        await StorageFileRequestHandler.HandleAsync(context, null, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
@@ -227,11 +240,11 @@ public class StorageFileRequestHandlerTests
     {
         // Arrange
         var storage = new FakeStorageContainer("{\"apiKey\":\"secret\"}"u8.ToArray());
-        var file = new JsonFile(storage, "secrets.json");
+        var file = Register(new JsonFile(storage, "secrets.json"));
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
@@ -248,7 +261,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
@@ -266,7 +279,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
@@ -282,7 +295,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
@@ -300,7 +313,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
@@ -316,7 +329,7 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => StorageFileRequestHandler.HandleAsync(context, file));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => StorageFileRequestHandler.HandleAsync(context, file, Viewer));
     }
 
     [Fact]
@@ -332,10 +345,45 @@ public class StorageFileRequestHandlerTests
         var context = CreateContext();
 
         // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
 
         // Assert
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
         Assert.False(context.Response.Headers.ContainsKey("ETag"));
+    }
+
+    [Fact]
+    public async Task WhenTheViewerMayNotSeeTheFile_ThenItIsNotFoundAndTheStorageIsNotRead()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent);
+        var file = CreateFile(storage, "plan.png", PngContent.Length);
+        var viewer = new TestUserPermissions { CannotShow = { file } };
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file, viewer);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.Empty(ReadBody(context));
+        Assert.False(context.Response.Headers.ContainsKey("ETag"));
+        Assert.Equal(0, storage.ReadCount);
+    }
+
+    [Fact]
+    public async Task WhenTheFileIsNotInAGraph_ThenItIsNotFound()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent);
+        var file = new GenericFile(storage, "plan.png") { FileSize = PngContent.Length, LastModified = Modified };
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file, Viewer);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.Equal(0, storage.ReadCount);
     }
 }

@@ -1,9 +1,11 @@
+using HomeBlaze.Authorization.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Net.Http.Headers;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Blazor;
 
@@ -25,14 +27,17 @@ internal static class StorageFileRequestHandler
     public static string GetSubjectPath(object? routeValue) =>
         (routeValue as string)?.TrimStart('/') ?? string.Empty;
 
-    /// <summary>Answers the request with the content of <paramref name="subject"/>, as <see cref="StorageFileEndpointRouteBuilderExtensions.MapStorageFiles"/> describes.</summary>
-    public static async Task HandleAsync(HttpContext context, IInterceptorSubject? subject)
+    /// <summary>
+    /// Answers the request with the content of <paramref name="subject"/> for a viewer with <paramref name="permissions"/>,
+    /// as <see cref="StorageFileEndpointRouteBuilderExtensions.MapStorageFiles"/> describes.
+    /// </summary>
+    public static async Task HandleAsync(HttpContext context, IInterceptorSubject? subject, IUserPermissions permissions)
     {
         var response = context.Response;
 
-        // A page or a configuration is answered as missing as well, so that a response does not tell that it exists: a
-        // JSON file can hold secrets.
-        if (subject is not GenericFile file)
+        // A page, a configuration and a file the viewer may not see are answered as missing as well, so that a response
+        // does not tell that they exist: a JSON file can hold secrets.
+        if (subject is not GenericFile file || file.TryGetRegisteredSubject() is not { } registeredFile || !permissions.CanShow(registeredFile))
         {
             response.StatusCode = StatusCodes.Status404NotFound;
             return;

@@ -4,6 +4,7 @@ using HomeBlaze.Authentication.Data;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Blazor;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -24,8 +25,8 @@ namespace HomeBlaze.Authentication.Blazor.Tests;
 /// <summary>
 /// A web application on a test server with the authentication of the application: a data directory in a temporary
 /// folder whose root is a storage of the folder <c>Files</c>, the authentication database in it, the request pipeline,
-/// the health endpoints, <c>/protected</c>, the test pages and the Blazor hub behind the gate of the app, the account
-/// endpoints, and <c>/mcp</c> behind the key of the MCP user. Started once <see cref="AuthenticationStartup"/> completed.
+/// the health endpoints, <c>/protected</c>, the files of the storages under <c>/files</c>, the test pages and the Blazor hub
+/// behind the gate of the app, the account endpoints, and <c>/mcp</c> behind the key of the MCP user. Started once <see cref="AuthenticationStartup"/> completed.
 /// </summary>
 internal sealed class AuthenticationTestHost : IAsyncDisposable
 {
@@ -97,6 +98,13 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
             WaitForStartup = waitForStartup
         });
 
+    /// <summary>
+    /// Starts the host with <paramref name="files"/>, the content of files stored in the root storage before the start by
+    /// their path in it, and waits until the authentication startup completed.
+    /// </summary>
+    public static Task<AuthenticationTestHost> StartAsync(IReadOnlyDictionary<string, string> files) =>
+        StartCoreAsync(new HostSetup { Files = files });
+
     /// <summary>Starts the host with <paramref name="timeProvider"/> as its clock, such as of setup codes, and waits until the authentication startup completed.</summary>
     public static Task<AuthenticationTestHost> StartAsync(TimeProvider timeProvider) =>
         StartCoreAsync(new HostSetup { TimeProvider = timeProvider });
@@ -122,6 +130,13 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         if (setup.AuthorizationFileName is not null)
         {
             await File.WriteAllTextAsync(Path.Combine(directory.FullName, "Files", setup.AuthorizationFileName), AuthorizationFileContent);
+        }
+
+        foreach (var (path, content) in setup.Files ?? new Dictionary<string, string>())
+        {
+            var filePath = Path.Combine(directory.FullName, "Files", path);
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            await File.WriteAllTextAsync(filePath, content);
         }
 
         if (setup.DatabaseUnavailable)
@@ -170,6 +185,7 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         application.UseHomeBlazeMcpClientKey(McpPath);
         application.MapDefaultEndpoints();
         application.MapGet("/protected", () => "protected");
+        application.MapStorageFiles();
         application.MapRazorComponents<TestApp>()
             .AddInteractiveServerRenderMode()
             .AddAdditionalAssemblies(typeof(AuthenticationWebExtensions).Assembly)
@@ -311,6 +327,8 @@ internal sealed class AuthenticationTestHost : IAsyncDisposable
         public bool WaitForStartup { get; init; } = true;
 
         public TimeProvider? TimeProvider { get; init; }
+
+        public IReadOnlyDictionary<string, string>? Files { get; init; }
     }
 
     public async ValueTask DisposeAsync()
