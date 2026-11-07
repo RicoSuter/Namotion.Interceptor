@@ -77,8 +77,8 @@ public class PasswordEndpointTests
         Assert.True(browser.HasSessionCookie);
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/protected")).StatusCode);
 
-        // The old session is checked against the stamp by the password endpoint at once.
-        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(await SetPasswordAsync(otherBrowser, "a password of the attacker", currentPassword: AnotherPassword)));
+        // The user store holds the new stamp, so the old session is refused before the endpoint.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SetPasswordAsync(otherBrowser, "a password of the attacker", currentPassword: AnotherPassword)).StatusCode);
         Assert.False(otherBrowser.HasSessionCookie);
 
         using var oldPasswordBrowser = host.CreateBrowser();

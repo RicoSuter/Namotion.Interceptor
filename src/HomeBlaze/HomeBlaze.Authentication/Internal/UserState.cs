@@ -4,7 +4,10 @@ using HomeBlaze.Authorization;
 
 namespace HomeBlaze.Authentication.Internal;
 
-/// <summary>A user as the user store holds it in memory: what the projection shows, without secrets.</summary>
+/// <summary>
+/// A user as the user store holds it in memory: what the projection shows, without secrets, and the security stamp that
+/// the sessions of the user are checked against.
+/// </summary>
 internal sealed record UserEntry
 {
     public required string Id { get; init; }
@@ -27,6 +30,9 @@ internal sealed record UserEntry
     public DateTimeOffset? LastLogin { get; init; }
 
     public bool IsBuiltIn { get; init; }
+
+    /// <summary>The security stamp as stored; it must follow every change of the stored one, or the sessions of the user are refused.</summary>
+    public string? SecurityStamp { get; init; }
 
     public bool IsLockedOut(DateTimeOffset now) => LockoutEnd > now;
 

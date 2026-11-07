@@ -270,6 +270,29 @@ public class UserStoreTests
     }
 
     [Fact]
+    public async Task WhenAUserIsLockedAndUnlocked_ThenOnlyASessionWithTheNewStampIsAllowed()
+    {
+        // Arrange
+        await using var graph = await AuthenticationTestGraph.CreateAsync();
+        await graph.AddUserAsync("mom", [BuiltInRoles.ReaderName]);
+        var momId = graph.UserStore.GetUserId("mom")!;
+        var stampBefore = await graph.GetSecurityStampAsync(momId);
+        var administration = graph.AdministrationAs(graph.AdminUserId);
+        Assert.True((await administration.SetLockedAsync("mom", true, CancellationToken.None)).Succeeded);
+        Assert.True((await administration.SetLockedAsync("mom", false, CancellationToken.None)).Succeeded);
+
+        // Act
+        var isOldSessionAllowed = graph.UserStore.IsSessionAllowed(momId, stampBefore, sessionMustChangePassword: true);
+        var isNewSessionAllowed = graph.UserStore.IsSessionAllowed(momId, await graph.GetSecurityStampAsync(momId), sessionMustChangePassword: true);
+        var isSessionWithoutStampAllowed = graph.UserStore.IsSessionAllowed(momId, null, sessionMustChangePassword: true);
+
+        // Assert
+        Assert.False(isOldSessionAllowed);
+        Assert.True(isNewSessionAllowed);
+        Assert.False(isSessionWithoutStampAllowed);
+    }
+
+    [Fact]
     public async Task WhenAUserIsLockedByAnAdministrator_ThenTheyHoldNoRolesUntilUnlocked()
     {
         // Arrange

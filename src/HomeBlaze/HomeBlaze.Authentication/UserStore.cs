@@ -124,19 +124,24 @@ public sealed class UserStore : IMcpClientAccess
 
     /// <summary>
     /// Whether a session of the user with <paramref name="userId"/> may go on, as the store knows without reading the
-    /// database: the user exists, no administrator locked them, and they need not change their password, as after a
-    /// reset, unless the session is one that must change it, see <paramref name="sessionMustChangePassword"/>.
+    /// database: the user exists, no administrator locked them, the session carries their security stamp as stored now,
+    /// see <paramref name="securityStamp"/>, and they need not change their password, as after a reset, unless the session
+    /// is one that must change it, see <paramref name="sessionMustChangePassword"/>.
     /// </summary>
-    public bool IsSessionAllowed(string userId, bool sessionMustChangePassword)
+    /// <param name="userId">The id of the user of the session.</param>
+    /// <param name="securityStamp">The security stamp the session carries, or null when it carries none.</param>
+    /// <param name="sessionMustChangePassword">Whether the session is one that must change the password.</param>
+    public bool IsSessionAllowed(string userId, string? securityStamp, bool sessionMustChangePassword)
     {
         ArgumentNullException.ThrowIfNull(userId);
 
-        if (!_state.ById.TryGetValue(userId, out var user) || user.IsBuiltIn || user.IsLockedByAdministrator)
+        if (securityStamp is null || !_state.ById.TryGetValue(userId, out var user) || user.IsBuiltIn || user.IsLockedByAdministrator)
         {
             return false;
         }
 
-        return sessionMustChangePassword || !user.MustChangePassword;
+        return string.Equals(securityStamp, user.SecurityStamp, StringComparison.Ordinal) &&
+            (sessionMustChangePassword || !user.MustChangePassword);
     }
 
     /// <summary>Gets the id of the user named <paramref name="userName"/>, or null.</summary>
@@ -194,9 +199,9 @@ public sealed class UserStore : IMcpClientAccess
         RefreshUserCoreAsync(userId, _timeProvider.GetUtcNow(), cancellationToken);
 
     /// <summary>
-    /// Reloads the lockout, the required password change, whether an empty password is allowed and the last sign-in of the user with
-    /// <paramref name="userId"/>, after Identity changed them in the database, such as a lockout after failed sign-ins or
-    /// a set password. Nothing changes for a user the store does not know.
+    /// Reloads the lockout, the required password change, whether an empty password is allowed, the last sign-in and the
+    /// security stamp of the user with <paramref name="userId"/>, after Identity changed them in the database, such as a
+    /// lockout after failed sign-ins or a set password. Nothing changes for a user the store does not know.
     /// </summary>
     public Task RefreshUserAsync(string userId, CancellationToken cancellationToken) =>
         RefreshUserCoreAsync(userId, signInTime: null, cancellationToken);
@@ -309,7 +314,10 @@ public sealed class UserStore : IMcpClientAccess
         }
 
         // Committed: the state is updated from what was written, without reading it back.
-        var user = new UserEntry { Id = committed.UserId!, UserName = userName, Email = email, Roles = roleNames, MustChangePassword = true };
+        var user = new UserEntry
+        {
+            Id = committed.UserId!, UserName = userName, Email = email, Roles = roleNames, MustChangePassword = true, SecurityStamp = committed.SecurityStamp
+        };
         var actor = GetActorName(_state, actingUserId);
         Publish(_state.With(user));
         EventLog.UserAdded(userName, roleNames, actor);
@@ -357,14 +365,15 @@ public sealed class UserStore : IMcpClientAccess
         }
 
         // Committed: the state is updated from what was written, without reading it back.
+        var stamped = target with { SecurityStamp = committed.SecurityStamp };
         Publish(change.Action switch
         {
             UserAction.Remove => state.Without(target.Id),
-            UserAction.Reset => state.With(target with { MustChangePassword = true, AllowsEmptyPassword = false }),
-            UserAction.Lock => state.With(target.WithAdministratorLock(true)),
-            UserAction.Unlock => state.With(target.WithAdministratorLock(false)),
-            UserAction.SetDisplayName => state.With(target with { DisplayName = change.DisplayName }),
-            _ => state.With(target with { Roles = roleNames! })
+            UserAction.Reset => state.With(stamped with { MustChangePassword = true, AllowsEmptyPassword = false }),
+            UserAction.Lock => state.With(stamped.WithAdministratorLock(true)),
+            UserAction.Unlock => state.With(stamped.WithAdministratorLock(false)),
+            UserAction.SetDisplayName => state.With(stamped with { DisplayName = change.DisplayName }),
+            _ => state.With(stamped with { Roles = roleNames! })
         });
 
         EventLog.UserChanged(target.UserName, change, roleNames, actor);

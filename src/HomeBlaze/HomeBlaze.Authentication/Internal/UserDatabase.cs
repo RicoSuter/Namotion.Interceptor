@@ -44,7 +44,8 @@ internal static class UserDatabase
                 MustChangePassword = user.MustChangePassword,
                 AllowsEmptyPassword = user.AllowsEmptyPassword,
                 LastLogin = user.LastLogin,
-                IsBuiltIn = user.IsBuiltIn
+                IsBuiltIn = user.IsBuiltIn,
+                SecurityStamp = user.SecurityStamp
             })
             .ToList();
 
@@ -60,8 +61,8 @@ internal static class UserDatabase
     }
 
     /// <summary>
-    /// Gets <paramref name="user"/> with the lockout, the required password change, whether an empty password is allowed
-    /// and the last sign-in as stored, after
+    /// Gets <paramref name="user"/> with the lockout, the required password change, whether an empty password is allowed,
+    /// the last sign-in and the security stamp as stored, after
     /// storing <paramref name="signInTime"/> as the last sign-in when it is not null; a refused write is logged.
     /// </summary>
     /// <returns>The refreshed user, or null when the user no longer exists.</returns>
@@ -92,12 +93,13 @@ internal static class UserDatabase
             LockoutEnd = stored.LockoutEnd,
             MustChangePassword = stored.MustChangePassword,
             AllowsEmptyPassword = stored.AllowsEmptyPassword,
-            LastLogin = stored.LastLogin
+            LastLogin = stored.LastLogin,
+            SecurityStamp = stored.SecurityStamp
         };
     }
 
     /// <summary>Adds a user without a password holding <paramref name="roles"/>, with a setup code.</summary>
-    /// <returns>The id of the user and the setup code, or why the database refused it.</returns>
+    /// <returns>The id, the security stamp and the setup code of the user, or why the database refused it.</returns>
     public static Task<CommitResult> AddUserAsync(
         IServiceScopeFactory scopeFactory, string userName, string? email, string[] roles, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
@@ -110,7 +112,9 @@ internal static class UserDatabase
                 error = GetError(await userManager.AddToRolesAsync(user, roles));
             }
 
-            return error is null ? await CreateSetupCodeAsync(userManager, user, timeProvider) with { UserId = user.Id } : new CommitResult(error);
+            return error is null
+                ? await CreateSetupCodeAsync(userManager, user, timeProvider) with { UserId = user.Id, SecurityStamp = user.SecurityStamp }
+                : new CommitResult(error);
         }, cancellationToken);
     }
 
@@ -118,7 +122,7 @@ internal static class UserDatabase
     /// Applies <paramref name="change"/> to the user with <paramref name="userId"/>, updating their security stamp, which
     /// ends their sessions, unless only their roles or their display name change.
     /// </summary>
-    /// <returns>The setup code of a reset, or why the database refused the change.</returns>
+    /// <returns>The security stamp of the user after the change and the setup code of a reset, or why the database refused the change.</returns>
     public static Task<CommitResult> ChangeUserAsync(
         IServiceScopeFactory scopeFactory, string userId, UserChange change, TimeProvider timeProvider, CancellationToken cancellationToken) =>
         CommitAsync(scopeFactory, async userManager =>
@@ -128,7 +132,7 @@ internal static class UserDatabase
                 return new CommitResult("The user no longer exists.");
             }
 
-            return change.Action switch
+            var result = change.Action switch
             {
                 UserAction.Remove => new CommitResult(await RemoveAsync(userManager, user)),
                 UserAction.Reset => await ResetPasswordAsync(userManager, user, timeProvider),
@@ -137,6 +141,8 @@ internal static class UserDatabase
                 UserAction.SetDisplayName => new CommitResult(await SetDisplayNameAsync(userManager, user, change.DisplayName)),
                 _ => new CommitResult(await SetRolesAsync(userManager, user, change.Roles ?? []))
             };
+
+            return result with { SecurityStamp = user.SecurityStamp };
         }, cancellationToken);
 
     /// <summary>Creates the key of the built-in user with <paramref name="userId"/>, replacing an earlier one, or removes it.</summary>
@@ -277,7 +283,8 @@ internal static class UserDatabase
 /// <param name="SetupCode">The setup code the write created, or null.</param>
 /// <param name="UserId">The id of the added user, or null.</param>
 /// <param name="McpKey">The key the write created, or null.</param>
-internal readonly record struct CommitResult(string? Error, string? SetupCode = null, string? UserId = null, string? McpKey = null)
+/// <param name="SecurityStamp">The security stamp of the added or changed user after the write, or null.</param>
+internal readonly record struct CommitResult(string? Error, string? SetupCode = null, string? UserId = null, string? McpKey = null, string? SecurityStamp = null)
 {
     // The secrets never reach a log or a debugger display through ToString.
     private bool PrintMembers(StringBuilder builder)

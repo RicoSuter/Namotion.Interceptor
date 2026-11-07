@@ -42,6 +42,67 @@ public class AuthenticationPipelineTests
         Assert.False(browser.HasSessionCookie);
     }
 
+    [Theory]
+    [InlineData("unlock")]
+    [InlineData("redeem")]
+    public async Task WhenAPersonIsActiveAgainAfterALockOrAReset_ThenACookieFromBeforeIsStillRefused(string change)
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        using var oldBrowser = host.CreateBrowser();
+        await host.SignInAsync(oldBrowser, "kid");
+        using var newBrowser = host.CreateBrowser();
+        var administration = host.AdministrationAsAdmin;
+        if (change == "unlock")
+        {
+            Assert.True((await administration.SetLockedAsync("kid", true, CancellationToken.None)).Succeeded);
+            Assert.True((await administration.SetLockedAsync("kid", false, CancellationToken.None)).Succeeded);
+            await host.SignInAsync(newBrowser, "kid");
+        }
+        else
+        {
+            var reset = await administration.ResetPasswordAsync("kid", CancellationToken.None);
+            Assert.True(reset.Succeeded, reset.Error);
+            Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(await AccountTestForms.RedeemSetupCodeAsync(newBrowser, "kid", reset.SetupCode!)));
+        }
+
+        // Act
+        var oldResponse = await oldBrowser.GetAsync("/protected");
+        var newResponse = await newBrowser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Redirect, oldResponse.StatusCode);
+        Assert.False(oldBrowser.HasSessionCookie);
+        Assert.Equal(HttpStatusCode.OK, newResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenAPersonChangesTheirPassword_ThenTheCookiesOfTheirOtherSessionsAreRefusedAtOnce()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        var added = await host.AdministrationAsAdmin.AddUserAsync("kid", null, [BuiltInRoles.ReaderName], CancellationToken.None);
+        Assert.True(added.Succeeded, added.Error);
+        await host.SetPasswordAsync("kid", AccountTestForms.Password);
+        using var changingBrowser = host.CreateBrowser();
+        using var otherBrowser = host.CreateBrowser();
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(await AccountTestForms.SignInAsync(changingBrowser, "kid", AccountTestForms.Password)));
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(await AccountTestForms.SignInAsync(otherBrowser, "kid", AccountTestForms.Password)));
+        var changed = await AccountTestForms.SetPasswordAsync(changingBrowser, "another correct horse", currentPassword: AccountTestForms.Password);
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(changed));
+
+        // Act
+        var changingResponse = await changingBrowser.GetAsync("/protected");
+        var otherResponse = await otherBrowser.GetAsync("/protected");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, changingResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, otherResponse.StatusCode);
+        Assert.False(otherBrowser.HasSessionCookie);
+    }
+
     [Fact]
     public async Task WhenAnUnauthenticatedVisitorRequestsAProtectedEndpoint_ThenTheyAreRedirectedToTheAppWithTheReturnUrl()
     {
