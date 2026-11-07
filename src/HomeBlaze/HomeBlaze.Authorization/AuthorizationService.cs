@@ -229,7 +229,8 @@ public sealed class AuthorizationService : IDisposable
                 isRebuilt = true;
             }
 
-            _updateCount++;
+            // A full fence, so that a reader that sees the update also sees the snapshot published above.
+            Interlocked.Increment(ref _updateCount);
         }
 
         // Caught, as Refresh does: a scope that is never returned could not end the update, which would keep every policy
@@ -336,9 +337,15 @@ public sealed class AuthorizationService : IDisposable
         hasWrittenStatuses = false;
         var version = Volatile.Read(ref _version);
         var snapshot = Volatile.Read(ref _snapshot);
-        if (snapshot is not null && (snapshot.Version == version || Volatile.Read(ref _updateCount) > 0))
+        if (snapshot is not null && snapshot.Version == version)
         {
             return snapshot;
+        }
+
+        // Read again, as an update that started since may have compiled a change made before it, see BeginUpdate.
+        if (Volatile.Read(ref _updateCount) > 0 && Volatile.Read(ref _snapshot) is { } updateSnapshot)
+        {
+            return updateSnapshot;
         }
 
         lock (_rebuildLock)
