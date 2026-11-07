@@ -47,6 +47,17 @@ public partial class TestSensor
     [State]
     [ExcludeFromExpressions]
     public partial string? RawPayload { get; set; }
+
+    [State]
+    public partial object? Reading { get; set; }
+}
+
+/// <summary>A reading whose text cannot be shown, because a getter that its text reads fails, as a faulty device value does.</summary>
+public sealed record UnreadableReading
+{
+    public string Raw => Decode();
+
+    private static string Decode() => throw new InvalidOperationException("The reading is corrupt");
 }
 
 /// <summary>A subject that holds a replaceable sensor.</summary>

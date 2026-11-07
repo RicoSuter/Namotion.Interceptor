@@ -206,9 +206,10 @@
         {
             result = rule.TestNow();
         }
-        catch (InvalidOperationException exception)
+        catch (Exception exception)
         {
-            Snackbar.Add(exception.Message, Severity.Error);
+            // A getter or a text of a device value that the test reads can throw, which must not end the circuit.
+            Snackbar.Add($"Test now failed: {exception.Message}", Severity.Error);
             return;
         }
 

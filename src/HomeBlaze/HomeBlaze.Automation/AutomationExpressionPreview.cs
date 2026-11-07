@@ -12,6 +12,6 @@ public sealed record AutomationExpressionPreview
     /// <summary>The value of the expression, or the rendered template; null when the value is missing.</summary>
     public object? Value { get; init; }
 
-    /// <summary>The value as pages show it, or the rendered template; null when the value is missing.</summary>
+    /// <summary>The value as pages show it, the rendered template, or why a value cannot be read; null when the value is missing.</summary>
     public string? Text { get; init; }
 }

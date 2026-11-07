@@ -141,4 +141,24 @@ public class AutomationPreviewTests
         Assert.DoesNotContain("secret", template.Text);
         Assert.DoesNotContain("payload", template.Text);
     }
+
+    [Fact]
+    public async Task WhenReadingAValueThrows_ThenThePreviewSaysWhyInsteadOfThrowing()
+    {
+        // Arrange
+        await using var host = await StartAsync();
+        host.Weather.Reading = new UnreadableReading();
+
+        // Act
+        var value = AutomationPreview.Evaluate(host.Automation, "retract", "/Weather/Reading", allowsEvent: false);
+        var template = AutomationPreview.Render(host.Automation, "retract", "Reading {{ /Weather/Reading }}", allowsEvent: false);
+
+        // Assert
+        Assert.Null(value.Error);
+        Assert.Null(value.Result);
+        Assert.Null(value.Value);
+        Assert.Equal("cannot be read: The reading is corrupt", value.Text);
+        Assert.Null(template.Error);
+        Assert.Equal("cannot be read: The reading is corrupt", template.Text);
+    }
 }
