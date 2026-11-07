@@ -211,7 +211,7 @@ An automation runs as its own principal with the roles in its `Roles`, which the
 - **`Operator`** allows every operation and every write except what the system rules deny: configuration, secrets, operations that require confirmation, agents and the authorization with its roles. That includes **Reset State** of any automation, itself included.
 - **A custom role** restricts an automation to what it is for. A deny is a block and not a convention: a storm automation whose role denies `Open` of the blinds never opens them, whatever rules are added to it later, see [Storm](#storm).
 - **Agents**: no role, `Everything` included, lets an automation call an operation of an agent, because the system rules deny every action on agents.
-- **When it is checked**: when the configuration is applied, and before each call and each write. The editor lists a denied action, such as `Rule 'Retract blinds': action 'call-1': /Living/Blinds/Open: the role 'StormBlinds' denies calling it`, and Save is blocked. The editor checks the actions of the rule it shows every second, and every action on each edit and on Save. A file with such an action is not applied, and the previous configuration keeps running, as for any invalid configuration. While a configuration is rejected, the previous rules run a call or a write only when both the previous roles and the roles of the rejected configuration allow it: roles narrowed in a rejected file apply at once, widened roles allow nothing more, and once a valid configuration is applied, only its roles apply. A denial when the action runs fails the action with the same reason, and a denial by the roles of the rejected configuration starts with `refused by the roles of the rejected configuration:`.
+- **When it is checked**: when the configuration is applied, and before each call and each write. The editor lists a denied action, such as `Rule 'Retract blinds': action 'call-1': /Living/Blinds/Open: the role 'StormBlinds' denies calling it`, and Save is blocked. The editor checks the actions of the rule it shows every second, and every action on each edit and on Save. A file with such an action is not applied, and the previous configuration keeps running, as for any invalid configuration, with only what both its roles and the roles of the rejected file allow, see [Roles of a rejected configuration](#roles-of-a-rejected-configuration). A denial when the action runs fails the action with the same reason.
 - **Not checkable yet**: a target that does not resolve, such as a device that is not loaded, is checked when the action runs. So are the relative targets of a rule that is not saved yet: the editor passes them, and after Save the automation may reject the configuration because the target is denied or does not resolve, in which case the previous configuration keeps running.
 - **Roles that cannot be used**, such as no roles, a misspelled name or a custom role while `Authorization.json` is not loaded yet, refuse every call and write with the reason, such as `/Living/Blinds/Close: the roles of the automation cannot be used: Role 'StormBlind' is not defined.`. They do not keep the configuration from being applied, so an automation that starts before the roles are loaded runs once they are. While a rule calls or writes anything, the page and the editor show `The actions that call operations or write properties are refused:` with the reason, and the editor blocks Save.
 - **The pickers** of **Call operation** and **Set property** let you select only targets that the roles selected in the dialog allow.
@@ -300,7 +300,7 @@ The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that 
 
 1. **Read the status of the rule** on the page of the automation. `Off` and `Inactive ...` say that the rule does not observe its triggers, `Not applied ...` that the saved change is not in effect yet (an invalid one leaves the previous configuration running), `Unknown since ...` names the values that are missing, `Holding since ...` that a hold has not elapsed, `Waiting since ...` that Only if or a state change held the run back, `Triggered, waiting to rearm` and `Already true, waiting until false` that the condition was true already and must change first, and `; not run: ...` why the last request did not run. A rule in Dry run lists its runs but executes nothing.
 2. **Click Test now** on the rule. It shows the result of each trigger and of Only if with the current values, and the arguments the actions would get, so a condition that is false or unknown and a wrong path show up there.
-3. **Read the status of the automation and the log.** A failed or refused action, a stopped feedback chain and an invalid configuration are in `StatusMessage` and in the log, with the full error.
+3. **Read the status of the automation and the log.** A failed action, an action that the [roles](#authorization) refuse, a stopped feedback chain and an invalid configuration are in `StatusMessage` and in the log, with the full error.
 
 ---
 
@@ -314,7 +314,7 @@ The state belongs to the path of the automation: moving it to another folder or 
 
 ## Examples
 
-The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
+The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. An automation whose rules call operations or write properties needs roles that allow them, such as `Operator`, see [Authorization](#authorization). A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
 
 ### Washing machine finished
 
@@ -564,7 +564,7 @@ Rule  WS90 silent
 
 ## Operational details
 
-This section describes how the automation stores, batches and limits its work. It is not needed to write rules.
+This section describes how the automation stores, batches and limits its work, and which roles apply while a configuration is rejected. It is not needed to write rules.
 
 ### The checkpoint
 
@@ -583,6 +583,10 @@ Every run increments the `RunCount` of its rule, also two identical runs in a ro
 - An operation may run for one minute, then its cancellation is requested and the action fails. An operation that ignores its cancellation is still awaited, so that it never overlaps a later run of the automation. Every other rule of the automation waits meanwhile, so give each concern its own automation.
 - Stopping an automation, such as when HomeBlaze shuts down, cancels the running action; the actions after it and the other rules of that input do not run, and the run is recorded as **Canceled**, which the page shows as **Canceled by a stop**. A stop waits at most 10 seconds: a worker that is still in an operation is then abandoned and changes nothing anymore, and an operation that ignores its cancellation is abandoned once its minute is over. The runs not written yet are written on the stop, unless the stop is given no time at all, which can lose the runs of the last 5 seconds.
 - `LastRunMessage` holds at most 500 characters; the full errors are in the log.
+
+### Roles of a rejected configuration
+
+While a saved configuration is rejected, the previous rules run a call or a write only when both the previous roles and the roles of the rejected configuration allow it: roles narrowed in a rejected file apply at once, and widened roles allow nothing more. A refusal by the roles of the rejected configuration starts with `refused by the roles of the rejected configuration:`. Once a valid configuration is applied, only its roles apply.
 
 ### Other details
 
