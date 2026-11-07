@@ -3,10 +3,11 @@ namespace Namotion.Interceptor.Authorization.Internal;
 /// <summary>The bounds that keep compiling and evaluating a policy finite on any role set and any graph.</summary>
 internal static class Limits
 {
-    // An evaluation tries this many times to read the graph between two equal even structure versions, waiting with a
-    // spin between attempts, so a registry change of ordinary length ends before it fails closed; ten is SpinWait's
-    // spinning phase, after which it yields.
-    public const int MaxConsistencyAttempts = 10;
+    // An evaluation tries this many times to read the graph between two equal even structure versions. Between
+    // attempts it spins, and from SpinWait's tenth wait on it yields the thread, so a burst of registry changes usually
+    // ends before the evaluation fails closed; a registry that changes without pause can still make it fail closed,
+    // which only a read under the registry's lock would avoid.
+    public const int MaxConsistencyAttempts = 40;
 
     // The visibility walk tracks every subject from this depth on, so a deep single-parent chain reached from several branches is explored once.
     public const int WalkVisitedTrackingDepth = 32;

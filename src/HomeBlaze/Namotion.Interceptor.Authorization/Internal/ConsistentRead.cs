@@ -32,7 +32,7 @@ internal struct ConsistentRead
             }
 
             // A registry change is in progress; reading now would only be discarded.
-            _spinner.SpinOnce(sleep1Threshold: -1);
+            WaitBeforeNextAttempt();
         }
 
         return false;
@@ -49,7 +49,15 @@ internal struct ConsistentRead
             return true;
         }
 
-        _spinner.SpinOnce(sleep1Threshold: -1);
+        WaitBeforeNextAttempt();
         return false;
+    }
+
+    private void WaitBeforeNextAttempt()
+    {
+        if (_attempts < Limits.MaxConsistencyAttempts)
+        {
+            _spinner.SpinOnce(sleep1Threshold: -1);
+        }
     }
 }

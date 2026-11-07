@@ -91,7 +91,6 @@ public sealed class AuthorizationPolicy
     {
         ArgumentNullException.ThrowIfNull(subject);
 
-        // The member checks, the walk and its link checks run in one attempt, so the answer rests on one instant.
         var state = EvaluationState.Rent();
         try
         {
@@ -107,6 +106,7 @@ public sealed class AuthorizationPolicy
                     : detachedDecision;
             }
 
+            // The member checks, the walk and its link checks run in one attempt, so the answer rests on one instant.
             var read = new ConsistentRead(registry);
             while (read.TryBegin())
             {

@@ -390,7 +390,7 @@ public class ConcurrentGraphChangeTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void WhenAnUnrelatedPartOfTheGraphKeepsChangingDuringEveryAttempt_ThenThePathsAreIncomplete()
+    public void WhenAnUnrelatedPartOfTheGraphKeepsChangingDuringEveryAttempt_ThenAPathAllowDoesNotApply()
     {
         // Arrange: S stays under R.Mother while another subject enters and leaves R.Father at every segment lookup. No
         // path of S passes R.Father, but the registry's structure version counts every change, so no attempt is accepted.
