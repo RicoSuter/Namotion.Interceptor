@@ -17,9 +17,9 @@ namespace HomeBlaze.Authentication;
 /// </summary>
 /// <remarks>
 /// A failure to attach or to add the subject is logged, not thrown, so that the startup still completes; without a
-/// projection, administration refuses, as it finds no subject.
+/// projection, administration refuses, as it finds no subject. The lifecycle handler runs after the registry, so that
+/// the registry already lists or no longer lists the subject.
 /// </remarks>
-/// <remarks>The lifecycle handler runs after the registry, so that the registry already lists or no longer lists the subject.</remarks>
 [RunsAfter(typeof(SubjectRegistry))]
 internal sealed class AuthorizationSubjectBinding : ILifecycleHandler
 {

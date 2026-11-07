@@ -130,7 +130,7 @@ public static class AuthenticationWebExtensions
     /// <summary>
     /// Opens the pages of the app and its live connection to visitors who are not signed in, rate limited with
     /// <see cref="UiStartRateLimitPolicy"/>, as the gate of the app (<see cref="Components.AccountGate"/>) decides what
-    /// they see: nothing but the dialog that signs them in, unless the built-in user <c>Anonymous</c> holds roles. Every
+    /// they see: nothing but the dialog that signs them in, unless the built-in user <c>anonymous</c> holds roles. Every
     /// other endpoint keeps the fallback policy <see cref="HomeBlazeAccessRequirement"/>.
     /// </summary>
     public static RazorComponentsEndpointConventionBuilder WithHomeBlazeAccountGate(this RazorComponentsEndpointConventionBuilder builder)

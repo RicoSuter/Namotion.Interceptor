@@ -16,7 +16,7 @@ namespace HomeBlaze.Authentication.Blazor.Components;
 /// <see cref="HomeBlazeAccessRequirement"/> and need not change their password. Anybody else gets only the frame of
 /// <see cref="ShellLayout"/> with the dialog that signs them in, redeems their setup code on
 /// <see cref="AccountEndpoints.SetupPath"/>, or sets their password; nothing while the authentication state is not known.
-/// It decides again when the authentication state, the roles of the person or of <c>Anonymous</c>, or the policies change.
+/// It decides again when the authentication state, the roles of the person or of <c>anonymous</c>, or the policies change.
 /// A static page that allows anonymous access itself, such as the error page, passes, as no circuit opens for it.
 /// </summary>
 public sealed partial class AccountGate : ComponentBase, IDisposable

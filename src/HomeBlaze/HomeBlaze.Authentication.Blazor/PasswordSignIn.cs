@@ -21,8 +21,9 @@ internal sealed class PasswordSignIn(
     /// <paramref name="context"/>, with a session that outlives the browser when <paramref name="isPersistent"/>, never
     /// for the empty password, and returns whether it succeeded.
     /// </summary>
-    // Every refusal verifies one password hash, a stored or a dummy one, so that its time reveals neither whether the
-    // user exists nor whether they have a password or are locked out.
+    // Every refusal verifies one password hash, a stored or a dummy one, so that the hash work is the same whether or not
+    // the user exists, has a password or is locked out. Only that work is equal: a wrong password for an existing user
+    // also stores the failed access, which an unknown name does not.
     public async Task<bool> SignInAsync(HttpContext context, string userName, string password, bool isPersistent)
     {
         var user = await SignInRefusals.FindUserAsync(userManager, userName);
