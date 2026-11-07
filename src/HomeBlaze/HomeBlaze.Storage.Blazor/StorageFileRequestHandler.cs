@@ -45,8 +45,12 @@ internal static class StorageFileRequestHandler
         }
 
         var contentType = ContentTypes.TryGetContentType(file.Name, out var knownContentType) ? WithCharset(knownContentType) : FallbackContentType;
-        var entityTag = new EntityTagHeaderValue($"\"{file.LastModified.Ticks:x}-{file.FileSize:x}\"", isWeak: true);
-        if (IsNotModified(context.Request, entityTag))
+        // Without a modification time from the storage, a validator would rest on the size alone and keep a replaced file
+        // of the same size cached, so the file is then sent in full on every request.
+        var entityTag = file.LastModified == default
+            ? null
+            : new EntityTagHeaderValue($"\"{file.LastModified.Ticks:x}-{file.FileSize:x}\"", isWeak: true);
+        if (entityTag is not null && IsNotModified(context.Request, entityTag))
         {
             WriteHeaders(response, file, entityTag, contentType);
             response.StatusCode = StatusCodes.Status304NotModified;
@@ -122,11 +126,14 @@ internal static class StorageFileRequestHandler
         return false;
     }
 
-    private static void WriteHeaders(HttpResponse response, GenericFile file, EntityTagHeaderValue entityTag, string contentType)
+    private static void WriteHeaders(HttpResponse response, GenericFile file, EntityTagHeaderValue? entityTag, string contentType)
     {
-        var headers = response.GetTypedHeaders();
-        headers.ETag = entityTag;
-        headers.LastModified = new DateTimeOffset(DateTime.SpecifyKind(file.LastModified, DateTimeKind.Utc));
+        if (entityTag is not null)
+        {
+            var headers = response.GetTypedHeaders();
+            headers.ETag = entityTag;
+            headers.LastModified = new DateTimeOffset(DateTime.SpecifyKind(file.LastModified, DateTimeKind.Utc));
+        }
 
         // Revalidated on every view, so that a file that is replaced shows at once.
         response.Headers.CacheControl = "no-cache";

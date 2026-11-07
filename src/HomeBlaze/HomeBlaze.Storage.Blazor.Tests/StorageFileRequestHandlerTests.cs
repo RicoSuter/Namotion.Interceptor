@@ -118,6 +118,28 @@ public class StorageFileRequestHandlerTests
     }
 
     [Fact]
+    public async Task WhenStorageReportsNoModificationTime_ThenTheFileIsSentInFullWithoutValidators()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent);
+        var file = new GenericFile(storage, "plan.png") { FileSize = PngContent.Length };
+        var context = CreateContext(ifNoneMatch: "*");
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file);
+
+        // Assert
+        var response = context.Response;
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        Assert.Equal(PngContent, ReadBody(context));
+        Assert.False(response.Headers.ContainsKey("ETag"));
+        Assert.False(response.Headers.ContainsKey("Last-Modified"));
+        Assert.Equal("no-cache", response.Headers.CacheControl.ToString());
+        Assert.Equal("nosniff", response.Headers.XContentTypeOptions.ToString());
+        Assert.Equal(1, storage.ReadCount);
+    }
+
+    [Fact]
     public async Task WhenRequestHasTheCurrentETag_ThenItIsNotModifiedAndTheStorageIsNotRead()
     {
         // Arrange
