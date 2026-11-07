@@ -161,25 +161,6 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleHintIsAboveTheTabs()
-    {
-        // Arrange
-        var role = Graph.GetRole("Kitchen");
-        role.Allow =
-        [
-            new PermissionRule { Paths = ["/Devices/**"], Actions = [AuthorizationActions.Execute] },
-            new PermissionRule { Members = ["Temperature"], Actions = [PermissionAction.Read] }
-        ];
-
-        // Act
-        var component = RenderEditor(role);
-
-        // Assert
-        Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']"));
-        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
-    }
-
-    [Fact]
     public async Task WhenARuleIsAdded_ThenItHasNoActionAndTheRoleIsInvalidUntilOneIsChecked()
     {
         // Arrange
@@ -286,7 +267,7 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
     }
 
     [Fact]
-    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleAndTheRuleSayTheMethodsCannotBeUsed()
+    public void WhenARuleAllowsExecuteWithoutRead_ThenTheRoleAboveTheTabsAndTheRuleSayTheMethodsCannotBeUsed()
     {
         // Arrange
         var role = Graph.GetRole("Kitchen");
@@ -300,7 +281,8 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         var component = RenderEditor(role);
 
         // Assert
-        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        var roleHint = Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']")).TextContent;
+        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
         Assert.Contains("Execute is allowed without read on 2 methods", roleHint);
         Assert.Contains("such as /Devices/Child/Start,", roleHint);
         Assert.Contains("listed and run only when it is readable", roleHint);
@@ -323,7 +305,8 @@ public sealed class RoleEditComponentTests : RoleEditorTestContext
         var component = RenderEditor(role);
 
         // Assert
-        var roleHint = component.Find("[data-testid='role-edit-execute-without-read']").TextContent;
+        var roleHint = Assert.Single(component.FindAll("[data-testid='role-edit-execute-without-read']")).TextContent;
+        Assert.Null(component.Find(".role-edit-tabs").QuerySelector("[data-testid='role-edit-execute-without-read']"));
         Assert.Contains("Execute is allowed without read on 2 methods", roleHint);
         Assert.Empty(component.FindAll("[data-testid='rule-execute-without-read-hint']"));
     }

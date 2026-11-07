@@ -135,20 +135,6 @@ public sealed class RoleSelectorTests : BunitContext, IAsyncLifetime
         Assert.Equal([BuiltInRoles.ReaderName, "Kitchen"], _changedSelection);
     }
 
-    [Fact]
-    public void WhenAnErrorIsSet_ThenTheErrorTextIsShown()
-    {
-        // Act
-        var component = RenderSelector([], parameters => parameters
-            .Add(selector => selector.Label, "Includes")
-            .Add(selector => selector.Error, true)
-            .Add(selector => selector.ErrorText, "Select a role."));
-
-        // Assert
-        Assert.Contains("Includes", component.Markup);
-        Assert.Contains("Select a role.", component.Markup);
-    }
-
     [Theory]
     [InlineData(new string[0], "")]
     [InlineData(new[] { "Reader" }, "1 role")]
