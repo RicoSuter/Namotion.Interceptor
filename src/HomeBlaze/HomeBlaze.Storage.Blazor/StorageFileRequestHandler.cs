@@ -22,13 +22,10 @@ internal static class StorageFileRequestHandler
     /// Returns the route value of the path as a string without leading slashes, so that <c>//Demo/x.png</c> addresses the
     /// same file as <c>Demo/x.png</c> and does not resolve as an absolute path of its own.
     /// </summary>
-    internal static string GetSubjectPath(object? routeValue) =>
+    public static string GetSubjectPath(object? routeValue) =>
         (routeValue as string)?.TrimStart('/') ?? string.Empty;
 
-    /// <summary>
-    /// Writes the content of the subject when it is a <see cref="GenericFile"/>, and 404 for any other subject or none or a
-    /// file that is gone, and 503 when the storage is not connected or cannot deliver the content now.
-    /// </summary>
+    /// <summary>Answers the request with the content of <paramref name="subject"/>, as <see cref="StorageFileEndpointRouteBuilderExtensions.MapStorageFiles"/> describes.</summary>
     public static async Task HandleAsync(HttpContext context, IInterceptorSubject? subject)
     {
         var response = context.Response;

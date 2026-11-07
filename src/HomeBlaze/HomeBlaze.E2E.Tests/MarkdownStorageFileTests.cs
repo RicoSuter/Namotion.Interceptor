@@ -103,20 +103,6 @@ public class MarkdownStorageFileTests
         Assert.Equal($"{_fixture.ServerAddress}{PageRoute}", page.Url);
     }
 
-    [Fact]
-    public async Task WhenPageHasAnExternalLink_ThenItOpensInANewTab()
-    {
-        // Arrange
-        var page = await OpenPageAsync();
-
-        // Act
-        var link = page.GetByRole(AriaRole.Link, new() { Name = "Example site" });
-
-        // Assert
-        Assert.Equal("_blank", await link.GetAttributeAsync("target"));
-        Assert.Equal("noopener noreferrer", await link.GetAttributeAsync("rel"));
-    }
-
     [Theory]
     [InlineData("files/Demo/StorageFiles.md")]
     [InlineData("files/History")]

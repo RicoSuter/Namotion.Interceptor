@@ -108,8 +108,8 @@ A section is addressed by the id of its heading. Every heading gets its id from 
 
 ### Link Targets
 
-- **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. So does the `Href` of a [Card](widgets/card.md), so it should not point at a file.
-- **Links that open in a new tab**: a web address, any other link with a scheme such as `mailto:`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
+- **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. The `Href` of a [Card](widgets/card.md) opens in the same tab as well, so it should not point at a file.
+- **Links that open in a new tab**: a link with a scheme, such as a web address or `mailto:`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
 - **A page in a new tab**: write the link as an HTML element with a target, `<a href="/pages/Docs/home.md" target="_blank" rel="noopener">Home</a>`. The page keeps the attribute as written.
 - **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
 - **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.
@@ -133,7 +133,7 @@ A picture can also be a file of the storage. Put the file next to the page, or i
 ![Sample floor plan](images/sample-floor-plan.svg)
 
 - **Address**: the picture is served under `/files/` with its path in the storage, here `/files/Docs/administration/images/sample-floor-plan.svg`. The `Image` of a [Card](widgets/card.md) takes a relative path in the same way.
-- **What is served**: any file that is not a page, not a JSON file and not a subject of its own type, such as `.png`, `.jpg`, `.svg` or `.pdf`. Pages (`.md`), JSON files and hidden files, whose name starts with a dot, are never served.
+- **What is served**: any file that is not a subject of its own type, such as `.png`, `.jpg`, `.svg` or `.pdf`. Pages (`.md`), JSON files and hidden files, whose name starts with a dot, are never served.
 - **A changed file**: a picture that is replaced in the storage shows on the next view of the page.
 
 A picture is shown in a size that fits the page, and it always keeps its proportions:

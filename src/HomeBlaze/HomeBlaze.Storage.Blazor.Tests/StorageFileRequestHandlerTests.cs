@@ -202,11 +202,13 @@ public class StorageFileRequestHandlerTests
         Assert.Equal(0, storage.ReadCount);
     }
 
-    [Fact]
-    public async Task WhenFileIsGoneAtReadWithAnException_ThenItIsNotFoundWithoutCacheHeaders()
+    [Theory]
+    [InlineData(typeof(FileNotFoundException))]
+    [InlineData(typeof(DirectoryNotFoundException))]
+    public async Task WhenFileOrFolderIsGoneAtRead_ThenItIsNotFoundWithoutCacheHeaders(Type exceptionType)
     {
         // Arrange
-        var storage = new FakeStorageContainer(PngContent) { ReadException = new FileNotFoundException() };
+        var storage = new FakeStorageContainer(PngContent) { ReadException = (Exception)Activator.CreateInstance(exceptionType)! };
         var file = CreateFile(storage, "plan.png", PngContent.Length);
         var context = CreateContext();
 
@@ -249,22 +251,6 @@ public class StorageFileRequestHandlerTests
 
         // Assert
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
-        Assert.False(context.Response.Headers.ContainsKey("ETag"));
-    }
-
-    [Fact]
-    public async Task WhenFolderIsGoneAtRead_ThenItIsNotFound()
-    {
-        // Arrange
-        var storage = new FakeStorageContainer(PngContent) { ReadException = new DirectoryNotFoundException() };
-        var file = CreateFile(storage, "plan.png", PngContent.Length);
-        var context = CreateContext();
-
-        // Act
-        await StorageFileRequestHandler.HandleAsync(context, file);
-
-        // Assert
-        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
         Assert.False(context.Response.Headers.ContainsKey("ETag"));
     }
 

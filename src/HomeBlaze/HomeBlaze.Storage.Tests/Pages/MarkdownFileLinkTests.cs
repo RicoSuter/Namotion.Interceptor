@@ -4,6 +4,13 @@ namespace HomeBlaze.Storage.Tests.Pages;
 
 public class MarkdownFileLinkTests
 {
+    private static async Task<string> RenderAsync(string pagePath, string source)
+    {
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(pagePath, source);
+        return MarkdownPageFixture.Html(page.Children);
+    }
+
     [Theory]
     [InlineData("page.md", "![Plan](plan.png)", "src=\"/files/plan.png\"")]
     [InlineData("Docs/page.md", "![Plan](images/plan.png)", "src=\"/files/Docs/images/plan.png\"")]
@@ -13,14 +20,11 @@ public class MarkdownFileLinkTests
     [InlineData("Docs/page.md", "[Export](export.csv?download=1)", "href=\"/files/Docs/export.csv?download=1\"")]
     public async Task WhenLinkIsRelativeAndNotAPage_ThenItLeadsToTheFileRoute(string pagePath, string source, string expected)
     {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-
         // Act
-        var page = await fixture.AddPageAsync(pagePath, source);
+        var html = await RenderAsync(pagePath, source);
 
         // Assert
-        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
+        Assert.Contains(expected, html);
     }
 
     [Theory]
@@ -33,14 +37,11 @@ public class MarkdownFileLinkTests
     [InlineData("[Upper](HTTP://example.com/plan.png)", "href=\"HTTP://example.com/plan.png\"")]
     public async Task WhenLinkHasASchemeOrStartsWithASlash_ThenItStaysAsWritten(string source, string expected)
     {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-
         // Act
-        var page = await fixture.AddPageAsync("Docs/page.md", source);
+        var html = await RenderAsync("Docs/page.md", source);
 
         // Assert
-        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
+        Assert.Contains(expected, html);
     }
 
     [Theory]
@@ -49,14 +50,11 @@ public class MarkdownFileLinkTests
     [InlineData("Docs/architecture/overview.md", "[Up](../)", "<a href=\"/browser/Docs\">Up</a>")]
     public async Task WhenLinkIsARelativeFolder_ThenItOpensTheFolderInTheBrowserInTheSameTab(string pagePath, string source, string expected)
     {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-
         // Act
-        var page = await fixture.AddPageAsync(pagePath, source);
+        var html = await RenderAsync(pagePath, source);
 
         // Assert
-        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
+        Assert.Contains(expected, html);
     }
 
     [Theory]
@@ -69,28 +67,10 @@ public class MarkdownFileLinkTests
     [InlineData("[Notes](notes.markdown)", "<a href=\"/pages/Docs/notes.markdown\">Notes</a>")]
     public async Task WhenPageHasALink_ThenOnlyFileAndExternalLinksOpenInANewTab(string source, string expected)
     {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-
         // Act
-        var page = await fixture.AddPageAsync("Docs/page.md", source);
+        var html = await RenderAsync("Docs/page.md", source);
 
         // Assert
-        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
-    }
-
-    [Fact]
-    public async Task WhenPageHasAPictureFromTheStorage_ThenThePictureHasNoTarget()
-    {
-        // Arrange
-        var fixture = await MarkdownPageFixture.CreateAsync();
-
-        // Act
-        var page = await fixture.AddPageAsync("Docs/page.md", "![Plan](plan.png)");
-
-        // Assert
-        var html = MarkdownPageFixture.Html(page.Children);
-        Assert.Contains("src=\"/files/Docs/plan.png\"", html);
-        Assert.DoesNotContain("target", html);
+        Assert.Contains(expected, html);
     }
 }

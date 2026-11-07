@@ -229,21 +229,8 @@ public static partial class MarkdownSegmentBuilder
 
         if (opensInNewTab is not null)
         {
-            var linkRenderer = renderer.ObjectRenderers.FindExact<LinkInlineRenderer>();
-            if (linkRenderer is not null)
-            {
-                var newTabRenderer = new NewTabLinkInlineRenderer(opensInNewTab);
-                newTabRenderer.TryWriters.AddRange(linkRenderer.TryWriters);
-                renderer.ObjectRenderers.Replace<LinkInlineRenderer>(newTabRenderer);
-            }
-
-            var autolinkRenderer = renderer.ObjectRenderers.FindExact<AutolinkInlineRenderer>();
-            if (autolinkRenderer is not null)
-            {
-                var newTabRenderer = new NewTabAutolinkInlineRenderer();
-                newTabRenderer.TryWriters.AddRange(autolinkRenderer.TryWriters);
-                renderer.ObjectRenderers.Replace<AutolinkInlineRenderer>(newTabRenderer);
-            }
+            ReplaceRenderer<LinkInlineRenderer, LinkInline>(renderer, new NewTabLinkInlineRenderer(opensInNewTab));
+            ReplaceRenderer<AutolinkInlineRenderer, AutolinkInline>(renderer, new NewTabAutolinkInlineRenderer());
         }
 
         WriteBreaksBetweenBlocks(renderer, page, writer, token);
@@ -592,6 +579,18 @@ public static partial class MarkdownSegmentBuilder
         }
     }
 
+    private static void ReplaceRenderer<TOriginal, TObject>(HtmlRenderer renderer, HtmlObjectRenderer<TObject> replacement)
+        where TOriginal : HtmlObjectRenderer<TObject>
+        where TObject : MarkdownObject
+    {
+        var original = renderer.ObjectRenderers.FindExact<TOriginal>();
+        if (original is not null)
+        {
+            replacement.TryWriters.AddRange(original.TryWriters);
+            renderer.ObjectRenderers.Replace<TOriginal>(replacement);
+        }
+    }
+
     private const string NewTabAttributes = " target=\"_blank\" rel=\"noopener noreferrer\"";
 
     /// <summary>
@@ -606,7 +605,7 @@ public static partial class MarkdownSegmentBuilder
     {
         protected override void Write(HtmlRenderer renderer, LinkInline link)
         {
-            var url = link.GetDynamicUrl != null ? link.GetDynamicUrl() ?? link.Url : link.Url;
+            var url = link.GetDynamicUrl?.Invoke() ?? link.Url;
             if (link.IsImage || !renderer.EnableHtmlForInline || url is null || !opensInNewTab(url))
             {
                 base.Write(renderer, link);
