@@ -372,6 +372,24 @@ public class ParsedExpressionEvaluationTests
     }
 
     [Theory]
+    [InlineData("10675199d2h48m5.4775807s", long.MaxValue)]
+    [InlineData("-10675199d2h48m5.4775808s", long.MinValue)]
+    [InlineData("10675199d2h48m5s", long.MaxValue - 4775807)]
+    [InlineData("0.0000001s", 1L)]
+    public void WhenDurationIsAtTheEdgeOfTheRange_ThenItIsExactToTheTick(string text, long expectedTicks)
+    {
+        // Arrange
+        Assert.True(ParsedExpression.TryParse(text, '/', out var expression, out var error), error);
+        var context = new TestExpressionContext([]);
+
+        // Act
+        var result = expression.Evaluate(ref context);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromTicks(expectedTicks), result.Value);
+    }
+
+    [Theory]
     [InlineData("Interval == 90")]
     [InlineData("Interval > Name")]
     public void WhenDurationIsComparedWithAnotherType_ThenTheComparisonIsUnknown(string text)

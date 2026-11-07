@@ -13,6 +13,8 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
     internal const int MaximumExpressionLength = 1000;
     internal const int MaximumNestingDepth = 32;
 
+    private const decimal OutOfRangeTicks = 2m * long.MaxValue;
+
     // Boxed once, so that evaluating a literal allocates nothing.
     private static readonly object True = true;
     private static readonly object False = false;
@@ -52,17 +54,34 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         SkipWhitespace();
         if (_position < text.Length)
         {
-            throw CreateError(DescribeUnexpectedCharacter());
+            throw CreateUnexpectedCharacterError();
         }
 
         return new ParsedExpression(text, pathSeparator, variables, body, pipes, [.. _paths]);
     }
 
-    private string DescribeUnexpectedCharacter()
+    // An operator glued to the value after it, as in "a -5", or to the token before it, as in "a- b", is the likely mistake.
+    private FormatException CreateUnexpectedCharacterError()
     {
         var character = text[_position];
-        var isGluedOperator = character is '+' or '-' or '*' or '/' && !EndsWord(_position + 1);
-        return isGluedOperator ? $"put a space after '{character}'" : $"unexpected '{character}'";
+        if (IsArithmeticSymbol(character) && !StandsAlone(_position))
+        {
+            return CreateError($"put a space after '{character}'");
+        }
+
+        var previous = _position - 1;
+        while (previous > 0 && char.IsWhiteSpace(text[previous]))
+        {
+            previous--;
+        }
+
+        if (previous > 0 && IsArithmeticSymbol(text[previous]) && !char.IsWhiteSpace(text[previous - 1]))
+        {
+            _position = previous;
+            return CreateError($"put a space before '{text[previous]}'");
+        }
+
+        return CreateError($"unexpected '{character}'");
     }
 
     private ExpressionNode ParseOr()
@@ -206,7 +225,8 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
         if (IsNumber(token))
         {
-            return TryParseDuration(token, out var duration) ? new LiteralNode(duration) : ParseNumber(token, start);
+            // A duration ends with its unit, a number never ends with a letter.
+            return char.IsAsciiLetter(token[^1]) ? new LiteralNode(ParseDuration(token, start)) : ParseNumber(token, start);
         }
 
         if (TryCreateKeywordLiteral(token) is { } literal)
@@ -246,21 +266,32 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
     private LiteralNode ParseNumber(string token, int start)
     {
-        if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
         {
-            _position = start;
-            throw CreateError($"invalid number '{token}'");
+            if (!double.IsFinite(number))
+            {
+                _position = start;
+                throw CreateError($"number out of range '{token}'");
+            }
+
+            return new LiteralNode(number);
         }
 
-        return new LiteralNode(number);
+        if (IsArithmeticSymbol(token[^1]))
+        {
+            _position = start + token.Length - 1;
+            throw CreateError($"put a space before '{token[^1]}'");
+        }
+
+        _position = start;
+        throw CreateError($"invalid number '{token}'");
     }
 
     // A duration is one or more pairs of a number and a unit, from the largest unit to the smallest and each unit at most
-    // once, with an optional sign before the first pair: 90s, 1h30m, 1.5d, -5m. A unit letter never parses as a double, so
-    // a duration never takes the place of a number.
-    private static bool TryParseDuration(string token, out TimeSpan duration)
+    // once, with an optional sign before the first pair: 90s, 1h30m, 1.5d, -5m. The ticks add up as decimals, so the
+    // whole range of TimeSpan is exact.
+    private TimeSpan ParseDuration(string token, int start)
     {
-        duration = TimeSpan.Zero;
         var rest = token.AsSpan();
         var isNegative = rest[0] == '-';
         if (rest[0] is '-' or '+')
@@ -268,35 +299,34 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
             rest = rest[1..];
         }
 
-        var ticks = 0d;
+        var ticks = 0m;
         var previousRank = int.MaxValue;
         while (rest.Length > 0)
         {
             if (!TryReadDurationPart(ref rest, previousRank, out var rank, out var partTicks))
             {
-                return false;
+                _position = start;
+                throw CreateError($"invalid duration '{token}'");
             }
 
             previousRank = rank;
             ticks += partTicks;
         }
 
-        if (ticks >= TimeSpan.MaxValue.Ticks)
+        ticks = decimal.Round(isNegative ? -ticks : ticks);
+        if (ticks < TimeSpan.MinValue.Ticks || ticks > TimeSpan.MaxValue.Ticks)
         {
-            return false;
+            _position = start;
+            throw CreateError($"duration out of range '{token}'");
         }
 
-        duration = TimeSpan.FromTicks((long)Math.Round(ticks));
-        if (isNegative)
-        {
-            duration = duration.Negate();
-        }
-
-        return true;
+        return TimeSpan.FromTicks((long)ticks);
     }
 
     // Reads one number and its unit from the front of the text, and fails unless the unit is smaller than the previous one.
-    private static bool TryReadDurationPart(ref ReadOnlySpan<char> rest, int previousRank, out int rank, out double ticks)
+    // A part beyond the range of TimeSpan counts as OutOfRangeTicks, so that the parts add up without overflow and the
+    // duration stays out of range with either sign.
+    private static bool TryReadDurationPart(ref ReadOnlySpan<char> rest, int previousRank, out int rank, out decimal ticks)
     {
         rank = -1;
         ticks = 0;
@@ -307,7 +337,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         }
 
         if (numberLength == 0 ||
-            !double.TryParse(rest[..numberLength], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
+            !decimal.TryParse(rest[..numberLength], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount))
         {
             return false;
         }
@@ -318,7 +348,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
             return false;
         }
 
-        ticks = amount * ticksPerUnit;
+        ticks = amount < OutOfRangeTicks / ticksPerUnit ? amount * ticksPerUnit : OutOfRangeTicks;
         rest = remaining[unitLength..];
         return true;
     }
@@ -359,7 +389,7 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         token.Equals("or", StringComparison.OrdinalIgnoreCase) ||
         token.Equals("not", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsArithmeticToken(string token) => token is "+" or "-" or "*" or "/";
+    private static bool IsArithmeticToken(string token) => token.Length == 1 && IsArithmeticSymbol(token[0]);
 
     // With '.' as separator a dot is the decimal point of a number, so only the other separators make a token a path.
     private bool IsNumber(string token) =>
@@ -387,8 +417,8 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         return null;
     }
 
-    // An arithmetic operator stands alone: white space, an opening parenthesis or the end follows it. Inside a token such
-    // as "notes-v2.md" it is part of a name, and directly before a digit, as in "-5", it is the sign of a number.
+    // An arithmetic operator stands alone. Inside a token such as "notes-v2.md" it is part of a name, and directly before a
+    // digit, as in "-5", it is the sign of a number.
     private (ArithmeticOperator Operator, string Symbol)? TryConsumeArithmeticOperator(bool isAdditive)
     {
         SkipWhitespace();
@@ -398,13 +428,12 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
         }
 
         var arithmetic = ReadArithmeticSymbol(isAdditive);
-        var next = _position + 1;
-        if (arithmetic is null || !EndsWord(next))
+        if (arithmetic is null || !StandsAlone(_position))
         {
             return null;
         }
 
-        _position = next;
+        _position++;
         return arithmetic;
     }
 
@@ -561,6 +590,12 @@ internal sealed class ExpressionParser(string text, char pathSeparator, Immutabl
 
     private bool EndsWord(int end) =>
         end >= text.Length || char.IsWhiteSpace(text[end]) || text[end] == '(';
+
+    // White space, a parenthesis, a pipe or the end follows the operator, so "a -)" reports the missing value after it.
+    private bool StandsAlone(int operatorPosition) =>
+        EndsWord(operatorPosition + 1) || text[operatorPosition + 1] is ')' or '|';
+
+    private static bool IsArithmeticSymbol(char character) => character is '+' or '-' or '*' or '/';
 
     private void EnterNesting(int position)
     {
