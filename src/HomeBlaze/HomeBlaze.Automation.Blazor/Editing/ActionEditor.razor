@@ -51,7 +51,6 @@
 @code {
     private const string ValueHelperText = "A value, or an expression such as /Weather/WindGust * 2";
     private const string ValueKey = ActionInputs.ValueKey;
-    private static readonly TimeSpan TargetCheckInterval = TimeSpan.FromSeconds(1);
 
     private AutomationAction _value = null!;
     private IReadOnlyList<ArgumentField>? _fields;
@@ -61,8 +60,7 @@
     private AutomationAction? _checkedValue;
     private RuleExpressions? _checkedExpressions;
     private RegisteredSubjectProperty? _target;
-    private ITimer? _targetTimer;
-    private bool _isDisposed;
+    private PreviewTicker? _ticker;
 
     [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
 
@@ -93,28 +91,14 @@
     {
         _value = Value;
         Refresh();
-        StartTargetTimer();
+        _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, CheckTargetAsync);
     }
 
-    // The target is resolved again once per interval, outside of a render, so that an operation or a property that appears
-    // after the action was typed shows its inputs and errors. Only a changed target checks the inputs again. The timer is
-    // created without the execution context of the render, so that a tick records no reads into a read tracking scope of that render.
-    private void StartTargetTimer()
-    {
-        if (_targetTimer is not null)
-        {
-            return;
-        }
-
-        using (ExecutionContext.SuppressFlow())
-        {
-            _targetTimer = TimeProvider.CreateTimer(state => _ = InvokeAsync(CheckTargetAsync), null, TargetCheckInterval, TargetCheckInterval);
-        }
-    }
-
+    // Each tick resolves the target again, so that an operation or a property that appears after the action was typed shows
+    // its inputs and errors. Only a changed target checks the inputs again.
     private async Task CheckTargetAsync()
     {
-        if (_isDisposed || GetTargetPath(_value) is not { } path || ReferenceEquals(AutomationPreview.ResolveTarget(Automation, RuleKey, path), _target))
+        if (GetTargetPath(_value) is not { } path || ReferenceEquals(AutomationPreview.ResolveTarget(Automation, RuleKey, path), _target))
         {
             return;
         }
@@ -125,11 +109,7 @@
         await TargetChanged.InvokeAsync();
     }
 
-    public void Dispose()
-    {
-        _isDisposed = true;
-        _targetTimer?.Dispose();
-    }
+    public void Dispose() => _ticker?.Dispose();
 
     private static string? GetTargetPath(AutomationAction action) => action switch
     {

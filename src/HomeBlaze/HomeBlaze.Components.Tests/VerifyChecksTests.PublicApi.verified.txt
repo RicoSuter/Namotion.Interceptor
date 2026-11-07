@@ -1843,6 +1843,11 @@ namespace HomeBlaze.Components.Inputs
         public string? Text { get; init; }
         public object? Value { get; init; }
     }
+    public sealed class PreviewTicker : System.IDisposable
+    {
+        public PreviewTicker(System.TimeProvider timeProvider, System.Func<System.Func<System.Threading.Tasks.Task>, System.Threading.Tasks.Task> invokeAsync, System.Func<System.Threading.Tasks.Task> tick) { }
+        public void Dispose() { }
+    }
     public class SubjectPathField : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectPathField() { }
