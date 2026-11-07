@@ -29,6 +29,9 @@ public sealed partial class MarkdownContentParser
 
     private static readonly SearchValues<char> CharactersToEscapeForLink = SearchValues.Create("%#?");
 
+    /// <summary>The number of links that the widgets of one page keep resolved, see <see cref="ResolveLink"/>.</summary>
+    internal const int MaximumCachedLinks = 32;
+
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly TypeProvider _typeProvider;
@@ -195,8 +198,29 @@ public sealed partial class MarkdownContentParser
             return link;
         }
 
-        var pageName = kind == LinkKind.Page && pathEnd == 0 ? EscapeForLink(Path.GetFileName(page.FullPath)) : string.Empty;
-        return RewriteLink(link, kind, pathEnd, GetLinkBasePath(page), pageName);
+        // Both read on every call and before the base path is computed. The structure version keys the cache as the
+        // registry documents for anything computed from it, so links computed during a change carry a number from before
+        // the change ended and are not served after it. The paths version makes a component that renders the link render
+        // again when the paths change.
+        var structureVersion = ((IInterceptorSubject)page).Context.TryGetService<ISubjectRegistry>()?.StructureVersion ?? 0;
+        var pathsVersion = _pathResolver.PathsVersion;
+        var resolvedLinks = page.ResolvedLinks;
+        if (resolvedLinks is null || resolvedLinks.StructureVersion != structureVersion || resolvedLinks.PathsVersion != pathsVersion)
+        {
+            resolvedLinks = new ResolvedLinks(
+                structureVersion, pathsVersion, GetLinkBasePath(page), EscapeForLink(Path.GetFileName(page.FullPath)), MaximumCachedLinks);
+            page.ResolvedLinks = resolvedLinks;
+        }
+
+        if (resolvedLinks.TryGet(link, out var resolved))
+        {
+            return resolved;
+        }
+
+        resolved = RewriteLink(
+            link, kind, pathEnd, resolvedLinks.BasePath, kind == LinkKind.Page && pathEnd == 0 ? resolvedLinks.PageName : string.Empty);
+        resolvedLinks.TryAdd(link, resolved);
+        return resolved;
     }
 
     /// <summary>
