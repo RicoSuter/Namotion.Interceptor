@@ -24,6 +24,7 @@ using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -471,6 +472,56 @@ public sealed class AgentRolesTests : IAsyncLifetime
         Assert.Equal("Kitchen: [Yes], cellar: [], temperature: [18]", evaluated);
     }
 
+    public static TheoryData<string> AuthorizationBlocks => new()
+    {
+        $":: {typeof(Authorization.Authorization).FullName}#auth\n::",
+        $":: {typeof(Role).FullName}#role\n::",
+        $"```subject(auth)\n{{ \"$type\": \"{typeof(Authorization.Authorization).FullName}\" }}\n```",
+        $":: {typeof(GridLayout).FullName}\n::: Cell\n:::: {typeof(Authorization.Authorization).FullName}#auth\n::::\n:::\n::"
+    };
+
+    [Theory]
+    [MemberData(nameof(AuthorizationBlocks))]
+    public async Task WhenAnAgentWritesAnAuthorizationOrRoleBlock_ThenEveryPageWriteRefusesItAlsoWithThePageLayoutPermission(string block)
+    {
+        // Arrange
+        var graph = await CreateGraphAsync("# Notes");
+        var results = new List<string>();
+        var agent = new FakeAgent(graph.AgentServices)
+        {
+            AllowedTools = [.. HomeBlazeMarkdownToolProvider.ToolNames, HomeBlazeMcpToolProvider.InvokeOperationToolName, AgentToolSet.EditPageLayoutPermission],
+            Handler = async (request, _, cancellationToken) =>
+            {
+                var tools = request.Tools.Tools.ToDictionary(tool => tool.Name);
+                async Task CallAsync(string name, object input) => results.Add(JsonSerializer.Serialize(
+                    await tools[name].Handler(JsonSerializer.SerializeToElement(input), cancellationToken)));
+
+                await CallAsync(HomeBlazeMarkdownToolProvider.CreateMarkdownToolName, new { folder_path = "/Storage", name = "Roles.md", content = "# Roles\n\n" + block });
+                await CallAsync(HomeBlazeMarkdownToolProvider.WriteMarkdownToolName, new { path = "/Storage/Notes.md", content = "# Notes\n\n" + block });
+                await CallAsync(HomeBlazeMarkdownToolProvider.EditMarkdownToolName, new { path = "/Storage/Notes.md", old_text = "# Notes", new_text = "# Notes\n\n" + block });
+                await CallAsync(HomeBlazeMcpToolProvider.InvokeOperationToolName, new
+                {
+                    path = "/Storage/Notes.md", method = "ReplaceContent", parameters = new { content = "# Notes\n\n" + block }
+                });
+                return new AgentTurnResult("Done.", null, null);
+            }
+        };
+        await AttachAndWaitForStartAsync(graph, agent);
+
+        // Act
+        await agent.SendMessageAsync("Add a role.", CancellationToken.None);
+
+        // Assert
+        Assert.Equal([BuiltInRoles.OperatorName], agent.Roles);
+        Assert.Equal(4, results.Count);
+        Assert.All(results, result => Assert.Contains("With the permission to edit page layout", result));
+        var knownSubjects = ((IInterceptorSubject)graph.Root).Context.GetService<ISubjectRegistry>().KnownSubjects.Keys;
+        Assert.Single(knownSubjects.OfType<Authorization.Authorization>());
+        Assert.Empty(knownSubjects.OfType<Role>());
+        Assert.Equal("# Notes", await File.ReadAllTextAsync(Path.Combine(_directory.FullName, "Notes.md")));
+        Assert.False(File.Exists(Path.Combine(_directory.FullName, "Roles.md")));
+    }
+
     [Theory]
     [InlineData(false, "State: [warm]")]
     [InlineData(true, "State: [Cannot resolve map: busy]")]
@@ -655,6 +706,7 @@ public sealed class AgentRolesTests : IAsyncLifetime
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(ValueMap).Assembly);
+        typeProvider.AddAssembly(typeof(Authorization.Authorization).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         var services = new ServiceCollection();

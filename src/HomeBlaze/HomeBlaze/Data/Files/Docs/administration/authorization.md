@@ -205,7 +205,7 @@ They cannot be changed, because each closes a way for a client to gain more than
 
 ## One Authorization Subject
 
-Only one `Authorization` subject may exist. The create dialog offers the type only while there is none. A second one can still appear, for example from a copied or restored file. Then:
+Only one `Authorization` subject may exist. The create dialog offers the type only while there is none. Agents and `/mcp` clients cannot create an `Authorization` or a `Role`: they create and change only Markdown pages, whose write rules refuse every added block except layout blocks, also with the permission to edit page layout. A second one can still appear, for example from a copied or restored file. Then:
 
 - neither is used, and each, with each of its roles, shows the status "Only one Authorization subject is allowed; remove the others. Custom roles are unavailable until then.",
 - the built-in roles keep working,
