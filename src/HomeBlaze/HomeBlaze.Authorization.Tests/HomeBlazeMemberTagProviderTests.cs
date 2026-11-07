@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Authorization.Tests.Subjects;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Xunit;
@@ -47,6 +48,21 @@ public class HomeBlazeMemberTagProviderTests
         var tags = _provider.GetTags(member);
 
         // Assert
+        AssertTags([MemberTags.Configuration, MemberTags.Secret], tags);
+    }
+
+    [Fact]
+    public void WhenASecretConfigurationPropertyHasNoConfigurationAttributeYet_ThenItIsTaggedConfigurationAndSecret()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var member = new TagTestSubject(context).TryGetRegisteredSubject()!.TryGetProperty(nameof(TagTestSubject.Password))!;
+
+        // Act
+        var tags = _provider.GetTags(member);
+
+        // Assert
+        Assert.Null(member.TryGetAttribute(KnownAttributes.Configuration));
         AssertTags([MemberTags.Configuration, MemberTags.Secret], tags);
     }
 
