@@ -15,9 +15,11 @@ internal static class ExpressionArithmetic
     /// <returns>The result, or null when the values have no arithmetic or the result is out of range.</returns>
     public static object? Apply(ArithmeticOperator arithmeticOperator, object left, object right)
     {
-        if (ExpressionComparer.IsNumber(left) && ExpressionComparer.IsNumber(right))
+        var leftKind = ExpressionComparer.GetNumberKind(left);
+        var rightKind = ExpressionComparer.GetNumberKind(right);
+        if (leftKind != NumberKind.None && rightKind != NumberKind.None)
         {
-            return ApplyToNumbers(arithmeticOperator, left, right);
+            return ApplyToNumbers(arithmeticOperator, left, right, leftKind | rightKind);
         }
 
         return arithmeticOperator switch
@@ -35,23 +37,23 @@ internal static class ExpressionArithmetic
         float single => float.IsFinite(single) ? -single + 0f : null,
         double number => double.IsFinite(number) ? -number + 0d : null,
         TimeSpan duration => duration == TimeSpan.MinValue ? null : duration.Negate(),
-        _ when ExpressionComparer.IsIntegerOrDecimal(value) => -Normalize(ExpressionComparer.ToDecimal(value)),
+        _ when ExpressionComparer.GetNumberKind(value) != NumberKind.None => -Normalize(ExpressionComparer.ToDecimal(value)),
         _ => null
     };
 
     // Adding zero turns a negative zero into zero, which a host would otherwise write as "-0". A result that is no finite
     // number, such as that of a division by zero, is missing like a result out of range.
-    private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, object left, object right)
+    private static object? ApplyToNumbers(ArithmeticOperator arithmeticOperator, object left, object right, NumberKind kinds)
     {
         // A float with a float or a literal keeps the precision of a float, so that its result compares with a literal as
         // the float itself does. With a double or an integer it computes as double, which keeps the precision of both.
-        if (IsFloatPair(left, right))
+        if (kinds is NumberKind.Float or (NumberKind.Float | NumberKind.Decimal))
         {
             var single = (float)Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
             return float.IsFinite(single) ? single + 0f : null;
         }
 
-        if (ExpressionComparer.IsIntegerOrDecimal(left) && ExpressionComparer.IsIntegerOrDecimal(right) &&
+        if (ExpressionComparer.IsExact(kinds) &&
             TryComputeExactly(arithmeticOperator, ExpressionComparer.ToDecimal(left), ExpressionComparer.ToDecimal(right), out var exact))
         {
             return Normalize(exact);
@@ -60,12 +62,6 @@ internal static class ExpressionArithmetic
         var result = Compute(arithmeticOperator, ExpressionComparer.ToDouble(left), ExpressionComparer.ToDouble(right));
         return double.IsFinite(result) ? result + 0d : null;
     }
-
-    private static bool IsFloatPair(object left, object right) => (left, right) switch
-    {
-        (float, float or decimal) or (decimal, float) => true,
-        _ => false
-    };
 
     /// <summary>Removes the trailing zeros of a decimal, so that 1.50 times 2 is written as 3 and not as 3.00.</summary>
     // A division by one with the largest scale gives the smallest scale that keeps the value.

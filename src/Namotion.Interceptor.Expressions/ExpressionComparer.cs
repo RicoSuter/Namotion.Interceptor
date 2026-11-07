@@ -86,40 +86,41 @@ internal static class ExpressionComparer
         return TryGetInstant(other, out var otherValue) ? instant.CompareTo(otherValue) : null;
     }
 
+    // Widening a float would make 0.1f differ from the literal 0.1, so a float compares with a double or decimal as a
+    // float, and with an integer or another float as a double.
     private static int? CompareNumber(object value, object other)
     {
-        if (!IsNumber(value) || !IsNumber(other))
+        var kind = GetNumberKind(value);
+        var otherKind = GetNumberKind(other);
+        if (kind == NumberKind.None || otherKind == NumberKind.None)
         {
             return null;
         }
 
-        if (value is float || other is float)
+        return (kind | otherKind) switch
         {
-            return CompareAsFloat(value, other);
-        }
-
-        return IsIntegerOrDecimal(value) && IsIntegerOrDecimal(other)
-            ? ToDecimal(value).CompareTo(ToDecimal(other))
-            : ToDouble(value).CompareTo(ToDouble(other));
+            NumberKind.Float | NumberKind.Double or NumberKind.Float | NumberKind.Decimal => ((float)ToDouble(value)).CompareTo((float)ToDouble(other)),
+            var kinds when IsExact(kinds) => ToDecimal(value).CompareTo(ToDecimal(other)),
+            _ => ToDouble(value).CompareTo(ToDouble(other))
+        };
     }
-
-    // Widening a float would make 0.1f differ from the literal 0.1, so a float compares with a double or decimal as a
-    // float, and with an integer or another float as a double.
-    private static int CompareAsFloat(object value, object other) => (value, other) switch
-    {
-        (float single, double or decimal) => single.CompareTo((float)ToDouble(other)),
-        (double or decimal, float otherSingle) => ((float)ToDouble(value)).CompareTo(otherSingle),
-        _ => ToDouble(value).CompareTo(ToDouble(other))
-    };
 
     // The cached name of a defined value, so a comparison does not allocate; ToString only for flag combinations and
     // undefined values.
     private static string GetEnumName(Enum enumValue) =>
         Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
 
-    internal static bool IsNumber(object value) => value is float or double || IsIntegerOrDecimal(value);
+    internal static NumberKind GetNumberKind(object value) => value switch
+    {
+        float => NumberKind.Float,
+        double => NumberKind.Double,
+        decimal => NumberKind.Decimal,
+        _ when IsSignedInteger(value) || IsUnsignedInteger(value) => NumberKind.Integer,
+        _ => NumberKind.None
+    };
 
-    internal static bool IsIntegerOrDecimal(object value) => value is decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
+    /// <summary>Whether the kinds of numbers, such as those of two operands combined, are only integers and decimals.</summary>
+    internal static bool IsExact(NumberKind kinds) => (kinds & ~(NumberKind.Integer | NumberKind.Decimal)) == 0;
 
     internal static double ToDouble(object value) => Convert.ToDouble(value, CultureInfo.InvariantCulture);
 
@@ -165,4 +166,18 @@ internal static class ExpressionComparer
         instant = new DateTimeOffset(dateTime.Ticks, offset);
         return true;
     }
+}
+
+/// <summary>
+/// How the comparer and the arithmetic treat a number: every integer type alike, and each other type by itself. The kinds
+/// of two operands combine as flags.
+/// </summary>
+[Flags]
+internal enum NumberKind
+{
+    None = 0,
+    Integer = 1,
+    Decimal = 2,
+    Float = 4,
+    Double = 8
 }
