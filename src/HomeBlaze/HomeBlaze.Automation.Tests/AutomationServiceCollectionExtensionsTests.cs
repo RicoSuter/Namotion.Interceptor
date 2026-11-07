@@ -1,3 +1,4 @@
+using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -32,6 +33,20 @@ public class AutomationServiceCollectionExtensionsTests
         Assert.IsType<AllowAllAutomationAuthorizer>(provider.GetRequiredService<IAutomationAuthorizer>());
         Assert.Same(TimeProvider.System, provider.GetRequiredService<AutomationServices>().TimeProvider);
         Assert.True(automation.Enabled);
+    }
+
+    [Fact]
+    public void WhenAutomationIsAdded_ThenTheAutomationServicesUseTheRegisteredChangeDispatcher()
+    {
+        // Arrange
+        var services = CreateServices();
+
+        // Act
+        services.AddHomeBlazeAutomation();
+        using var provider = services.BuildServiceProvider();
+
+        // Assert
+        Assert.Same(provider.GetRequiredService<AutomationChangeDispatcher>(), provider.GetRequiredService<AutomationServices>().ChangeDispatcher);
     }
 
     [Fact]
