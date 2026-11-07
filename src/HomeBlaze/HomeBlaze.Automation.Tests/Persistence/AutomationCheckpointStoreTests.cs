@@ -86,6 +86,32 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheFileHoldsARunOutcomeThatNoLongerExists_ThenTheOutcomeIsReadAsNoneAndTheRestIsKept()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "AutomationState", "Storm.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+            {
+              "currentState": "Open",
+              "rules": {
+                "retract": { "runCount": 3, "lastRunOutcome": "rejectedByGuard", "lastRunMessage": "Only if is false" },
+                "close": { "runCount": 1, "lastRunOutcome": "succeeded" }
+              }
+            }
+            """);
+
+        // Act
+        var checkpoint = new AutomationCheckpointStore(path).Read();
+
+        // Assert
+        Assert.Equal("Open", checkpoint?.CurrentState);
+        Assert.Equal(3, checkpoint?.Rules["retract"].RunCount);
+        Assert.Null(checkpoint?.Rules["retract"].LastRunOutcome);
+        Assert.Equal(AutomationRunOutcome.Succeeded, checkpoint?.Rules["close"].LastRunOutcome);
+    }
+
+    [Fact]
     public void WhenThereIsNoFile_ThenNothingIsRead()
     {
         // Act

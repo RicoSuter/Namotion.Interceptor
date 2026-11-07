@@ -8,7 +8,8 @@ namespace HomeBlaze.Automation.Persistence;
 /// saved. The run properties of a rule are applied in memory at once and written at most every
 /// <see cref="RunWriteDelay"/>, with the next write of the state or when the automation stops, whichever comes first,
 /// so that frequent runs do not write the file on every run. A crash therefore loses at most the runs, run counts and
-/// trigger times of the last <see cref="RunWriteDelay"/>. Used by the worker only.
+/// trigger times of the last <see cref="RunWriteDelay"/>, and the run count restored after it can be lower than the last
+/// one history recorded, which history readers take as a reset of the count. Used by the worker only.
 /// </summary>
 internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
 {

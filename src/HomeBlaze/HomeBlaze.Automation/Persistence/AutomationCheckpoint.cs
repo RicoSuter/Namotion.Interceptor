@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace HomeBlaze.Automation.Persistence;
 
 /// <summary>
@@ -20,6 +22,7 @@ internal sealed record RuleCheckpoint
 
     public long RunCount { get; init; }
 
+    [JsonConverter(typeof(RunOutcomeJsonConverter))]
     public AutomationRunOutcome? LastRunOutcome { get; init; }
 
     public string? LastRunMessage { get; init; }

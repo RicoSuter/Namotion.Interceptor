@@ -58,7 +58,8 @@ public partial class AutomationRule : IConfigurable, ITitleProvider
 
     /// <summary>
     /// The number of runs: those that executed their actions and dry runs. A request that did not run, such as one that
-    /// <see cref="Guard"/> rejected, is not counted. Null until the automation restored it.
+    /// <see cref="Guard"/> rejected, is not counted. Null until the automation restored it. After a crash it can restart
+    /// below the last value history recorded, since runs are saved at most every 5 seconds.
     /// </summary>
     [State("Runs", IsCumulative = true, Position = 3)]
     public partial long? RunCount { get; internal set; }
