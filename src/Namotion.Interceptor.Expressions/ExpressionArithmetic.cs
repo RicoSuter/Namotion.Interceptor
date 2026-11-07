@@ -1,14 +1,6 @@
 namespace Namotion.Interceptor.Expressions;
 
-/// <summary>
-/// Applies an arithmetic operator to two values that are not null. Two integers or decimals compute as
-/// <see cref="decimal"/> when the result is exact, and as <see cref="double"/> otherwise; a <see cref="float"/> with a
-/// <see cref="float"/> or a <see cref="decimal"/>, such as a number literal, computes as <see cref="float"/>; every other
-/// pair of numbers computes as <see cref="double"/>. An instant minus an instant is a <see cref="TimeSpan"/>, an instant
-/// plus or minus a <see cref="TimeSpan"/> is an instant, and two <see cref="TimeSpan"/> values add and subtract. A number
-/// or a <see cref="TimeSpan"/> negates. A <see cref="DateTime"/> without a kind is read as UTC. A null result means the
-/// pair has no arithmetic or the result is out of range, so the value is missing.
-/// </summary>
+/// <summary>Applies arithmetic and negation to values that are not null, as docs/expressions.md#arithmetic describes; a null result is missing.</summary>
 internal static class ExpressionArithmetic
 {
     /// <summary>Applies the operator to two values that are not null.</summary>
