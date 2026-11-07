@@ -15,6 +15,7 @@ namespace Namotion.Interceptor.Registry.Abstractions
     public interface ISubjectRegistry
     {
         System.Collections.Generic.IReadOnlyDictionary<Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject> KnownSubjects { get; }
+        long StructureVersion { get; }
         Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject);
     }
     public class RegisteredSubject
@@ -113,6 +114,7 @@ namespace Namotion.Interceptor.Registry
     {
         public SubjectRegistry() { }
         public System.Collections.Generic.IReadOnlyDictionary<Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject> KnownSubjects { get; }
+        public long StructureVersion { get; }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject) { }
         public bool TryGetSubjectById(string subjectId, out Namotion.Interceptor.IInterceptorSubject subject) { }
     }
@@ -198,6 +200,7 @@ namespace Namotion.Interceptor.Registry.Paths
         public virtual char IndexClose { get; }
         public virtual char IndexOpen { get; }
         public virtual char PathSeparator { get; }
+        public virtual long Version { get; }
         public virtual bool TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property) { }
         public virtual bool TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? segment) { }
     }

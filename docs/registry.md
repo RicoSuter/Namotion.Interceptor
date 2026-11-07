@@ -58,6 +58,14 @@ var child = garage.TryGetRegisteredProperty(g => g.Cars)!.Children[0]; // Subjec
 - Both entries follow the assigned value, and paths built afterwards use the new index. The rules, including a subject held more than once and a value mutated in place, are in [Child Index Changes](tracking.md#child-index-changes).
 - `Children` of a collection is in position order. A property declared as a dictionary is not reordered by key, so its children stay in the order they were attached, also when its value enumerates as positions. A property declared more broadly, such as `object`, that holds a dictionary with `int` keys has its children ordered by key.
 
+### Structure version
+
+`ISubjectRegistry.StructureVersion` is odd while the registry changes the registered subjects, their parents, children or child indices, and even otherwise. Each such change raises it by two, a property added at run time raises it by two after the property is published, and it never decreases. An even value marks the end of one registry change, not of a whole property write: one write can make several registry changes, such as detaching a subtree or replacing the items of a collection, and the value is even between them.
+
+A reader that wants a consistent view reads the value, which is an acquire load, reads the registry, issues a full fence with `Interlocked.MemoryBarrier()`, and reads the value again. When both reads return the same even value, it read no such change, not even part of one. The fence is required also for a reader that reads the registry only through its own members: `TryGetRegisteredSubject` and `Children` read under a lock, and neither the release of that lock nor the acquire load of the value keeps the second read of the value after the reads inside the lock.
+
+A cache of anything computed from the registry, such as paths, reads the value before computing and serves an entry only while it is unchanged; an entry computed during a change carries a value from before the change ended and is never served after it. The value follows what the registry tracks: assigned subject references, collections and dictionaries, and properties added at run time. A derived property that returns another subject changes no value, nor does a collection or dictionary mutated in place, also when the same instance is assigned again afterwards, so a cache keeps its entries across such a change (in-place mutation is unsupported, see [Child Index Changes](tracking.md#child-index-changes)).
+
 ## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:
@@ -305,6 +313,8 @@ public class StatePathProvider : PathProviderBase
     }
 }
 ```
+
+A provider whose answers change while it is in use overrides `PathProviderBase.Version` and raises it after each change. Caches of paths, such as the MQTT topic caches, serve an entry only while it and the registry's [`StructureVersion`](#structure-version) are unchanged. The built-in providers return 0, which means their answers never change.
 
 ### Included properties
 

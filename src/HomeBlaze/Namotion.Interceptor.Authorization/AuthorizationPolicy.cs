@@ -17,8 +17,6 @@ public sealed class AuthorizationPolicy
     /// <summary>Gets the name of the role that <see cref="Explain(RegisteredSubjectProperty, PermissionAction)"/> reports for a system deny rule; no role may use it.</summary>
     public static string SystemRoleName { get; } = "System";
 
-    private const int MaxConsistencyAttempts = 3;
-
     private static readonly TypeNameCache TypeNames = new();
 
     private readonly CompiledRule[] _allow;
@@ -93,19 +91,29 @@ public sealed class AuthorizationPolicy
     {
         ArgumentNullException.ThrowIfNull(subject);
 
-        // The member checks, the walk and its link checks record into one instance, so the answer rests on one instant.
         var state = EvaluationState.Rent();
         try
         {
-            for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
+            // The version validates only reads of the registry that holds this instance. When the context reaches no
+            // registry that holds it, the instance is detached, is being attached, or belongs to another graph's
+            // registry, so it is hidden whatever the walk finds, and the walk runs once only for the reason it reports.
+            // An unvalidated walk may not make a subject visible.
+            var registry = subject.Subject.Context.TryGetService<ISubjectRegistry>();
+            if (registry is null || !ReferenceEquals(registry.TryGetRegisteredSubject(subject.Subject), subject))
             {
-                if (attempt > 0)
-                {
-                    state.Clear();
-                }
+                var unvalidatedDecision = ExplainOnce(subject, state);
+                return unvalidatedDecision.IsVisible
+                    ? new VisibilityDecision(isVisible: false, hasReadableMember: false, deniedProperty: null)
+                    : unvalidatedDecision;
+            }
 
+            // The member checks, the walk and its link checks run in one attempt, so the answer rests on one instant.
+            var read = new ConsistentRead(registry);
+            while (read.TryBegin())
+            {
+                state.Clear();
                 var decision = ExplainOnce(subject, state);
-                if (state.Reads.AreUnchanged())
+                if (read.TryEnd())
                 {
                     return decision;
                 }
@@ -303,10 +311,9 @@ public sealed class AuthorizationPolicy
         return false;
     }
 
-    // Every path of the subject as of one instant of the graph; a root has the single empty path. When the graph changed
-    // during every attempt, no path is listed, so an allow cannot match a path that never existed. In a subject
-    // evaluation the reads are only recorded, for the evaluation to check, and each subject's paths are built once per
-    // attempt.
+    // Every path of the subject as of one instant of the graph; a root has the single empty path. When the registry
+    // changed during every attempt, no path is listed, so an allow cannot match a path that never existed. In a subject
+    // evaluation the evaluation validates its attempt as a whole, and each subject's paths are built once per attempt.
     private PathList GetPaths(RegisteredSubject subject, ref MatchContext context)
     {
         if (context.SharedState is { } sharedState)
@@ -323,17 +330,21 @@ public sealed class AuthorizationPolicy
             return isAttached ? PathList.Root : PathList.Unknown;
         }
 
+        // Only the registry that holds this instance validates reads of its paths; without one the paths are unknown.
+        var registry = subject.Subject.Context.TryGetService<ISubjectRegistry>();
+        if (registry is null || !ReferenceEquals(registry.TryGetRegisteredSubject(subject.Subject), subject))
+        {
+            return PathList.Unknown;
+        }
+
         // The paths live in the state, so the context keeps it until the question is answered.
         var state = context.RentedState ??= EvaluationState.Rent();
-        for (var attempt = 0; attempt < MaxConsistencyAttempts; attempt++)
+        var read = new ConsistentRead(registry);
+        while (read.TryBegin())
         {
-            if (attempt > 0)
-            {
-                state.Clear();
-            }
-
+            state.Clear();
             var paths = state.BuildPaths(subject, _pathProvider, Limits.MaxPaths);
-            if (state.Reads.AreUnchanged())
+            if (read.TryEnd())
             {
                 return paths;
             }
@@ -368,7 +379,7 @@ public sealed class AuthorizationPolicy
     {
         HashSet<RegisteredSubject>? visited = null;
         List<ParentCursor>? pending = null;
-        var hasCursor = TryEnter(subject, 0, state, ref visited, out var cursor, out var isRoot);
+        var hasCursor = TryEnter(subject, 0, ref visited, out var cursor, out var isRoot);
         var cursorPaths = subjectPaths;
         var context = new MatchContext { SharedState = state, ReleasablePathsStart = -1 };
         while (!isRoot)
@@ -400,7 +411,7 @@ public sealed class AuthorizationPolicy
                 continue;
             }
 
-            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, state, ref visited, out cursor, out isRoot);
+            hasCursor = TryEnter(parent.Property.Parent, cursor.Depth + 1, ref visited, out cursor, out isRoot);
         }
 
         return true;
@@ -409,11 +420,12 @@ public sealed class AuthorizationPolicy
     // Enters a subject: isRoot when it is an attached subject without parents; no cursor when it is no longer attached
     // or was already explored.
     private static bool TryEnter(
-        RegisteredSubject subject, int depth, EvaluationState state, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
+        RegisteredSubject subject, int depth, ref HashSet<RegisteredSubject>? visited, out ParentCursor cursor, out bool isRoot)
     {
         cursor = default;
         isRoot = false;
-        var parents = state.Reads.GetParents(subject, out var isAttached);
+        var parents = subject.Parents;
+        var isAttached = subject.IsAttached;
         if (!isAttached)
         {
             return false;
@@ -483,8 +495,8 @@ public sealed class AuthorizationPolicy
         // Where the paths this question built start in the shared state, when no later question uses them; -1 otherwise.
         public int ReleasablePathsStart;
 
-        // When set, the question is part of a subject evaluation: the paths' parent reads are recorded here for the
-        // evaluation to check, instead of being checked per enumeration.
+        // When set, the question is part of a subject evaluation, which validates the reads of all its questions at once
+        // instead of each enumeration on its own.
         public EvaluationState? SharedState;
 
         // The state a question on its own rented for its paths, which point into it until the question is answered.

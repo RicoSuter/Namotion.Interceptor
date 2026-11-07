@@ -40,6 +40,24 @@ public class ReverseCompositeMapperTests
     private sealed class TestComposite(params IReversePropertyMapper<TestMapping, string>[] mappers)
         : ReverseCompositeMapper<TestMapping, string>(mappers);
 
+    private sealed class VersionedMapper(long version) : IReversePropertyMapper<TestMapping, string>
+    {
+        public long Version { get; set; } = version;
+
+        public bool TryGetMapping(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject rootSubject,
+            [NotNullWhen(true)] out TestMapping? mapping)
+        {
+            mapping = null;
+            return false;
+        }
+
+        public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+            string key, RegisteredSubject subject, CancellationToken cancellationToken)
+            => new(result: null);
+    }
+
     private static (RegisteredSubject Subject, IInterceptorSubject Root) CreateSubject()
     {
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -190,5 +208,36 @@ public class ReverseCompositeMapperTests
 
         // Assert
         Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenNoMapperHasAVersion_ThenCompositeVersionIsZero()
+    {
+        // Arrange
+        var composite = new TestComposite(new FakeMapper(), new FakeMapper());
+
+        // Act
+        var version = composite.Version;
+
+        // Assert
+        Assert.Equal(0, version);
+    }
+
+    [Fact]
+    public void WhenAMapperRaisesItsVersion_ThenCompositeVersionIsTheSumOfTheMappers()
+    {
+        // Arrange
+        var first = new VersionedMapper(2);
+        var second = new VersionedMapper(3);
+        var composite = new TestComposite(first, second);
+        var before = composite.Version;
+
+        // Act
+        first.Version = 4;
+        var after = composite.Version;
+
+        // Assert
+        Assert.Equal(5, before);
+        Assert.Equal(7, after);
     }
 }

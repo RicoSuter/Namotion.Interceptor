@@ -24,6 +24,7 @@
 
 	<ItemGroup>
 	  <InternalsVisibleTo Include="Namotion.Interceptor.Mqtt.Tests" />
+	  <InternalsVisibleTo Include="Namotion.Interceptor.Benchmark" />
 	</ItemGroup>
 
 	<ItemGroup>
