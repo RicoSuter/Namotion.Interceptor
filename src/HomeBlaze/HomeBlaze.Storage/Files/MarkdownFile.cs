@@ -36,9 +36,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         "than http, https and mailto";
 
     private readonly MarkdownContentParser _parser;
-
-    /// <summary>The links that widgets of the page resolved, kept by <see cref="MarkdownContentParser.ResolveLink"/>.</summary>
-    internal ResolvedLinks? ResolvedLinks { get; set; }
     private readonly ConfigurableSubjectSerializer _serializer;
 
     // The parse state is one immutable snapshot that is replaced as a whole. Reloads and write-backs run
@@ -88,6 +85,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // _parseResult into a local once and read both from that local.
     private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;
     private IReadOnlyDictionary<string, IInterceptorSubject> _namedSubjects => _parseResult.NamedSubjects;
+
+    /// <summary>The links that widgets of the page resolved, kept by <see cref="MarkdownContentParser.ResolveLink"/>.</summary>
+    internal ResolvedLinks? ResolvedLinks { get; set; }
 
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
