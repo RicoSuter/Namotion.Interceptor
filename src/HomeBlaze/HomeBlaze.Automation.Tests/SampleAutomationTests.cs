@@ -30,6 +30,7 @@ public partial class SampleAutomationTests
 
         // Assert
         Assert.True(isValid, error);
+        Assert.Equal(["Operator"], automation.Roles);
         Assert.Equal(["cooled", "overheat"], automation.Rules.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.All(automation.Rules.Values, rule => Assert.Equal(AutomationRuleMode.DryRun, rule.Mode));
     }
@@ -53,7 +54,7 @@ public partial class SampleAutomationTests
             using var automation = Deserialize(json, provider);
             var written = new ConfigurableSubjectSerializer(new TypeProvider().AddAssembly(typeof(Automation).Assembly), provider).Serialize(automation);
             errors.AddRange(FindUnreadMembers(JsonDocument.Parse(json).RootElement, JsonDocument.Parse(written).RootElement, automation.Name ?? "?"));
-            errors.AddRange(AutomationValidator.Validate(automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
+            errors.AddRange(AutomationValidator.Validate(automation, automation.Roles, automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
                 .Select(error => $"{automation.Name}: {error.Message}"));
         }
 

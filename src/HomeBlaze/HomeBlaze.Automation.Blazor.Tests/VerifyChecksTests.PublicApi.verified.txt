@@ -186,11 +186,11 @@ namespace HomeBlaze.Automation.Blazor.Editing
     }
     public sealed class AutomationDraft
     {
-        public AutomationDraft() { }
         public bool Enabled { get; set; }
         public string? InitialState { get; set; }
         public int InputErrorVersion { get; }
         public string? Name { get; set; }
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Rules { get; }
         public System.Collections.Generic.List<string> States { get; }
         public HomeBlaze.Automation.Blazor.Editing.RuleDraft AddRule() { }

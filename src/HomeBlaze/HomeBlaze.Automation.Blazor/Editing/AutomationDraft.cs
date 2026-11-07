@@ -10,11 +10,18 @@ namespace HomeBlaze.Automation.Blazor.Editing;
 public sealed class AutomationDraft
 {
     private readonly Dictionary<string, AutomationValidationError> _inputErrors = new(StringComparer.Ordinal);
-    private Automation? _automation;
+    private Automation _automation = null!;
+
+    private AutomationDraft()
+    {
+    }
 
     public string? Name { get; set; }
 
     public bool Enabled { get; set; } = true;
+
+    /// <summary>The roles of the automation, see <see cref="Automation.Roles"/>.</summary>
+    public IReadOnlyList<string> Roles { get; set; } = [];
 
     public List<string> States { get; } = [];
 
@@ -25,20 +32,21 @@ public sealed class AutomationDraft
 
     public static AutomationDraft From(Automation automation)
     {
-        var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, _automation = automation };
+        var draft = new AutomationDraft { Name = automation.Name, Enabled = automation.Enabled, InitialState = automation.InitialState, Roles = [.. automation.Roles], _automation = automation };
         draft.States.AddRange(automation.States);
         draft.Rules.AddRange(automation.GetRulesInOrder().Select(pair => RuleDraft.From(pair.Key, pair.Value)));
         return draft;
     }
 
     /// <summary>
-    /// Writes the configuration to the automation, the rules last, so that the automation reads a complete configuration
-    /// when it applies it. New rule instances take the run properties of the instances they replace.
+    /// Writes the configuration to the automation, the rules last and the roles before them, so that the automation reads a
+    /// complete configuration when it applies it and never runs new rules with old roles. New rule instances take the run properties of the instances they replace.
     /// </summary>
     public void ApplyTo(Automation automation)
     {
         automation.Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim();
         automation.Enabled = Enabled;
+        automation.Roles = [.. Roles];
         automation.States = [.. States];
         automation.InitialState = States.Count == 0 ? null : InitialState;
         automation.RuleOrder = [.. Rules.Select(rule => rule.Key)];
@@ -49,9 +57,11 @@ public sealed class AutomationDraft
     public IReadOnlyList<AutomationValidationError> Validate() =>
     [
         .. AutomationValidator.Validate(
+            _automation,
+            Roles,
             States,
             States.Count == 0 ? null : InitialState,
-            Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => _automation is null ? null : ActionInputs.GetMethod(_automation, rule.Key, path))),
+            Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetMethod(_automation, rule.Key, path))),
             [.. Rules.Select(rule => rule.Key)]),
         .. CheckActionInputs(),
         .. _inputErrors.Values
@@ -59,14 +69,12 @@ public sealed class AutomationDraft
 
     // The inputs of the actions are checked against the operations and properties they target, wherever the editor is showing.
     private IEnumerable<AutomationValidationError> CheckActionInputs() =>
-        _automation is not { } automation
-            ? []
-            : Rules.SelectMany(rule =>
-            {
-                var expressions = new RuleExpressions(automation, rule.Key, rule.AllowsEvent);
-                return rule.Actions.SelectMany((item, index) => ActionInputs.Check(item.Value, automation, rule.Key, expressions)
-                    .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
-            });
+        Rules.SelectMany(rule =>
+        {
+            var expressions = new RuleExpressions(_automation, rule.Key, rule.AllowsEvent);
+            return rule.Actions.SelectMany((item, index) => ActionInputs.Check(item.Value, _automation, rule.Key, expressions)
+                .Select(error => new AutomationValidationError(rule.Key, $"{ActionInputs.Name(item.Value, index)}: {error.Label}: {error.Error}")));
+        });
 
     /// <summary>Increases whenever an input error is set or cleared, so that a cached result of <see cref="Validate"/> can tell it is stale.</summary>
     public int InputErrorVersion { get; private set; }

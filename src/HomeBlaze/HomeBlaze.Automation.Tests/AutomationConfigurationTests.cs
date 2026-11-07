@@ -277,4 +277,57 @@ public class AutomationConfigurationTests
             host.Automation.StatusMessage);
         Assert.Equal("Not applied: the configuration is invalid", host.Rule("broken").Status);
     }
+
+    [Fact]
+    public async Task WhenASavedActionIsDeniedByTheRoles_ThenThePreviousConfigurationKeepsRunningAndTheStatusNamesTheRole()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation =>
+            {
+                automation.Roles = [TestAuthorization.StormBlinds];
+                automation.Rules = Keyed(("retract", Retract()));
+            },
+            authorizer: graph => TestAuthorization.Create(graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyOpen())));
+
+        // Act
+        await SaveAsync(host, Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Open")))));
+        var status = host.Automation.Status;
+        var statusMessage = host.Automation.StatusMessage;
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, status);
+        Assert.EndsWith("Rule 'Retract': action 'Open': /Blinds/Open: the role 'StormBlinds' denies calling it", statusMessage);
+        Assert.Equal(1, host.Blinds.CloseCount);
+        Assert.Equal(0, host.Blinds.OpenCount);
+    }
+
+    [Fact]
+    public async Task WhenTheRolesCannotBeUsedYet_ThenTheConfigurationIsAppliedAndEachCallIsRefusedUntilTheRoleExists()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(
+            automation =>
+            {
+                automation.Roles = ["Ghost"];
+                automation.Rules = Keyed(("retract", Retract()));
+            },
+            authorizer: graph => TestAuthorization.Create(graph));
+
+        // Act
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var refusal = host.Rule("retract").LastRunMessage;
+        TestAuthorization.AddRoles(host.Graph, ("Ghost", new global::HomeBlaze.Authorization.Role { Includes = [global::HomeBlaze.Authorization.BuiltInRoles.OperatorName] }));
+        host.Weather.Gust = 0;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("action 'Close' failed: /Blinds/Close: the roles of the automation cannot be used: Role 'Ghost' is not defined.", refusal);
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
 }

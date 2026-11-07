@@ -654,7 +654,7 @@ public class AutomationEditorTests
             ];
             configured.Rules["started"].Actions =
             [
-                new SetPropertyAction { Id = "set-1", PropertyPath = "/Demo/Motor/TargetSpeed", Value = "event/Timestamp" }
+                new SetPropertyAction { Id = "set-1", PropertyPath = "/Demo/Motor/CurrentSpeed", Value = "event/Timestamp" }
             ];
         });
         try

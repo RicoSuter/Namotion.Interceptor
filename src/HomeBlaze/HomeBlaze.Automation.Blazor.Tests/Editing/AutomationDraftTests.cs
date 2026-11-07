@@ -3,6 +3,10 @@ using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
@@ -88,7 +92,7 @@ public class AutomationDraftTests
     public void WhenAnInputErrorIsSetAgainOrClearedTwice_ThenTheVersionChangesOnlyWithTheErrors()
     {
         // Arrange
-        var draft = new AutomationDraft();
+        var draft = AutomationDraft.From(TestAutomations.Create());
         var error = new AutomationValidationError(null, "Hold: Use a duration above 0");
 
         // Act
@@ -137,6 +141,97 @@ public class AutomationDraftTests
         Assert.Equal("Start", automation.Rules["started"].Name);
         Assert.Equal(AutomationRuleMode.DryRun, automation.Rules[added.Key].Mode);
         Assert.Equal("Idle", automation.InitialState);
+    }
+
+    [Fact]
+    public void WhenTheRolesOfTheDraftAreChangedAndApplied_ThenTheAutomationHasThem()
+    {
+        // Arrange
+        var automation = CreateWasher();
+        automation.Roles = ["Reader"];
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var read = draft.Roles.ToArray();
+        draft.Roles = ["Reader", "Operator"];
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.Equal(["Reader"], read);
+        Assert.Equal(["Reader", "Operator"], automation.Roles);
+    }
+
+    [Fact]
+    public void WhenTheDraftIsApplied_ThenTheRolesAreWrittenBeforeTheRules()
+    {
+        // Arrange
+        var automation = CreateWasher();
+        var recorder = new WriteRecorder(automation);
+        ((IInterceptorSubject)automation).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry().WithParents());
+        ((IInterceptorSubject)automation).Context.AddService<IWriteInterceptor>(recorder);
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.Contains(nameof(Automation.Roles), recorder.Written);
+        Assert.True(recorder.Written.IndexOf(nameof(Automation.Roles)) < recorder.Written.IndexOf(nameof(Automation.Rules)), string.Join(", ", recorder.Written));
+        Assert.Equal(nameof(Automation.Rules), recorder.Written[^1]);
+    }
+
+    private sealed class WriteRecorder(Automation automation) : IWriteInterceptor
+    {
+        public List<string> Written { get; } = [];
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, automation))
+            {
+                Written.Add(context.Property.Name);
+            }
+
+            next(ref context);
+        }
+    }
+
+    [Fact]
+    public void WhenTheRolesCannotBeUsedAndARuleCallsAnOperation_ThenTheDraftHasTheRolesErrorWhichBlocksSave()
+    {
+        // Arrange
+        var automation = TestAutomations.Create(
+            authorizer: new UnusableRolesAuthorizer("the roles of the automation cannot be used: No roles are assigned."));
+        automation.Rules = new Dictionary<string, AutomationRule>
+        {
+            ["call"] = Rule("Call", null, new InvokeOperationAction { Id = "call-1", OperationPath = "/Notify/Send" })
+        };
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var errors = draft.Validate();
+
+        // Assert
+        Assert.Contains(errors, error => error.RuleKey is null && error.Message ==
+            "The actions that call operations or write properties are refused: the roles of the automation cannot be used: No roles are assigned.");
+    }
+
+    [Fact]
+    public void WhenAResolvedTargetIsWhatAnAutomationNeverWrites_ThenTheRuleHasTheSameErrorAsTheRuntime()
+    {
+        // Arrange
+        var automation = TestAutomations.Create();
+        ((IInterceptorSubject)automation).Context.AddFallbackContext(InterceptorSubjectContext.Create().WithRegistry().WithParents());
+        automation.Rules = new Dictionary<string, AutomationRule>
+        {
+            ["rule"] = Rule("Rule", null, new SetPropertyAction { Id = "set-1", PropertyPath = "./Status", Value = "x" })
+        };
+        var draft = AutomationDraft.From(automation);
+
+        // Act
+        var errors = draft.Validate();
+
+        // Assert
+        Assert.Contains(errors, error => error.RuleKey == "rule" && error.Message == "action 'set-1': ./Status is read-only");
     }
 
     [Fact]

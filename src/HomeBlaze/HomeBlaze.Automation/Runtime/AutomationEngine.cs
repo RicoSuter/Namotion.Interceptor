@@ -136,7 +136,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         var roles = _automation.Roles;
         TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
-        if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
+        if (AutomationCompiler.TryCompile(_automation, roles, rules, out var compiled, out var error))
         {
             _roles = [.. roles];
             Replace(compiled);
