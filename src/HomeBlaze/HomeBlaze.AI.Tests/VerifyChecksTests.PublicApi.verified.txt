@@ -375,7 +375,6 @@ namespace HomeBlaze.AI.Mcp
     }
     public class HomeBlazeMarkdownToolProvider : Namotion.Interceptor.Mcp.Abstractions.IMcpToolProvider
     {
-        public const string CreateMarkdownToolName = "create_markdown";
         public const string EditMarkdownToolName = "edit_markdown";
         public const string WriteMarkdownToolName = "write_markdown";
         public static System.Collections.Generic.IReadOnlyList<string> ToolNames { get; }
