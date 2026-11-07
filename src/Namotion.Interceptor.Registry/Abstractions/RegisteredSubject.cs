@@ -39,14 +39,18 @@ public class RegisteredSubject
     /// <summary>
     /// Gets whether the subject is in the registry's graph through this instance: true from the registry's
     /// registration of the subject until the registry removes the subject's last parent or unregisters it, both of
-    /// which happen only when the subject detaches. A subject without parents that is attached is therefore a root.
+    /// which happen only when the subject detaches, as long as the registry has seen every reference to the subject. A
+    /// reference added through a property the registry does not know, or before the registry was added, is not
+    /// tracked, so removing the subject's last tracked parent clears the flag although the subject stays in the graph.
+    /// A subject without parents that is attached is therefore a root.
     /// An instance never becomes attached again: a subject attached again is registered as a new instance. An
     /// instance created outside the registry is never attached. Lock-free.
     /// </summary>
     /// <remarks>
     /// A reader that combines it with <see cref="Parents"/> must read <see cref="Parents"/> first and this property
-    /// second: the registry clears it before it removes the last parent, so a reader that sees the parents empty after
-    /// a removal then sees it false, while the opposite order can see it true and then the parents empty.
+    /// second: the registry clears it no later than the removal of the last parent becomes visible, so a reader that
+    /// sees the parents empty after a removal then sees it false, while the opposite order can see it true and then the
+    /// parents empty.
     /// </remarks>
     public bool IsAttached => Volatile.Read(ref _isAttached);
 
@@ -192,7 +196,7 @@ public class RegisteredSubject
             {
                 if (_additionalParents is null || _additionalParents.Count == 0)
                 {
-                    // Before the parents change, see IsAttached.
+                    // Inside the critical section that changes the parents, or before it, see IsAttached.
                     MarkDetached();
                 }
 

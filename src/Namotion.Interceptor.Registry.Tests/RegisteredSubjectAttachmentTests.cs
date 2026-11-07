@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -376,6 +377,55 @@ public class RegisteredSubjectAttachmentTests
         Assert.True(checks > 0);
         Assert.All(subtree, registeredSubject => Assert.False(registeredSubject.IsAttached));
     }
+
+    [Fact]
+    public void WhenADetachingParentRemovesTheLastParentOfASubject_ThenAReaderUnderTheSubjectsLockSeesItNoLongerAttached()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var first = new Person();
+        var second = new Person();
+        var mother = new Person { Children = [first, second] };
+        var person = new Person(context) { Mother = mother };
+        var registeredFirst = first.TryGetRegisteredSubject()!;
+        var registeredSecond = second.TryGetRegisteredSubject()!;
+
+        bool hasReachedSecond;
+        int firstParentCount, secondParentCount;
+        bool isFirstAttached, isSecondAttached;
+        var writer = new Thread(() => person.Mother = null);
+
+        // Act
+        using (GetLock(registeredSecond).EnterScope())
+        {
+            // The detaching mother removes the parent of first, then waits for the lock of second, held here, inside
+            // the same registry change.
+            writer.Start();
+            hasReachedSecond = SpinWait.SpinUntil(() => registeredFirst.Parents.IsEmpty, TimeSpan.FromSeconds(30));
+
+            using (GetLock(registeredFirst).EnterScope())
+            {
+                firstParentCount = registeredFirst.Parents.Length;
+                isFirstAttached = registeredFirst.IsAttached;
+            }
+
+            secondParentCount = registeredSecond.Parents.Length;
+            isSecondAttached = registeredSecond.IsAttached;
+        }
+
+        writer.Join();
+
+        // Assert
+        Assert.True(hasReachedSecond);
+        Assert.Equal(0, firstParentCount);
+        Assert.False(isFirstAttached);
+        Assert.Equal(1, secondParentCount);
+        Assert.True(isSecondAttached);
+        Assert.False(registeredSecond.IsAttached);
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lock")]
+    private static extern ref Lock GetLock(RegisteredSubject registeredSubject);
 
     [RunsBefore(typeof(SubjectRegistry))]
     private sealed class BeforeRegistryProbe(Action check) : ILifecycleHandler
