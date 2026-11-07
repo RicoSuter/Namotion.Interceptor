@@ -101,6 +101,82 @@ public class AutomationChangeDispatcherTests
     }
 
     [Fact]
+    public void WhenAListenerPublishesARoute_ThenOnlyAChangeOfAPropertyOnItIsAGraphChange()
+    {
+        // Arrange
+        var (graph, _) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var routed = new RecordingListener();
+        var unrouted = new RecordingListener();
+        using var routedRegistration = dispatcher.Register(graph.Context, routed);
+        using var unroutedRegistration = dispatcher.Register(graph.Context, unrouted);
+        routedRegistration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+
+        // Act
+        graph.Add("Garden", new TestSensor());
+        var graphChangesAfterAnotherProperty = routed.GraphChanges;
+        holder.Sensor = new TestSensor();
+
+        // Assert
+        Assert.Equal(0, graphChangesAfterAnotherProperty);
+        Assert.Equal(1, routed.GraphChanges);
+        Assert.Equal(2, unrouted.GraphChanges);
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, routed, SensorOf(holder)));
+        Assert.False(dispatcher.IsRoutedAsGraphChange(graph.Context, routed, ChildrenOf(graph)));
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, unrouted, ChildrenOf(graph)));
+    }
+
+    [Fact]
+    public void WhenARouteIsUnbounded_ThenAChangeOfAPropertyOnItAndOfEveryPropertyThatHoldsSubjectsIsAGraphChange()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var dispatcher = new AutomationChangeDispatcher();
+        var listener = new RecordingListener();
+        using var registration = dispatcher.Register(graph.Context, listener);
+        registration.PublishRoute(Watch(Gust(weather)), isUnbounded: true);
+
+        // Act
+        weather.Gust = 9;
+        weather.Rain = 2;
+        graph.Add("Garden", new TestSensor());
+
+        // Assert
+        Assert.Equal(2, listener.GraphChanges);
+        Assert.Empty(listener.Changes);
+    }
+
+    [Fact]
+    public void WhenAListenerWithARouteIsUnregistered_ThenItsRouteIsRemoved()
+    {
+        // Arrange
+        var (graph, weather) = CreateGraph();
+        var holder = new TestSensorHolder();
+        graph.Add("Holder", holder);
+        var dispatcher = new AutomationChangeDispatcher();
+        var leaving = new RecordingListener();
+        var staying = new RecordingListener();
+        var leavingRegistration = dispatcher.Register(graph.Context, leaving);
+        using var stayingRegistration = dispatcher.Register(graph.Context, staying);
+        leavingRegistration.PublishRoute(Watch(SensorOf(holder), Gust(weather)), isUnbounded: false);
+        stayingRegistration.PublishRoute(Watch(SensorOf(holder)), isUnbounded: false);
+
+        // Act
+        leavingRegistration.Dispose();
+        leavingRegistration.PublishRoute(Watch(Gust(weather)), isUnbounded: true);
+        holder.Sensor = new TestSensor();
+        weather.Gust = 9;
+
+        // Assert
+        Assert.Equal(0, leaving.GraphChanges);
+        Assert.Equal(1, staying.GraphChanges);
+        Assert.False(dispatcher.IsRoutedAsGraphChange(graph.Context, leaving, SensorOf(holder)));
+        Assert.True(dispatcher.IsRoutedAsGraphChange(graph.Context, staying, SensorOf(holder)));
+    }
+
+    [Fact]
     public void WhenAChangeIsWrittenDuringARun_ThenItCarriesTheChainDepthOfTheWritingFlow()
     {
         // Arrange
@@ -250,6 +326,7 @@ public class AutomationChangeDispatcherTests
                 using var registration = dispatcher.Register(graph.Context, new RecordingListener());
                 registration.PublishWatched(Watch(Gust(weather)));
                 registration.PublishWatched(Watch(Gust(weather), Rain(weather)));
+                registration.PublishRoute(Watch(Rain(weather)), isUnbounded: false);
                 registration.PublishWatched(FrozenSet<PropertyReference>.Empty);
             }
         }, TaskCreationOptions.LongRunning));
@@ -274,6 +351,10 @@ public class AutomationChangeDispatcherTests
     private static PropertyReference Gust(TestSensor weather) => new(weather, nameof(TestSensor.Gust));
 
     private static PropertyReference Rain(TestSensor weather) => new(weather, nameof(TestSensor.Rain));
+
+    private static PropertyReference SensorOf(TestSensorHolder holder) => new(holder, nameof(TestSensorHolder.Sensor));
+
+    private static PropertyReference ChildrenOf(TestGraph graph) => new(graph.Root, nameof(TestRoot.Children));
 
     private static FrozenSet<PropertyReference> Watch(params PropertyReference[] properties) => properties.ToFrozenSet();
 
