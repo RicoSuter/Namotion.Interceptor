@@ -19,10 +19,18 @@ namespace HomeBlaze.Automation.Runtime;
 /// A step up from a subject depends on its parents. Its route has the properties that hold the subject, which lose it,
 /// but the property that gains it next is not known; the step is exact only for a subject that tells the worker when it
 /// gains a parent: the automation of the worker, and a rule whose only parent is that automation.
+/// <para>
+/// The walk of an absolute path to a subject is kept while the structure version that
+/// <paramref name="getStructureVersion"/> reads stays the same even number, as the resolver keeps its result: a change
+/// that can make the walk find another subject or read another property changes the version.
+/// </para>
 /// </remarks>
-internal sealed class GraphRouteWalker(SubjectPathResolver resolver, IInterceptorSubject? automation)
+internal sealed class GraphRouteWalker(SubjectPathResolver resolver, IInterceptorSubject? automation, Func<long> getStructureVersion)
 {
     private readonly HashSet<IInterceptorSubject> _visited = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, AbsoluteWalk> _absoluteWalks = new(StringComparer.Ordinal);
+    private readonly GraphRouteBuilder _absoluteRoute = new();
+    private long _absoluteWalksVersion = -1;
 
     /// <summary>Walks the path to the property that <see cref="Expressions.AutomationPaths.ResolveProperty"/> resolves.</summary>
     public RegisteredSubjectProperty? WalkProperty(string path, IInterceptorSubject rule, GraphRouteBuilder route)
@@ -69,14 +77,7 @@ internal sealed class GraphRouteWalker(SubjectPathResolver resolver, IIntercepto
 
         if (path.StartsWith("/", StringComparison.CurrentCulture))
         {
-            var root = resolver.ResolveSubject("/", PathStyle.Canonical);
-            if (root is null)
-            {
-                route.MarkUnbounded();
-                return null;
-            }
-
-            return path.Length == 1 ? root : WalkSegments(root, path[1..], route);
+            return WalkAbsolute(path, route);
         }
 
         if (path.StartsWith("./", StringComparison.CurrentCulture))
@@ -87,6 +88,47 @@ internal sealed class GraphRouteWalker(SubjectPathResolver resolver, IIntercepto
         return path.StartsWith("../", StringComparison.CurrentCulture) || path == ".."
             ? WalkUp(path, rule, route)
             : WalkSegments(rule, path, route);
+    }
+
+    private IInterceptorSubject? WalkAbsolute(string path, GraphRouteBuilder route)
+    {
+        var version = getStructureVersion();
+        if (version != _absoluteWalksVersion)
+        {
+            _absoluteWalks.Clear();
+            _absoluteWalksVersion = version;
+        }
+
+        if (!_absoluteWalks.TryGetValue(path, out var walk))
+        {
+            _absoluteRoute.Clear();
+            var subject = WalkFromRoot(path, _absoluteRoute);
+            walk = new AbsoluteWalk(subject, _absoluteRoute.Properties.ToArray(), _absoluteRoute.IsUnbounded);
+            if (version >= 0 && version % 2 == 0)
+            {
+                _absoluteWalks[path] = walk;
+            }
+        }
+
+        route.AddRange(walk.Route);
+        if (walk.IsUnbounded)
+        {
+            route.MarkUnbounded();
+        }
+
+        return walk.Subject;
+    }
+
+    private IInterceptorSubject? WalkFromRoot(string path, GraphRouteBuilder route)
+    {
+        var root = resolver.ResolveSubject("/", PathStyle.Canonical);
+        if (root is null)
+        {
+            route.MarkUnbounded();
+            return null;
+        }
+
+        return path.Length == 1 ? root : WalkSegments(root, path[1..], route);
     }
 
     /// <summary>Records the properties that the canonical path of the automation is built from.</summary>
@@ -269,4 +311,6 @@ internal sealed class GraphRouteWalker(SubjectPathResolver resolver, IIntercepto
         route.Add(children.Reference);
         return SubjectPathResolverExtensions.FindChildByIndex(children, segment);
     }
+
+    private readonly record struct AbsoluteWalk(IInterceptorSubject? Subject, PropertyReference[] Route, bool IsUnbounded);
 }

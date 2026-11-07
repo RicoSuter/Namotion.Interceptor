@@ -40,7 +40,7 @@ internal sealed class GraphRoutes
     public GraphRoutes(SubjectPathResolver resolver, IInterceptorSubject? automation, Func<long> getStructureVersion, AutomationChangeReceiver? changes)
     {
         Resolver = resolver;
-        _walker = new GraphRouteWalker(resolver, automation);
+        _walker = new GraphRouteWalker(resolver, automation, getStructureVersion);
         _getStructureVersion = getStructureVersion;
         _changes = changes;
     }

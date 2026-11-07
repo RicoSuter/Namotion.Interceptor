@@ -30,6 +30,19 @@ internal sealed class GraphRouteBuilder
         }
     }
 
+    public void AddRange(ReadOnlySpan<PropertyReference> properties)
+    {
+        foreach (var property in properties)
+        {
+            Add(property);
+        }
+    }
+
+    /// <summary>The properties recorded since the last clear, each once.</summary>
+    public ReadOnlySpan<PropertyReference> Properties => CollectionsMarshal.AsSpan(_properties);
+
+    public bool IsUnbounded => _isUnbounded;
+
     /// <summary>Adds the properties that hold the subject.</summary>
     public void AddHolders(ImmutableArray<SubjectPropertyParent> parents)
     {
