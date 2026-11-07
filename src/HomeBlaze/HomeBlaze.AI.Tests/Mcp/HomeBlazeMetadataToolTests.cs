@@ -9,6 +9,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Abstractions.Metadata;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -392,6 +393,50 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.Equal(["Docs"], browsedMetadata.GetProperty("order").EnumerateArray().Select(name => name.GetString()));
     }
 
+    [Fact]
+    public async Task WhenAPageExpressionShowsTheMetadataOfAFolder_ThenItsOrderLeavesOutAnAgentAndAHiddenBranch()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "order": ["Secret", "Agent", "Docs"] }""");
+        WriteFile("Probe.md", "Order: {{ /Storage/HomeBlaze:Metadata }}");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage/Probe.md", method = "ReadEvaluatedContent" });
+
+        // Assert
+        var unfiltered = ((MarkdownFile)storage.Children["Probe.md"]).ReadEvaluatedContent();
+        Assert.Contains("Secret", unfiltered);
+        var evaluated = result.GetProperty("result").GetString();
+        Assert.Contains("Docs", evaluated);
+        Assert.DoesNotContain("Secret", evaluated);
+        Assert.DoesNotContain("Agent", evaluated);
+    }
+
+    [Theory]
+    [InlineData("Secret", false)]
+    [InlineData("Agent", false)]
+    [InlineData("Docs", true)]
+    public async Task WhenSearchMetadataLooksForAChildInTheOrderOfAFolder_ThenOnlyAListedChildMatches(string name, bool matches)
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "order": ["Secret", "Agent", "Docs"] }""");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var result = await CallAsync(tools["invoke_query"], new { path = "/Storage", method = "SearchMetadata", parameters = new { key = "order", value = name } });
+
+        // Assert
+        Assert.Single(storage.SearchMetadata(null, "order", name, null));
+        Assert.Equal(matches ? ["|"] : [], GetMatches(result));
+    }
+
     [Theory]
     [InlineData("Secret")]
     [InlineData("Missing")]
@@ -674,7 +719,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
 
         // Act
         var result = AgentMetadataAccess.FilterSearchMetadataResult(
-            subject, method, new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() });
+            subject, method, [], new[] { "Docs/Hidden.json" }, new McpServerConfiguration { PathProvider = new StateAttributePathProvider() });
 
         // Assert
         Assert.Empty(Assert.IsType<MetadataSearchMatch[]>(result));

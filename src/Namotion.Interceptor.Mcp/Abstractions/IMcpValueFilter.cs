@@ -3,8 +3,8 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace Namotion.Interceptor.Mcp.Abstractions;
 
 /// <summary>
-/// Changes the value of a property or attribute that the tools return or compare, for example to leave out the parts of
-/// a value that name what the access policy hides.
+/// Changes the value of a property or attribute that the built-in tools return or compare, for example to leave out the
+/// parts of a value that name what the access policy hides, see <see cref="McpServerConfiguration.ValueFilters"/>.
 /// </summary>
 public interface IMcpValueFilter
 {

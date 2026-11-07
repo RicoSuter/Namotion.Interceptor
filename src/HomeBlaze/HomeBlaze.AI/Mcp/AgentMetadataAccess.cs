@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
@@ -25,12 +27,13 @@ internal static class AgentMetadataAccess
     private const int MaxSearchMetadataMatches = 100;
 
     /// <summary>
-    /// Gets the first 100 matches of SearchMetadata of a storage that the tools list and whose metadata member the access
-    /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and no match for a
-    /// result of SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
+    /// Gets the first 100 matches of SearchMetadata of a storage that the tools list, whose metadata member the access
+    /// policy of <paramref name="configuration"/> allows to read at its path, as get_property reads it, and whose metadata
+    /// still matches the input arguments as the value filters of the configuration show it, and no match for a result of
+    /// SearchMetadata of a storage that is no array of matches; any other result is returned unchanged.
     /// </summary>
     public static object? FilterSearchMetadataResult(
-        RegisteredSubject subject, MethodMetadata method, object? result, McpServerConfiguration configuration)
+        RegisteredSubject subject, MethodMetadata method, object?[] arguments, object? result, McpServerConfiguration configuration)
     {
         if (method.PropertyName != nameof(FluentStorageContainer.SearchMetadata) || subject.Subject is not IMetadataStore)
         {
@@ -42,8 +45,12 @@ internal static class AgentMetadataAccess
             return Array.Empty<MetadataSearchMatch>();
         }
 
+        // The input parameters in declaration order: tag, key, value and path.
+        var (tag, key, value) = arguments is [var tagArgument, var keyArgument, var valueArgument, ..]
+            ? (tagArgument as string, keyArgument as string, valueArgument as string)
+            : (null, null, null);
         return matches
-            .Where(match => IsReadable(subject, match, configuration))
+            .Where(match => IsReadable(subject, match, configuration) && MatchesShownMetadata(subject, match, configuration, tag, key, value))
             .Take(MaxSearchMetadataMatches)
             .ToArray();
     }
@@ -138,6 +145,25 @@ internal static class AgentMetadataAccess
 
         return configuration.AccessPolicy is null ||
             IsMetadataReadable(configuration, storage, target, match.Path, match.Property);
+    }
+
+    // A value filter can leave out the part of the metadata that matched, such as a hidden child in the order of a folder,
+    // so the match must hold for the metadata as the tools show it, or it confirms what they hide.
+    private static bool MatchesShownMetadata(
+        RegisteredSubject storage, MetadataSearchMatch match, McpServerConfiguration configuration, string? tag, string? key, string? value)
+    {
+        var target = FluentStorageContainer.ResolveMetadataPath(storage.Subject, match.Path)?.TryGetRegisteredSubject();
+        var member = match.Property is null
+            ? target?.TryGetProperty(KnownAttributes.Metadata)
+            : target?.TryGetProperty(match.Property)?.TryGetAttribute(KnownAttributes.Metadata);
+        if (member?.GetValue() is not ImmutableDictionary<string, JsonElement> metadata)
+        {
+            return false;
+        }
+
+        var shown = configuration.ApplyValueFilters(member, metadata);
+        return ReferenceEquals(shown, metadata) ||
+            (shown is ImmutableDictionary<string, JsonElement> shownMetadata && MetadataSearch.IsMatch(shownMetadata, tag, key, value));
     }
 
     /// <summary>

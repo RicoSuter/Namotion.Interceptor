@@ -66,6 +66,7 @@ namespace Namotion.Interceptor.Mcp
     }
     public static class McpServerConfigurationExtensions
     {
+        public static object? ApplyValueFilters(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, object? value) { }
         public static bool IsAllowed(this Namotion.Interceptor.Mcp.McpServerConfiguration configuration, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty member, string action) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Property",

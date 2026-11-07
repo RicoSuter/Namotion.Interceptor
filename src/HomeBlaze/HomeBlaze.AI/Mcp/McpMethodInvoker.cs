@@ -27,7 +27,7 @@ internal sealed class McpMethodInvoker
     private readonly ILogger _logger;
     private readonly bool _isReadOnly;
     private readonly Func<RegisteredSubject, MethodMetadata, object?[], string?>? _operationFilter;
-    private readonly Func<RegisteredSubject, MethodMetadata, object?, object?>? _resultFilter;
+    private readonly Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? _resultFilter;
     private readonly McpPageReadAccess? _pageReadAccess;
 
     /// <param name="rootSubjectProvider">Resolves the root subject when a tool runs.</param>
@@ -39,7 +39,8 @@ internal sealed class McpMethodInvoker
     /// <param name="logger">Logs failed calls.</param>
     /// <param name="isReadOnly">Whether operations are blocked.</param>
     /// <param name="operationFilter">Gets why a call of an operation with the given arguments is refused, or null when it is not.</param>
-    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method; null passes every result on.</param>
+    /// <param name="resultFilter">Gets the result that the caller is given in place of the result of a method called with
+    /// the given input arguments; null passes every result on.</param>
     public McpMethodInvoker(
         Func<IInterceptorSubject> rootSubjectProvider,
         McpServerConfiguration configuration,
@@ -47,7 +48,7 @@ internal sealed class McpMethodInvoker
         ILogger logger,
         bool isReadOnly,
         Func<RegisteredSubject, MethodMetadata, object?[], string?>? operationFilter,
-        Func<RegisteredSubject, MethodMetadata, object?, object?>? resultFilter = null)
+        Func<RegisteredSubject, MethodMetadata, object?[], object?, object?>? resultFilter = null)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _configuration = configuration;
@@ -94,13 +95,27 @@ internal sealed class McpMethodInvoker
         return subject;
     }
 
+    // Only a query evaluates pages for the caller. An operation changes state, and the change handlers, renders and
+    // background work it starts must not inherit the caller's check. Entered without one as well, so that a check of the
+    // flow the tool is called on never carries over.
+    private async Task<object?> InvokeWithReadAccessAsync(MethodMetadata method, object?[]? arguments, CancellationToken cancellationToken)
+    {
+        var isQuery = method.Kind == MethodKind.Query;
+        var readCheck = isQuery ? _pageReadAccess?.CreateCheck(_rootSubjectProvider()) : null;
+        using (PropertyReadAccess.Enter(readCheck, isQuery && _configuration.ValueFilters.Count > 0 ? _configuration.ApplyValueFilters : null))
+        {
+            return await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
+        }
+    }
+
     /// <summary>
     /// Invokes the method and returns <c>{ success, result }</c>, or <c>{ error }</c> when the call is refused, an argument
     /// does not fit or the method fails. A method the access policy does not allow to read is not found; one it does not
-    /// allow to execute is refused. A query runs with the policy's read check as <see cref="PropertyReadAccess"/>, so a
-    /// page expression over a property that does not resolve through the readable resolution of the tools, because it or
-    /// a property on its path is not readable or a subject on its path is hidden, renders empty. An operation runs without
-    /// a read check.
+    /// allow to execute is refused. A query runs with the policy's read check and the value filters of the configuration
+    /// as <see cref="PropertyReadAccess"/>, so a page expression over a property that does not resolve through the
+    /// readable resolution of the tools, because it or a property on its path is not readable or a subject on its path is
+    /// hidden, renders empty, and one over a readable property renders the value the tools return. An operation runs
+    /// without either.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled during the call.</exception>
     /// <param name="subject">The subject that has the method.</param>
@@ -133,18 +148,8 @@ internal sealed class McpMethodInvoker
 
         try
         {
-            object? result;
-
-            // Only a query evaluates pages for the caller. An operation changes state, and the change handlers, renders and
-            // background work it starts must not inherit the caller's check. Entered without one as well, so that a check
-            // of the flow the tool is called on never carries over.
-            var readCheck = method.Kind == MethodKind.Query ? _pageReadAccess?.CreateCheck(_rootSubjectProvider()) : null;
-            using (PropertyReadAccess.Enter(readCheck))
-            {
-                result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
-            }
-
-            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, result));
+            var result = await InvokeWithReadAccessAsync(method, arguments, cancellationToken);
+            result = MethodResultLimit.Apply(_resultFilter is null ? result : _resultFilter(subject, method, arguments ?? [], result));
             return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (ArgumentException exception)

@@ -69,6 +69,25 @@ public class ValueFilterTests
         Assert.Equal(30m, room.Temperature);
     }
 
+    [Fact]
+    public void WhenSeveralValueFiltersAreConfigured_ThenApplyValueFiltersRunsThemInOrder()
+    {
+        // Arrange
+        var room = CreateRoom();
+        var name = room.TryGetRegisteredSubject()!.TryGetProperty(nameof(TestRoom.Name))!;
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            ValueFilters = { new AppendingValueFilter("1"), new AppendingValueFilter("2") }
+        };
+
+        // Act
+        var value = configuration.ApplyValueFilters(name, name.GetValue());
+
+        // Assert
+        Assert.Equal("Kitchen12", value);
+    }
+
     private static TestRoom CreateRoom()
     {
         var context = InterceptorSubjectContext.Create()
@@ -91,6 +110,11 @@ public class ValueFilterTests
         IsReadOnly = false,
         ValueFilters = { new TestValueFilter() }
     };
+
+    private sealed class AppendingValueFilter(string suffix) : IMcpValueFilter
+    {
+        public object? Filter(RegisteredSubjectProperty member, object? value) => value + suffix;
+    }
 
     private sealed class TestValueFilter : IMcpValueFilter
     {

@@ -16,7 +16,8 @@ namespace HomeBlaze.Storage.Internal;
 /// <param name="pathResolver">The resolver of the paths and of the names of maps.</param>
 /// <param name="page">The page the paths resolve from.</param>
 /// <param name="timeZone">The time zone of the viewer for dates, or null for that of the server.</param>
-/// <param name="checksReadAccess">Whether a property that <see cref="PropertyReadAccess"/> refuses resolves to missing.
+/// <param name="checksReadAccess">Whether a property that <see cref="PropertyReadAccess"/> refuses resolves to missing, and
+/// a value is read with <see cref="PropertyReadAccess.GetValue"/>.
 /// False only for a value that is shared by every caller, which must not depend on the flow that computes it.</param>
 internal readonly struct MarkdownExpressionContext(
     SubjectPathResolver pathResolver,
@@ -37,9 +38,19 @@ internal readonly struct MarkdownExpressionContext(
             return ExpressionValue.Missing;
         }
 
-        return property is null || (checksReadAccess && !PropertyReadAccess.CanRead(property))
-            ? ExpressionValue.Missing
-            : ExpressionValue.FromProperty(property, property.GetValue());
+        if (property is null)
+        {
+            return ExpressionValue.Missing;
+        }
+
+        if (!checksReadAccess)
+        {
+            return ExpressionValue.FromProperty(property, property.GetValue());
+        }
+
+        return PropertyReadAccess.CanRead(property)
+            ? ExpressionValue.FromProperty(property, PropertyReadAccess.GetValue(property))
+            : ExpressionValue.Missing;
     }
 
     // The text of a page binds no variable, and MarkdownExpressions refuses one before an expression is evaluated.
