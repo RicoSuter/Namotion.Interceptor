@@ -1,6 +1,8 @@
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Blazor.Editing;
 using HomeBlaze.Automation.Blazor.Tests.Testing;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Automation.Blazor.Tests.Editing;
 
@@ -29,6 +31,40 @@ public class AutomationDraftTests
             ["started"] = Rule("Started", "Idle", Enter("Running"))
         };
     });
+
+    [Fact]
+    public void WhenARuleFileHoldsExplicitNulls_ThenTheDraftOpensValidatesAndSavesWithoutThem()
+    {
+        // Arrange
+        const string json = """
+            {
+              "$type": "HomeBlaze.Automation.AutomationRule", "name": null, "mode": "On", "inState": null, "guard": null,
+              "triggers": [ null, { "$type": "PropertyTrigger", "expression": null, "rearm": null },
+                            { "$type": "SubjectEventTrigger", "subjectPath": null, "eventType": null, "filter": null } ],
+              "actions": [ null, { "$type": "InvokeOperation", "id": null, "operationPath": null, "arguments": null },
+                           { "$type": "SetProperty", "id": null, "propertyPath": null, "value": null },
+                           { "$type": "ChangeState", "id": null, "targetState": null } ]
+            }
+            """;
+        var serializer = new ConfigurableSubjectSerializer(
+            new TypeProvider().AddAssembly(typeof(AutomationRule).Assembly), new ServiceCollection().BuildServiceProvider());
+        var rule = Assert.IsType<AutomationRule>(serializer.Deserialize(json));
+        var automation = TestAutomations.Create(created => created.Rules = new Dictionary<string, AutomationRule> { ["k1"] = rule });
+
+        // Act
+        var draft = AutomationDraft.From(automation);
+        var errors = draft.Validate();
+        var expressions = new RuleExpressions(automation, "k1", draft.Rules[0].AllowsEvent);
+        var inputErrors = draft.Rules[0].Actions.SelectMany(action => ActionInputs.Check(action.Value, automation, "k1", expressions)).ToList();
+        draft.ApplyTo(automation);
+
+        // Assert
+        Assert.NotEmpty(errors);
+        Assert.Empty(inputErrors);
+        var saved = automation.Rules["k1"];
+        Assert.All(saved.Actions, action => Assert.Equal(string.Empty, action.Id));
+        Assert.Empty(Assert.IsType<InvokeOperationAction>(saved.Actions[0]).Arguments);
+    }
 
     [Fact]
     public void WhenTheDraftIsRead_ThenItHasTheConfigurationWithTheRulesInRunOrder()

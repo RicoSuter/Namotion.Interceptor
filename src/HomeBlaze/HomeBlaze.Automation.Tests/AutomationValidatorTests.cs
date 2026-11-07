@@ -35,6 +35,22 @@ public class AutomationValidatorTests
     }
 
     [Fact]
+    public void WhenActionsHaveNoIdOrArguments_ThenTheErrorsSayWhatIsMissing()
+    {
+        // Arrange
+        var rules = new Dictionary<string, AutomationRule>
+        {
+            ["a"] = Rule(actions: [new InvokeOperationAction { Id = null!, OperationPath = "/Blinds/Close", Arguments = null! }, new SetPropertyAction { Id = null! }])
+        };
+
+        // Act
+        var errors = AutomationValidator.Validate([], null, rules, []);
+
+        // Assert
+        Assert.Contains(errors, error => error.RuleKey == "a" && error.Message.Contains("the arguments are missing", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void WhenARuleIsInvalid_ThenItsErrorsCarryItsKeyWithoutItsName()
     {
         // Arrange

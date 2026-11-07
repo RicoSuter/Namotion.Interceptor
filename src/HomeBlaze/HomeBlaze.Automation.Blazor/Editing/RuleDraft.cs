@@ -50,8 +50,8 @@ public sealed class RuleDraft
     public static RuleDraft From(string key, AutomationRule rule)
     {
         var draft = new RuleDraft(key) { Name = rule.Name, Mode = rule.Mode, InState = rule.InState, Guard = rule.Guard };
-        draft.Triggers.AddRange(rule.Triggers.OfType<AutomationTrigger>().Select(trigger => new DraftItem<AutomationTrigger>(trigger)));
-        draft.Actions.AddRange(rule.Actions.OfType<AutomationAction>().Select(action => new DraftItem<AutomationAction>(CopyArguments(action))));
+        draft.Triggers.AddRange((rule.Triggers ?? []).OfType<AutomationTrigger>().Select(trigger => new DraftItem<AutomationTrigger>(WithoutNulls(trigger))));
+        draft.Actions.AddRange((rule.Actions ?? []).OfType<AutomationAction>().Select(action => new DraftItem<AutomationAction>(WithoutNulls(action))));
         return draft;
     }
 
@@ -88,10 +88,32 @@ public sealed class RuleDraft
         Actions = [.. Actions.Select(action => action.IsOperationChanged ? Prune(action.Value, getMethod) : action.Value)]
     };
 
-    // The deserialized arguments are a mutable dictionary that the live action shares, so the draft holds its own copy.
-    private static AutomationAction CopyArguments(AutomationAction action) => action is InvokeOperationAction invoke
-        ? invoke with { Arguments = new Dictionary<string, string>(invoke.Arguments) }
-        : action;
+    // A configuration file may hold explicit nulls, which the runtime reports as errors and the editor shows as empty
+    // inputs. The deserialized arguments are a mutable dictionary that the live action shares, so the draft holds its own copy.
+    private static AutomationAction WithoutNulls(AutomationAction action) => (action with { Id = action.Id ?? string.Empty }) switch
+    {
+        InvokeOperationAction invoke => WithoutNulls(invoke),
+        SetPropertyAction set => set with { PropertyPath = set.PropertyPath ?? string.Empty, Value = set.Value ?? string.Empty },
+        ChangeStateAction change => change with { TargetState = change.TargetState ?? string.Empty },
+        var other => other
+    };
+
+    private static InvokeOperationAction WithoutNulls(InvokeOperationAction invoke) => invoke with
+    {
+        OperationPath = invoke.OperationPath ?? string.Empty,
+        Arguments = invoke.Arguments is null ? new Dictionary<string, string>() : new Dictionary<string, string>(invoke.Arguments)
+    };
+
+    private static AutomationTrigger WithoutNulls(AutomationTrigger trigger) => trigger switch
+    {
+        PropertyTrigger property => property with { Expression = property.Expression ?? string.Empty },
+        SubjectEventTrigger subjectEvent => subjectEvent with
+        {
+            SubjectPath = subjectEvent.SubjectPath ?? string.Empty,
+            EventType = subjectEvent.EventType ?? string.Empty
+        },
+        _ => trigger
+    };
 
     private static AutomationAction Prune(AutomationAction action, Func<string, MethodMetadata?>? getMethod) =>
         action is InvokeOperationAction invoke && getMethod is not null

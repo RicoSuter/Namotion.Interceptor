@@ -64,7 +64,7 @@ public static class AutomationValidator
     private static IEnumerable<string> CheckActionIds(IEnumerable<AutomationAction?> actions) =>
         actions
             .OfType<AutomationAction>()
-            .Where(action => action.Id.Length > 0)
+            .Where(action => !string.IsNullOrEmpty(action.Id))
             .GroupBy(action => action.Id, StringComparer.Ordinal)
             .Where(group => group.Count() > 1)
             .Select(group => $"The action id '{group.Key}' is used {group.Count()} times");
