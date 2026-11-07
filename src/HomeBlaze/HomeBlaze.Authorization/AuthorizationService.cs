@@ -118,8 +118,9 @@ public sealed class AuthorizationService : IDisposable
 
     /// <summary>
     /// Gets the custom roles that exist but cannot be used, by name ignoring case, with the reason: a name used by more
-    /// than one role or reserved for the system rules, or any custom role while several <see cref="Authorization"/>
-    /// subjects exist. A custom role named like a built-in role is not listed, as the name means the built-in role.
+    /// than one role, reserved for the system rules, or with leading or trailing whitespace or an invisible character such
+    /// as a zero-width space, or any custom role while several <see cref="Authorization"/> subjects exist. A custom role
+    /// named like a built-in role is not listed, as the name means the built-in role.
     /// </summary>
     public IReadOnlyDictionary<string, string> GetUnavailableRoles() => GetSnapshot().UnavailableRoles;
 

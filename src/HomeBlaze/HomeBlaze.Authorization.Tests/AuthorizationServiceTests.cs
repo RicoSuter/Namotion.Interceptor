@@ -213,6 +213,32 @@ public sealed class AuthorizationServiceTests : IDisposable
         Assert.Null(goodResult.Error);
     }
 
+    [Theory]
+    [InlineData("kitchen ")]
+    [InlineData(" kitchen")]
+    [InlineData("kit\u200Bchen")]
+    [InlineData("kit\u0007chen")]
+    [InlineData("kit\U000E0041chen")]
+    public async Task WhenACustomRoleNameHasOuterWhitespaceOrAnInvisibleCharacter_ThenOnlyThatRoleIsUnavailable(string name)
+    {
+        // Arrange
+        var badlyNamed = new Role { Allow = [ReadPlain()] };
+        AddAuthorization((name, badlyNamed), ("good", new Role { Allow = [ReadPlain()] }));
+
+        // Act
+        var badlyNamedResult = _service.GetPolicy([name]);
+        var goodResult = _service.GetPolicy(["good"]);
+        var readerResult = _service.GetPolicy([BuiltInRoles.ReaderName]);
+
+        // Assert
+        Assert.Same(AuthorizationPolicy.DenyAll, badlyNamedResult.Policy);
+        Assert.Null(goodResult.Error);
+        Assert.True(goodResult.Policy.CanRead(Member(nameof(TagTestSubject.Plain))));
+        Assert.Null(readerResult.Error);
+        Assert.Contains(name, _service.GetUnavailableRoles().Keys);
+        await StatusAssert.NotNullAsync(() => badlyNamed.Status);
+    }
+
     [Fact]
     public async Task WhenTwoRolesHaveTheSameNameIgnoringCase_ThenNeitherIsUsedAndBothHaveAStatus()
     {
