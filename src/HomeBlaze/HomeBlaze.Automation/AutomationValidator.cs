@@ -19,7 +19,7 @@ public static class AutomationValidator
     /// <summary>
     /// Gets the errors of a configuration of the automation, those of the automation first and then those of each rule in
     /// run order. Relative paths start at the saved rules of the automation, so the relative targets of a rule that is not
-    /// saved yet are checked when it runs.
+    /// saved yet are checked when the saved configuration is applied and when the action runs.
     /// </summary>
     /// <param name="automation">The automation whose path resolver and authorizer check the targets.</param>
     /// <param name="roles">The roles of the configuration, which may differ from the saved <see cref="Automation.Roles"/>.</param>

@@ -40,7 +40,8 @@ public sealed class AutomationDraft
 
     /// <summary>
     /// Writes the configuration to the automation, the rules last and the roles before them, so that the automation reads a
-    /// complete configuration when it applies it and never runs new rules with old roles. New rule instances take the run properties of the instances they replace.
+    /// complete configuration when it applies it and never runs new rules with old roles. New rule instances take the run
+    /// properties of the instances they replace.
     /// </summary>
     public void ApplyTo(Automation automation)
     {
