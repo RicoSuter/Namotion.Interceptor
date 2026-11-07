@@ -273,7 +273,7 @@ public class AutomationStateTests
         Assert.Equal(AutomationRunOutcome.CompletedWithErrors, host.Rule("started").LastRunOutcome);
         Assert.Contains("The state Running was not entered because it could not be saved", host.Rule("started").LastRunMessage);
         Assert.Equal(ServiceStatus.Error, host.Automation.Status);
-        Assert.StartsWith("Rule 'Started': the run was not saved", host.Automation.StatusMessage);
+        Assert.StartsWith("Rule 'Started': action 'enter Running' failed: The state Running was not entered because it could not be saved", host.Automation.StatusMessage);
     }
 
     [Fact]

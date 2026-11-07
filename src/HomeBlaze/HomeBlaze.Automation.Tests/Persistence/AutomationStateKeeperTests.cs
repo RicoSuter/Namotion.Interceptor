@@ -21,11 +21,11 @@ public sealed class AutomationStateKeeperTests : IDisposable
         Directory.CreateDirectory(path);
 
         // Act
-        var error = keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Persisted, "Running", Now));
+        var error = keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Current, "Running", Now));
 
         // Assert
         Assert.NotNull(error);
-        Assert.Equal("Idle", keeper.Persisted.CurrentState);
+        Assert.Equal("Idle", keeper.Current.CurrentState);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class AutomationStateKeeperTests : IDisposable
         Assert.Null(error);
         Assert.NotNull(checkpoint);
         Assert.Equal("Idle", checkpoint.CurrentState);
-        Assert.Empty(keeper.Persisted.Rules);
+        Assert.Empty(keeper.Current.Rules);
         Assert.Equal(0L, rule.RunCount);
     }
 

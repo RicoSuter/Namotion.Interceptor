@@ -34,7 +34,7 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         }
 
         var now = timeProvider.GetUtcNow();
-        if (keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Persisted, targetState, now)) is { } error)
+        if (keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Current, targetState, now)) is { } error)
         {
             return $"The state {targetState} was not entered because it could not be saved: {error}";
         }
@@ -69,7 +69,7 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         }
 
         var now = timeProvider.GetUtcNow();
-        if (keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Persisted, snapshot.InitialState, now)) is { } error)
+        if (keeper.TryPersist(AutomationStateKeeper.WithState(keeper.Current, snapshot.InitialState, now)) is { } error)
         {
             return $"The initial state was not entered because it could not be saved: {error}";
         }
@@ -89,7 +89,7 @@ internal sealed class StateTransitions(Automation automation, AutomationStateKee
         var previous = automation.CurrentState;
         var initialState = snapshot.States.Count > 0 ? snapshot.InitialState : null;
         var now = timeProvider.GetUtcNow();
-        var next = AutomationStateKeeper.WithoutTriggerTimes(AutomationStateKeeper.WithState(keeper.Persisted, initialState, now));
+        var next = AutomationStateKeeper.WithoutTriggerTimes(AutomationStateKeeper.WithState(keeper.Current, initialState, now));
         if (keeper.TryPersist(next) is { } error)
         {
             return $"The reset was not saved, so nothing changed: {error}";

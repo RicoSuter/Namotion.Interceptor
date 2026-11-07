@@ -3,27 +3,69 @@ using System.Text.Json;
 namespace HomeBlaze.Automation.Persistence;
 
 /// <summary>
-/// The checkpoint an automation has written, kept in memory, and the only way to change it: a new checkpoint is written
-/// first and becomes <see cref="Persisted"/> only when the write succeeded, so the caller publishes nothing that is not
-/// saved. Used by the worker only.
+/// The checkpoint of an automation, kept in memory, and the only way to change it. A change of the state is written
+/// first and becomes <see cref="Current"/> only when the write succeeded, so the caller publishes no state that is not
+/// saved. The run properties of a rule are applied in memory at once and written at most every
+/// <see cref="RunWriteDelay"/>, with the next write of the state or when the automation stops, whichever comes first,
+/// so that frequent runs do not write the file on every run. A crash therefore loses at most the runs, run counts and
+/// trigger times of the last <see cref="RunWriteDelay"/>. Used by the worker only.
 /// </summary>
 internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
 {
+    /// <summary>How long run properties stay in memory at most before they are written.</summary>
+    public static readonly TimeSpan RunWriteDelay = TimeSpan.FromSeconds(5);
+
     private string? _overwriteRefusal;
+    private DateTimeOffset? _runsDueAt;
 
     public AutomationCheckpointStore Store { get; private set; } = store;
 
-    public AutomationCheckpoint Persisted { get; private set; } = new();
+    /// <summary>The checkpoint as the automation has it: the one written last with the runs that are not written yet.</summary>
+    public AutomationCheckpoint Current { get; private set; } = new();
+
+    /// <summary>Whether runs were recorded that are not written yet.</summary>
+    public bool HasUnwrittenRuns => _runsDueAt is not null;
 
     /// <summary>Keeps the checkpoint in the store from now on, starting from an empty one, as for a new automation.</summary>
     public void UseStore(AutomationCheckpointStore newStore)
     {
         Store = newStore;
-        Persisted = new AutomationCheckpoint();
+        Current = new AutomationCheckpoint();
+        _runsDueAt = null;
+    }
+
+    /// <summary>Applies the run properties of the rule in memory and writes them within <see cref="RunWriteDelay"/>.</summary>
+    public void RecordRun(string key, RuleCheckpoint run, DateTimeOffset now)
+    {
+        Current = WithRule(Current, key, run);
+        _runsDueAt ??= now + RunWriteDelay;
     }
 
     /// <summary>
-    /// Reads the checkpoint into <see cref="Persisted"/>; null without one, and with the error when it cannot be read. A
+    /// Writes the runs that are not written yet when they are due; returns the error of the write, which is tried again
+    /// after <see cref="RunWriteDelay"/>, or null.
+    /// </summary>
+    public string? WriteRunsIfDue(DateTimeOffset now)
+    {
+        if (_runsDueAt is not { } dueAt || now < dueAt)
+        {
+            return null;
+        }
+
+        var error = TryPersist(Current);
+        if (error is not null)
+        {
+            _runsDueAt = now + RunWriteDelay;
+        }
+
+        return error;
+    }
+
+    /// <summary>Writes the runs that are not written yet at once; returns the error of the write, or null.</summary>
+    public string? WriteRuns() => HasUnwrittenRuns ? TryPersist(Current) : null;
+
+    /// <summary>
+    /// Reads the checkpoint into <see cref="Current"/>; null without one, and with the error when it cannot be read. A
     /// file that cannot be read is moved aside, so that the next write does not replace it; when that fails too, nothing
     /// is written until <see cref="AllowOverwrite"/>.
     /// </summary>
@@ -35,7 +77,8 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
             var checkpoint = Store.Read() is { } read ? WithoutNullRules(read) : null;
             if (checkpoint is not null)
             {
-                Persisted = checkpoint;
+                Current = checkpoint;
+                _runsDueAt = null;
             }
 
             error = null;
@@ -51,7 +94,10 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
     /// <summary>Writes again after an unreadable checkpoint could not be moved aside, which then is replaced.</summary>
     public void AllowOverwrite() => _overwriteRefusal = null;
 
-    /// <summary>Writes the checkpoint and keeps it; returns the error and keeps the previous checkpoint when the write fails.</summary>
+    /// <summary>
+    /// Writes the checkpoint, which is <see cref="Current"/> with a change, and keeps it; returns the error and keeps the
+    /// previous checkpoint when the write fails. The runs not written yet are written with it.
+    /// </summary>
     public string? TryPersist(AutomationCheckpoint next)
     {
         if (_overwriteRefusal is { } refusal)
@@ -62,7 +108,8 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
         try
         {
             Store.Write(next);
-            Persisted = next;
+            Current = next;
+            _runsDueAt = null;
             return null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -100,7 +147,7 @@ internal sealed class AutomationStateKeeper(AutomationCheckpointStore store)
 
     private void Restore(string key, AutomationRule rule)
     {
-        var run = Persisted.Rules.GetValueOrDefault(key);
+        var run = Current.Rules.GetValueOrDefault(key);
         rule.LastTriggeredAt = run?.LastTriggeredAt;
         rule.LastRunOutcome = run?.LastRunOutcome;
         rule.LastRunMessage = run?.LastRunMessage;

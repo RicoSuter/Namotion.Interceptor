@@ -14,10 +14,10 @@ internal sealed class DispatchSummary
 
     public string? LastError { get; private set; }
 
-    public void Add(RuleRunResult result, string? saveError)
+    public void Add(RuleRunResult result)
     {
         ChangedState |= result.ChangedState;
         ExecutedActions |= result.ExecutedActions;
-        LastError = saveError ?? result.Error ?? LastError;
+        LastError = result.Error ?? LastError;
     }
 }

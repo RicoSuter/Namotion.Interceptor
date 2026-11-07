@@ -12,7 +12,7 @@ namespace HomeBlaze.Automation.Runtime;
 internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices services, AutomationStateKeeper keeper, ILogger logger)
 {
     private readonly RuleRunner _runner = RuleRunner.Create(services, logger);
-    private readonly RunRecorder _recorder = new(keeper);
+    private readonly RunRecorder _recorder = new(keeper, services.TimeProvider);
 
     public async Task<DispatchSummary> DispatchAsync(
         IReadOnlyList<RunRequest> requests, Func<CompiledRule, bool> isActive, CancellationToken cancellationToken)
@@ -59,7 +59,8 @@ internal sealed class RunDispatcher(IRuleRunHost host, AutomationServices servic
 
         request.Rule.SkipReason = null;
         request.Trigger?.State.Consume();
-        summary.Add(result, _recorder.Record(request.Rule, result));
+        _recorder.Record(request.Rule, result);
+        summary.Add(result);
     }
 
     private void Skip(RunRequest request, string reason)

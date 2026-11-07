@@ -78,7 +78,7 @@ internal sealed class AutomationEngine : IRuleRunHost
         _hasCheckpointError = false;
 
         // Written at once, so that an older file at the new path is not read at the next start.
-        if (_keeper.TryPersist(_keeper.Persisted) is { } error)
+        if (_keeper.TryPersist(_keeper.Current) is { } error)
         {
             _status.Fail($"The checkpoint at the new path could not be written: {error}");
         }
@@ -126,8 +126,15 @@ internal sealed class AutomationEngine : IRuleRunHost
     public Task OnPropertyChangedAsync(PropertyChangedInput input, CancellationToken cancellationToken) =>
         DispatchAsync(_triggers.OnPropertyChanged(_snapshot.Rules, input), cancellationToken);
 
-    public Task OnTickAsync(CancellationToken cancellationToken) =>
-        DispatchAsync(_triggers.OnTick(_snapshot.Rules), cancellationToken);
+    public Task OnTickAsync(CancellationToken cancellationToken)
+    {
+        if (_keeper.WriteRunsIfDue(_automation.Services.TimeProvider.GetUtcNow()) is { } error)
+        {
+            _status.Fail($"The runs could not be saved and are saved again in {AutomationStateKeeper.RunWriteDelay.TotalSeconds:0} seconds: {error}");
+        }
+
+        return DispatchAsync(_triggers.OnTick(_snapshot.Rules), cancellationToken);
+    }
 
     public Task OnEventAsync(EventInput input, CancellationToken cancellationToken) =>
         DispatchAsync(_triggers.OnEvent(input), cancellationToken);
@@ -224,10 +231,15 @@ internal sealed class AutomationEngine : IRuleRunHost
         }
     }
 
-    /// <summary>Deactivates every rule and shows it as inactive, once the worker ends.</summary>
+    /// <summary>Deactivates every rule, writes the runs not written yet and shows every rule as inactive, once the worker ends.</summary>
     public void End()
     {
         Stop();
+        if (_keeper.WriteRuns() is { } error)
+        {
+            _logger.LogWarning("The automation {Automation} could not save its last runs when it stopped: {Error}", Name, error);
+        }
+
         RuleStatusPublisher.PublishStopped(_automation.Rules, _automation.Services.TimeProvider.LocalTimeZone);
     }
 
@@ -363,12 +375,12 @@ internal sealed class AutomationEngine : IRuleRunHost
 
     private void PruneCheckpoint()
     {
-        if (_keeper.Persisted.Rules.Keys.All(key => _snapshot.FindRule(key) is not null))
+        if (_keeper.Current.Rules.Keys.All(key => _snapshot.FindRule(key) is not null))
         {
             return;
         }
 
-        var pruned = AutomationStateKeeper.WithRulesOf(_keeper.Persisted, _snapshot.Rules.Select(rule => rule.Key));
+        var pruned = AutomationStateKeeper.WithRulesOf(_keeper.Current, _snapshot.Rules.Select(rule => rule.Key));
         if (_keeper.TryPersist(pruned) is { } error)
         {
             _logger.LogWarning("The automation {Automation} could not remove deleted rules from its checkpoint: {Error}", Name, error);
