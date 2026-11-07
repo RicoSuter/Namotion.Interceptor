@@ -137,7 +137,7 @@ public class RunHistoryTests
     [InlineData(1, 2, true)]
     [InlineData(2, 2, false)]
     [InlineData(3, 2, false)]
-    [InlineData(null, 2, true)]
+    [InlineData(null, 2, false)]
     [InlineData(null, 0, false)]
     [InlineData(null, null, false)]
     [InlineData(1, null, false)]
@@ -155,6 +155,19 @@ public class RunHistoryTests
 
         // Assert
         Assert.Equal(expectedIsBehind, result.IsBehind);
+    }
+
+    [Fact]
+    public async Task WhenNoCountIsStoredForARuleThatRan_ThenTheHistoryIsNotBehind()
+    {
+        // Arrange
+        var store = CreateStore();
+
+        // Act
+        var result = await RunHistory.LoadAsync([store], [new RunSource("Finished", Finished, 3)], Start, Start.AddMinutes(10), 10, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsBehind);
     }
 
     [Fact]

@@ -17,8 +17,9 @@ internal static class RunHistory
     /// <summary>
     /// Gets the runs between the instants, newest first, at most the given number over all rules, and whether the history
     /// lags behind the rules: a rule whose current run count is above the newest count stored. History stores buffer their
-    /// writes, so a run that has just happened is not stored yet. Reads the newest counts of each rule and the outcome and
-    /// message only of the runs it returns.
+    /// writes, so a run that has just happened is not stored yet. A rule without a stored count does not lag, because a store
+    /// that never stored its count, or that dropped it, would not catch up. Reads the newest counts of each rule and the
+    /// outcome and message only of the runs it returns.
     /// </summary>
     public static async Task<RunHistoryResult> LoadAsync(
         IReadOnlyCollection<IHistoryStore> stores,
@@ -39,7 +40,7 @@ internal static class RunHistory
         {
             var (times, storedCount) = await LoadRunTimesAsync(stores, rule, from, to, maxRuns, cancellationToken);
             runTimes.AddRange(times.Select(at => (at, rule)));
-            isBehind |= rule.RunCount is > 0 && rule.RunCount > (storedCount ?? 0);
+            isBehind |= storedCount is { } stored && rule.RunCount > stored;
         }
 
         var runs = new List<RunEntry>();

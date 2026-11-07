@@ -2,9 +2,7 @@
 @implements ISubjectComponent
 @implements IDisposable
 @using global::HomeBlaze.Components.Dialogs
-@using global::HomeBlaze.History.Abstractions
 @using global::HomeBlaze.Services.Components
-@using Namotion.Interceptor.Registry.Abstractions
 @inject ITimeZoneDisplay TimeZone
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -16,7 +14,7 @@
 {
     var path = PathResolver.GetPath(automation, PathStyle.Canonical);
     @* Read in the render of the page itself, not in the content of a child component, so that a run renders the page and its runs are read again. *@
-    _renderedRunsKey = GetRunsKey(automation);
+    _renderedRunsKey = RecentRuns.GetKey(automation);
     <div class="d-flex flex-column gap-4 pt-2 pt-sm-4 pb-4" data-testid="automation-page">
         @* The right padding keeps the buttons clear of the page's edit mode menu, which floats over the top right corner. *@
         <MudStack Row="true" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center" Spacing="2" Class="pr-12">
@@ -98,20 +96,20 @@
         <section>
             <MudText Typo="Typo.h6">Recent runs</MudText>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                @(_hasHistory ? "From history: the runs of the last seven days." : "Without a history store: the last run of each rule.")
+                @_recentRuns.Caption
             </MudText>
-            @if (_runsError is not null)
+            @if (_recentRuns.Error is { } runsError)
             {
-                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@_runsError</MudAlert>
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@runsError</MudAlert>
             }
-            else if (_runs.Count == 0)
+            else if (_recentRuns.Runs.Count == 0)
             {
                 <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2" data-testid="automation-no-runs">No runs yet.</MudText>
             }
             else
             {
                 <MudStack Spacing="1" Class="mt-2">
-                    @foreach (var run in _runs)
+                    @foreach (var run in _recentRuns.Runs)
                     {
                         <div class="d-flex flex-wrap align-center gap-2" data-testid="automation-run">
                             <MudText Typo="Typo.caption" Style="min-width: 160px;">@FormatInstant(run.At, "Last run")</MudText>
@@ -130,18 +128,15 @@
 }
 
 @code {
-    private const int MaxRuns = 20;
-    private static readonly TimeSpan RunWindow = TimeSpan.FromDays(7);
     private static readonly TimeSpan ReloadInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RetryWindow = TimeSpan.FromSeconds(30);
 
     private readonly StateDiagramLayoutCache _layouts = new();
-    private readonly RunReloadSchedule _reloads = new(ReloadInterval);
+    private readonly RunReloadSchedule _reloads = new(ReloadInterval, RetryWindow);
     private readonly CancellationTokenSource _disposal = new();
     private StateDiagramLayout? _layout;
     private (string[]? States, string? InitialState, Dictionary<string, AutomationRule>? Rules, string[]? RuleOrder) _layoutConfiguration;
-    private IReadOnlyList<RunEntry> _runs = [];
-    private bool _hasHistory;
-    private string? _runsError;
+    private RecentRunsResult _recentRuns = new(false, [], null, false);
     private int? _renderedRunsKey;
     private int? _loadedRunsKey;
     private int _loadVersion;
@@ -149,21 +144,17 @@
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     // The page reads the run counts in its render, so a run or a saved configuration renders it again. The runs are read
-    // at most once per interval, and once more after it while the history lags behind the counts.
+    // at most once per interval, and once more after it while the history lags behind the counts, for a limited time after
+    // the last change of the counts.
     protected override void OnAfterRender(bool firstRender)
     {
         if (Subject is Automation && _renderedRunsKey != _loadedRunsKey)
         {
             _loadedRunsKey = _renderedRunsKey;
-            RequestLoad();
-        }
-    }
-
-    private void RequestLoad()
-    {
-        if (_reloads.Request(TimeProvider.GetUtcNow()) is { } delay)
-        {
-            _ = LoadAfterAsync(delay);
+            if (_reloads.Request(TimeProvider.GetUtcNow()) is { } delay)
+            {
+                _ = LoadAfterAsync(delay);
+            }
         }
     }
 
@@ -183,16 +174,18 @@
                 return;
             }
 
+            // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs.
             var version = ++_loadVersion;
-            var isBehind = await LoadRunsAsync(automation, version, cancellationToken);
-            if (!IsStale(version, cancellationToken))
+            var recentRuns = await RecentRuns.LoadAsync(automation, PathResolver, TimeProvider.GetUtcNow(), cancellationToken);
+            if (version == _loadVersion && !cancellationToken.IsCancellationRequested)
             {
+                _recentRuns = recentRuns;
                 StateHasChanged();
             }
 
-            if (isBehind && !cancellationToken.IsCancellationRequested)
+            if (recentRuns.IsBehind && !cancellationToken.IsCancellationRequested && _reloads.Retry(TimeProvider.GetUtcNow()) is { } retryDelay)
             {
-                RequestLoad();
+                _ = LoadAfterAsync(retryDelay);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -200,56 +193,6 @@
             // The page was closed.
         }
     }
-
-    private bool IsStale(int version, CancellationToken cancellationToken) =>
-        version != _loadVersion || cancellationToken.IsCancellationRequested;
-
-    // A load that a newer one superseded leaves the runs alone, so a slow older query cannot replace newer runs. Returns
-    // whether the history lags behind the live run counts.
-    private async Task<bool> LoadRunsAsync(Automation automation, int version, CancellationToken cancellationToken)
-    {
-        IHistoryStore[] stores = ((IInterceptorSubject)automation).Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.OfType<IHistoryStore>().ToArray() ?? [];
-        if (stores.Length == 0)
-        {
-            _hasHistory = false;
-            _runsError = null;
-            _runs = GetLastRuns(automation);
-            return false;
-        }
-
-        try
-        {
-            var now = TimeProvider.GetUtcNow();
-            var result = await RunHistory.LoadAsync(stores, GetRunSources(automation), now - RunWindow, now, MaxRuns, cancellationToken);
-            if (!IsStale(version, cancellationToken))
-            {
-                _hasHistory = true;
-                _runs = result.Runs;
-                _runsError = null;
-            }
-
-            return result.IsBehind;
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // A load that a newer one superseded or that the closed page canceled shows nothing.
-            if (!IsStale(version, cancellationToken))
-            {
-                _hasHistory = true;
-                _runsError = $"The runs could not be read from history: {exception.Message}";
-            }
-
-            return false;
-        }
-    }
-
-    private IReadOnlyList<RunSource> GetRunSources(Automation automation) =>
-    [
-        .. automation.GetRulesInOrder()
-            .Select(pair => (pair.Key, pair.Value, Path: PathResolver.GetPath(pair.Value, PathStyle.Canonical)))
-            .Where(rule => rule.Path is not null)
-            .Select(rule => new RunSource(rule.Value.Name ?? rule.Key, rule.Path!, rule.Value.RunCount))
-    ];
 
     private async Task TestAsync(string key, AutomationRule rule)
     {
@@ -330,23 +273,6 @@
 
         return automation.States.Length > 0 ? "Any state" : null;
     }
-
-    // A hash instead of a text, because the page renders on every change of a status.
-    private static int GetRunsKey(Automation automation)
-    {
-        var hash = new HashCode();
-        foreach (var (key, rule) in automation.Rules)
-        {
-            hash.Add(key);
-            hash.Add(rule.Name);
-            hash.Add(rule.RunCount);
-        }
-
-        return hash.ToHashCode();
-    }
-
-    private static IReadOnlyList<RunEntry> GetLastRuns(Automation automation) =>
-        RunHistory.GetLastRuns(automation.GetRulesInOrder().Select(pair => (pair.Value.Name ?? pair.Key, pair.Value.LastRunOutcome, pair.Value.LastRunMessage)));
 
     public void Dispose()
     {

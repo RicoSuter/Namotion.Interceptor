@@ -10,7 +10,7 @@ public class RunReloadScheduleTests
     public void WhenNothingWasReadYet_ThenTheFirstRequestReadsAtOnce()
     {
         // Arrange
-        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5));
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
 
         // Act
         var delay = schedule.Request(Start);
@@ -23,7 +23,7 @@ public class RunReloadScheduleTests
     public void WhenARequestFollowsAReadWithinTheInterval_ThenItWaitsForTheRestOfTheInterval()
     {
         // Arrange
-        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5));
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
         schedule.Request(Start);
         schedule.Start(Start);
 
@@ -38,7 +38,7 @@ public class RunReloadScheduleTests
     public void WhenARequestComesWhileAReadIsDue_ThenItJoinsThatRead()
     {
         // Arrange
-        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5));
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
         schedule.Request(Start);
         schedule.Start(Start);
         schedule.Request(Start.AddSeconds(1));
@@ -56,7 +56,7 @@ public class RunReloadScheduleTests
     public void WhenTheIntervalPassedSinceTheLastRead_ThenTheNextRequestReadsAtOnce()
     {
         // Arrange
-        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5));
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
         schedule.Request(Start);
         schedule.Start(Start);
 
@@ -65,5 +65,66 @@ public class RunReloadScheduleTests
 
         // Assert
         Assert.Equal(TimeSpan.Zero, delay);
+    }
+
+    [Fact]
+    public void WhenTheHistoryIsBehindWithinTheRetryWindowAfterTheLastChange_ThenAnotherReadIsScheduled()
+    {
+        // Arrange
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+        schedule.Request(Start);
+        schedule.Start(Start.AddSeconds(25));
+
+        // Act
+        var delay = schedule.Retry(Start.AddSeconds(26));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(4), delay);
+    }
+
+    [Fact]
+    public void WhenTheHistoryIsStillBehindAfterTheRetryWindow_ThenNoFurtherReadIsScheduled()
+    {
+        // Arrange
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+        schedule.Request(Start);
+        schedule.Start(Start.AddSeconds(30));
+
+        // Act
+        var delay = schedule.Retry(Start.AddSeconds(30));
+
+        // Assert
+        Assert.Null(delay);
+    }
+
+    [Fact]
+    public void WhenTheRunsChangeAgainAfterTheRetryWindow_ThenTheRetriesStartOver()
+    {
+        // Arrange
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+        schedule.Request(Start);
+        schedule.Start(Start);
+        schedule.Request(Start.AddMinutes(5));
+        schedule.Start(Start.AddMinutes(5));
+
+        // Act
+        var delay = schedule.Retry(Start.AddMinutes(5).AddSeconds(1));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(4), delay);
+    }
+
+    [Fact]
+    public void WhenARetryComesWhileAReadIsDue_ThenItJoinsThatRead()
+    {
+        // Arrange
+        var schedule = new RunReloadSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+        schedule.Request(Start);
+
+        // Act
+        var delay = schedule.Retry(Start.AddSeconds(1));
+
+        // Assert
+        Assert.Null(delay);
     }
 }
