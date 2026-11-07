@@ -214,16 +214,17 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
 IsConnected == false || BatteryLevel < 0.2 && Status != "Running"
 ```
 
-A property can also be reached through other subjects, and `not` negates a condition:
+A property can also be reached through other subjects, `not` negates a condition, and values compute with `+ - * /` and durations such as `15m`:
 
 ```text
 Device.IsOn == true and not (Device.Mode == Eco)
+Power - Offset > MaximumPower * 0.8
 ```
 
 The grammar, [logic](expressions.md#grammar), [comparisons of values](expressions.md#comparisons), [missing values](expressions.md#truth-and-missing-values) and the limits of an expression are those of the language. What is specific to `where`:
 
-- **Properties**: a path from the subject through the path provider that uses the separator of the provider, such as `Device.IsOn`, or `subject.Device.IsOn`, where `subject` is the subject itself. A bare word on the right of a comparison, as in `Status != Running`, is a string, unless it holds the separator or an index, or is `subject`: then it is a property. Only properties the path provider exposes can be filtered on, also on the way of a path. A value is also missing when an attribute is addressed.
-- **Refused paths**: a path starts at the subject and ends at a property: it cannot start with the separator, go up with `..` or end at an entry such as `Devices[a]`, and indexes use `[` and `]` whatever the separator. These paths and `subject.` without a name are refused when the expression is parsed, as `where: a path starts at the subject and cannot start with '.'`, `where: a path starts at the subject and cannot go up with '..'`, `where: a path ends at a property, not at an entry such as 'Devices[a]'` and `where: expected a name after 'subject.'`, with the separator of the path provider.
+- **Properties**: a path from the subject through the path provider that uses the separator of the provider, such as `Device.IsOn`, or `subject.Device.IsOn`, where `subject` is the subject itself. A bare word on the right of a comparison, as in `Status != Running`, is a string, unless it holds the separator or an index, is `subject`, or is an operand of arithmetic, as `MaximumPower` is above: then it is a property. Only properties the path provider exposes can be filtered on, also on the way of a path. A value is also missing when an attribute is addressed.
+- **Refused paths**: a path starts at the subject and ends at a property: it cannot start with the separator, go up with `..` or end at an entry such as `Devices[a]`, and indexes use `[` and `]` whatever the separator. A property name holds no `+`, `*` or `/`, so outside an index one of them is an operator that lacks the spaces around it. These paths and `subject.` without a name are refused when the expression is parsed, as `where: a path starts at the subject and cannot start with '.'`, `where: a path starts at the subject and cannot go up with '..'`, `where: a path ends at a property, not at an entry such as 'Devices[a]'`, `where: put spaces around '*' in 'Power*2'` and `where: expected a name after 'subject.'`, with the separator of the path provider.
 - **Properties that hold subjects**: a property that holds a subject, a collection or a dictionary has that value, so `Device == null` is true when no device is set and `Device != null` is true when one is. Every other comparison with it is unknown.
 - **Not available**: `value` and pipes (`|`) give the errors `where: 'value' is not available in where` and `where: a condition takes no pipes`.
 - **Errors**: an invalid expression returns an error that starts with `where: ` and names the zero-based position, for example `where: use '==' for equality at position 12`.
