@@ -218,6 +218,10 @@ namespace HomeBlaze.Storage
         public static bool IsGranted { get; }
         public static System.IDisposable Enter(bool isGranted) { }
     }
+    public static class StorageFileRoute
+    {
+        public const string Prefix = "/files";
+    }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class VirtualFolder : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Storage.Abstractions.IStorageContainer, HomeBlaze.Storage.Abstractions.Metadata.IMetadataContainer, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {

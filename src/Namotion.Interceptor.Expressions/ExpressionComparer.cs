@@ -3,10 +3,10 @@ using System.Globalization;
 namespace Namotion.Interceptor.Expressions;
 
 /// <summary>
-/// Compares two values that are not null: a boolean only for equality, an enum
-/// by its name without regard to case and only for equality, a text without regard to case for equality and ordinal for
-/// order, a date against ISO 8601 text, a float as a float, and NaN never. A null result means the pair has no order, so the
-/// comparison is unknown.
+/// Compares two values that are not null: a boolean only for equality, an enum by its name without regard to case and
+/// only for equality, a text without regard to case for equality and ordinal for order, a date against ISO 8601 text,
+/// a duration against a duration, a float as a float, and NaN never. A null result means the pair has no order, so
+/// the comparison is unknown.
 /// </summary>
 internal static class ExpressionComparer
 {
@@ -35,9 +35,7 @@ internal static class ExpressionComparer
         string text => CompareText(text, other, isEquality),
         DateTimeOffset instant => CompareInstant(instant, other, otherInstant),
         DateTime dateTime => CompareDateTime(dateTime, other, otherInstant),
-        // Widening a float to double would make 0.1f differ from the literal 0.1.
-        float single when other is double number => single.CompareTo((float)number),
-        double number when other is float single => ((float)number).CompareTo(single),
+        TimeSpan duration => other is TimeSpan otherDuration ? duration.CompareTo(otherDuration) : null,
         _ => CompareNumber(value, other)
     };
 
@@ -86,7 +84,12 @@ internal static class ExpressionComparer
             return otherInstant is { } literalInstant ? instant.CompareTo(literalInstant) : null;
         }
 
-        return other is DateTimeOffset otherDate ? instant.CompareTo(otherDate) : null;
+        return other switch
+        {
+            DateTimeOffset otherDate => instant.CompareTo(otherDate),
+            DateTime otherDateTime => instant.CompareTo(ToInstant(otherDateTime)),
+            _ => null
+        };
     }
 
     private static int? CompareDateTime(DateTime dateTime, object other, DateTimeOffset? otherInstant)
@@ -96,11 +99,27 @@ internal static class ExpressionComparer
             return otherInstant is { } literalInstant ? ToInstant(dateTime).CompareTo(literalInstant) : null;
         }
 
-        return other is DateTime otherDateTime ? ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)) : null;
+        return other switch
+        {
+            DateTime otherDateTime => ToInstant(dateTime).CompareTo(ToInstant(otherDateTime)),
+            DateTimeOffset otherInstantValue => ToInstant(dateTime).CompareTo(otherInstantValue),
+            _ => null
+        };
     }
 
     private static int? CompareNumber(object value, object other)
     {
+        // Widening a float to double would make 0.1f differ from the literal 0.1.
+        if (value is float single && other is double floatNumber)
+        {
+            return single.CompareTo((float)floatNumber);
+        }
+
+        if (value is double number && other is float otherSingle)
+        {
+            return ((float)number).CompareTo(otherSingle);
+        }
+
         if (!IsNumber(value) || !IsNumber(other))
         {
             return null;
@@ -114,7 +133,7 @@ internal static class ExpressionComparer
     private static string GetEnumName(Enum enumValue) =>
         Enum.GetName(enumValue.GetType(), enumValue) ?? enumValue.ToString();
 
-    private static bool IsNumber(object value) =>
+    internal static bool IsNumber(object value) =>
         value is float or double or decimal || IsSignedInteger(value) || IsUnsignedInteger(value);
 
     private static bool IsSignedInteger(object value) => value is sbyte or short or int or long;
@@ -125,7 +144,7 @@ internal static class ExpressionComparer
         (value is double number && double.IsNaN(number)) || (value is float single && float.IsNaN(single));
 
     // A DateTime without a kind is read as UTC, matching how a text without an offset is read.
-    private static DateTimeOffset ToInstant(DateTime dateTime) =>
+    internal static DateTimeOffset ToInstant(DateTime dateTime) =>
         dateTime.Kind == DateTimeKind.Unspecified
             ? new DateTimeOffset(dateTime, TimeSpan.Zero)
             : new DateTimeOffset(dateTime);

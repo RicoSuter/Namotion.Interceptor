@@ -25,6 +25,10 @@ namespace HomeBlaze.Storage.Blazor
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeStorage(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }
+    public static class StorageFileEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapStorageFiles(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
 }
 namespace HomeBlaze.Storage.Blazor.Files
 {

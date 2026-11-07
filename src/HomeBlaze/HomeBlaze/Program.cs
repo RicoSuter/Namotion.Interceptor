@@ -222,6 +222,7 @@ if (mcpEnabled)
 app.MapDefaultEndpoints();
 app.MapStaticAssets().AllowAnonymous();
 app.MapHomeBlazeAccountEndpoints();
+app.MapStorageFiles();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(typeof(AuthenticationWebExtensions).Assembly)
