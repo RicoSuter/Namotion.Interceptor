@@ -108,4 +108,38 @@ public class RoleAutomationAuthorizerTests
         Assert.Null(after.Error);
         Assert.Null(after.GetOperationDenial(Member("Close")));
     }
+
+    [Fact]
+    public void WhenACustomRoleDeniesAPathPattern_ThenCallsAndWritesUnderThePathAreDenied()
+    {
+        // Arrange
+        var authorizer = TestAuthorization.Create(_graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyBlindsPath()));
+
+        // Act
+        var permissions = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
+
+        // Assert
+        Assert.Equal("the role 'StormBlinds' denies calling it", permissions.GetOperationDenial(Member("Close")));
+        Assert.Equal("the role 'StormBlinds' denies writing it", permissions.GetPropertyWriteDenial(Member("Position")));
+    }
+
+    [Fact]
+    public void WhenTheRoleGainsADenyOrIsRemoved_ThenTheNextPermissionsRefuseWhatWasAllowed()
+    {
+        // Arrange
+        var authorizer = TestAuthorization.Create(_graph, (TestAuthorization.StormBlinds, new Role { Includes = [BuiltInRoles.OperatorName] }));
+        var allowed = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
+
+        // Act
+        TestAuthorization.AddRoles(_graph, (TestAuthorization.StormBlinds, TestAuthorization.DenyOpen()));
+        var denied = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
+        TestAuthorization.AddRoles(_graph);
+        var removed = authorizer.GetPermissions([TestAuthorization.StormBlinds]);
+
+        // Assert
+        Assert.Null(allowed.GetOperationDenial(Member("Open")));
+        Assert.NotNull(denied.GetOperationDenial(Member("Open")));
+        Assert.NotNull(removed.Error);
+        Assert.False(AutomationTargets.CanCall(Member("Close"), removed));
+    }
 }

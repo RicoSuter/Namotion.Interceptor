@@ -22,7 +22,7 @@ internal static class TestAuthorization
         return new RoleAutomationAuthorizer(service);
     }
 
-    /// <summary>The roles of HomeBlaze over the graph, with paths separated by <c>/</c> as the tools of agents build them.</summary>
+    /// <summary>The roles of HomeBlaze over the graph, with paths separated by <c>/</c>; the provider of the tools of agents is internal to another project.</summary>
     public static AuthorizationService CreateService(TestGraph graph) => new(graph.Context, new DefaultPathProvider('/'));
 
     /// <summary>Attaches an <c>Authorization</c> subject with the custom roles under <c>/Authorization</c>, replacing an earlier one.</summary>
@@ -31,6 +31,13 @@ internal static class TestAuthorization
         {
             Roles = roles.ToDictionary(role => role.Name, role => role.Role, StringComparer.OrdinalIgnoreCase)
         });
+
+    /// <summary>A role that includes <c>Operator</c> and denies every member under the path of <c>/Blinds</c>.</summary>
+    public static Role DenyBlindsPath() => new()
+    {
+        Includes = [BuiltInRoles.OperatorName],
+        Deny = [new PermissionRule { Paths = ["/Blinds/**"], Actions = [AuthorizationActions.Execute, PermissionAction.Write] }]
+    };
 
     /// <summary>A role that includes <c>Operator</c> and denies calling <c>Open</c> of the test blinds.</summary>
     public static Role DenyOpen() => new()

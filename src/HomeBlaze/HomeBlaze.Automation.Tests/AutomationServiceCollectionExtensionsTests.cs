@@ -86,4 +86,17 @@ public class AutomationServiceCollectionExtensionsTests
         // Assert
         Assert.IsType<AllowAllAutomationAuthorizer>(automation.Authorizer);
     }
+
+    [Fact]
+    public void WhenAuthorizationIsNotRegistered_ThenResolvingTheAuthorizerThrowsInsteadOfAllowingAll()
+    {
+        // Arrange
+        var services = CreateServices();
+        services.AddHomeBlazeAutomation();
+        using var provider = services.BuildServiceProvider();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IAutomationAuthorizer>());
+        Assert.Throws<InvalidOperationException>(() => ActivatorUtilities.CreateInstance<Automation>(provider));
+    }
 }
