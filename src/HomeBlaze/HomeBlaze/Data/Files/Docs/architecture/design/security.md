@@ -8,7 +8,7 @@ status: In Progress
 
 ## Overview
 
-Security in HomeBlaze covers graph-level authorization (who can read and write which properties, invoke which methods and read which history), inter-node authentication, and MCP access control. Graph authorization is implemented for the built-in AI agents and the external `/mcp` endpoint; roles for people in the browser, inter-node authentication and per-client MCP identity are planned. The operator guide is [Authorization](../../administration/authorization.md).
+Security in HomeBlaze covers graph-level authorization (who can read and write which properties, invoke which methods and read which history), inter-node authentication, and MCP access control. Graph authorization is implemented for the built-in AI agents, automations and the external `/mcp` endpoint; roles for people in the browser, inter-node authentication and per-client MCP identity are planned. The operator guide is [Authorization](../../administration/authorization.md).
 
 ## Graph Authorization [In Progress]
 
@@ -53,6 +53,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 | Built-in agent | Its `Roles`, default `["Operator"]`, which allows what agents could do before roles existed, so `AllowedTools` stays the gate on upgrade. A chat turn and a background run take the policy once, next to the `AllowedTools` snapshot. Roles that yield `DenyAll`, also an empty list, show "Invalid roles: ..." in the agent's status, and the turn runs with tools that deny everything |
 | Watch paths of an agent | `Everything` with the system rules: the operator chose the paths, so the agent's roles do not filter them |
 | External `/mcp` | `Everything` with the system rules, and `McpServer:ReadOnly` |
+| Automation | Its `Roles`, none by default, so it calls and writes nothing until a role allows it. `RoleAutomationAuthorizer`, the default `IAutomationAuthorizer`, asks `execute` on an operation and `write` on a property. One check (`AutomationTargets`) runs when the automation applies a configuration (`ActionTargetCheck` in `AutomationCompiler`), in the editor (`AutomationValidator`, with the roles of the dialog) and before each action. A target that does not resolve yet is checked when the action runs. Roles that yield `DenyAll` refuse every call and write but do not block applying a configuration, so an automation that starts before `Authorization.json` is loaded runs once it is. Conditions and texts read without the roles, as watch paths do |
 | People in the browser | No policy yet |
 
 ### Enforcement
@@ -77,6 +78,10 @@ Denied `execute` and `history` are logged at debug level with the agent and the 
 - **The check** (`McpPageReadAccess`) builds the property's path from the root and requires `TryGetReadableProperty` to resolve that path back to the same property, so a property below a hidden branch renders empty although the policy allows to read it. The path names every member, the tools' segments and otherwise the member's name, so an expression may read a member the tools do not list, such as a derived title. A property without a path fails closed. The answers are cached per property for one query.
 - **Queries only**: an operation changes state, and the change handlers, renders and background work it starts would otherwise inherit the caller's check.
 - Without a scope, as in the browser, nothing changes. The derived `Value` of a page expression is computed without the check, as it is shared by every caller.
+
+**Test now of automations.** `AutomationRule.TestNow` is a query, so the read check that `McpMethodInvoker` sets for a query reaches its evaluation, which treats a property the check refuses as missing; the previews of the automation editor pass the same check, which has no scope in the browser. The running automation never uses it.
+
+**Writing automations.** An agent or `/mcp` client can neither create nor change an automation, whatever its roles, because an automation acts with its own roles and a principal that could write one could give it more than it holds. Comparing the writer's roles with the automation's is not possible, as neither the page parser nor the automation knows who wrote a file, so every write path is closed instead: `deny [configuration] write` covers `Roles`, the rules and every other setting of an automation and of its rules; `MarkdownWriteRules` lets the Markdown tools add, change or remove only layout blocks, which hold single configuration values and no nested subjects, and `Automation` is no `[PageLayout]` type; agents have no tools that write files; and the **Create** operation of a folder runs the create dialog, which only the Blazor UI provides. `AutomationWriteAccessTests` and the automation rows of `MarkdownFileWriteTests` pin each path. A person may still place an automation in a page.
 
 **Known limits.**
 
@@ -105,11 +110,14 @@ Planned. Today every `/mcp` client shares the `Everything` policy. With a client
 | Two gates for agents | `AllowedTools` decides the tools, roles what they reach | Tools stay a coarse, visible switch; roles add the fine-grained scope |
 | Several `Authorization` subjects | None is used | Merging two role sets silently could grant more than either intends |
 | Page expressions | Ambient `AsyncLocal` read check | The shared page subject cannot receive the caller, and a per-caller service does not reach it |
+| Automations | Own roles, none by default, checked at validation and before each action | An automation acts unattended: only explicitly allowed operations run, and a deny in its role is a block that rules added later cannot bypass |
+| Agents writing automations | Refused on every path, whatever the roles | The writer of a file is not known when it loads, so "only roles the writer holds" cannot be checked; agents need not author automations |
 | Inter-node auth | Deferred | Focus on graph authorization first |
 
 ## Open Questions
 
 - Roles of people in the browser, the role editor and a "preview as" tester
+- Rights of the person who edits an automation, once people have roles
 - Inter-node authentication mechanism (TLS, tokens, certificates)
 - MCP session identity model
 - Authorization for cross-instance operation proxying

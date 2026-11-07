@@ -5,7 +5,7 @@ navTitle: Authorization
 
 # Authorization
 
-Roles decide what the built-in [AI agents](ai-agents.md) and the clients of the external `/mcp` endpoint may read, change, run and read the history of. Each agent names its roles, and `/mcp` uses the built-in role `Everything`. Fixed system rules apply on top of every role. People in the browser have no roles yet and are not affected. The design is in [Security Design](../architecture/design/security.md#graph-authorization-in-progress).
+Roles decide what the built-in [AI agents](ai-agents.md), the [automations](automation.md#authorization) and the clients of the external `/mcp` endpoint may read, change, run and read the history of. Each agent and each automation names its roles, and `/mcp` uses the built-in role `Everything`. Fixed system rules apply on top of every role. People in the browser have no roles yet and are not affected. The design is in [Security Design](../architecture/design/security.md#graph-authorization-in-progress).
 
 On this page:
 
@@ -18,6 +18,7 @@ On this page:
 - [System Rules](#system-rules): the deny rules no role can lift
 - [One Authorization Subject](#one-authorization-subject): what happens with two
 - [Agents](#agents): the `Roles` setting and the "Invalid roles" status
+- [Automations](#automations): the `Roles` of an automation
 - [External MCP Clients](#external-mcp-clients), [Watch Paths](#watch-paths) and [Page Expressions](#page-expressions)
 - [File Format](#file-format): the roles in `Authorization.json`
 - [Known Limits](#known-limits)
@@ -121,7 +122,7 @@ A change that cannot be saved stays applied until the next restart, and the oper
 
 ### Roles That Agents Use
 
-Agents and the custom roles that include a role name it, so a rename or deletion changes what they may do. Neither a rename nor a deletion changes those names for you. The dialog of "Rename" and the confirmation of the Delete button say so, see [Adding, Renaming and Deleting Roles](#adding-renaming-and-deleting-roles). The number of agents that use a role is its `UsedByAgents`, and its edit dialog shows "Used by N agents".
+Agents and the custom roles that include a role name it, so a rename or deletion changes what they may do. Automations name roles too and are not counted, see [Automations](#automations). Neither a rename nor a deletion changes those names for you. The dialog of "Rename" and the confirmation of the Delete button say so, see [Adding, Renaming and Deleting Roles](#adding-renaming-and-deleting-roles). The number of agents that use a role is its `UsedByAgents`, and its edit dialog shows "Used by N agents".
 
 - **Agents**: the agents keep the old name in their `Roles`. They show the status "Invalid roles: Role 'LightOperator' is not defined." and every tool call of theirs is denied, not only the calls the role allowed, see [Invalid Roles](#invalid-roles). Their edit dialog shows the old name as a red chip with the tooltip "Unknown role". Remove it there and select the new name or another role, then save the agent. A rename that changes only the case of the name changes nothing for them, as names compare ignoring case.
 - **Includes**: a custom role that includes the old name shows the status "Role '...' includes 'LightOperator', which is not defined." and cannot be used until its includes are changed as well, so the agents that use it are denied everything until then.
@@ -293,7 +294,7 @@ A subject the roles hide gives "Subject not found." in the method and Markdown t
 
 ## System Rules
 
-These deny rules apply to every agent and to `/mcp`, whatever the roles allow:
+These deny rules apply to every agent, every automation and `/mcp`, whatever the roles allow:
 
 | Deny | Actions | Keeps clients from |
 |------|---------|--------------------|
@@ -349,6 +350,16 @@ When the roles cannot be used, the agent shows the status Error with "Invalid ro
 - "Role '...' is unavailable: ...", for a role with a reserved name or a name with `/`, `[`, `]` or an invisible character, or while [several Authorization subjects](#one-authorization-subject) exist.
 
 Turns still run, but every tool call is denied, so the agent can tell you what it cannot do. The status is checked again when the agent starts, when its settings are saved, after each turn and when a role or the `Authorization` subject changes, so it follows a saved role or an edit of `Authorization.json` without waiting for a turn.
+
+---
+
+## Automations
+
+An automation names its roles in `Roles`, as an agent does, and has none by default, so it calls no operation and writes no property until a role allows it. It needs `execute` on each operation it calls and `write` on each property it writes; its conditions and texts read without its roles. The roles are checked when its configuration is applied and before each action, see [Authorization](automation.md#authorization) in the automation guide.
+
+- **Edit form**: the field "Roles" on the tab General of its edit dialog, the same picker as for agents. Unlike an agent, an automation may have no roles; the dialog then lists every action that calls an operation or writes a property as refused.
+- **Usage**: `UsedByAgents` does not count automations, and the dialogs of Rename and Delete do not name them. An automation that names a renamed or deleted role refuses its calls and writes with "the roles of the automation cannot be used: Role '...' is not defined." until it is given the new name.
+- **Agents and `/mcp` clients** can neither create nor change an automation, whatever their roles: the [system rules](#system-rules) deny writing its configuration, and the Markdown tools cannot add or change a block of a page other than a layout block. An agent therefore cannot give an automation roles it does not have itself.
 
 ---
 
