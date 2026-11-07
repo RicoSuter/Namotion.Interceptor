@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Components.Abstractions.Access;
@@ -128,7 +129,10 @@ public static class OperationInvoker
     /// message box titled "Not allowed" says so and <see cref="OperationOutcome.Denied"/> is returned. What the method
     /// itself writes is not checked.
     /// </param>
-    /// <param name="member">The member that holds the operation or query; refused as not allowed when it holds none.</param>
+    /// <param name="member">
+    /// The member that holds the operation or query; refused as not allowed when it holds none, or one excluded from user
+    /// interfaces.
+    /// </param>
     /// <param name="lifetime">
     /// Canceled when the caller goes away. From then on no dialog is shown and a method that has not started is
     /// not started. A started method is not canceled.
@@ -157,7 +161,9 @@ public static class OperationInvoker
             return new OperationInvocationResult(OperationOutcome.Canceled, null, null);
         }
 
-        if (member.GetValue() is not MethodMetadata method || !permissions.CanInvoke(member))
+        // A method excluded from user interfaces is meant for agents only, such as one that skips the checks of the UI, so
+        // a button configured with its path does not run it either.
+        if (member.GetValue() is not MethodMetadata method || method.IsExcludedFrom(ExclusionTarget.UserInterface) || !permissions.CanInvoke(member))
         {
             return await DenyAsync(dialogService, null);
         }

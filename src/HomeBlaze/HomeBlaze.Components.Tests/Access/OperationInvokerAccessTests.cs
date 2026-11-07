@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Operations;
 using HomeBlaze.Components.Tests.Models;
 using Namotion.Interceptor;
@@ -58,6 +59,22 @@ public class OperationInvokerAccessTests
         // Assert
         Assert.Equal(OperationOutcome.Denied, result.Outcome);
         Assert.True(graph.IsConfirmationShown);
+        Assert.Equal(0, graph.InvocationCount);
+        AssertRefused(graph);
+    }
+
+    [Fact]
+    public async Task WhenTheOperationIsExcludedFromUserInterfaces_ThenItIsDeniedAlthoughTheUserMayInvokeIt()
+    {
+        // Arrange
+        var graph = OperationTestGraph.Create(excludedFrom: ExclusionTarget.UserInterface);
+        var permissions = new TestUserPermissions();
+
+        // Act
+        var result = await OperationInvoker.InvokeAsync(graph.Dialogs, graph.Services, permissions, graph.Operation, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(OperationOutcome.Denied, result.Outcome);
         Assert.Equal(0, graph.InvocationCount);
         AssertRefused(graph);
     }

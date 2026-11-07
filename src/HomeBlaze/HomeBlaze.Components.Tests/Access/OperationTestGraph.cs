@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Components.Tests.Models;
@@ -19,7 +20,7 @@ public sealed class OperationTestGraph
     private readonly Mock<IDialogService> _dialogs = new();
     private int _invocationCount;
 
-    private OperationTestGraph(bool requiresConfirmation, bool requiresAdministration, bool hasInputParameter)
+    private OperationTestGraph(bool requiresConfirmation, bool requiresAdministration, bool hasInputParameter, ExclusionTarget excludedFrom)
     {
         Method = new MethodMetadata(_ =>
         {
@@ -31,6 +32,7 @@ public sealed class OperationTestGraph
             Kind = MethodKind.Operation,
             RequiresConfirmation = requiresConfirmation,
             RequiresAdministration = requiresAdministration,
+            ExcludedFrom = excludedFrom,
             Parameters = hasInputParameter ? [new MethodParameter { Name = "speed", Type = typeof(int) }] : []
         };
         Operation = CreateMember(Method);
@@ -88,8 +90,9 @@ public sealed class OperationTestGraph
     /// <summary>The errors the error dialog showed, in order.</summary>
     public List<Exception> ShownErrors { get; } = [];
 
-    public static OperationTestGraph Create(bool requiresConfirmation = false, bool requiresAdministration = false, bool hasInputParameter = false) =>
-        new(requiresConfirmation, requiresAdministration, hasInputParameter);
+    public static OperationTestGraph Create(
+        bool requiresConfirmation = false, bool requiresAdministration = false, bool hasInputParameter = false, ExclusionTarget excludedFrom = ExclusionTarget.None) =>
+        new(requiresConfirmation, requiresAdministration, hasInputParameter, excludedFrom);
 
     /// <summary>Registers the method as a member of a new subject and returns that member.</summary>
     public static RegisteredSubjectProperty CreateMember(MethodMetadata method)
