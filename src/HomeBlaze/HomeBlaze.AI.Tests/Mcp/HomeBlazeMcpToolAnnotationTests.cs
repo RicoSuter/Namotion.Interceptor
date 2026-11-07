@@ -19,7 +19,7 @@ public class HomeBlazeMcpToolAnnotationTests
         // Arrange
         var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
         var configuration = HomeBlazeMcpConfigurationFactory.Create(
-            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false, forAgents: false);
+            HomeBlazeMcpConfigurationFactoryTests.CreateServices(), () => room, isReadOnly: false, TestAccessPolicies.Everything);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");

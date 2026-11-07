@@ -2,22 +2,44 @@
 
 @inject IDialogService DialogService
 
-<MudTextField T="string"
-              Value="@Value"
-              ValueChanged="SetValueAsync"
-              Label="@Label"
-              Placeholder="@Placeholder"
-              Variant="@Variant"
-              Required="@Required"
-              Error="@(ErrorText is not null)"
-              ErrorText="@ErrorText"
-              Immediate="true"
-              Adornment="Adornment.End"
-              AdornmentIcon="@Icons.Material.Filled.Search"
-              AdornmentAriaLabel="@($"Browse {Label}")"
-              OnAdornmentClick="OpenPickerDialogAsync"
-              Class="@Class"
-              data-testid="subject-path-field" />
+@if (HasBrowseButton)
+{
+    <div class="d-flex align-start gap-2 @Class">
+        <MudTextField T="string"
+                      Value="@Value"
+                      ValueChanged="SetValueAsync"
+                      Label="@Label"
+                      Placeholder="@Placeholder"
+                      Variant="@Variant"
+                      Required="@Required"
+                      Error="@(ErrorText is not null)"
+                      ErrorText="@ErrorText"
+                      Immediate="true"
+                      Class="flex-grow-1"
+                      data-testid="subject-path-field" />
+        <MudIconButton Icon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Color="Color.Primary" Class="mt-4" OnClick="OpenPickerDialogAsync"
+                       aria-label="@($"Browse {Label}")" data-testid="subject-path-field-browse" />
+    </div>
+}
+else
+{
+    <MudTextField T="string"
+                  Value="@Value"
+                  ValueChanged="SetValueAsync"
+                  Label="@Label"
+                  Placeholder="@Placeholder"
+                  Variant="@Variant"
+                  Required="@Required"
+                  Error="@(ErrorText is not null)"
+                  ErrorText="@ErrorText"
+                  Immediate="true"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Search"
+                  AdornmentAriaLabel="@($"Browse {Label}")"
+                  OnAdornmentClick="OpenPickerDialogAsync"
+                  Class="@Class"
+                  data-testid="subject-path-field" />
+}
 
 @code {
     [Parameter]
@@ -64,6 +86,13 @@
     /// </summary>
     [Parameter]
     public Func<IInterceptorSubject, bool>? CanSelectSubject { get; set; }
+
+    /// <summary>
+    /// Whether the picker opens from a button next to the field, which the keyboard reaches, instead of from the search
+    /// icon in the field, which it does not; false by default. <see cref="Class"/> then applies to both.
+    /// </summary>
+    [Parameter]
+    public bool HasBrowseButton { get; set; }
 
     private async Task OpenPickerDialogAsync()
     {

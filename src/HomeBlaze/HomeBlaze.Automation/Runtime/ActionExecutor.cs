@@ -3,15 +3,14 @@ using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Automation.Expressions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
-/// Runs the operation calls and property writes of rules: resolves the target, refuses what an automation may not do or
-/// what the authorizer failed to decide, binds the arguments and executes. A failure is a result with its reason; only a
-/// cancellation of the caller's token is thrown.
+/// Runs the operation calls and property writes of rules: resolves the target, refuses what an automation may not do,
+/// what its roles or the roles of a rejected configuration do not allow or what the authorizer failed to decide, binds the
+/// arguments and executes. A failure is a result with its reason; only a cancellation of the caller's token is thrown.
 /// </summary>
 internal sealed class ActionExecutor(
     SubjectPathResolver resolver,
@@ -28,7 +27,7 @@ internal sealed class ActionExecutor(
 
     public async Task<ActionResult> InvokeOperationAsync(InvokeOperationAction action, ActionScope scope, CancellationToken cancellationToken)
     {
-        if (!TryPrepareOperation(action, scope, cancellationToken, out var operation, out var error))
+        if (!TryPrepareOperation(action, scope, out var operation, out var error))
         {
             return ActionResult.Failure(error);
         }
@@ -98,7 +97,7 @@ internal sealed class ActionExecutor(
     public static string DescribeChangeState(ChangeStateAction change) => $"ChangeState({change.TargetState})";
 
     private string Describe(InvokeOperationAction action, ActionScope scope) =>
-        TryPrepareOperation(action, scope, CancellationToken.None, out var operation, out var error) ? operation.Description : NameTarget(action.OperationPath, error);
+        TryPrepareOperation(action, scope, out var operation, out var error) ? operation.Description : NameTarget(action.OperationPath, error);
 
     private string Describe(SetPropertyAction action, ActionScope scope) =>
         TryPrepareWrite(action, scope, out var write, out var error) ? write.Description : NameTarget(action.PropertyPath, error);
@@ -110,7 +109,6 @@ internal sealed class ActionExecutor(
     private bool TryPrepareOperation(
         InvokeOperationAction action,
         ActionScope scope,
-        CancellationToken cancellationToken,
         [NotNullWhen(true)] out PreparedOperation? operation,
         [NotNullWhen(false)] out string? error)
     {
@@ -123,7 +121,10 @@ internal sealed class ActionExecutor(
             return false;
         }
 
-        error = GetOperationRefusal(path, property, method, scope.Automation, cancellationToken);
+        // Refused before the authorizer is asked: what an automation never does, and a disabled operation.
+        error = AutomationTargets.CheckOperationNever(path, method) ??
+            (property.IsMethodEnabled() ? null : $"{path} is disabled") ??
+            AutomationTargets.GetDenial(path, property, GetPermissions(scope), isWrite: false);
         if (error is not null)
         {
             return false;
@@ -139,34 +140,6 @@ internal sealed class ActionExecutor(
         return true;
     }
 
-    private string? GetOperationRefusal(
-        string path, RegisteredSubjectProperty property, MethodMetadata method, IInterceptorSubject automation, CancellationToken cancellationToken)
-    {
-        if (method.Kind != MethodKind.Operation)
-        {
-            return $"{path} is a query, not an operation";
-        }
-
-        if (method.RequiresConfirmation)
-        {
-            return $"{path} requires confirmation by a person and cannot be called by an automation";
-        }
-
-        return property.IsMethodEnabled() ? GetOperationDenial(path, property, automation, cancellationToken) : $"{path} is disabled";
-    }
-
-    private string? GetOperationDenial(string path, RegisteredSubjectProperty property, IInterceptorSubject automation, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return authorizer.GetOperationDenial(automation, property);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException && !cancellationToken.IsCancellationRequested)
-        {
-            return DescribeAuthorizationFailure(path, exception);
-        }
-    }
-
     private bool TryPrepareWrite(
         SetPropertyAction action, ActionScope scope, [NotNullWhen(true)] out PreparedWrite? write, [NotNullWhen(false)] out string? error)
     {
@@ -178,7 +151,7 @@ internal sealed class ActionExecutor(
             return false;
         }
 
-        error = GetWriteRefusal(path, property, scope.Automation);
+        error = AutomationTargets.CheckWriteNever(path, property) ?? AutomationTargets.GetDenial(path, property, GetPermissions(scope), isWrite: true);
         if (error is not null)
         {
             return false;
@@ -194,36 +167,14 @@ internal sealed class ActionExecutor(
         return true;
     }
 
-    private string? GetWriteRefusal(string path, RegisteredSubjectProperty property, IInterceptorSubject automation)
+    // Asked for every action, so that a changed custom role applies to the next action of a run.
+    private IAutomationPermissions GetPermissions(ActionScope scope)
     {
-        if (property.TryGetMethodMetadata() is not null)
-        {
-            return $"{path} is an operation; call it with an operation action";
-        }
-
-        if (!property.HasPublicSetter)
-        {
-            return $"{path} is read-only";
-        }
-
-        return property.IsConfigurationProperty()
-            ? $"{path} is configuration, which an automation cannot change"
-            : GetPropertyWriteDenial(path, property, automation);
+        var permissions = AutomationTargets.GetPermissions(authorizer, scope.Roles);
+        return scope.RejectedRoles is { } rejectedRoles
+            ? new RejectedRolesPermissions(permissions, AutomationTargets.GetPermissions(authorizer, rejectedRoles))
+            : permissions;
     }
-
-    private string? GetPropertyWriteDenial(string path, RegisteredSubjectProperty property, IInterceptorSubject automation)
-    {
-        try
-        {
-            return authorizer.GetPropertyWriteDenial(automation, property);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            return DescribeAuthorizationFailure(path, exception);
-        }
-    }
-
-    private static string DescribeAuthorizationFailure(string path, Exception exception) => $"{path}: the authorization failed: {exception.Message}";
 
     private sealed record PreparedOperation(MethodMetadata Method, object?[] Arguments, string Description);
 

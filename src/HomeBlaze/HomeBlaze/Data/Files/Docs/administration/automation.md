@@ -14,11 +14,11 @@ This page is the operator guide. The syntax of expressions is the one of [page e
 ## Quick start
 
 1. In the subject browser, create an **Automation** from the group Automation, for example in a folder `Automations`.
-2. Open its page and click **Edit**. In the **Rules** tab, add a rule, write its condition under **Runs when any of these happens**, and add an action under **Then, in this order**. Save is available once nothing is invalid or unfinished.
+2. Open its page and click **Edit**. In the **Rules** tab, add a rule, write its condition under **Runs when any of these happens**, and add an action under **Then, in this order**. Save is available once nothing is invalid or unfinished. On the **General** tab, select the roles that allow what the actions call and write, such as the built-in `Operator`; an automation without roles can only change its own state, see [Authorization](#authorization).
 3. Keep the rule in **Dry run** and save. Each time the rule would run, the page lists the run with its actions and their values, and nothing is executed.
 4. Switch the rule to **On** once its runs look right.
 
-The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor: both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38. Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot. Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
+The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor with the role `Operator`: both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38. Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot. Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
 
 ---
 
@@ -200,9 +200,30 @@ The arguments of an operation:
 
 **Set property** takes one value in the same way and writes the raw value of the property.
 
-Authorization has a seam but no rules yet: every operation the automation can see and every writable property is allowed, except operations that require confirmation. The automation asks an authorizer before each call and write, so rules can restrict it later, see [Missing Features](#missing-features).
-
 **On error** decides what a failed action does to the rest of the run: **Continue**, the default, runs the remaining actions; **Stop rule** skips them. Neither undoes actions that succeeded, including a state change, and nothing is retried. A failure is logged and recorded in the run of the rule.
+
+---
+
+## Authorization
+
+An automation runs as its own principal with the roles in its `Roles`, which the **General** tab of the editor sets. They are the roles of [Authorization](authorization.md): the built-in `Reader`, `Operator` and `Everything` and the custom roles of `Authorization.json`, with the [system rules](authorization.md#system-rules) on top. A call needs `execute` on the operation, and a write needs `write` on the property. Only what a role allows runs: an automation without roles, which is the default, can change its own state and nothing else.
+
+- **`Operator`** allows every operation and every write except what the system rules deny: configuration, secrets, operations that require confirmation, agents and the authorization with its roles. That includes **Reset State** of any automation, itself included.
+- **A custom role** restricts an automation to what it is for. A deny is a block and not a convention: a storm automation whose role denies `Open` of the blinds never opens them, whatever rules are added to it later, see [Storm](#storm).
+- **Agents**: no role, `Everything` included, lets an automation call an operation of an agent, because the system rules deny every action on agents.
+- **When it is checked**: when the configuration is applied, and before each call and each write. The editor lists a denied action, such as `Rule 'Retract blinds': action 'call-1': /Living/Blinds/Open: the role 'StormBlinds' denies calling it`, and Save is blocked. The editor checks the actions of the rule it shows every second, and every action on each edit and on Save. A file with such an action is not applied, and the previous configuration keeps running, as for any invalid configuration, with only what both its roles and the roles of the rejected file allow, see [Roles of a rejected configuration](#roles-of-a-rejected-configuration). A denial when the action runs fails the action with the same reason.
+- **Not checkable yet**: a target that does not resolve, such as a device that is not loaded, is checked when the action runs. So are the relative targets of a rule that is not saved yet: the editor passes them, and after Save the automation may reject the configuration because the target is denied or does not resolve, in which case the previous configuration keeps running.
+- **Roles that cannot be used**, such as no roles, a misspelled name or a custom role while `Authorization.json` is not loaded yet, refuse every call and write with the reason, such as `/Living/Blinds/Close: the roles of the automation cannot be used: Role 'StormBlind' is not defined.`. They do not keep the configuration from being applied, so an automation that starts before the roles are loaded runs once they are. While a rule calls or writes anything, the page and the editor show `The actions that call operations or write properties are refused:` with the reason, and the editor blocks Save.
+- **The pickers** of **Call operation** and **Set property** let you select only targets that the roles selected in the dialog allow.
+- **Operations that require confirmation** are refused before the roles are asked, whatever they allow.
+
+What the roles do not decide:
+
+- **Reading**: conditions, filters and texts read every value except secrets, as the [watch paths](authorization.md#watch-paths) of agents do, because the person who writes a rule chose its paths. **Test now** called by an agent through `invoke_query` shows only the values the agent may read; the editor shows every value. **Test now** only describes the actions and never runs them, and it describes them with the roles the automation has now. The run records of a rule hold its rendered arguments and are readable to whoever may read the rule.
+- **The person who edits**: people in the browser have no roles yet, so whoever can edit an automation can give it any role.
+- **What an operation does**: a role decides whether an operation runs, not what it changes as part of its work.
+
+**Agents and `/mcp` clients** can neither create nor change an automation, whatever their roles, so they never give an automation more than a person did: the system rules deny writing configuration, which covers `Roles`, the rules and every other setting, and the Markdown tools cannot add a block to a page or change one, other than layout blocks, so they can neither add an automation block nor change its roles. Agents have no tools that write files, and creating a subject in a folder opens a dialog for a person.
 
 ---
 
@@ -222,7 +243,7 @@ New rules start in Dry run. A rule in Dry run with a Change state action does no
 
 ## The page and the widget
 
-The page of an automation shows its status and last error, a **Reset state**, which asks for confirmation, and an **Edit** button, the read-only state diagram with the current state and the time it was entered (when the automation has states), the rules with their mode, status, last trigger time, run count and **Test now**, and the recent runs. **Last triggered** is when the first action of the last run that was not a dry run started, so a rule in Dry run can list runs while it shows **Never**.
+The page of an automation shows its status and last error, its roles and, while they refuse its calls and writes, why, a **Reset state**, which asks for confirmation, and an **Edit** button, the read-only state diagram with the current state and the time it was entered (when the automation has states), the rules with their mode, status, last trigger time, run count and **Test now**, and the recent runs. **Last triggered** is when the first action of the last run that was not a dry run started, so a rule in Dry run can list runs while it shows **Never**.
 
 **Recent runs** lists the runs of the last seven days, at most 20, with the outcome and the message of each run. Runs are the runs that executed actions, including those that failed or that a stop canceled, and dry runs; requests that Only if rejected and requests skipped after a state change are [no runs](#only-if-and-cooldown). The list is read from history, so runs of one rule close together, within about 250 ms, can show as one, and a crash can drop runs; the caption of the list says so. Without a [history store](../architecture/design/history.md), the page shows the last run of each rule.
 
@@ -234,7 +255,7 @@ The widget of an automation, placed on a page, shows its title with a link to it
 
 **Edit** opens a dialog with three tabs:
 
-- **General**: the name and whether the automation is enabled.
+- **General**: the name, whether the automation is enabled, and its **Roles**, see [Authorization](#authorization).
 - **Rules**: the rules in run order, each with its mode, the state it is active in (or "any state"; omitted while there are no states) and its number of triggers, with buttons to move them, and the selected rule with its name, mode, **Active in state** (shown once there are states), **Runs when any of these happens**, **Only if**, and **Then, in this order**.
 - **States**: the state diagram, a button to add a state, and the selected state with its name, whether it is the initial state, the rules that enter, are active in and leave it, and a delete button that is disabled while rules use the state. Renaming a state renames it in every rule's state scope, in its Change state actions and as the initial state, but not in expressions, filters or argument texts that compare with the name, such as `event/NewState == Running` or `../CurrentState == Idle`: the editor lists the rules that still contain the old name as a word, and you change those texts yourself. A click on an edge opens its rule.
 
@@ -279,7 +300,7 @@ The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that 
 
 1. **Read the status of the rule** on the page of the automation. `Off` and `Inactive ...` say that the rule does not observe its triggers, `Not applied ...` that the saved change is not in effect yet (an invalid one leaves the previous configuration running), `Unknown since ...` names the values that are missing, `Holding since ...` that a hold has not elapsed, `Waiting since ...` that Only if or a state change held the run back, `Triggered, waiting to rearm` and `Already true, waiting until false` that the condition was true already and must change first, and `; not run: ...` why the last request did not run. A rule in Dry run lists its runs but executes nothing.
 2. **Click Test now** on the rule. It shows the result of each trigger and of Only if with the current values, and the arguments the actions would get, so a condition that is false or unknown and a wrong path show up there.
-3. **Read the status of the automation and the log.** A failed or refused action, a stopped feedback chain and an invalid configuration are in `StatusMessage` and in the log, with the full error.
+3. **Read the status of the automation and the log.** A failed action, an action that the [roles](#authorization) refuse, a stopped feedback chain and an invalid configuration are in `StatusMessage` and in the log, with the full error.
 
 ---
 
@@ -293,7 +314,7 @@ The state belongs to the path of the automation: moving it to another folder or 
 
 ## Examples
 
-The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
+The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. An automation whose rules call operations or write properties needs roles that allow them, such as `Operator`, see [Authorization](#authorization). A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
 
 ### Washing machine finished
 
@@ -303,6 +324,7 @@ The memory "it was running" is a state, so a standby reading after a restart in 
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Washing machine",
+  "roles": [ "Operator" ],
   "states": [ "Idle", "Running" ],
   "initialState": "Idle",
   "ruleOrder": [ "started", "finished" ],
@@ -341,12 +363,13 @@ The memory "it was running" is a state, so a standby reading after a restart in 
 
 ### Storm
 
-A gust held for 20 seconds or rain for a minute retracts the blinds, at most once every 30 minutes and not while they move. A gust or rain that is still there when the 30 minutes end or the blinds stop moving retracts them then, and a gust and rain together retract them once. The rearm condition keeps gusts around 8 m/s from firing again before the storm is over.
+A gust held for 20 seconds or rain for a minute retracts the blinds, at most once every 30 minutes and not while they move. A gust or rain that is still there when the 30 minutes end or the blinds stop moving retracts them then, and a gust and rain together retract them once. The rearm condition keeps gusts around 8 m/s from firing again before the storm is over. The role `StormBlinds` lets the automation close the blinds and send the notification, and denies opening the blinds, so no rule of this automation can ever open them, also one added later.
 
 ```json
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Storm",
+  "roles": [ "StormBlinds" ],
   "rules": {
     "retract": {
       "name": "Retract blinds",
@@ -370,6 +393,22 @@ A gust held for 20 seconds or rain for a minute retracts the blinds, at most onc
 }
 ```
 
+The role in `Authorization.json`, see [File Format](authorization.md#file-format):
+
+```json
+{
+  "$type": "HomeBlaze.Authorization.Authorization",
+  "roles": {
+    "StormBlinds": {
+      "allow": [ { "paths": [ "/Living/Blinds/Close", "/Notifications/Family/SendNotification" ], "actions": [ "execute" ] } ],
+      "deny": [ { "paths": [ "/Living/Blinds/Open" ], "actions": [ "execute" ] } ]
+    }
+  }
+}
+```
+
+The allow rule alone already leaves `Open` out; the deny keeps it out when the role later includes `Operator` or another broad role, because a deny always wins.
+
 ### Hue button
 
 Every short press of the button starts the music, also two in a row: a short press ends with the button state `Release`, while a press held long ends with `LongRelease`, which the filter does not match.
@@ -378,6 +417,7 @@ Every short press of the button starts the music, also two in a row: a short pre
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Kitchen button",
+  "roles": [ "Operator" ],
   "rules": {
     "play": {
       "name": "Play music",
@@ -406,6 +446,7 @@ The door state is part of the reminder's trigger and not of Only if, so after a 
 {
   "$type": "HomeBlaze.Automation.Automation",
   "name": "Front door",
+  "roles": [ "Operator" ],
   "states": [ "Closed", "Open", "Informed" ],
   "initialState": "Closed",
   "ruleOrder": [ "opened", "remind", "shut" ],
@@ -523,7 +564,7 @@ Rule  WS90 silent
 
 ## Operational details
 
-This section describes how the automation stores, batches and limits its work. It is not needed to write rules.
+This section describes how the automation stores, batches and limits its work, and which roles apply while a configuration is rejected. It is not needed to write rules.
 
 ### The checkpoint
 
@@ -543,6 +584,10 @@ Every run increments the `RunCount` of its rule, also two identical runs in a ro
 - Stopping an automation, such as when HomeBlaze shuts down, cancels the running action; the actions after it and the other rules of that input do not run, and the run is recorded as **Canceled**, which the page shows as **Canceled by a stop**. A stop waits at most 10 seconds: a worker that is still in an operation is then abandoned and changes nothing anymore, and an operation that ignores its cancellation is abandoned once its minute is over. The runs not written yet are written on the stop, unless the stop is given no time at all, which can lose the runs of the last 5 seconds.
 - `LastRunMessage` holds at most 500 characters; the full errors are in the log.
 
+### Roles of a rejected configuration
+
+While a saved configuration is rejected, the previous rules run a call or a write only when both the previous roles and the roles of the rejected configuration allow it: roles narrowed in a rejected file apply at once, and widened roles allow nothing more. A refusal by the roles of the rejected configuration starts with `refused by the roles of the rejected configuration:`. Once a valid configuration is applied, only its roles apply.
+
 ### Other details
 
 - A rule shows `On: Not applied yet` until the automation applied its configuration for the first time.
@@ -555,7 +600,8 @@ Every run increments the `RunCount` of its rule, also two identical runs in a ro
 
 The following features are not available yet:
 
-- Authorization rules: an allowlist of the operations and properties an automation may call or write, such as a storm automation that may close the blinds but never open them.
+- Checking the rights of the person who edits an automation, once people have roles: today whoever can edit an automation can give it any role and any action.
+- Counting automations in the `UsedByAgents` of a role and naming them when a role is renamed or deleted: an automation that names a renamed or deleted role refuses its calls and writes until it is given the new name.
 - History functions in expressions, such as the maximum of a property over the last hours or "was above 500 W in the last 3 hours". Named states cover the washing machine without them.
 - A sun subject with sunrise and sunset instants for light rules.
 - A lock that depends on state and applies to every caller, such as nobody extending the blinds during a storm.

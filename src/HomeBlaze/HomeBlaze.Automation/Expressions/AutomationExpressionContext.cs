@@ -12,7 +12,7 @@ internal readonly struct AutomationExpressionContext(AutomationEvaluation evalua
 {
     public ExpressionValue ResolvePath(string path)
     {
-        if (AutomationPaths.ResolveProperty(evaluation.Resolver, path, evaluation.Rule) is not { } property)
+        if (AutomationPaths.ResolveProperty(evaluation.Resolver, path, evaluation.Rule) is not { } property || !evaluation.CanRead(property))
         {
             evaluation.AddMissingPath(path);
             return ExpressionValue.Missing;

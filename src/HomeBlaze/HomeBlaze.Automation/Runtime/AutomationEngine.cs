@@ -20,6 +20,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     private readonly AutomationStatusReporter _status;
     private readonly ILogger _logger;
     private CompiledAutomation _snapshot = CompiledAutomation.Empty;
+    private IReadOnlyList<string> _roles = [];
+    private IReadOnlyList<string>? _rejectedRoles;
     private int _appliedConfigurationVersion = -1;
     private bool _hasConfigurationError;
 
@@ -52,6 +54,10 @@ internal sealed class AutomationEngine : IRuleRunHost
     IInterceptorSubject IRuleRunHost.Automation => _automation;
 
     public string? CurrentState => _automation.CurrentState;
+
+    public IReadOnlyList<string> Roles => _roles;
+
+    public IReadOnlyList<string>? RejectedRoles => _rejectedRoles;
 
     public bool RunUnlessAbandoned(Action write)
     {
@@ -134,14 +140,19 @@ internal sealed class AutomationEngine : IRuleRunHost
 
         _appliedConfigurationVersion = version;
         var rules = _automation.Rules;
+        var roles = _automation.Roles;
         TakeRunsOfReplacedRules(rules);
         _keeper.RestoreRules(rules);
-        if (AutomationCompiler.TryCompile(_automation.States, _automation.InitialState, rules, _automation.RuleOrder, out var compiled, out var error))
+        if (AutomationCompiler.TryCompile(_automation, roles, rules, out var compiled, out var error))
         {
+            _roles = [.. roles];
+            _rejectedRoles = null;
             Replace(compiled);
         }
         else
         {
+            // The kept rules run only what both role sets allow, so that roles narrowed in a rejected file still apply.
+            _rejectedRoles = roles.All(_roles.Contains) && _roles.All(roles.Contains) ? null : [.. roles];
             KeepPrevious(rules, error);
         }
     }
@@ -309,6 +320,8 @@ internal sealed class AutomationEngine : IRuleRunHost
     {
         Stop();
         _snapshot = CompiledAutomation.Empty;
+        _roles = [];
+        _rejectedRoles = null;
         _appliedConfigurationVersion = -1;
     }
 

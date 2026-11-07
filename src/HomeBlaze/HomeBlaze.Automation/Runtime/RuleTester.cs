@@ -1,4 +1,5 @@
 using HomeBlaze.Automation.Expressions;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.Automation.Runtime;
 
@@ -17,7 +18,7 @@ internal static class RuleTester
             return new AutomationRuleTestResult { Error = error };
         }
 
-        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone);
+        var evaluation = new AutomationEvaluation(automation.PathResolver, rule, automation.TimeProvider.GetUtcNow(), automation.TimeProvider.LocalTimeZone, canRead: PropertyReadAccess.CanRead);
         var onlyIf = compiled.OnlyIf is { } onlyIfExpression ? evaluation.EvaluateCondition(onlyIfExpression) : true;
         IReadOnlyList<string> onlyIfMissingPaths = onlyIf is null ? [.. evaluation.MissingPaths] : [];
         var triggers = compiled.PropertyTriggers.Select(trigger => TestPropertyTrigger(trigger, evaluation))
@@ -25,7 +26,7 @@ internal static class RuleTester
             .OrderBy(trigger => trigger.Number)
             .ToList();
         var executor = ActionExecutor.For(automation);
-        var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent);
+        var scope = new ActionScope(automation, rule, evaluation, compiled.AllowsEvent, automation.Roles);
         return new AutomationRuleTestResult
         {
             IsActive = compiled.IsActiveIn(automation.Enabled, automation.CurrentState),

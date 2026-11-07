@@ -15,8 +15,8 @@ public class ActionExecutorTests
     private ActionExecutor CreateExecutor(IAutomationAuthorizer? authorizer = null) =>
         new(_graph.Resolver, authorizer ?? new AllowAllAutomationAuthorizer(), serviceProvider: null, _time);
 
-    private ActionScope CreateScope() =>
-        new(_graph.Host, _graph.Rule, new AutomationEvaluation(_graph.Resolver, _graph.Rule, Now, TimeZoneInfo.Utc), AllowsEvent: false);
+    private ActionScope CreateScope(IReadOnlyList<string>? roles = null, IReadOnlyList<string>? rejectedRoles = null) =>
+        new(_graph.Host, _graph.Rule, new AutomationEvaluation(_graph.Resolver, _graph.Rule, Now, TimeZoneInfo.Utc), AllowsEvent: false, Roles: roles ?? [], rejectedRoles);
 
     private static InvokeOperationAction Invoke(string path, Dictionary<string, string>? arguments = null) =>
         new() { OperationPath = path, Arguments = arguments ?? new Dictionary<string, string>() };
@@ -85,20 +85,116 @@ public class ActionExecutorTests
     }
 
     [Fact]
-    public async Task WhenTheAuthorizerDenies_ThenNothingRuns()
+    public async Task WhenTheAuthorizerDenies_ThenNothingRunsAndTheRefusalStartsWithThePath()
     {
         // Arrange
-        var executor = CreateExecutor(new DenyingAuthorizer());
+        var authorizer = new RecordingAuthorizer(new DenyingPermissions());
+        var executor = CreateExecutor(authorizer);
+
+        // Act
+        var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), CreateScope(["StormBlinds"]), CancellationToken.None);
+        var write = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Position", Value = "5" }, CreateScope(["StormBlinds"]));
+
+        // Assert
+        Assert.Equal("/Blinds/Close: the automation may not call Close", call.Message);
+        Assert.Equal("/Blinds/Position: the automation may not write Position", write.Message);
+        Assert.Equal(2, authorizer.Requests.Count);
+        Assert.All(authorizer.Requests, roles => Assert.Equal(["StormBlinds"], roles.ToArray()));
+        Assert.Equal(0, _graph.Blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.Position);
+    }
+
+    [Fact]
+    public async Task WhenTheAuthorizerReturnsNoPermissions_ThenEveryCallAndWriteIsRefused()
+    {
+        // Arrange
+        var executor = CreateExecutor(new NullAuthorizer());
 
         // Act
         var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), CreateScope(), CancellationToken.None);
         var write = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Position", Value = "5" }, CreateScope());
 
         // Assert
-        Assert.Equal("The automation may not call Close", call.Message);
-        Assert.Equal("The automation may not write Position", write.Message);
+        Assert.Equal("/Blinds/Close: the authorization failed: the authorizer returned no permissions", call.Message);
+        Assert.Equal("/Blinds/Position: the authorization failed: the authorizer returned no permissions", write.Message);
         Assert.Equal(0, _graph.Blinds.CloseCount);
         Assert.Equal(0, _graph.Blinds.Position);
+    }
+
+    [Theory]
+    [InlineData("Denying", "/Blinds/Close: refused by the roles of the rejected configuration: the automation may not call Close", "/Blinds/Position: refused by the roles of the rejected configuration: the automation may not write Position")]
+    [InlineData("Unknown", "/Blinds/Close: refused by the roles of the rejected configuration: the authorization failed: the authorizer returned no permissions", "/Blinds/Position: refused by the roles of the rejected configuration: the authorization failed: the authorizer returned no permissions")]
+    public async Task WhenTheRolesOfARejectedConfigurationRefuse_ThenEveryCallAndWriteIsRefusedAlthoughTheAppliedRolesAllowIt(
+        string rejectedRole, string expectedCall, string expectedWrite)
+    {
+        // Arrange
+        var executor = CreateExecutor(new FirstRoleAuthorizer(new Dictionary<string, IAutomationPermissions?>
+        {
+            ["Allowing"] = new AllowAllAutomationAuthorizer().GetPermissions([]),
+            ["Denying"] = new DenyingPermissions()
+        }));
+        var scope = CreateScope(["Allowing"], [rejectedRole]);
+
+        // Act
+        var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), scope, CancellationToken.None);
+        var write = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Position", Value = "5" }, scope);
+
+        // Assert
+        Assert.Equal(expectedCall, call.Message);
+        Assert.Equal(expectedWrite, write.Message);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
+        Assert.Equal(0, _graph.Blinds.Position);
+    }
+
+    [Fact]
+    public async Task WhenTheRolesOfARejectedConfigurationAllowWhatTheAppliedRolesRefuse_ThenTheAppliedRolesStillRefuse()
+    {
+        // Arrange
+        var executor = CreateExecutor(new FirstRoleAuthorizer(new Dictionary<string, IAutomationPermissions?>
+        {
+            ["Allowing"] = new AllowAllAutomationAuthorizer().GetPermissions([]),
+            ["Denying"] = new DenyingPermissions()
+        }));
+
+        // Act
+        var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), CreateScope(["Denying"], ["Allowing"]), CancellationToken.None);
+
+        // Assert
+        Assert.Equal("/Blinds/Close: the automation may not call Close", call.Message);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenAnOperationRequiresConfirmationOrIsDisabled_ThenTheAuthorizerIsNotAsked()
+    {
+        // Arrange
+        var authorizer = RecordingAuthorizer.AllowingAll();
+        var executor = CreateExecutor(authorizer);
+        _graph.Blinds.IsLocked = true;
+
+        // Act
+        await executor.InvokeOperationAsync(Invoke("/Blinds/Calibrate"), CreateScope(), CancellationToken.None);
+        await executor.InvokeOperationAsync(Invoke("/Blinds/Open"), CreateScope(), CancellationToken.None);
+
+        // Assert
+        Assert.Empty(authorizer.Requests);
+    }
+
+    [Fact]
+    public async Task WhenTheRolesCannotBeUsed_ThenEveryCallAndWriteIsRefusedWithTheReason()
+    {
+        // Arrange
+        const string reason = "the roles of the automation cannot be used: No roles are assigned.";
+        var executor = CreateExecutor(new RecordingAuthorizer(new DenyingPermissions(reason)));
+
+        // Act
+        var call = await executor.InvokeOperationAsync(Invoke("/Blinds/Close"), CreateScope(), CancellationToken.None);
+        var write = executor.SetProperty(new SetPropertyAction { PropertyPath = "/Blinds/Position", Value = "5" }, CreateScope());
+
+        // Assert
+        Assert.Equal($"/Blinds/Close: {reason}", call.Message);
+        Assert.Equal($"/Blinds/Position: {reason}", write.Message);
+        Assert.Equal(0, _graph.Blinds.CloseCount);
     }
 
     [Fact]

@@ -38,6 +38,16 @@
                        data-testid="automation-edit">Edit</MudButton>
         </MudStack>
 
+        <div>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary" data-testid="automation-roles">
+                Roles: @(automation.Roles.Length == 0 ? "none" : string.Join(", ", automation.Roles))
+            </MudText>
+            @if (GetRolesError(automation) is { } rolesError)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error" data-testid="automation-roles-error">@rolesError</MudText>
+            }
+        </div>
+
         @if (automation.States.Length > 0)
         {
             <section>
@@ -275,6 +285,10 @@
 
         return _layout;
     }
+
+    // From the roles rather than the status, which names a refused action only after it ran.
+    private static string? GetRolesError(Automation automation) =>
+        AutomationTargets.GetRolesError(AutomationTargets.GetPermissions(automation, automation.Roles), automation.Rules.Values);
 
     private static string? DescribeScope(Automation automation, AutomationRule rule)
     {

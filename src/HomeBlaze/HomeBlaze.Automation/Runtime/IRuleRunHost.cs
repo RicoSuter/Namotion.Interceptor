@@ -12,6 +12,15 @@ internal interface IRuleRunHost
 
     string? CurrentState { get; }
 
+    /// <summary>The roles of the applied configuration, which decide what the actions may call and write.</summary>
+    IReadOnlyList<string> Roles { get; }
+
+    /// <summary>
+    /// The roles of a configuration that was rejected while the rules of the applied one keep running, which must also
+    /// allow each action; null when no configuration is rejected or the rejected one has the same roles.
+    /// </summary>
+    IReadOnlyList<string>? RejectedRoles { get; }
+
     /// <summary>Runs the write unless a stop abandoned the worker, which then writes nothing anymore; returns whether it ran.</summary>
     bool RunUnlessAbandoned(Action write);
 

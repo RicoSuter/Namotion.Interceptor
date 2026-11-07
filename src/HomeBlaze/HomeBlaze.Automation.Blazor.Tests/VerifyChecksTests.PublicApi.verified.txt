@@ -161,6 +161,9 @@ namespace HomeBlaze.Automation.Blazor.Editing
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public HomeBlaze.Automation.Blazor.Editing.RuleExpressions Expressions { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<HomeBlaze.Automation.IAutomationPermissions> GetPermissions { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public int Index { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -185,17 +188,18 @@ namespace HomeBlaze.Automation.Blazor.Editing
     }
     public sealed class AutomationDraft
     {
-        public AutomationDraft() { }
         public bool Enabled { get; set; }
         public string? InitialState { get; set; }
         public int InputErrorVersion { get; }
         public string? Name { get; set; }
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
         public System.Collections.Generic.List<HomeBlaze.Automation.Blazor.Editing.RuleDraft> Rules { get; }
         public System.Collections.Generic.List<string> States { get; }
         public HomeBlaze.Automation.Blazor.Editing.RuleDraft AddRule() { }
         public string AddState() { }
         public void ApplyTo(HomeBlaze.Automation.Automation automation) { }
         public HomeBlaze.Automation.Blazor.Editing.RuleDraft? FindRule(string? key) { }
+        public HomeBlaze.Automation.IAutomationPermissions GetPermissions() { }
         public void MoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule, int offset) { }
         public void RemoveRule(HomeBlaze.Automation.Blazor.Editing.RuleDraft rule) { }
         public bool RemoveState(string state) { }

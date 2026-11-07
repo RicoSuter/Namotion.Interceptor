@@ -30,6 +30,7 @@ public partial class SampleAutomationTests
 
         // Assert
         Assert.True(isValid, error);
+        Assert.Equal(["Operator"], automation.Roles);
         Assert.Equal(["cooled", "overheat"], automation.Rules.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.All(automation.Rules.Values, rule => Assert.Equal(AutomationRuleMode.DryRun, rule.Mode));
         Assert.Equal(TimeSpan.FromSeconds(30), Assert.IsType<PropertyTrigger>(automation.Rules["overheat"].Triggers[0]).For);
@@ -54,7 +55,7 @@ public partial class SampleAutomationTests
             using var automation = Deserialize(json, provider);
             var written = CreateSerializer(provider).Serialize(automation);
             errors.AddRange(FindUnreadMembers(JsonDocument.Parse(json).RootElement, JsonDocument.Parse(written).RootElement, automation.Name ?? "?"));
-            errors.AddRange(AutomationValidator.Validate(automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
+            errors.AddRange(AutomationValidator.Validate(automation, automation.Roles, automation.States, automation.InitialState, automation.Rules, automation.RuleOrder)
                 .Select(error => $"{automation.Name}: {error.Message}"));
         }
 
@@ -96,11 +97,13 @@ public partial class SampleAutomationTests
         }
     }
 
+    // The samples are checked without the roles of an installation, which need its graph.
     private static ServiceProvider CreateServices()
     {
         var services = new ServiceCollection();
         services.AddSingleton(new SubjectPathResolver(() => null));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddSingleton<IAutomationAuthorizer, AllowAllAutomationAuthorizer>();
         services.AddHomeBlazeAutomation();
         return services.BuildServiceProvider();
     }

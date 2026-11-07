@@ -80,7 +80,7 @@
             {
                 var item = Rule.Actions[index];
                 <ActionEditor @key="item" Value="item.Value" Index="index" Count="Rule.Actions.Count" States="Draft.States"
-                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions!"
+                              Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions!" GetPermissions="Draft.GetPermissions"
                               ValueChanged="@(action => EditAsync(() => SetAction(item, action)))" Moved="@(offset => EditAsync(() => Rule.MoveAction(item, offset)))"
                               Removed="@(() => EditAsync(() => Rule.Actions.Remove(item)))" TargetChanged="InputChanged" />
             }

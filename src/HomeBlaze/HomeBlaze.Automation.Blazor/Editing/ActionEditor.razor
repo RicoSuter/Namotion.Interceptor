@@ -59,6 +59,8 @@
     private AutomationAction? _checkedValue;
     private RuleExpressions? _checkedExpressions;
     private RegisteredSubjectProperty? _target;
+    private IAutomationPermissions _permissions = null!;
+    private bool? _isTargetAllowed;
     private PreviewTicker? _ticker;
 
     [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
@@ -77,11 +79,20 @@
 
     [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
 
+    /// <summary>
+    /// Gets what the roles of the edited configuration allow now; the pickers offer only targets they allow. Asked again
+    /// on each check of the target, so that a role that changed meanwhile applies.
+    /// </summary>
+    [Parameter, EditorRequired] public Func<IAutomationPermissions> GetPermissions { get; set; } = null!;
+
     [Parameter] public EventCallback<int> Moved { get; set; }
 
     [Parameter] public EventCallback Removed { get; set; }
 
-    /// <summary>Raised when the operation or property at the path of the action appeared, went away or was replaced in the graph.</summary>
+    /// <summary>
+    /// Raised when the operation or property at the path of the action appeared, went away or was replaced in the graph, or
+    /// when the roles started or stopped allowing the action on it.
+    /// </summary>
     [Parameter] public EventCallback TargetChanged { get; set; }
 
     // The component renders again after each edit, before its parent passes the new action down. A stale value in that
@@ -89,21 +100,33 @@
     protected override void OnParametersSet()
     {
         _value = Value;
+        _permissions = GetPermissions();
         Refresh();
+        _isTargetAllowed = IsAllowed(_target);
         _ticker ??= new PreviewTicker(TimeProvider, InvokeAsync, CheckTargetAsync);
     }
 
-    // Each tick resolves the target again, so that an operation or a property that appears after the action was typed shows
-    // its inputs and errors. Only a changed target checks the inputs again.
+    // Each tick resolves the target and checks it against the roles again, so that an operation or a property that appears
+    // after the action was typed shows its inputs and errors, and a role that changed meanwhile shows or clears its denial.
+    // Only a changed target or a changed verdict checks the action again.
     private async Task CheckTargetAsync()
     {
-        if (ActionInputs.GetTargetPath(_value) is not { } path || ReferenceEquals(AutomationPreview.ResolveTarget(Automation, RuleKey, path), _target))
+        if (ActionInputs.GetTargetPath(_value) is not { } path)
+        {
+            return;
+        }
+
+        var target = AutomationPreview.ResolveTarget(Automation, RuleKey, path);
+        _permissions = GetPermissions();
+        var isTargetAllowed = IsAllowed(target);
+        if (ReferenceEquals(target, _target) && isTargetAllowed == _isTargetAllowed)
         {
             return;
         }
 
         _checkedValue = null;
         Refresh();
+        _isTargetAllowed = isTargetAllowed;
         StateHasChanged();
         await TargetChanged.InvokeAsync();
     }
@@ -243,11 +266,17 @@
         return separator < 0 ? null : key[..separator];
     }
 
-    private static bool IsOperation(RegisteredSubjectProperty property) =>
-        property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, RequiresConfirmation: false };
+    private bool IsOperation(RegisteredSubjectProperty property) => AutomationTargets.CanCall(property, _permissions);
 
-    private static bool IsWritable(RegisteredSubjectProperty property) =>
-        property.TryGetMethodMetadata() is null && property.HasPublicSetter && !property.IsConfigurationProperty();
+    private bool IsWritable(RegisteredSubjectProperty property) => AutomationTargets.CanWrite(property, _permissions);
+
+    // Whether the roles allow the action on the target, or null without a target.
+    private bool? IsAllowed(RegisteredSubjectProperty? target) => target is null ? null : _value switch
+    {
+        InvokeOperationAction => IsOperation(target),
+        SetPropertyAction => IsWritable(target),
+        _ => null
+    };
 
     private static string FormatPolicy(ActionErrorPolicy policy) => policy == ActionErrorPolicy.StopRule ? "Stop rule" : "Continue";
 }

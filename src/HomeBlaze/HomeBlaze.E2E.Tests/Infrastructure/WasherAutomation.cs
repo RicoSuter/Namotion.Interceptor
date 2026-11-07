@@ -3,14 +3,16 @@ using HomeBlaze.Automation;
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
 /// <summary>
-/// A dry-run automation of a washing machine with the states Idle and Running over the demo motor. Its conditions never
-/// become true there, so no rule runs during a test.
+/// A dry-run automation of a washing machine with the states Idle and Running over the demo motor, with the role
+/// Operator, so that an action a test adds may call the motor. Its conditions never become true there, so no rule runs
+/// during a test.
 /// </summary>
 internal static class WasherAutomation
 {
     public static void Configure(HomeBlaze.Automation.Automation automation)
     {
         automation.Name = "Washer";
+        automation.Roles = ["Operator"];
         automation.States = ["Idle", "Running"];
         automation.InitialState = "Idle";
         automation.RuleOrder = ["started", "finished"];

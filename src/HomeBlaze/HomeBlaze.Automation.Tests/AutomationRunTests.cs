@@ -2,6 +2,7 @@ using System.Reactive;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Automation.Tests.Testing;
+using HomeBlaze.Services;
 using Namotion.Interceptor.Testing;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
@@ -47,7 +48,7 @@ public class AutomationRunTests
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(
             automation => automation.Rules = Keyed(("retract", Create("Retract", mode, [When("/Weather/Gust > 8")], [Invoke("/Blinds/Close")]))),
-            authorizer: new ThrowingAuthorizer());
+            authorizer: _ => new ThrowingAuthorizer());
         var rule = host.Rule("retract");
 
         // Act
@@ -358,5 +359,53 @@ public class AutomationRunTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => flushes.IsCompleted, timeout: TimeSpan.FromSeconds(5));
         Assert.True(flushes.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenTheRolesChangeWithoutBeingApplied_ThenRunsKeepTheAppliedRoles()
+    {
+        // Arrange
+        var authorizer = RecordingAuthorizer.AllowingAll();
+        await using var host = await AutomationTestHost.StartAsync(
+            automation =>
+            {
+                automation.Roles = ["Operator"];
+                automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close"))));
+            },
+            authorizer: _ => authorizer);
+
+        // Act
+        host.Automation.Roles = ["Reader"];
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+        var beforeApply = authorizer.Requests[^1].ToArray();
+        await host.Automation.ApplyConfigurationAsync(CancellationToken.None);
+        host.Weather.Gust = 0;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(["Operator"], beforeApply);
+        Assert.Equal(["Reader"], authorizer.Requests[^1].ToArray());
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenTheFlowThatChangesAValueMayNotReadIt_ThenTheRunningAutomationStillReadsIt()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation =>
+            automation.Rules = Keyed(("retract", On("Retract", When("/Weather/Gust > 8"), Invoke("/Blinds/Close")))));
+
+        // Act
+        using (PropertyReadAccess.Enter(_ => false))
+        {
+            host.Weather.Gust = 9;
+            await host.FlushAsync();
+        }
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
     }
 }
