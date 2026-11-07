@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.Connectors.Updates.Internal;
 
 namespace Namotion.Interceptor.Connectors;
 
