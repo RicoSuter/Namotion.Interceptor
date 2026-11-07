@@ -56,7 +56,7 @@ Data/
 ├── Root.json            root configuration
 ├── Files/               devices, dashboards, pages, Plugins.json, docs
 ├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
-├── Automations/         current state and last runs of automations, one checkpoint file each
+├── AutomationState/     current state and last runs of automations, one checkpoint file each
 ├── DataProtection-Keys/ ASP.NET Core keys that keep antiforgery tokens valid across restarts
 ├── History/Sqlite/      SQLite history
 └── OpcUa/               OPC UA certificates
@@ -66,7 +66,7 @@ When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The
 
 `DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
 
-`Automations/` holds one checkpoint file per automation, at the path of the automation in the subject graph: `Automations/Demo/ConveyorGuard.json` belongs to `/Demo/ConveyorGuard`. It keeps the current state, when the automation entered it, and the last run of each rule across restarts, and it is replaced as a whole: at once when the state changes, and at most every 5 seconds for the runs. A crash or a power loss can therefore lose the runs of the last 5 seconds, with their run counts and the time a rule last ran, which a cooldown reads. Deleting an automation deletes its file, and renaming or moving one starts it again from its initial state. A file that cannot be read is kept as `ConveyorGuard.json.unreadable-<timestamp>` next to it: the automation starts from its initial state and shows the error until it is reset or its configuration is saved. To reset an automation by hand, stop HomeBlaze and delete its file.
+`AutomationState/` holds one checkpoint file per automation, at the path of the automation in the subject graph: `AutomationState/Demo/ConveyorGuard.json` belongs to `/Demo/ConveyorGuard`. A character that a file name cannot hold, such as `:`, and `%` itself are written as `%` and their hexadecimal code, so that every path has a file of its own. It keeps the current state, when the automation entered it, and the last run of each rule across restarts, and it is replaced as a whole: at once when the state changes, and at most every 5 seconds for the runs. A crash or a power loss can therefore lose the runs of the last 5 seconds, with their run counts and the time a rule last ran, which a cooldown reads. Deleting an automation deletes its file, and renaming or moving one starts it again from its initial state. A file that cannot be read is kept as `ConveyorGuard.json.unreadable-<timestamp>` next to it: the automation starts from its initial state and shows the error until it is reset or its configuration is saved. To reset an automation by hand, stop HomeBlaze and delete its file.
 
 ---
 

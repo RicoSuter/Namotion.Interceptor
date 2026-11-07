@@ -32,7 +32,7 @@ public static class HomeBlazePaths
     public const string DataProtectionKeysDirectory = "DataProtection-Keys";
 
     /// <summary>Folder of the checkpoint files of automations, relative to the data directory.</summary>
-    public const string AutomationsDirectory = "Automations";
+    public const string AutomationStateDirectory = "AutomationState";
 
     /// <summary>
     /// Resolves the full path of the root configuration file. A relative setting resolves against the working directory.

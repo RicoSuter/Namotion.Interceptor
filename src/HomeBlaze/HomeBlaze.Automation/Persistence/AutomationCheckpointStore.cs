@@ -1,4 +1,7 @@
+using System.Buffers;
+using System.Collections.Frozen;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using HomeBlaze.Services;
 
@@ -6,14 +9,24 @@ namespace HomeBlaze.Automation.Persistence;
 
 /// <summary>
 /// The checkpoint file of one automation, at the canonical path of the automation below the folder
-/// <see cref="HomeBlazePaths.AutomationsDirectory"/> of the data directory, such as
-/// <c>Automations/Demo/ConveyorGuard.json</c> for <c>/Demo/ConveyorGuard</c>. Without a path nothing is read or written.
-/// A write replaces the file atomically, so it holds the old or the new checkpoint and never a part of one.
+/// <see cref="HomeBlazePaths.AutomationStateDirectory"/> of the data directory, such as
+/// <c>AutomationState/Demo/ConveyorGuard.json</c> for <c>/Demo/ConveyorGuard</c>. Each path has a file of its own: a
+/// character that a file name cannot hold, the escape character <c>%</c>, a name that Windows reserves and a folder name
+/// that ends with <c>.json</c> are percent-encoded. Without a path nothing is read or written. A write replaces the file
+/// atomically, so it holds the old or the new checkpoint and never a part of one.
 /// </summary>
 internal sealed class AutomationCheckpointStore(string? filePath)
 {
-    // The Windows set, so that data directories move between platforms without renames.
-    private static readonly char[] InvalidFileNameCharacters = ['<', '>', ':', '"', '\\', '|', '?', '*'];
+    private const string Extension = ".json";
+
+    // The Windows set, so that data directories move between platforms without renames, and the escape character.
+    private static readonly SearchValues<char> EscapedCharacters = SearchValues.Create("<>:\"\\|?*%");
+
+    private static readonly FrozenSet<string> ReservedNames = new[]
+    {
+        "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private readonly Lock _lock = new();
     private bool _isDeleted;
@@ -28,14 +41,16 @@ internal sealed class AutomationCheckpointStore(string? filePath)
             return null;
         }
 
-        var segments = automationPath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(ToFileName).ToList();
-        if (segments.Count == 0)
+        var names = automationPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var segments = new string[names.Length == 0 ? 1 : names.Length];
+        for (var index = 0; index < names.Length; index++)
         {
-            segments.Add("_root");
+            segments[index] = ToFileName(names[index], isFolder: index < names.Length - 1);
         }
 
-        segments[^1] += ".json";
-        return Path.Combine([dataDirectory, HomeBlazePaths.AutomationsDirectory, .. segments]);
+        // The root is named by its path, which no segment can hold.
+        segments[^1] = (names.Length == 0 ? "%2F" : segments[^1]) + Extension;
+        return Path.Combine([dataDirectory, HomeBlazePaths.AutomationStateDirectory, .. segments]);
     }
 
     /// <summary>Reads the checkpoint, or null when there is no path or no file.</summary>
@@ -133,22 +148,46 @@ internal sealed class AutomationCheckpointStore(string? filePath)
         }
     }
 
-    private static string ToFileName(string segment)
+    // Percent-encodes what would make two segments share a file name, or a segment name no file: what a file name cannot
+    // hold, the escape character, the dot names, a trailing dot or space (which Windows drops), the first letter of a
+    // reserved name, and the dot of a folder name that ends with the extension of a file next to it.
+    private static string ToFileName(string segment, bool isFolder)
     {
-        if (segment is "." or "..")
+        var builder = new StringBuilder(segment.Length + 8);
+        for (var index = 0; index < segment.Length; index++)
         {
-            return "_";
-        }
-
-        var characters = segment.ToCharArray();
-        for (var index = 0; index < characters.Length; index++)
-        {
-            if (InvalidFileNameCharacters.Contains(characters[index]) || char.IsControl(characters[index]))
+            var character = segment[index];
+            if (MustEscape(segment, index, isFolder))
             {
-                characters[index] = '_';
+                builder.Append('%').Append(((int)character).ToString("X2", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                builder.Append(character);
             }
         }
 
-        return new string(characters);
+        return builder.ToString();
+    }
+
+    private static bool MustEscape(string segment, int index, bool isFolder)
+    {
+        var character = segment[index];
+        if (EscapedCharacters.Contains(character) || char.IsControl(character) || segment is "." or "..")
+        {
+            return true;
+        }
+
+        return index == segment.Length - 1 && character is '.' or ' ' || IsPositionEscaped(segment, index, isFolder);
+    }
+
+    private static bool IsPositionEscaped(string segment, int index, bool isFolder)
+    {
+        if (index == 0 && ReservedNames.Contains(segment.Split('.')[0]))
+        {
+            return true;
+        }
+
+        return isFolder && index == segment.Length - Extension.Length && segment.EndsWith(Extension, StringComparison.OrdinalIgnoreCase);
     }
 }

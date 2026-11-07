@@ -114,8 +114,8 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Running", stateBeforeMove);
         Assert.Equal("Idle", stateAfterMove);
         Assert.Equal(1L, host.Rule("started").RunCount);
-        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
-        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(Path.Combine(host.DataDirectory, "Automations", "Basement", "Storm.json")));
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
+        Assert.Contains("\"Running\"", await File.ReadAllTextAsync(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Storm.json")));
     }
 
     [Fact]
@@ -141,8 +141,8 @@ public class AutomationCheckpointLifecycleTests
         Assert.Null(host.Rule("started").LastRunOutcome);
         Assert.Equal(0L, host.Rule("started").RunCount);
         Assert.Equal("Idle", automation.CurrentState);
-        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
-        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Basement", "Storm.json")));
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
+        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Storm.json")));
     }
 
     [Fact]
@@ -168,8 +168,8 @@ public class AutomationCheckpointLifecycleTests
         Assert.Equal("Idle", automation.CurrentState);
         Assert.Null(host.Rule("started").LastTriggeredAt);
         Assert.Equal(0L, host.Rule("started").RunCount);
-        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Storm.json")));
-        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "Automations", "Laundry.json")));
+        Assert.False(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Storm.json")));
+        Assert.True(File.Exists(Path.Combine(host.DataDirectory, "AutomationState", "Laundry.json")));
     }
 
     [Fact]
@@ -202,7 +202,7 @@ public class AutomationCheckpointLifecycleTests
     {
         // Arrange
         await using var host = await AutomationTestHost.StartAsync(automation => { });
-        var checkpointPath = Path.Combine(host.DataDirectory, "Automations", "Basement", "Washer.json");
+        var checkpointPath = Path.Combine(host.DataDirectory, "AutomationState", "Basement", "Washer.json");
         new AutomationCheckpointStore(checkpointPath).Write(new AutomationCheckpoint
         {
             CurrentState = "Running",

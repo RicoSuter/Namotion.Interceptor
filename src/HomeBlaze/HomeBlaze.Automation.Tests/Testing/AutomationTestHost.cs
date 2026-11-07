@@ -51,7 +51,7 @@ internal sealed class AutomationTestHost : IAsyncDisposable
 
     public string Key { get; private set; } = string.Empty;
 
-    public string CheckpointPath => Path.Combine(DataDirectory, "Automations", Key + ".json");
+    public string CheckpointPath => Path.Combine(DataDirectory, "AutomationState", Key + ".json");
 
     public static async Task<AutomationTestHost> StartAsync(
         Action<Automation> configure, DateTimeOffset? start = null, TimeZoneInfo? timeZone = null, IAutomationAuthorizer? authorizer = null)

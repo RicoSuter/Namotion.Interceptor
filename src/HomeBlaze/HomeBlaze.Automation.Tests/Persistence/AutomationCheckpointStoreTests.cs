@@ -9,10 +9,16 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     [Theory]
-    [InlineData("/Automations/Storm", "Automations/Automations/Storm.json")]
-    [InlineData("/Pages/Home.md/Storm", "Automations/Pages/Home.md/Storm.json")]
-    [InlineData("/A:B/C?", "Automations/A_B/C_.json")]
-    [InlineData("/", "Automations/_root.json")]
+    [InlineData("/Automations/Storm", "AutomationState/Automations/Storm.json")]
+    [InlineData("/Pages/Home.md/Storm", "AutomationState/Pages/Home.md/Storm.json")]
+    [InlineData("/Laundry/Washer_2", "AutomationState/Laundry/Washer_2.json")]
+    [InlineData("/A:B/C?", "AutomationState/A%3AB/C%3F.json")]
+    [InlineData("/100%", "AutomationState/100%25.json")]
+    [InlineData("/a/..", "AutomationState/a/%2E%2E.json")]
+    [InlineData("/Dot./Space ", "AutomationState/Dot%2E/Space%20.json")]
+    [InlineData("/CON/lpt1.x", "AutomationState/%43ON/%6Cpt1.x.json")]
+    [InlineData("/Storm.json/Rain", "AutomationState/Storm%2Ejson/Rain.json")]
+    [InlineData("/", "AutomationState/%2F.json")]
     public void WhenAnAutomationPathIsMapped_ThenTheFileMirrorsIt(string automationPath, string expected)
     {
         // Act
@@ -20,6 +26,25 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
 
         // Assert
         Assert.Equal(Path.Combine(_directory, expected.Replace('/', Path.DirectorySeparatorChar)), path);
+    }
+
+    [Theory]
+    [InlineData("/a:b", "/a_b")]
+    [InlineData("/x/a?b", "/x/a*b")]
+    [InlineData("/a/..", "/a/_")]
+    [InlineData("/a%3Ab", "/a:b")]
+    [InlineData("/Storm.json/Rain", "/Storm")]
+    [InlineData("/", "/_root")]
+    public void WhenTwoAutomationPathsDiffer_ThenTheirFilesDifferAndNeitherIsInTheFolderOfTheOther(string first, string second)
+    {
+        // Act
+        var firstPath = AutomationCheckpointStore.GetFilePath(_directory, first)!;
+        var secondPath = AutomationCheckpointStore.GetFilePath(_directory, second)!;
+
+        // Assert
+        Assert.NotEqual(firstPath, secondPath, StringComparer.OrdinalIgnoreCase);
+        Assert.False(firstPath.StartsWith(secondPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        Assert.False(secondPath.StartsWith(firstPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -38,7 +63,7 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     public void WhenACheckpointIsWritten_ThenItIsReadBackAndNoTemporaryFileRemains()
     {
         // Arrange
-        var store = new AutomationCheckpointStore(Path.Combine(_directory, "Automations", "Storm.json"));
+        var store = new AutomationCheckpointStore(Path.Combine(_directory, "AutomationState", "Storm.json"));
         var run = new RuleCheckpoint { RunCount = 3, LastRunOutcome = AutomationRunOutcome.DryRun, LastRunMessage = "Would run /Blinds/Close()" };
         var checkpoint = new AutomationCheckpoint
         {
@@ -56,7 +81,7 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
         Assert.Equal("Open", read.CurrentState);
         Assert.Equal(checkpoint.StateEnteredAt, read.StateEnteredAt);
         Assert.Equal(run, read.Rules["remind"]);
-        Assert.Equal([store.FilePath!], Directory.GetFiles(Path.Combine(_directory, "Automations")));
+        Assert.Equal([store.FilePath!], Directory.GetFiles(Path.Combine(_directory, "AutomationState")));
         Assert.Contains("\"lastRunOutcome\": \"DryRun\"", File.ReadAllText(store.FilePath!));
     }
 
@@ -76,7 +101,7 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     public void WhenTheStoreIsDeleted_ThenTheFileIsGoneAndLaterWritesDoNothing()
     {
         // Arrange
-        var path = Path.Combine(_directory, "Automations", "Storm.json");
+        var path = Path.Combine(_directory, "AutomationState", "Storm.json");
         var store = new AutomationCheckpointStore(path);
         store.Write(new AutomationCheckpoint());
 
@@ -92,7 +117,7 @@ public sealed class AutomationCheckpointStoreTests : IDisposable
     public void WhenTheFileCannotBeReplaced_ThenTheWriteThrows()
     {
         // Arrange
-        var path = Path.Combine(_directory, "Automations", "Storm.json");
+        var path = Path.Combine(_directory, "AutomationState", "Storm.json");
         Directory.CreateDirectory(path);
         var store = new AutomationCheckpointStore(path);
 
