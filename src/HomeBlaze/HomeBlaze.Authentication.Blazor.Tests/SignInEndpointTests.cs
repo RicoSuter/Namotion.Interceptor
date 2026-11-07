@@ -292,6 +292,30 @@ public class SignInEndpointTests
     }
 
     [Fact]
+    public async Task WhenTheStoredUserAllowsAnEmptyPasswordButNeedNotChangeIt_ThenTheSessionMustStillChangeIt()
+    {
+        // Arrange
+        await using var host = await AuthenticationTestHost.StartAsync();
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var admin = (await userManager.FindByNameAsync(AdminSeeding.AdminUserName))!;
+            admin.MustChangePassword = false;
+            Assert.True((await userManager.UpdateAsync(admin)).Succeeded);
+            Assert.True(admin.AllowsEmptyPassword);
+        }
+
+        using var browser = host.CreateBrowser();
+
+        // Act
+        var response = await SignInAsync(browser, AdminSeeding.AdminUserName, string.Empty);
+
+        // Assert
+        Assert.Equal("/", await TestBrowser.GetAccountRedirectAsync(response));
+        Assert.Equal(HttpStatusCode.Forbidden, (await browser.GetAsync("/protected")).StatusCode);
+    }
+
+    [Fact]
     public async Task WhenTheAdminHasAPasswordButStillAllowsAnEmptyOne_ThenAnEmptyPasswordIsRefused()
     {
         // Arrange

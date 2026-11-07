@@ -67,6 +67,9 @@ internal sealed class PasswordSignIn(
             return false;
         }
 
+        // In memory only, for the claim: an empty password confines the session even where the stored flag is false,
+        // such as in a database edited by hand.
+        user.MustChangePassword = true;
         await signInManager.SignInAsync(user, isPersistent: false);
         await SignedInAsync(context, user);
         return true;
