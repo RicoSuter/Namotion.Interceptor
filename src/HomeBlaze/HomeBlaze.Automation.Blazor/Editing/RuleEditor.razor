@@ -3,13 +3,13 @@
 <MudStack Spacing="3" data-testid="automation-rule-editor">
     <div class="d-flex flex-wrap align-center gap-3">
         <div style="flex: 1 1 220px;">
-            <MudTextField T="string" Label="Rule name" Value="@Rule.Name" ValueChanged="SetNameAsync" Immediate="true" />
+            <MudTextField T="string" Label="Rule name" Value="@Rule.Name" ValueChanged="@((string? name) => EditAsync(() => Rule.Name = name))" Immediate="true" />
         </div>
         <MudButtonGroup Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OverrideStyles="false">
             @foreach (var mode in Modes)
             {
                 <MudButton Size="Size.Small" Color="Color.Primary" Variant="@(Rule.Mode == mode ? Variant.Filled : Variant.Outlined)"
-                           OnClick="@(() => SetModeAsync(mode))" data-testid="@($"automation-rule-mode-{mode}")">@AutomationSummary.FormatMode(mode)</MudButton>
+                           OnClick="@(() => EditAsync(() => Rule.Mode = mode))" data-testid="@($"automation-rule-mode-{mode}")">@AutomationSummary.FormatMode(mode)</MudButton>
             }
         </MudButtonGroup>
         <MudIconButton Icon="@Icons.Material.Filled.Delete" aria-label="Delete rule" OnClick="@(() => Removed.InvokeAsync(Rule))"
@@ -18,7 +18,7 @@
     @if (Draft.States.Count > 0)
     {
         <div style="max-width: 280px;">
-            <MudSelect T="string" Label="Active in state" Value="@(Rule.InState ?? AnyState)" ValueChanged="SetInStateAsync" ToStringFunc="@FormatState">
+            <MudSelect T="string" Label="Active in state" Value="@(Rule.InState ?? AnyState)" ValueChanged="@((string? state) => EditAsync(() => Rule.InState = string.IsNullOrEmpty(state) ? null : state))" ToStringFunc="@FormatState">
                 <MudSelectItem Value="@AnyState">@FormatState(AnyState)</MudSelectItem>
                 @foreach (var state in Draft.States)
                 {
@@ -45,19 +45,19 @@
                 {
                     case PropertyTrigger propertyTrigger:
                         <PropertyTriggerEditor @key="item" Trigger="propertyTrigger" Expressions="_expressions" Draft="Draft" RuleKey="@Rule.Key"
-                                               TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
+                                               TriggerChanged="@(trigger => EditAsync(() => item.Value = trigger))" Removed="@(() => EditAsync(() => Rule.Triggers.Remove(item)))" />
                         break;
                     case SubjectEventTrigger eventTrigger:
                         <EventTriggerEditor @key="item" Trigger="eventTrigger" Automation="Automation" RuleKey="@Rule.Key"
-                                            TriggerChanged="@(trigger => SetTriggerAsync(item, trigger))" Removed="@(() => RemoveTriggerAsync(item))" />
+                                            TriggerChanged="@(trigger => EditAsync(() => item.Value = trigger))" Removed="@(() => EditAsync(() => Rule.Triggers.Remove(item)))" />
                         break;
                 }
             }
         </MudStack>
         <div class="d-flex flex-wrap gap-2 mt-2">
-            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddPropertyTriggerAsync"
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(() => Rule.AddTrigger(new PropertyTrigger())))"
                        data-testid="automation-add-property-trigger">Property condition</MudButton>
-            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddEventTriggerAsync"
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(() => Rule.AddTrigger(new SubjectEventTrigger())))"
                        data-testid="automation-add-event-trigger">Event</MudButton>
         </div>
     </section>
@@ -77,16 +77,16 @@
                 var item = Rule.Actions[index];
                 <ActionEditor @key="item" Value="item.Value" Index="index" Count="Rule.Actions.Count" States="Draft.States"
                               Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions"
-                              ValueChanged="@(action => SetActionAsync(item, action))" Moved="@(offset => MoveActionAsync(item, offset))"
-                              Removed="@(() => RemoveActionAsync(item))" />
+                              ValueChanged="@(action => EditAsync(() => SetAction(item, action)))" Moved="@(offset => EditAsync(() => Rule.MoveAction(item, offset)))"
+                              Removed="@(() => EditAsync(() => Rule.Actions.Remove(item)))" />
             }
         </MudStack>
         <div class="d-flex flex-wrap gap-2 mt-2">
-            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddCallOperationAsync"
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(Rule.AddCallOperation))"
                        data-testid="automation-add-call-operation">Call operation</MudButton>
-            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSetPropertyAsync"
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(Rule.AddSetProperty))"
                        data-testid="automation-add-set-property">Set property</MudButton>
-            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddChangeStateAsync" Disabled="@(Draft.States.Count == 0)"
+            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => EditAsync(() => Rule.AddChangeState(Draft.States.Count > 0 ? Draft.States[0] : string.Empty)))" Disabled="@(Draft.States.Count == 0)"
                        data-testid="automation-add-change-state">Change state</MudButton>
         </div>
     </section>
@@ -114,83 +114,17 @@
 
     protected override void OnParametersSet() => _expressions = new RuleExpressions(Automation, Rule.Key, Rule.AllowsEvent, TimeZone);
 
-    private Task SetNameAsync(string? name)
+    // Every edit of the rule changes the draft, which the editor validates again.
+    private Task EditAsync(Action edit)
     {
-        Rule.Name = name;
+        edit();
         return Changed.InvokeAsync();
     }
 
-    private Task SetModeAsync(AutomationRuleMode mode)
-    {
-        Rule.Mode = mode;
-        return Changed.InvokeAsync();
-    }
-
-    private Task SetInStateAsync(string? state)
-    {
-        Rule.InState = string.IsNullOrEmpty(state) ? null : state;
-        return Changed.InvokeAsync();
-    }
-
-    private Task SetTriggerAsync(DraftItem<AutomationTrigger> item, AutomationTrigger trigger)
-    {
-        item.Value = trigger;
-        return Changed.InvokeAsync();
-    }
-
-    private Task RemoveTriggerAsync(DraftItem<AutomationTrigger> item)
-    {
-        Rule.Triggers.Remove(item);
-        return Changed.InvokeAsync();
-    }
-
-    private Task AddPropertyTriggerAsync()
-    {
-        Rule.AddTrigger(new PropertyTrigger());
-        return Changed.InvokeAsync();
-    }
-
-    private Task AddEventTriggerAsync()
-    {
-        Rule.AddTrigger(new SubjectEventTrigger());
-        return Changed.InvokeAsync();
-    }
-
-    private Task SetActionAsync(DraftItem<AutomationAction> item, AutomationAction action)
+    private static void SetAction(DraftItem<AutomationAction> item, AutomationAction action)
     {
         item.IsOperationChanged |= item.Value is InvokeOperationAction previous && action is InvokeOperationAction next && previous.OperationPath != next.OperationPath;
         item.Value = action;
-        return Changed.InvokeAsync();
-    }
-
-    private Task MoveActionAsync(DraftItem<AutomationAction> item, int offset)
-    {
-        Rule.MoveAction(item, offset);
-        return Changed.InvokeAsync();
-    }
-
-    private Task RemoveActionAsync(DraftItem<AutomationAction> item)
-    {
-        Rule.Actions.Remove(item);
-        return Changed.InvokeAsync();
-    }
-
-    private Task AddCallOperationAsync()
-    {
-        Rule.AddCallOperation();
-        return Changed.InvokeAsync();
-    }
-
-    private Task AddSetPropertyAsync()
-    {
-        Rule.AddSetProperty();
-        return Changed.InvokeAsync();
-    }
-
-    private Task AddChangeStateAsync()
-    {
-        Rule.AddChangeState(Draft.States.Count > 0 ? Draft.States[0] : string.Empty);
-        return Changed.InvokeAsync();
     }
 
     private static string FormatState(string? state) => string.IsNullOrEmpty(state) ? "Any state" : state;

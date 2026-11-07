@@ -1,7 +1,7 @@
 <MudStack Spacing="3" Class="automation-tab">
-    <MudTextField T="string" Label="Name" Value="@Draft.Name" ValueChanged="SetNameAsync" Immediate="true"
+    <MudTextField T="string" Label="Name" Value="@Draft.Name" ValueChanged="@((string? name) => EditAsync(() => Draft.Name = name))" Immediate="true"
                   HelperText="The title of the automation." data-testid="automation-name" />
-    <MudSwitch T="bool" Value="@Draft.Enabled" ValueChanged="SetEnabledAsync" Color="Color.Primary" data-testid="automation-enabled"
+    <MudSwitch T="bool" Value="@Draft.Enabled" ValueChanged="@((bool isEnabled) => EditAsync(() => Draft.Enabled = isEnabled))" Color="Color.Primary" data-testid="automation-enabled"
                Label="Enabled: the rules observe their triggers. A disabled automation keeps its state." />
 </MudStack>
 
@@ -10,15 +10,9 @@
 
     [Parameter] public EventCallback Changed { get; set; }
 
-    private Task SetNameAsync(string? name)
+    private Task EditAsync(Action edit)
     {
-        Draft.Name = name;
-        return Changed.InvokeAsync();
-    }
-
-    private Task SetEnabledAsync(bool isEnabled)
-    {
-        Draft.Enabled = isEnabled;
+        edit();
         return Changed.InvokeAsync();
     }
 }
