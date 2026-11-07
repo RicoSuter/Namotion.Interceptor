@@ -62,7 +62,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 | Tool | With a policy |
 |------|---------------|
 | `browse`, `search`, `get_property`, `set_property` | The rules of `Namotion.Interceptor.Mcp`: hidden reads as missing, writable needs `write` |
-| `list_methods`, `$methods` | Only methods with `read` |
+| `list_methods`, `$methods`, `$title`, `$icon` | Only methods with `read`; the title and the icon only with `read` on them when they are registered members, such as a derived title |
 | `invoke_query`, `invoke_operation`, Markdown tools | Subject resolved with `TryGetReadableSubject`, else "Subject not found."; `read` on the method, else "Method not found"; `execute`, else "Operation 'Name' is not permitted. The access policy does not allow it." |
 | `get_property_history` | Path resolved with `TryGetReadableProperty`, else "Path not found"; then `history`, else "History is not available: path. The access policy does not allow it."; the store is queried with the recorded path of the resolved property (`GetHistoryPath`), whichever spelling the client used |
 | `search_markdown` | Pages readable at their path with `read` and `execute` on `ReadRawContent`; notes whose metadata member is readable |

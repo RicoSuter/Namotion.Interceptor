@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.AI.Tests.Agents;
 using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -48,6 +49,28 @@ public class HomeBlazeMcpSubjectEnricherTests
 
         // Assert
         Assert.Equal("Lightbulb", enrichments["$icon"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenTheTitleIsADerivedMember_ThenItIsEnrichedOnlyWhenThePolicyAllowsToReadIt(bool deniesTitle)
+    {
+        // Arrange
+        var device = new TitledTestDevice(CreateContext()) { Name = "Pump" };
+        var role = new AuthorizationRole
+        {
+            Name = "NoTitle",
+            Includes = [BuiltInRoles.OperatorName],
+            Deny = deniesTitle ? [new PermissionRule { Members = [nameof(TitledTestDevice.Title)], Actions = [PermissionAction.Read] }] : []
+        };
+        var enricher = new HomeBlazeMcpSubjectEnricher([], isReadOnly: false, accessPolicy: TestAccessPolicies.Create(role.Name, role));
+
+        // Act
+        var enrichments = enricher.GetSubjectEnrichments(device.TryGetRegisteredSubject()!);
+
+        // Assert
+        Assert.Equal(!deniesTitle, enrichments.ContainsKey("$title"));
     }
 
     [Fact]
