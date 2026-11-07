@@ -4,8 +4,8 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Authorization.Internal;
 
 /// <summary>
-/// What one attempt of an evaluation reads and builds: the recorded parent reads, the paths built from them and which
-/// subject's paths were built. Everything is cleared together, so every path the attempt uses rests on its own reads.
+/// What one attempt of an evaluation builds: the paths and which subject's paths were built. Everything is cleared
+/// together, so every path the attempt uses rests on the reads of that attempt.
 /// </summary>
 internal sealed class EvaluationState
 {
@@ -25,8 +25,6 @@ internal sealed class EvaluationState
     // the capacities the earlier attempts grew.
     private bool _hasBuiltPathsSinceRent;
 
-    public ParentReads Reads { get; } = new();
-
     public PathStore Paths { get; } = new();
 
     /// <summary>
@@ -43,8 +41,7 @@ internal sealed class EvaluationState
     /// <summary>Clears the instance and caches it for the thread's next evaluation; it must not be used afterwards.</summary>
     public static void Return(EvaluationState state)
     {
-        if (state.Reads.Capacity > MaxCachedCapacity ||
-            (state._hasBuiltPathsSinceRent && (state.Paths.IsLargerThan(MaxCachedCapacity, MaxCachedLinks) || state._builtPaths.EnsureCapacity(0) > MaxCachedCapacity)))
+        if (state._hasBuiltPathsSinceRent && (state.Paths.IsLargerThan(MaxCachedCapacity, MaxCachedLinks) || state._builtPaths.EnsureCapacity(0) > MaxCachedCapacity))
         {
             return;
         }
@@ -83,13 +80,14 @@ internal sealed class EvaluationState
     }
 
     /// <summary>
-    /// Builds the paths of the subject from parents read through <see cref="Reads"/>: a root has the single empty path,
-    /// a detached subject unknown paths, also when it lost its parents. Incomplete when not every path could be built
-    /// or the subject has parents but no path was found.
+    /// Builds the paths of the subject from the registry's live parents: a root has the single empty path, a detached
+    /// subject unknown paths, also when it lost its parents. Incomplete when not every path could be built or the
+    /// subject has parents but no path was found. The caller validates the attempt with the registry's structure version.
     /// </summary>
     public PathList BuildPaths(RegisteredSubject subject, PathProviderBase pathProvider, int maxPaths)
     {
-        var parents = Reads.GetParents(subject, out var isAttached);
+        var parents = subject.Parents;
+        var isAttached = subject.IsAttached;
         if (!isAttached || parents.Length == 0)
         {
             return isAttached ? PathList.Root : PathList.Unknown;
@@ -98,7 +96,7 @@ internal sealed class EvaluationState
         _hasBuiltPaths = true;
         _hasBuiltPathsSinceRent = true;
         var first = Paths.Count;
-        var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, Paths, maxPaths, Reads, out var followedSingleParents) && Paths.Count > first;
+        var isComplete = SubjectPaths.TryGetPaths(subject, pathProvider, Paths, maxPaths, out var followedSingleParents) && Paths.Count > first;
         var count = Paths.Count - first;
         return new PathList(Paths, first, count, droppedLinks: 0, isComplete, isSingleChain: isComplete && followedSingleParents && count == 1);
     }
@@ -108,7 +106,6 @@ internal sealed class EvaluationState
 
     public void Clear()
     {
-        Reads.Clear();
         if (_hasBuiltPaths)
         {
             Paths.Clear();

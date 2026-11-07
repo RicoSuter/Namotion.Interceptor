@@ -22,7 +22,7 @@ public sealed class MqttServerDiagnostics : ConnectorDiagnostics
     }
 
     /// <summary>
-    /// Gets the number of clients currently connected to the broker.
+    /// Gets the number of client connections currently open on the broker.
     /// </summary>
     public int ConnectedClientCount => _server.ConnectedClientCount;
 }
