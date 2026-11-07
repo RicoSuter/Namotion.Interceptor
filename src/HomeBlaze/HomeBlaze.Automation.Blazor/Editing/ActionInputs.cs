@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Blazor.Editing;
 
@@ -18,7 +19,11 @@ internal static class ActionInputs
 
     /// <summary>The fields of the operation at the path, or null when the path leads to no operation.</summary>
     public static IReadOnlyList<ArgumentField>? GetFields(Automation automation, string ruleKey, string path) =>
-        AutomationPreview.ResolveTarget(automation, ruleKey, path)?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
+        GetFields(AutomationPreview.ResolveTarget(automation, ruleKey, path));
+
+    /// <summary>The fields of the operation that the target is, or null when the target is no operation.</summary>
+    public static IReadOnlyList<ArgumentField>? GetFields(RegisteredSubjectProperty? target) =>
+        target?.TryGetMethodMetadata() is { } method ? ArgumentFields.Create(method) : null;
 
     /// <summary>The operation at the path, or null when the path leads to none.</summary>
     public static MethodMetadata? GetMethod(Automation automation, string ruleKey, string path) =>

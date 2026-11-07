@@ -31,7 +31,7 @@
     <div class="automation-column automation-rule-details">
         @if (Draft.FindRule(SelectedRuleKey) is { } selected)
         {
-            <RuleEditor @key="selected" Automation="Automation" Draft="Draft" Rule="selected" Errors="@GetErrors(selected)" Changed="Changed" Removed="RemoveAsync" />
+            <RuleEditor @key="selected" Automation="Automation" Draft="Draft" Rule="selected" Errors="@GetErrors(selected)" Changed="Changed" InputChanged="InputChanged" Removed="RemoveAsync" />
         }
         else
         {
@@ -52,6 +52,9 @@
     [Parameter] public EventCallback<string?> SelectedRuleKeyChanged { get; set; }
 
     [Parameter] public EventCallback Changed { get; set; }
+
+    /// <summary>Raised when the errors may have changed without an edit of the draft, which keeps the dialog as dirty as it was.</summary>
+    [Parameter] public EventCallback InputChanged { get; set; }
 
     private string GetItemStyle(RuleDraft rule) => rule.Key == SelectedRuleKey
         ? "cursor: pointer; border-color: var(--mud-palette-primary); border-width: 2px;"

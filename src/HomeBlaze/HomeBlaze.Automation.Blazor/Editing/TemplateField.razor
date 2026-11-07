@@ -1,4 +1,6 @@
+@implements IDisposable
 @inject IDialogService DialogService
+@inject TimeProvider TimeProvider
 
 <div data-testid="automation-template-field">
     <MudTextField T="string" Label="@Label" Value="@_text" ValueChanged="SetValueAsync" Immediate="true"
@@ -13,6 +15,8 @@
 </div>
 
 @code {
+    private static readonly TimeSpan PreviewInterval = TimeSpan.FromSeconds(1);
+
     private string? _text;
     private string? _written;
     private string? _error;
@@ -20,6 +24,9 @@
     private bool _isInitialized;
     private string? _evaluatedText;
     private RuleExpressions? _evaluatedExpressions;
+    private bool _hasTemplate;
+    private ITimer? _previewTimer;
+    private bool _isDisposed;
 
     private static readonly Func<IInterceptorSubject, bool> NoSubject = _ => false;
 
@@ -46,6 +53,44 @@
         }
 
         Refresh();
+        StartPreviewTimer();
+    }
+
+    // The preview reads the current values once per interval, outside of a render, so that a value that changes often
+    // neither renders the field on every change nor makes a render evaluate the template. The timer is created without the
+    // execution context of the render, so that a tick records no reads into a read tracking scope of that render.
+    private void StartPreviewTimer()
+    {
+        if (_previewTimer is not null)
+        {
+            return;
+        }
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            _previewTimer = TimeProvider.CreateTimer(state => _ = InvokeAsync(RefreshPreview), null, PreviewInterval, PreviewInterval);
+        }
+    }
+
+    private void RefreshPreview()
+    {
+        if (_isDisposed || !_hasTemplate || _evaluatedText is not { } text || _evaluatedExpressions is not { } expressions)
+        {
+            return;
+        }
+
+        var rendered = expressions.RenderTemplate(text);
+        if (rendered != _rendered)
+        {
+            _rendered = rendered;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _previewTimer?.Dispose();
     }
 
     // Evaluated when the text or the expressions change, not on every render of the editor.
@@ -60,7 +105,8 @@
         _evaluatedText = text;
         _evaluatedExpressions = Expressions;
         _error = ArgumentFields.Validate(text, typeof(string), IsRequired, Expressions);
-        _rendered = _error is null && text.Contains("{{", StringComparison.Ordinal) ? Expressions.RenderTemplate(text) : null;
+        _hasTemplate = _error is null && text.Contains("{{", StringComparison.Ordinal);
+        _rendered = _hasTemplate ? Expressions.RenderTemplate(text) : null;
     }
 
     private Task SetValueAsync(string? value)

@@ -372,6 +372,52 @@ public class AutomationEditorTests
     }
 
     [Fact]
+    public async Task WhenTheOperationOfAnActionAppearsWhileTheDialogIsOpen_ThenItsMissingArgumentIsListedAndSaveIsDisabled()
+    {
+        // Arrange
+        var motorName = PlaywrightFixture.CreateMotorName();
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].Actions =
+            [
+                new InvokeOperationAction
+                {
+                    Id = "call-1",
+                    OperationPath = $"/{motorName}/RunTest",
+                    Arguments = new Dictionary<string, string> { ["speed"] = "50" }
+                }
+            ];
+        });
+        string? motorFilePath = null;
+        IInterceptorSubject? motor = null;
+        try
+        {
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            await Assertions.Expect(dialog.GetByTestId("automation-action")).ToContainTextAsync("No operation at this path.", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeEnabledAsync();
+
+            // Act
+            (_, motorFilePath, motor) = await _fixture.AddStoredMotorAsync(motorName);
+
+            // Assert
+            await Assertions.Expect(dialog.GetByTestId("automation-action").GetByLabel("DurationSeconds")).ToBeVisibleAsync(new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByTestId("automation-errors")).ToContainTextAsync(
+                "Rule 'Started': action 'call-1': DurationSeconds: Required", new() { Timeout = Timeout });
+            await Assertions.Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true })).ToBeDisabledAsync();
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+            if (motorFilePath is not null && motor is not null)
+            {
+                await _fixture.DeleteStoredSubjectAsync(motorFilePath, motor);
+            }
+        }
+    }
+
+    [Fact]
     public async Task WhenTheOperationOfAnActionInARuleThatIsNotShownAppearsBeforeSave_ThenSaveListsItsMissingArgumentAndKeepsTheDialogOpen()
     {
         // Arrange
@@ -419,6 +465,40 @@ public class AutomationEditorTests
             {
                 await _fixture.DeleteStoredSubjectAsync(motorFilePath, motor);
             }
+        }
+    }
+
+    [Fact]
+    public async Task WhenAValueThatATemplateReadsChangesWhileTheDialogIsOpen_ThenTheTextShownFollowsIt()
+    {
+        // Arrange
+        var (motorName, motorFilePath, motor) = await _fixture.AddStoredMotorAsync();
+        var (name, filePath, automation) = await _fixture.AddStoredAutomationAsync(configured =>
+        {
+            WasherAutomation.Configure(configured);
+            configured.Rules["started"].Actions =
+            [
+                new SetPropertyAction { Id = "write-1", PropertyPath = $"/{motorName}/Name", Value = $"Speed {{{{ /{motorName}/TargetSpeed }}}}" }
+            ];
+        });
+        try
+        {
+            ((HomeBlaze.Samples.Motor)motor).TargetSpeed = 100;
+            var (_, dialog) = await OpenEditorAsync(name);
+            await dialog.GetByRole(AriaRole.Tab, new() { Name = "Rules" }).ClickAsync();
+            var template = dialog.GetByTestId("automation-template-field");
+            await Assertions.Expect(template).ToContainTextAsync("Now: Speed 100", new() { Timeout = Timeout });
+
+            // Act
+            ((HomeBlaze.Samples.Motor)motor).TargetSpeed = 200;
+
+            // Assert
+            await Assertions.Expect(template).ToContainTextAsync("Now: Speed 200", new() { Timeout = Timeout });
+        }
+        finally
+        {
+            await _fixture.DeleteStoredSubjectAsync(filePath, automation);
+            await _fixture.DeleteStoredSubjectAsync(motorFilePath, motor);
         }
     }
 

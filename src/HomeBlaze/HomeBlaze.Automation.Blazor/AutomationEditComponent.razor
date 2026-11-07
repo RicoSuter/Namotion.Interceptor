@@ -35,7 +35,7 @@
                     <GeneralTab Draft="draft" Changed="OnChanged" />
                 </MudTabPanel>
                 <MudTabPanel Text="Rules">
-                    <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" />
+                    <RulesTab Automation="Automation" Draft="draft" Errors="_errors" SelectedRuleKey="@_selectedRuleKey" SelectedRuleKeyChanged="OnRuleSelected" Changed="OnChanged" InputChanged="Revalidate" />
                 </MudTabPanel>
                 <MudTabPanel Text="States">
                     <StatesTab Automation="Automation" Draft="draft" Changed="OnChanged" InputChanged="Revalidate" RuleOpened="OpenRule" />

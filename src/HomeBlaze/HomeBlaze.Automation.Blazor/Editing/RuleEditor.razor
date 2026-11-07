@@ -78,7 +78,7 @@
                 <ActionEditor @key="item" Value="item.Value" Index="index" Count="Rule.Actions.Count" States="Draft.States"
                               Automation="Automation" RuleKey="@Rule.Key" Expressions="_expressions!"
                               ValueChanged="@(action => EditAsync(() => SetAction(item, action)))" Moved="@(offset => EditAsync(() => Rule.MoveAction(item, offset)))"
-                              Removed="@(() => EditAsync(() => Rule.Actions.Remove(item)))" />
+                              Removed="@(() => EditAsync(() => Rule.Actions.Remove(item)))" TargetChanged="InputChanged" />
             }
         </MudStack>
         <div class="d-flex flex-wrap gap-2 mt-2">
@@ -109,6 +109,9 @@
     [Parameter] public EventCallback Changed { get; set; }
 
     [Parameter] public EventCallback<RuleDraft> Removed { get; set; }
+
+    /// <summary>Raised when the errors of the rule may have changed without an edit, such as when the target of an action appeared.</summary>
+    [Parameter] public EventCallback InputChanged { get; set; }
 
     private AutomationRule? SavedRule => Automation.Rules.GetValueOrDefault(Rule.Key);
 
