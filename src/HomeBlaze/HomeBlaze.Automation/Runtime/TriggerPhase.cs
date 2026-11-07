@@ -19,5 +19,11 @@ internal enum TriggerPhase
     WaitingToRearm,
 
     /// <summary>The activation found the expression true; waits until it is false.</summary>
-    WaitingForFalse
+    WaitingForFalse,
+
+    /// <summary>
+    /// The rearm expression became true while the expression was still true; arms once the expression is false or
+    /// unknown, so that only a new change to true fires.
+    /// </summary>
+    RearmedWhileTrue
 }

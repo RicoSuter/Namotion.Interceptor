@@ -4,9 +4,10 @@ namespace HomeBlaze.Automation.Runtime;
 
 /// <summary>
 /// The arming, hold and unknown state of one property trigger. A trigger fires on a change to true that held for the
-/// hold, once, and rearms when its expression is known false or, with a rearm expression, when that is known true. A
-/// trigger that starts true waits for the same rearm. Unknown never fires and never rearms, and resets a running hold.
-/// Used by the worker only.
+/// hold, once, and rearms when its expression is known false or, with a rearm expression, when that is known true; a
+/// rearm while the expression is still true fires only after the expression was false or unknown again. A trigger that
+/// starts true waits for the same rearm. Unknown never fires and never rearms, and resets a running hold. Used by the
+/// worker only.
 /// </summary>
 internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
 {
@@ -53,8 +54,9 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             TriggerPhase.AwaitingBaseline => SetBaseline(observation, now),
             TriggerPhase.Armed => ObserveArmed(observation.Value, now),
             TriggerPhase.Holding => ObserveHolding(observation.Value, now),
-            TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation, now),
+            TriggerPhase.WaitingToRearm => ObserveWaitingToRearm(observation),
             TriggerPhase.WaitingForFalse => ObserveWaitingForFalse(observation.Value),
+            TriggerPhase.RearmedWhileTrue => ObserveRearmedWhileTrue(observation.Value),
             _ => throw new UnreachableException()
         };
     }
@@ -115,7 +117,7 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
         return Fire();
     }
 
-    private bool ObserveWaitingToRearm(TriggerObservation observation, DateTimeOffset now)
+    private bool ObserveWaitingToRearm(TriggerObservation observation)
     {
         var isRearmed = hasRearm ? observation.Rearm == true : observation.Value == false;
         if (!isRearmed)
@@ -123,13 +125,23 @@ internal sealed class PropertyTriggerState(TimeSpan? hold, bool hasRearm)
             return false;
         }
 
-        Phase = TriggerPhase.Armed;
-        return ObserveArmed(observation.Value, now);
+        Phase = observation.Value == true ? TriggerPhase.RearmedWhileTrue : TriggerPhase.Armed;
+        return false;
     }
 
     private bool ObserveWaitingForFalse(bool? value)
     {
         if (value == false)
+        {
+            Phase = TriggerPhase.Armed;
+        }
+
+        return false;
+    }
+
+    private bool ObserveRearmedWhileTrue(bool? value)
+    {
+        if (value != true)
         {
             Phase = TriggerPhase.Armed;
         }

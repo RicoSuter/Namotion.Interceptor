@@ -76,6 +76,53 @@ public class AutomationPropertyTriggerTests
     }
 
     [Fact]
+    public async Task WhenTheRearmExpressionIsTrueWhileTheExpressionStaysTrue_ThenTheRuleRunsOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("/Weather/Gust > 8", rearm: "/Weather/Rain < 1"), Invoke("/Blinds/Close")))));
+        host.Weather.Rain = 0;
+        host.Weather.Gust = 10;
+        await host.FlushAsync();
+
+        // Act
+        host.Weather.Rain = 0.1;
+        await host.FlushAsync();
+        host.Weather.Rain = 0.2;
+        await host.FlushAsync();
+        var runsWhileTheGustStays = host.Blinds.CloseCount;
+        host.Weather.Gust = 7;
+        await host.FlushAsync();
+        host.Weather.Gust = 9;
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal(1, runsWhileTheGustStays);
+        Assert.Equal(2, host.Blinds.CloseCount);
+    }
+
+    [Fact]
+    public async Task WhenATriggerReadsTheTimeAndItsRearmExpressionStaysTrue_ThenTheRuleRunsOnce()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("retract", On("Retract", When("time > 1h and /Weather/Gust > 8", rearm: "/Weather/Rain < 1"), Invoke("/Blinds/Close")))));
+        host.Weather.Rain = 0;
+        host.Weather.Gust = 10;
+        await host.FlushAsync();
+
+        // Act
+        for (var second = 0; second < 5; second++)
+        {
+            host.Time.Advance(TimeSpan.FromSeconds(1));
+            await host.FlushAsync();
+        }
+
+        // Assert
+        Assert.Equal(1, host.Blinds.CloseCount);
+    }
+
+    [Fact]
     public async Task WhenTheTriggerStartsTrueWithRearm_ThenOnlyTheRearmExpressionAllowsTheFirstRun()
     {
         // Arrange

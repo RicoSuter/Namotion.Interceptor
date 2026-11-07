@@ -14,7 +14,8 @@ public abstract record AutomationTrigger;
 
 /// <summary>
 /// Fires when its expression changes from not true to true and stayed true for <see cref="For"/>. It fires once and
-/// then waits until the expression is false, or until <see cref="Rearm"/> is true when that is set.
+/// then waits until the expression is false, or until <see cref="Rearm"/> is true when that is set; a rearm while the
+/// expression is still true fires only on the next change to true.
 /// </summary>
 public sealed record PropertyTrigger : AutomationTrigger
 {

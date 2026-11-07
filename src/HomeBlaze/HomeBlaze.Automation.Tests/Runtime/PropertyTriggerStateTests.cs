@@ -261,6 +261,45 @@ public class PropertyTriggerStateTests
     }
 
     [Fact]
+    public void WhenTheRearmExpressionIsTrueWhileTheExpressionStaysTrue_ThenOnlyANewChangeToTrueFires()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), Start);
+        state.Observe(WithRearm(true, false), Start.AddSeconds(1));
+
+        // Act
+        var rearmedWhileTrue = state.Observe(WithRearm(true, true), Start.AddSeconds(2));
+        var stillTrue = state.Observe(WithRearm(true, true), Start.AddSeconds(3));
+        var turnedFalse = state.Observe(WithRearm(false, true), Start.AddSeconds(4));
+        var trueAgain = state.Observe(WithRearm(true, false), Start.AddSeconds(5));
+
+        // Assert
+        Assert.False(rearmedWhileTrue);
+        Assert.False(stillTrue);
+        Assert.False(turnedFalse);
+        Assert.True(trueAgain);
+    }
+
+    [Fact]
+    public void WhenTheExpressionIsUnknownAfterARearmWhileTrue_ThenTheNextTrueValueFires()
+    {
+        // Arrange
+        var state = new PropertyTriggerState(hold: null, hasRearm: true);
+        state.Activate(TriggerActivation.EvaluateImmediately, WithRearm(false, null), Start);
+        state.Observe(WithRearm(true, false), Start.AddSeconds(1));
+        state.Observe(WithRearm(true, true), Start.AddSeconds(2));
+
+        // Act
+        var unknown = state.Observe(Unknown("/Weather/Gust"), Start.AddSeconds(3));
+        var trueAgain = state.Observe(WithRearm(true, false), Start.AddSeconds(4));
+
+        // Assert
+        Assert.False(unknown);
+        Assert.True(trueAgain);
+    }
+
+    [Fact]
     public void WhenTheTriggerIsDeactivated_ThenObservationsAreIgnored()
     {
         // Arrange
@@ -298,9 +337,9 @@ public class PropertyTriggerStateTests
         Assert.Equal(["/Weather/Threshold"], missingPaths);
         Assert.Equal(TriggerPhase.WaitingToRearm, phaseWhileUnknown);
         Assert.Equal(Start.AddSeconds(1), unknownSince);
-        Assert.True(rearmFired);
+        Assert.False(rearmFired);
         Assert.False(state.IsUnknown);
-        Assert.Equal(TriggerPhase.WaitingToRearm, state.Phase);
+        Assert.Equal(TriggerPhase.RearmedWhileTrue, state.Phase);
     }
 
     [Fact]
