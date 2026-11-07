@@ -1,5 +1,4 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
-using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -43,23 +42,17 @@ public class MarkdownQueryTests
     }
 
     [Fact]
-    public async Task WhenOpeningReplaceText_ThenTheDialogAsksForTheOldAndTheNewText()
+    public async Task WhenAPageIsOpenInTheSubjectBrowser_ThenTheOperationsThatRewriteItsTextAreNotOffered()
     {
         // Arrange
         var page = await SubjectBrowserPage.OpenAsync(_fixture, "Dashboard.md");
 
-        var operationButton = page.GetByRole(AriaRole.Button, new() { Name = "Replace Text" });
-        await Assertions.Expect(operationButton).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Content" })).ToBeVisibleAsync();
-
         // Act
-        await operationButton.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Read Evaluated Content" }))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
         // Assert
-        var dialog = page.GetByRole(AriaRole.Dialog).Filter(new() { HasText = "Replaces one exact, unique passage of the markdown source." });
-        await Assertions.Expect(dialog.GetByLabel(new Regex("^OldText"))).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(dialog.GetByLabel(new Regex("^NewText"))).ToBeVisibleAsync();
-        await dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
-        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Text" })).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Replace Content" })).ToHaveCountAsync(0);
     }
 }
