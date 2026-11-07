@@ -10,8 +10,7 @@ namespace HomeBlaze.Automation.Runtime;
 /// <summary>
 /// Runs the operation calls and property writes of rules: resolves the target, refuses what an automation may not do,
 /// what its roles or the roles of a rejected configuration do not allow or what the authorizer failed to decide, binds the
-/// arguments and executes. A failure is a
-/// result with its reason; only a cancellation of the caller's token is thrown.
+/// arguments and executes. A failure is a result with its reason; only a cancellation of the caller's token is thrown.
 /// </summary>
 internal sealed class ActionExecutor(
     SubjectPathResolver resolver,

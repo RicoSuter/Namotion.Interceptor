@@ -9,8 +9,8 @@ namespace HomeBlaze.Automation.Runtime;
 /// Checks the targets of actions while a configuration is validated, with the checks the actions run with: what an
 /// automation never does, and what its roles do not allow. A target that does not resolve yet, such as a device that is
 /// not loaded or a relative path of a rule that is not saved, is not checkable and passes; it is checked when the saved
-/// configuration is applied and when the action runs. While the roles cannot be used, for example before the custom roles are loaded, the roles are not checked here
-/// either, and every call and write is refused when it runs.
+/// configuration is applied and when the action runs. While the roles cannot be used, for example before the custom roles
+/// are loaded, the roles are not checked here either, and every call and write is refused when it runs.
 /// </summary>
 internal sealed class ActionTargetCheck
 {
