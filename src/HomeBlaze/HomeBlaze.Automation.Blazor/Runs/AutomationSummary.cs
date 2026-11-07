@@ -31,8 +31,8 @@ internal static class AutomationSummary
     };
 
     /// <summary>
-    /// Why a rule in dry run keeps the rules of the states it changes to from running, since a dry run changes no state; null
-    /// for a rule in another mode or without a Change state action to another state.
+    /// That the dry runs of a rule do not change the state to the states its Change state actions name; null for a rule in
+    /// another mode or without a Change state action to another state.
     /// </summary>
     public static string? GetDryRunHint(AutomationRuleMode mode, string? inState, IEnumerable<string?> targetStates)
     {
@@ -47,7 +47,7 @@ internal static class AutomationSummary
             .ToArray();
         return states.Length == 0
             ? null
-            : $"Dry runs do not change the state, so the rules of {JoinWithAnd(states!)} do not run until this rule is On.";
+            : $"Dry runs do not change the state to {JoinWithAnd(states!)}.";
     }
 
     /// <summary>

@@ -18,7 +18,7 @@ This page is the operator guide. The syntax of expressions is the one of [page e
 3. Keep the rule in **Dry run** and save. Each time the rule would run, the page lists the run with its actions and their values, and nothing is executed.
 4. Switch the rule to **On** once its runs look right.
 
-The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor: both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38. Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says so next to the rule that would enter Hot. Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
+The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor: both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38. Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot. Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
 
 ---
 
@@ -212,11 +212,11 @@ Authorization has a seam but no rules yet: every operation the automation can se
 |---|---|---|---|
 | Triggers observed | No | Yes | Yes |
 | Actions executed | No | No: the run is recorded as **Would have run (dry run)** with its actions and their values | Yes |
-| State changes | No | No, so the rules of the next state do not run | Yes |
+| State changes | No | No: a Change state action does not change the state | Yes |
 | `LastTriggeredAt` set | No | No | Yes |
 | Run recorded | No | Yes, with the outcome DryRun | Yes |
 
-New rules start in Dry run. A rule in Dry run with a Change state action never enters that state, so the rules of that state stay inactive until the rule is On; the page and the editor say so next to the rule. **Test now** on the page evaluates a saved rule with the current values: the result of each trigger, of Only if, and the actions with their arguments as they would run now. Its verdict says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true; it does not tell whether a condition fired already. It works in every mode and executes and records nothing. It tests the saved rule only; the editor shows the current value and result of every condition instead. Agents get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.
+New rules start in Dry run. A rule in Dry run with a Change state action does not change the state, so the rules of that state become active through it only once it is On; the page and the editor say so next to the rule. **Test now** on the page evaluates a saved rule with the current values: the result of each trigger, of Only if, and the actions with their arguments as they would run now. Its verdict says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true; it does not tell whether a condition fired already. It works in every mode and executes and records nothing. It tests the saved rule only; the editor shows the current value and result of every condition instead. Agents get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.
 
 ---
 
