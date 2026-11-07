@@ -68,7 +68,7 @@ They apply to every non-human client, agents and `/mcp` alike, and no role lifts
 | `search_markdown` | Pages readable at their path with `read` and `execute` on `ReadRawContent`; notes whose metadata member is readable |
 | `SetMetadata` | A target that the tools list, and `write` on its metadata member; a target without metadata gets its member registered with a null value first, which is the same as no metadata |
 | `SearchMetadata` | Matches whose subject the tools list and whose metadata member is readable |
-| `GetOrder`, `SetOrder` | `GetOrder` names only the children that the tools list at their path. `SetOrder` needs `write` on the metadata member of the folder, as `SetMetadata` does. An order in `SetOrder` or in the `order` of `SetMetadata` that names a child the tools do not list is refused with the storage's text for a name that is no child, which names only the children they list, so unlisted and missing cannot be told apart |
+| `GetOrder`, `SetOrder` | `GetOrder` names only the children that the tools list at their path, and so does the `order` in the metadata of a folder, which a value filter of the configuration (`IMcpValueFilter`) reduces wherever the tools return or compare it. `SetOrder` needs `write` on the metadata member of the folder, as `SetMetadata` does. An order in `SetOrder` or in the `order` of `SetMetadata` that names a child the tools do not list is refused with the storage's text for a name that is no child, which names only the children they list, so unlisted and missing cannot be told apart |
 
 Denied `execute` and `history` are logged at debug level with the agent and the member; reads and writes are asked for every listed member and are not logged.
 

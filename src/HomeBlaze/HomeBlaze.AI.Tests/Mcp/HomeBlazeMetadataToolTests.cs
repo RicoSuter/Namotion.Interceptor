@@ -8,6 +8,7 @@ using HomeBlaze.Authorization;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
+using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -367,6 +368,28 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         Assert.IsType<ClaudeCliAgent>(storage.Children["Agent"]);
         Assert.Equal(["Agent", "Docs", "Secret"], storage.GetOrder().Order(StringComparer.Ordinal));
         Assert.Equal(["Docs"], result.GetProperty("result").EnumerateArray().Select(name => name.GetString()));
+    }
+
+    [Fact]
+    public async Task WhenTheOrderOfAFolderNamesAnAgentOrAHiddenBranch_ThenItsMetadataLeavesThemOut()
+    {
+        // Arrange
+        WriteFile("Docs/Pump.json", """{ "speed": 1 }""");
+        WriteFile("Secret/Valve.json", """{ "speed": 3 }""");
+        WriteFile("Agent.json", $$"""{ "$type": "{{typeof(ClaudeCliAgent).FullName}}" }""");
+        WriteFile(".metadata.json", """{ "navTitle": "Root", "order": ["Secret", "Agent", "Docs"] }""");
+        var (tools, storage) = await CreateToolsAsync(accessPolicy: TestAccessPolicies.Create(HiddenSecretRole.Name, HiddenSecretRole));
+
+        // Act
+        var metadata = await CallAsync(tools["get_property"], new { path = "/Storage/HomeBlaze:Metadata" });
+        var browseResult = await CallAsync(tools["browse"], new { path = "/Storage", depth = 0, includeProperties = true, format = "json" });
+
+        // Assert
+        Assert.Equal(["Secret", "Agent", "Docs"], storage.GetMetadata()![MetadataKeys.Order].EnumerateArray().Select(name => name.GetString()));
+        Assert.Equal("Root", metadata.GetProperty("value").GetProperty("navTitle").GetString());
+        Assert.Equal(["Docs"], metadata.GetProperty("value").GetProperty("order").EnumerateArray().Select(name => name.GetString()));
+        var browsedMetadata = browseResult.GetProperty("result").GetProperty("properties").GetProperty("HomeBlaze:Metadata").GetProperty("value");
+        Assert.Equal(["Docs"], browsedMetadata.GetProperty("order").EnumerateArray().Select(name => name.GetString()));
     }
 
     [Theory]

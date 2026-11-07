@@ -1,5 +1,7 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using Namotion.Interceptor;
@@ -13,8 +15,9 @@ namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// The order of the children of a folder or of the root of a storage that the tools let their clients read and change:
-/// GetOrder names only the children that the tools list, SetOrder needs write access to the metadata of the folder, and
-/// an order that names a child the tools do not list is refused as one naming a child that does not exist.
+/// GetOrder and the order in the metadata of the folder name only the children that the tools list, SetOrder needs write
+/// access to the metadata of the folder, and an order that names a child the tools do not list is refused as one naming
+/// a child that does not exist.
 /// </summary>
 internal static class AgentOrderAccess
 {
@@ -37,6 +40,14 @@ internal static class AgentOrderAccess
         var listedNames = GetListedChildNames(subject, configuration, pathProvider, root);
         return names.Where(listedNames.Contains).ToArray();
     }
+
+    /// <summary>
+    /// Creates the value filter that leaves out of the order in the metadata of a folder or of the root of a storage the
+    /// names of the children that the tools do not list, as GetOrder does, so that get_property, browse and search name
+    /// no hidden child.
+    /// </summary>
+    public static IMcpValueFilter CreateMetadataOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider)
+        => new MetadataOrderFilter(configuration, rootSubjectProvider);
 
     /// <summary>
     /// Gets why SetOrder of a folder or of the root of a storage is refused, or null when it is not: the access policy
@@ -129,5 +140,27 @@ internal static class AgentOrderAccess
             ? null
             : parents[0].Property.TryGetPath(pathProvider, root, parents[0].Index);
         return "/" + path;
+    }
+
+    private sealed class MetadataOrderFilter(McpServerConfiguration configuration, Func<IInterceptorSubject> rootSubjectProvider) : IMcpValueFilter
+    {
+        public object? Filter(RegisteredSubjectProperty member, object? value)
+        {
+            if (value is not ImmutableDictionary<string, JsonElement> metadata || !IsOwnMetadataOfFolder(member) ||
+                !metadata.TryGetValue(MetadataKeys.Order, out var order) || order.ValueKind != JsonValueKind.Array)
+            {
+                return value;
+            }
+
+            var listedNames = GetListedChildNames(member.Parent, configuration, configuration.PathProvider, rootSubjectProvider());
+            var names = order.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String && listedNames.Contains(item.GetString()!))
+                .Select(item => item.GetString()!)
+                .ToArray();
+            return metadata.SetItem(MetadataKeys.Order, JsonSerializer.SerializeToElement(names));
+        }
+
+        private static bool IsOwnMetadataOfFolder(RegisteredSubjectProperty member)
+            => !member.IsAttribute && member.Parent.Subject is IMetadataContainer && member.IsMetadata();
     }
 }
