@@ -86,3 +86,13 @@ public partial class AgentExcludedDevice : IConfigurable
 [InterceptorSubject]
 [ExcludeFrom(ExclusionTarget.UserInterface)]
 public partial class UserInterfaceExcludedThing;
+
+[InterceptorSubject]
+public partial class TestUnitThing
+{
+    [State]
+    public partial decimal Temperature { get; set; }
+
+    [PropertyAttribute(nameof(Temperature), "Unit")]
+    public partial string? Temperature_Unit { get; set; }
+}
