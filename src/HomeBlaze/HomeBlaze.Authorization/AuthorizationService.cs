@@ -144,8 +144,11 @@ public sealed class AuthorizationService : IDisposable
         }
 
         Interlocked.Increment(ref _statusVersion);
-        GetSnapshot();
-        WriteStatuses();
+        GetSnapshot(out var hasWrittenStatuses);
+        if (!hasWrittenStatuses)
+        {
+            WriteStatuses();
+        }
     }
 
     /// <summary>
@@ -208,8 +211,12 @@ public sealed class AuthorizationService : IDisposable
         }
     }
 
-    private AuthorizationSnapshot GetSnapshot()
+    private AuthorizationSnapshot GetSnapshot() => GetSnapshot(out _);
+
+    // hasWrittenStatuses tells whether this call built a snapshot, and so wrote the statuses after publishing it.
+    private AuthorizationSnapshot GetSnapshot(out bool hasWrittenStatuses)
     {
+        hasWrittenStatuses = false;
         var version = Volatile.Read(ref _version);
         var snapshot = Volatile.Read(ref _snapshot);
         if (snapshot is not null && snapshot.Version == version)
@@ -243,6 +250,7 @@ public sealed class AuthorizationService : IDisposable
 
         // Outside the lock: a write notifies observers synchronously, which must not wait for a rebuild.
         WriteStatuses();
+        hasWrittenStatuses = true;
         return snapshot;
     }
 
