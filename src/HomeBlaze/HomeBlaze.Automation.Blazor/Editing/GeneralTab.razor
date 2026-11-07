@@ -3,6 +3,10 @@
                   HelperText="The title of the automation." data-testid="automation-name" />
     <MudSwitch T="bool" Value="@Draft.Enabled" ValueChanged="@((bool isEnabled) => EditAsync(() => Draft.Enabled = isEnabled))" Color="Color.Primary" data-testid="automation-enabled"
                Label="Enabled: the rules observe their triggers. A disabled automation keeps its state." />
+    <div data-testid="automation-roles">
+        <RoleSelector Selected="@Draft.Roles" SelectedChanged="@((IReadOnlyList<string> roles) => EditAsync(() => Draft.Roles = roles))" TestId="automation-role"
+                      HelperText="The roles that allow the operations the rules call and the properties they write. Without roles, the rules can only change the state." />
+    </div>
 </MudStack>
 
 @code {

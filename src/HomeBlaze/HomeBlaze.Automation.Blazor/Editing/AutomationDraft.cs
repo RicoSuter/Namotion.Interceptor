@@ -46,12 +46,15 @@ public sealed class AutomationDraft
     {
         automation.Name = string.IsNullOrWhiteSpace(Name) ? null : Name.Trim();
         automation.Enabled = Enabled;
-        automation.Roles = [.. Roles];
+        automation.Roles = [.. Roles ?? []];
         automation.States = [.. States];
         automation.InitialState = States.Count == 0 ? null : InitialState;
         automation.RuleOrder = [.. Rules.Select(rule => rule.Key)];
         automation.Rules = Rules.ToDictionary(rule => rule.Key, rule => rule.ToRule(path => ActionInputs.GetMethod(automation, rule.Key, path)));
     }
+
+    /// <summary>What the automation may call and write with the roles of the draft, for the targets the editor offers.</summary>
+    public IAutomationPermissions GetPermissions() => AutomationTargets.GetPermissions(_automation, Roles ?? []);
 
     /// <summary>The errors of the configuration as the automation and the editor check it, and the errors of inputs that do not parse.</summary>
     public IReadOnlyList<AutomationValidationError> Validate() =>
