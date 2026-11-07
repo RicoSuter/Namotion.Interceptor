@@ -14,8 +14,16 @@ namespace HomeBlaze.Storage.Blazor;
 internal static class StorageFileRequestHandler
 {
     private const string FallbackContentType = "application/octet-stream";
+    private const string PdfContentType = "application/pdf";
 
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
+
+    /// <summary>
+    /// Returns the route value of the path as a string without leading slashes, so that <c>//Demo/x.png</c> addresses the
+    /// same file as <c>Demo/x.png</c> and does not resolve as an absolute path of its own.
+    /// </summary>
+    internal static string GetSubjectPath(object? routeValue) =>
+        (routeValue as string)?.TrimStart('/') ?? string.Empty;
 
     /// <summary>
     /// Writes the content of the subject when it is a <see cref="GenericFile"/>, and 404 for any other subject or none.
@@ -38,10 +46,11 @@ internal static class StorageFileRequestHandler
             return;
         }
 
+        var contentType = ContentTypes.TryGetContentType(file.Name, out var knownContentType) ? knownContentType : FallbackContentType;
         var entityTag = new EntityTagHeaderValue($"\"{file.LastModified.Ticks:x}-{file.FileSize:x}\"", isWeak: true);
         if (IsNotModified(context.Request, entityTag))
         {
-            WriteHeaders(response, file, entityTag);
+            WriteHeaders(response, file, entityTag, contentType);
             response.StatusCode = StatusCodes.Status304NotModified;
             return;
         }
@@ -65,8 +74,8 @@ internal static class StorageFileRequestHandler
 
         await using (content)
         {
-            WriteHeaders(response, file, entityTag);
-            response.ContentType = ContentTypes.TryGetContentType(file.Name, out var contentType) ? contentType : FallbackContentType;
+            WriteHeaders(response, file, entityTag, contentType);
+            response.ContentType = contentType;
             if (content.CanSeek)
             {
                 response.ContentLength = content.Length;
@@ -89,7 +98,7 @@ internal static class StorageFileRequestHandler
         return false;
     }
 
-    private static void WriteHeaders(HttpResponse response, GenericFile file, EntityTagHeaderValue entityTag)
+    private static void WriteHeaders(HttpResponse response, GenericFile file, EntityTagHeaderValue entityTag, string contentType)
     {
         var headers = response.GetTypedHeaders();
         headers.ETag = entityTag;
@@ -100,6 +109,11 @@ internal static class StorageFileRequestHandler
 
         // A file opened on its own, such as an SVG with a script, must not run in the origin of the application.
         response.Headers.XContentTypeOptions = "nosniff";
-        response.Headers.ContentSecurityPolicy = "sandbox";
+
+        // A PDF is shown by a plugin-backed viewer that a sandbox blocks, and its scripts cannot reach the origin of the application.
+        if (contentType != PdfContentType)
+        {
+            response.Headers.ContentSecurityPolicy = "sandbox";
+        }
     }
 }

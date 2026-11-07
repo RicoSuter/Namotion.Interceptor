@@ -71,6 +71,20 @@ public class MarkdownStorageFileTests
     }
 
     [Fact]
+    public async Task WhenPictureRouteHasALeadingSlash_ThenItIsServedAsWithout()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+
+        // Act
+        var response = await page.APIRequest.GetAsync($"{_fixture.ServerAddress}files//Demo/images/sample.png");
+
+        // Assert
+        Assert.Equal(200, response.Status);
+        Assert.Equal("image/png", response.Headers["content-type"]);
+    }
+
+    [Fact]
     public async Task WhenFileLinkIsClicked_ThenTheFileOpensInANewTabAndThePageStays()
     {
         // Arrange

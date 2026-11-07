@@ -108,8 +108,8 @@ A section is addressed by the id of its heading. Every heading gets its id from 
 
 ### Link Targets
 
-- **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. So does the `Href` of a [Card](widgets/card.md).
-- **Links that open in a new tab**: a web address, any other link with a scheme such as `mailto:`, and a relative link to a file of the storage such as `[Manual](manual.pdf)`.
+- **Links on a page open in the same tab**: a relative link to a page, a relative link to a folder such as `[Demo](Demo/)`, and an address of the application such as `/browser/Demo`. So does the `Href` of a [Card](widgets/card.md), so it should not point at a file.
+- **Links that open in a new tab**: a web address, any other link with a scheme such as `mailto:`, a relative link to a file of the storage such as `[Manual](manual.pdf)`, and an address under `/files/` written in full.
 - **A page in a new tab**: write the link as an HTML element with a target, `<a href="/pages/Docs/home.md" target="_blank" rel="noopener">Home</a>`. The page keeps the attribute as written.
 - **Notes and replies**: a web address in the notes of the metadata and in a reply of an agent opens in a new tab, see [Metadata](metadata.md) and [AI Agents](ai-agents.md#the-agent-page).
 - **Addresses**: [Routes](paths.md#routes) shows the address of a page and of a subject in the browser.

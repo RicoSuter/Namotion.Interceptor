@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor.Expressions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
@@ -71,7 +72,8 @@ public sealed partial class MarkdownContentParser
 
         var fragmentStart = url.IndexOf('#');
         var pagePath = fragmentStart < 0 ? url.AsSpan() : url.AsSpan(0, fragmentStart);
-        if (fragmentStart == 0 || pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        if (fragmentStart == 0 || pagePath.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
+            pagePath.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase))
         {
             pathEnd = fragmentStart;
             return LinkKind.Page;
@@ -127,10 +129,18 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Whether a link of the page opens in a new tab: a link with a scheme, such as a web address, or a link to a file of
-    /// the storage. A link to a file must, because the router of the application would take a click on it as its own route.
+    /// the storage, also one written as an address under <see cref="StorageFileRoute.Prefix"/>. A link to a file must,
+    /// because the router of the application would take a click on it as its own route.
     /// </summary>
     private static bool OpensInNewTab(string url) =>
-        HasScheme(url) || ClassifyLink(url, out _) == LinkKind.File;
+        HasScheme(url) || ClassifyLink(url, out _) == LinkKind.File || IsFileRoute(url);
+
+    private static bool IsFileRoute(string url)
+    {
+        var prefix = StorageFileRoute.Prefix.AsSpan();
+        var span = url.AsSpan();
+        return span.Length > prefix.Length && span.StartsWith(prefix, StringComparison.Ordinal) && span[prefix.Length] == '/';
+    }
 
     private static string RewritePageLink(string url, int fragmentStart, string basePath, string pageName)
     {

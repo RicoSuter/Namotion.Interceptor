@@ -29,6 +29,8 @@ public class MarkdownFileLinkTests
     [InlineData("[Phone](tel:+41000000000)", "href=\"tel:+41000000000\"")]
     [InlineData("[App](/browser/Demo)", "href=\"/browser/Demo\"")]
     [InlineData("![Inline](data:image/png;base64,AAAA)", "src=\"data:image/png;base64,AAAA\"")]
+    [InlineData("[Other host](//example.com/plan.png)", "href=\"//example.com/plan.png\"")]
+    [InlineData("[Upper](HTTP://example.com/plan.png)", "href=\"HTTP://example.com/plan.png\"")]
     public async Task WhenLinkHasASchemeOrStartsWithASlash_ThenItStaysAsWritten(string source, string expected)
     {
         // Arrange
@@ -63,6 +65,8 @@ public class MarkdownFileLinkTests
     [InlineData("[Other](other.md)", "<a href=\"/pages/Docs/other.md\">Other</a>")]
     [InlineData("[Section](#a)", "<a href=\"/pages/Docs/page.md#a\">Section</a>")]
     [InlineData("[App](/browser/Demo)", "<a href=\"/browser/Demo\">App</a>")]
+    [InlineData("[Manual](/files/Docs/manual.pdf)", "<a href=\"/files/Docs/manual.pdf\" target=\"_blank\" rel=\"noopener noreferrer\">Manual</a>")]
+    [InlineData("[Notes](notes.markdown)", "<a href=\"/pages/Docs/notes.markdown\">Notes</a>")]
     public async Task WhenPageHasALink_ThenOnlyFileAndExternalLinksOpenInANewTab(string source, string expected)
     {
         // Arrange

@@ -54,6 +54,39 @@ public class StorageFileRequestHandlerTests
     }
 
     [Fact]
+    public async Task WhenSubjectIsAPdfFile_ThenItIsServedWithoutASandbox()
+    {
+        // Arrange
+        var storage = new FakeStorageContainer(PngContent);
+        var file = CreateFile(storage, "Docs/manual.pdf", PngContent.Length);
+        var context = CreateContext();
+
+        // Act
+        await StorageFileRequestHandler.HandleAsync(context, file);
+
+        // Assert
+        var response = context.Response;
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        Assert.Equal("application/pdf", response.ContentType);
+        Assert.Equal("nosniff", response.Headers.XContentTypeOptions.ToString());
+        Assert.False(response.Headers.ContainsKey("Content-Security-Policy"));
+    }
+
+    [Theory]
+    [InlineData("/Demo/x.png", "Demo/x.png")]
+    [InlineData("//Demo/x.png", "Demo/x.png")]
+    [InlineData("Demo/x.png", "Demo/x.png")]
+    [InlineData(null, "")]
+    public void WhenRouteValueIsGiven_ThenSubjectPathHasNoLeadingSlash(string? routeValue, string expected)
+    {
+        // Act
+        var path = StorageFileRequestHandler.GetSubjectPath(routeValue);
+
+        // Assert
+        Assert.Equal(expected, path);
+    }
+
+    [Fact]
     public async Task WhenRequestHasTheCurrentETag_ThenItIsNotModifiedAndTheStorageIsNotRead()
     {
         // Arrange
@@ -74,7 +107,7 @@ public class StorageFileRequestHandlerTests
     }
 
     [Fact]
-    public async Task WhenRequestHasAnOtherETag_ThenTheContentIsServed()
+    public async Task WhenRequestHasADifferentETag_ThenTheContentIsServed()
     {
         // Arrange
         var storage = new FakeStorageContainer(PngContent);

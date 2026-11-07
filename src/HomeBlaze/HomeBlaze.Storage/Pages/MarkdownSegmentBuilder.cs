@@ -232,7 +232,7 @@ public static partial class MarkdownSegmentBuilder
             var linkRenderer = renderer.ObjectRenderers.FindExact<LinkInlineRenderer>();
             if (linkRenderer is not null)
             {
-                var newTabRenderer = new NewTabLinkInlineRenderer(opensInNewTab) { Rel = linkRenderer.Rel };
+                var newTabRenderer = new NewTabLinkInlineRenderer(opensInNewTab);
                 newTabRenderer.TryWriters.AddRange(linkRenderer.TryWriters);
                 renderer.ObjectRenderers.Replace<LinkInlineRenderer>(newTabRenderer);
             }
@@ -240,7 +240,7 @@ public static partial class MarkdownSegmentBuilder
             var autolinkRenderer = renderer.ObjectRenderers.FindExact<AutolinkInlineRenderer>();
             if (autolinkRenderer is not null)
             {
-                var newTabRenderer = new NewTabAutolinkInlineRenderer { Rel = autolinkRenderer.Rel };
+                var newTabRenderer = new NewTabAutolinkInlineRenderer();
                 newTabRenderer.TryWriters.AddRange(autolinkRenderer.TryWriters);
                 renderer.ObjectRenderers.Replace<AutolinkInlineRenderer>(newTabRenderer);
             }
